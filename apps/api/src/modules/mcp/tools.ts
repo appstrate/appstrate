@@ -68,10 +68,7 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
-import {
-  credentialProxyClosedDetail,
-  isCredentialProxyOpen,
-} from "../../services/credential-proxy/access.ts";
+import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -1828,7 +1825,7 @@ export interface McpSurface {
   /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
   /**
-   * Those two tools are withheld by the space's setting alone (`isCredentialProxyOpen`), not by
+   * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
    * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
    */
   proxiesClosed: boolean;
@@ -1840,7 +1837,7 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
-  /** The space leaves the credential proxy open outside a run (`isCredentialProxyOpen`). */
+  /** The space leaves the credential proxy open outside a run (`credential_proxy_open`). */
   proxyOpen: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
@@ -2004,7 +2001,7 @@ function withSpaceArgument(
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
       // The space's setting, not the caller's role, withholds the proxy there.
-      if (need === "proxies" && !isCredentialProxyOpen(current)) {
+      if (need === "proxies" && !current.credentialProxyOpen) {
         return refusalResult({
           code: "credential_proxy_closed",
           error: credentialProxyClosedDetail(current),

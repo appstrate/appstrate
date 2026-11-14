@@ -1113,7 +1113,7 @@ export function createIntegrationsRouter() {
       scope,
       packageId,
       ...spaceListCaller(c),
-      reachOutsideRunIfPermitted(callerPermissions(c)),
+      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
     );
     return c.json(status);
   });
@@ -1673,7 +1673,7 @@ export function createIntegrationsRouter() {
         scope,
         packageId,
         ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c)),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
       );
       return c.json(detail);
     },

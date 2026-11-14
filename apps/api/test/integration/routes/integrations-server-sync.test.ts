@@ -493,8 +493,9 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
     const res = await sync(ctx, {});
     expect(res.status).toBe(502);
-    const body = (await res.json()) as { code: string; detail: string };
-    expect(body.code).toBe("bad_gateway");
+    const body = (await res.json()) as { code: string; detail: string; upstream_status: number };
+    expect(body.code).toBe("upstream_credential_rejected");
+    expect(body.upstream_status).toBe(401);
     expect(body.detail).toContain("refused the connection's credential");
   });
 

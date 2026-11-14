@@ -16,10 +16,10 @@ import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
   CREDENTIAL_STATUS_HEADER,
+  credentialMember,
   parseCredentialStatus,
   type CredentialStatus,
 } from "../../lib/credential-status-header.ts";
-import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
 import { CREDENTIAL_PROXY_PATH } from "./catalog.ts";
@@ -63,7 +63,7 @@ const CONCURRENCY = 3;
  * What one batch may take, below an MCP client's 60 s request timeout: past it nothing more is
  * sent, and a request still in flight is abandoned.
  */
-const BATCH_DEADLINE_MS = 45_000;
+export const BATCH_DEADLINE_MS = 45_000;
 /** Default cap on one text body: the sidecar's inline budget for a tool output (~8 000 tokens). */
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024;
 /**
@@ -202,32 +202,6 @@ type Outcome =
       credential: CredentialStatus | null;
     };
 
-interface CredentialMember {
-  status: CredentialStatus["status"];
-  cause: CredentialStatus["cause"];
-  detail: string;
-  failures?: number;
-  max_failures?: number;
-}
-
-/**
- * The `credential` member of an entry: what the platform concluded about the connection's
- * credential when the upstream refused it and a forced refresh could not recover it. Without it,
- * a 401 is the upstream refusing the request with a credential the platform did not judge.
- */
-function credentialMember(credential: CredentialStatus): CredentialMember {
-  const member = {
-    status: credential.status,
-    cause: credential.cause,
-    detail: CREDENTIAL_FAILURE_SENTENCES[credential.cause],
-  };
-  return credential.status === "in_use" &&
-    credential.failures !== undefined &&
-    credential.maxFailures !== undefined
-    ? { ...member, failures: credential.failures, max_failures: credential.maxFailures }
-    : member;
-}
-
 /** Bytes, so `Request` derives no Content-Type from the body: the caller's is the only one. */
 function encodeBody(text: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(new TextEncoder().encode(text));
@@ -345,6 +319,20 @@ async function dispatchCall(
 }
 
 /**
+ * The first `maxBytes` of a UTF-8 body as text; `cut` when bytes were left out here or before
+ * (`cutBefore`), in which case a character the cut falls inside is held back.
+ */
+export function utf8Head(
+  bytes: Uint8Array,
+  maxBytes: number,
+  cutBefore: boolean,
+): { text: string; keptBytes: number; cut: boolean } {
+  const kept = bytes.subarray(0, Math.max(0, maxBytes));
+  const cut = cutBefore || kept.byteLength < bytes.byteLength;
+  return { text: new TextDecoder().decode(kept, { stream: cut }), keptBytes: kept.byteLength, cut };
+}
+
+/**
  * The entries of a result, in request order. Text bodies draw on one budget
  * ({@link MAX_RESULT_BYTES}) in that order, so a batch is bounded whatever each response's cap.
  */
@@ -393,12 +381,9 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
         ...(outcome.truncated ? { truncated: true } : {}),
       };
     }
-    const kept = bytes.subarray(0, budget);
-    budget -= kept.byteLength;
-    if (kept.byteLength < bytes.byteLength) budgetSpent = true;
-    const truncated = outcome.truncated || kept.byteLength < bytes.byteLength;
-    // A cut may fall inside a character: `stream` holds the partial one back.
-    const text = new TextDecoder().decode(kept, { stream: truncated });
+    const { text, keptBytes, cut: truncated } = utf8Head(bytes, budget, outcome.truncated);
+    budget -= keptBytes;
+    if (keptBytes < bytes.byteLength) budgetSpent = true;
     let body: unknown = text;
     if (!truncated && outcome.contentType.toLowerCase().includes("json")) {
       try {
@@ -462,9 +447,14 @@ export async function executeApiCall(
   },
   args: ApiCallArguments,
   extra: AppstrateRequestExtra,
-  defaultConnectionId: string | undefined,
-  deadlineMs: number = BATCH_DEADLINE_MS,
+  options: {
+    /** Applies to each request naming no `connection_id` of its own. */
+    defaultConnectionId: string | undefined;
+    /** {@link BATCH_DEADLINE_MS}, unless a test shortens it. */
+    deadlineMs: number;
+  },
 ): Promise<ToolCallOutcome | Refusal> {
+  const { defaultConnectionId, deadlineMs } = options;
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
   const sessionId = args.session_id ?? crypto.randomUUID();

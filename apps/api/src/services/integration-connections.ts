@@ -49,7 +49,8 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { activeHereSql, isActiveHere } from "./package-activation.ts";
+import { isActiveHere } from "./package-activation.ts";
+import { activePackagesFilter } from "./space-packages.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -383,6 +384,13 @@ export interface RunBoundSelection {
 export type ProxyReach = "own" | "usable";
 
 /**
+ * What a caller outside a run may reach, for a verdict that reaches no credential: a
+ * {@link ProxyReach}, `closed` when the space closes the credential proxy outside a run, `null`
+ * without either proxy permission (`reachOutsideRunIfPermitted`).
+ */
+export type ReachOutsideRun = ProxyReach | "closed" | null;
+
+/**
  * How a caller names a connection: the credential proxy's `X-Connection-Id` header, or a
  * `connection_id` field (`/api/credential-proxy/tools*`, the server sync). A refusal about the
  * named connection speaks of it the way the caller wrote it.
@@ -562,6 +570,8 @@ async function selectConnection(
  *   - `default_unavailable`: the org default cannot bind (a member gone or off-auth, an empty set,
  *     a set too large); pins never apply outside a run.
  *   - `unusable`: `insufficient_scopes`, `auth_serves_no_selected_tool`, or another refusal (logged).
+ *   - `proxy_closed`: the space closes the credential proxy outside a run, whatever the caller's
+ *     role: only a run reaches its connections.
  *
  * `imposed`: an enforced org default governs the integration here — the space's admins decide.
  */
@@ -573,12 +583,13 @@ export type ProxyConnectionStatus =
   | "not_permitted"
   | "default_unavailable"
   | "unusable"
+  | "proxy_closed"
   | "not_required";
 
 export async function proxyConnectionVerdict(
   packageId: string,
   manifest: IntegrationManifest,
-  context: { spaceId: string; actor: Actor; reach: ProxyReach | null },
+  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
 ): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
   const { status, imposed } = await proxyConnectionOutcome(packageId, manifest, {
     ...context,
@@ -599,7 +610,7 @@ async function proxyConnectionOutcome(
   context: {
     spaceId: string;
     actor: Actor;
-    reach: ProxyReach | null;
+    reach: ReachOutsideRun;
     orgDefaults: Record<string, OrgDefaultPick>;
   },
 ): Promise<{ status: ProxyConnectionStatus; imposed: boolean; refusal?: ResolutionFieldError }> {
@@ -608,6 +619,7 @@ async function proxyConnectionOutcome(
   if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
   // The proxy route admits neither: nothing is selected for such a caller.
   if (reach === null) return { status: "not_permitted", imposed };
+  if (reach === "closed") return { status: "proxy_closed", imposed };
   const selection = { spaceId: context.spaceId, actor: context.actor, reach, orgDefaults };
   return selectConnection(packageId, manifest, null, selection).then(
     ({ row, notConnected }) =>
@@ -664,7 +676,7 @@ export interface IntegrationProxyVerdict {
  */
 export async function proxyConnectionVerdicts(
   manifests: ReadonlyMap<string, IntegrationManifest>,
-  context: { spaceId: string; actor: Actor; reach: ProxyReach | null },
+  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
 ): Promise<IntegrationProxyVerdict[]> {
   const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
   return mapWithConcurrency([...manifests], VERDICT_CONCURRENCY, async ([id, manifest]) => ({
@@ -824,23 +836,13 @@ export async function listActiveIntegrationIds(
   return active;
 }
 
-/**
- * The integrations of the organization (system ones included) active in the space, by the rule
- * {@link activeHereSql} states, sorted by id.
- */
+/** The integrations of the organization (system ones included) active in the space, sorted by id. */
 export async function listIntegrationIdsActiveInSpace(scope: SpaceScope): Promise<string[]> {
   const rows = await db
     .select({ id: packages.id })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .where(
-      and(
-        eq(packages.type, "integration"),
-        orgOrSystemFilter(scope.orgId),
-        notEphemeralFilter(),
-        activeHereSql(),
-      ),
-    )
+    .where(activePackagesFilter(scope, "integration"))
     .orderBy(packages.id);
   return rows.map((row) => row.id);
 }
@@ -3213,8 +3215,8 @@ export async function getIntegrationAuthStatuses(
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
-  /** Outside-run proxy reach (`reachOutsideRunIfPermitted`); `null` without either permission. */
-  reach: ProxyReach | null,
+  /** What the caller may reach outside a run (`reachOutsideRunIfPermitted`). */
+  reach: ReachOutsideRun,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];

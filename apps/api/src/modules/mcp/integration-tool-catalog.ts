@@ -8,7 +8,7 @@
  * typed tool through `/api/credential-proxy/tools/call`.
  */
 
-import { z } from "zod";
+import type { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
@@ -22,8 +22,10 @@ import {
   API_CALL_INPUT_SCHEMA,
   API_CALL_USAGE,
   apiCallSchema,
+  BATCH_DEADLINE_MS,
   executeApiCall,
   MAX_RESULT_BYTES,
+  utf8Head,
   type ApiCallArguments,
   type DispatchContext,
   type ToolCallOutcome,
@@ -43,10 +45,15 @@ export interface IntegrationTool {
   catalogUnreadable?: true;
   /** How to call it and read its result, carried with its `input_schema` by `best_match`. */
   usage: string;
-  /** Its arguments: `call_integration_tool` validates `arguments` against it before `execute`. */
-  schema: z.ZodType;
-  /** `schema` as JSON Schema: the `input_schema` of `best_match`. */
+  /**
+   * Its arguments, which `call_integration_tool` validates `arguments` against before `execute`;
+   * absent for a typed tool, whose server validates them.
+   */
+  schema?: z.ZodType;
+  /** Its arguments as JSON Schema: the `input_schema` of `best_match`. */
   inputSchema: Record<string, unknown>;
+  /** A typed tool's declared result schema: the `output_schema` of `best_match`. */
+  outputSchema?: Record<string, unknown>;
   /** The connections it reaches. */
   connections: ToolConnection[];
   /** Runs a call whose arguments `schema` accepted, with the connection the caller named. */
@@ -57,11 +64,25 @@ export interface IntegrationTool {
   ): Promise<ToolCallOutcome | Refusal>;
 }
 
+/** A listing entry about an integration, named as the MCP tools name it (`integration`). */
+type AboutIntegration<T extends { integration_package_id: string }> = Omit<
+  T,
+  "integration_package_id"
+> & { integration: string };
+
 export interface IntegrationTools {
   tools: IntegrationTool[];
-  notReady: IntegrationToolListing["not_ready"];
-  unlisted: IntegrationToolListing["unlisted"];
-  truncatedCatalogs: IntegrationToolListing["truncated_catalogs"];
+  not_ready: AboutIntegration<IntegrationToolListing["not_ready"][number]>[];
+  unlisted: AboutIntegration<IntegrationToolListing["unlisted"][number]>[];
+  truncated_catalogs: AboutIntegration<IntegrationToolListing["truncated_catalogs"][number]>[];
+}
+
+/** `entry` with its `integration_package_id` named `integration`. */
+function aboutIntegration<T extends { integration_package_id: string }>({
+  integration_package_id,
+  ...rest
+}: T): AboutIntegration<T> {
+  return { integration: integration_package_id, ...rest };
 }
 
 /** The listing route's refusal, as `invoke_operation` would relay it. */
@@ -87,33 +108,53 @@ const CONNECTIONS_USAGE =
 const REMOTE_TOOL_USAGE =
   "Pass the tool's own arguments in `arguments`, following its `input_schema`: the platform " +
   "checks only that the required ones are present, the server validates the rest (a refusal " +
-  "of the server answers `upstream_mcp_error`, with its `mcp_error.code` and `message`). The " +
-  "`connection_id` of call_integration_tool names the connection; without it the proxy " +
-  "chooses as for an `api_call`, and `must_choose_connection` lists the candidates in " +
+  "of the server answers `upstream_mcp_error`, with its `mcp_error.code` and `message`). When " +
+  "it has an `output_schema`, its `structuredContent` follows it. The `connection_id` of " +
+  "call_integration_tool names the connection; without it the proxy chooses as for an " +
+  "`api_call`, and `must_choose_connection` lists the candidates in " +
   "`errors[0].candidate_connections` (retry with one `id` as `connection_id`). The result is " +
   `the server's own tool result, relayed as is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
-  "tool has run, and only the content blocks that do not fit are replaced by a note " +
-  "(`truncated: true` in `_meta`). An error result carrying `content` is the tool's own " +
-  "failure (`isError: true`); one carrying `code`, `status` and `detail` is the platform's " +
-  "answer: a refusal before anything was sent, or the server failing the exchange " +
-  "(`bad_gateway`, `upstream_mcp_error`, `upstream_response_too_large` when the tool ran but " +
-  "its answer exceeds the exchange bound). " +
+  "tool has run: a text block that does not fit whole is cut, any other block that does not " +
+  'fit is replaced by a note, and `_meta["dev.appstrate/truncated"]` is `true`. An error ' +
+  "result carrying `content` is the tool's own failure (`isError: true`); one carrying `code`, " +
+  "`status` and `detail` is the platform's answer: a refusal before anything was sent, or the " +
+  "server failing the exchange: `bad_gateway`, `upstream_mcp_error`, `upstream_timeout` (no " +
+  "answer in time: the tool may have run, check before repeating a write), " +
+  "`upstream_response_too_large` (the tool ran but its answer exceeds the exchange bound: ask " +
+  "it for less), or `upstream_credential_rejected` (the server refused the connection's " +
+  "credential with HTTP `upstream_status`; do not retry: with `credential.status` " +
+  "`needs_reconnection`, its owner must reconnect it, otherwise the connection may lack a " +
+  "permission the tool needs; tell the user). " +
   CONNECTIONS_USAGE;
+
+/** Appended to a text block cut at the result budget. */
+const cutMarker = (kept: number, total: number) =>
+  `\n[cut: ${kept} of ${total} bytes kept, over the ${MAX_RESULT_BYTES}-byte result budget]`;
 
 /**
  * A tool result over {@link MAX_RESULT_BYTES}, bounded: its content blocks kept in order while
- * they fit, each one that does not replaced by a note, `structuredContent` kept only if it still
- * fits. The call has run: nothing of what fits is dropped.
+ * they fit, the first text block that does not fit cut to what is left (on a character boundary,
+ * marked), any other block that does not fit replaced by a note, `structuredContent` kept only if
+ * it still fits. The call has run: nothing of what fits is dropped.
  */
 function boundedResult(result: CallToolResult): CallToolResult {
-  const size = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  const encoder = new TextEncoder();
+  const size = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
   let budget = MAX_RESULT_BYTES;
+  let cut = 0;
   let omitted = 0;
   const content = (Array.isArray(result.content) ? result.content : []).map((block, index) => {
     const bytes = size(block);
     if (bytes <= budget) {
       budget -= bytes;
       return block;
+    }
+    if (block.type === "text" && budget > 0) {
+      const text = encoder.encode(block.text);
+      const head = utf8Head(text, budget, false);
+      budget -= head.keptBytes;
+      cut += 1;
+      return { ...block, text: head.text + cutMarker(head.keptBytes, text.byteLength) };
     }
     omitted += 1;
     return {
@@ -130,19 +171,17 @@ function boundedResult(result: CallToolResult): CallToolResult {
   content.push({
     type: "text",
     text:
-      `The tool ran; its result exceeds ${MAX_RESULT_BYTES} bytes: ${omitted} content block(s)` +
-      `${droppedStructured ? " and its structuredContent" : ""} were dropped, the rest is as it answered.`,
+      `The tool ran; its result exceeds ${MAX_RESULT_BYTES} bytes: ${cut} text block(s) cut, ` +
+      `${omitted} other block(s)${droppedStructured ? " and its structuredContent" : ""} ` +
+      "dropped, the rest is as it answered.",
   });
   return {
     content,
     ...structured,
     ...(result.isError ? { isError: true } : {}),
-    _meta: { truncated: true },
+    _meta: { "dev.appstrate/truncated": true },
   };
 }
-
-/** Upstream arguments: the server validates them against its own schema. */
-const remoteArgumentsSchema = z.record(z.string(), z.unknown());
 
 /**
  * The headers of a request to the proxy's tool routes. It asks for connect links: the MCP client
@@ -215,7 +254,10 @@ function callable(ctx: DispatchContext, tool: ListedIntegrationTool): Integratio
       schema: apiCallSchema,
       inputSchema: API_CALL_INPUT_SCHEMA,
       execute: (args, extra, named) =>
-        executeApiCall(ctx, target, args as ApiCallArguments, extra, named),
+        executeApiCall(ctx, target, args as ApiCallArguments, extra, {
+          defaultConnectionId: named,
+          deadlineMs: BATCH_DEADLINE_MS,
+        }),
     };
   }
   return {
@@ -223,8 +265,8 @@ function callable(ctx: DispatchContext, tool: ListedIntegrationTool): Integratio
     description: tool.description,
     ...(tool.catalog_unreadable ? { catalogUnreadable: true as const } : {}),
     usage: REMOTE_TOOL_USAGE,
-    schema: remoteArgumentsSchema,
     inputSchema: tool.input_schema,
+    ...(tool.output_schema ? { outputSchema: tool.output_schema } : {}),
     execute: (args, extra, named) =>
       executeRemoteTool(
         ctx,
@@ -261,8 +303,8 @@ export async function readIntegrationTools(
   const listing = body as unknown as IntegrationToolListing;
   return {
     tools: listing.tools.map((tool) => callable(ctx, tool)),
-    notReady: listing.not_ready,
-    unlisted: listing.unlisted,
-    truncatedCatalogs: listing.truncated_catalogs,
+    not_ready: listing.not_ready.map(aboutIntegration),
+    unlisted: listing.unlisted.map(aboutIntegration),
+    truncated_catalogs: listing.truncated_catalogs.map(aboutIntegration),
   };
 }

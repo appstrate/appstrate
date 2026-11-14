@@ -31,7 +31,7 @@ import {
   mcpServerFailure,
   proxiedMcpOperation,
   type ProxyCaller,
-} from "./credential-proxy/remote-tools.ts";
+} from "./credential-proxy/mcp-over-proxy.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import {
   readIntegrationManifestForRun,
@@ -154,26 +154,30 @@ export async function syncIntegrationFromServer(input: {
           caller: input.caller,
           deadline,
         });
+  const signal = proxied?.signal ?? deadline;
   let client: AppstrateMcpClient | undefined;
-  let exchanged;
-  try {
+  const exchange = async () => {
     client = await createMcpHttpClient(url, {
       fetch: proxied?.fetch ?? direct,
-      signal: deadline,
+      signal,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });
-    const { tools, truncated } = await listToolPages(client, deadline);
-    exchanged = {
+    const { tools, truncated } = await listToolPages(client, signal);
+    return {
       tools,
       truncated,
       info: client.getServerVersion(),
       instructions: client.getInstructions(),
     };
+  };
+  let exchanged;
+  try {
+    exchanged = await (proxied ? proxied.guard(exchange()) : exchange());
   } catch (err) {
     throw syncFailure(err, packageId, url, unauthenticated);
   } finally {
     // Before the session's close, which is no exchange of the listing.
-    proxied?.settle();
+    await proxied?.settle();
     await client?.close().catch(() => {});
   }
   return proposalFromServer(

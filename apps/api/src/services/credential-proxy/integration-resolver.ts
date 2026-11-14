@@ -45,7 +45,6 @@ import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
   connectionParam,
-  listActiveIntegrationIds,
   listIntegrationIdsActiveInSpace,
   listReachableConnections,
   proxyConnectionVerdicts,
@@ -275,38 +274,53 @@ export interface ConnectionOutsideRun {
 
 /** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
 export async function listConnectionsOutsideRun(
-  scope: { orgId: string; spaceId: string },
+  scope: SpaceScope,
   actor: Actor,
   reach: ProxyReach,
 ): Promise<ConnectionOutsideRun[]> {
-  return (await connectionsOutsideRun(scope, actor, reach)).connections;
+  const manifests = await publishedManifests(
+    scope.orgId,
+    await listIntegrationIdsActiveInSpace(scope),
+  );
+  return connectionsOutsideRun(scope, actor, reach, manifests);
 }
 
 /**
- * {@link listConnectionsOutsideRun}, with the published manifest of each integration listed: the
- * version a call outside a run is authorized against.
+ * The published manifest of each of `integrationIds` that has one: the version a call outside a
+ * run is authorized against.
+ */
+export async function publishedManifests(
+  orgId: string,
+  integrationIds: readonly string[],
+): Promise<Map<string, IntegrationManifest>> {
+  const loaded = await Promise.all(
+    integrationIds.map((id) => readIntegrationManifestForProxy(id, orgId, null)),
+  );
+  const manifests = new Map<string, IntegrationManifest>();
+  integrationIds.forEach((id, i) => {
+    const result = loaded[i]!;
+    if (result.ok) manifests.set(id, result.manifest);
+  });
+  return manifests;
+}
+
+/**
+ * {@link listConnectionsOutsideRun}, over the integrations of `manifests` alone: those active in
+ * the space, each with its published manifest, as the caller read them.
  */
 export async function connectionsOutsideRun(
-  scope: { orgId: string; spaceId: string },
+  scope: SpaceScope,
   actor: Actor,
   reach: ProxyReach,
-): Promise<{
-  connections: ConnectionOutsideRun[];
-  manifests: ReadonlyMap<string, IntegrationManifest>;
-}> {
-  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, reach);
-  const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
-  const [active, orgDefaults, manifests] = await Promise.all([
-    listActiveIntegrationIds(integrationIds, scope.spaceId),
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+): Promise<ConnectionOutsideRun[]> {
+  const [rows, orgDefaults] = await Promise.all([
+    listReachableConnections({ spaceId: scope.spaceId, actor }, reach),
     listOrgDefaultsForResolver(scope.spaceId),
-    Promise.all(integrationIds.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null))),
   ]);
-  const manifestOf = new Map(integrationIds.map((id, i) => [id, manifests[i]!]));
-
   const listed = rows.flatMap((row): ConnectionOutsideRun[] => {
-    const loaded = manifestOf.get(row.integrationId)!;
-    if (!active.has(row.integrationId) || !loaded.ok) return [];
-    const authDef = loaded.manifest.auths?.[row.authKey] as AfpsManifestAuth | undefined;
+    const authDef = manifests.get(row.integrationId)?.auths?.[row.authKey] as
+      AfpsManifestAuth | undefined;
     if (!authDef) return [];
     const orgDefault = orgDefaults[row.integrationId];
     const enforcedMembers = orgDefault?.enforce ? orgDefault.connectionIds : null;
@@ -326,18 +340,12 @@ export async function connectionsOutsideRun(
       },
     ];
   });
-  const listedManifests = new Map<string, IntegrationManifest>();
-  for (const connection of listed) {
-    const loaded = manifestOf.get(connection.integration_package_id);
-    if (loaded?.ok) listedManifests.set(connection.integration_package_id, loaded.manifest);
-  }
   // Grouped by integration; within one, oldest first.
-  listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
-  return { connections: listed, manifests: listedManifests };
+  return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
 }
 
 /** An integration active in the space, with what a call outside a run naming no connection gets. */
-interface IntegrationOutsideRun {
+export interface IntegrationOutsideRun {
   integration_package_id: string;
   display_name: string;
   /** What a call naming no connection gets ({@link proxyConnectionVerdict}). */
@@ -347,30 +355,18 @@ interface IntegrationOutsideRun {
 }
 
 /**
- * The integrations active in the space that have a published version, each with the verdict of
- * a call outside a run naming no connection, judged against that version under `reach`. With
- * `connectOffers`, a refusal item a connect flow clears carries its `connect_url`, minted by the
- * run launch's one minter under its policy (`attachConnectOffers`).
+ * The integrations of `manifests` (active in the space, each with its published manifest), each
+ * with the verdict of a call outside a run naming no connection, judged against that version
+ * under `reach`. With `connectOffers`, a refusal item a connect flow clears carries its
+ * `connect_url`, minted by the run launch's one minter under its policy (`attachConnectOffers`).
  */
-export async function listIntegrationsOutsideRun(
+export async function integrationsOutsideRun(
   scope: SpaceScope,
   actor: Actor,
   reach: ProxyReach,
   connectOffers: ConnectOfferPolicy | null,
-  /** Judges this integration alone. */
-  only?: string,
+  manifests: ReadonlyMap<string, IntegrationManifest>,
 ): Promise<IntegrationOutsideRun[]> {
-  const ids = (await listIntegrationIdsActiveInSpace(scope)).filter(
-    (id) => only === undefined || id === only,
-  );
-  const loaded = await Promise.all(
-    ids.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null)),
-  );
-  const manifests = new Map<string, IntegrationManifest>();
-  ids.forEach((id, i) => {
-    const result = loaded[i]!;
-    if (result.ok) manifests.set(id, result.manifest);
-  });
   const verdicts = await proxyConnectionVerdicts(manifests, {
     spaceId: scope.spaceId,
     actor,
@@ -380,12 +376,13 @@ export async function listIntegrationsOutsideRun(
   const offered = connectOffers
     ? await attachConnectOffers({ errors: refusals, scope, actor, policy: connectOffers })
     : refusals;
-  const refusalOf = new Map(refusals.map((refusal, i) => [refusal, offered[i]!]));
+  // `offered` holds the refusals in verdict order.
+  let next = 0;
   return verdicts.map(({ integrationId, manifest, status, imposed, refusal }) => ({
     integration_package_id: integrationId,
     display_name: manifest.display_name ?? manifest.name,
     proxy_connection: { status, imposed },
-    ...(refusal ? { refusal: refusalOf.get(refusal)! } : {}),
+    ...(refusal ? { refusal: offered[next++]! } : {}),
   }));
 }
 
@@ -397,7 +394,10 @@ export async function listIntegrationsOutsideRun(
  * Why no connection answers. Outside a run the wording depends only on whether an id was named,
  * never on whose row it names or whether it exists.
  */
-export function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
+export function noConnectionMessage(
+  input: Pick<ResolveIntegrationProxyInput, "integrationId" | "connectionId" | "connectionNaming"> &
+    ({ run: Pick<ProxyRunSelection, "id">; reach?: never } | { reach: ProxyReach; run?: never }),
+): string {
   const { integrationId, run } = input;
   if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
   const named = connectionParam(input.connectionNaming).label;

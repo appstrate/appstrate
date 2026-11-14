@@ -1154,11 +1154,12 @@ describe("call_integration_tool — a result past the budget", () => {
     ]),
   };
 
-  it("says the tool ran, and drops only the blocks that do not fit", async () => {
-    const big = "x".repeat(300 * 1024);
+  it("says the tool ran, cuts the text block that does not fit and drops any other", async () => {
+    const big = "é".repeat(150 * 1024);
     const upstream = {
       content: [
         { type: "text", text: "head" },
+        { type: "image", data: "A".repeat(300 * 1024), mimeType: "image/png" },
         { type: "text", text: big },
         { type: "text", text: "tail" },
       ],
@@ -1170,10 +1171,42 @@ describe("call_integration_tool — a result past the budget", () => {
     const texts = (result.content as Array<{ text: string }>).map((block) => block.text);
     expect(texts[0]).toBe("head");
     expect(texts[1]).toContain("content block 1 omitted");
-    expect(texts[2]).toBe("tail");
-    expect(texts[3]).toContain("The tool ran");
+    // The 300 KiB text reaches the model as its prefix, cut on a character boundary.
+    const [prefix, marker] = texts[2]!.split("\n[cut: ");
+    expect(prefix!.length).toBeGreaterThan(100 * 1024);
+    expect(prefix).toBe("é".repeat(prefix!.length));
+    expect(marker).toContain(`of ${300 * 1024} bytes kept`);
+    expect(texts[3]).toContain("content block 3 omitted");
+    expect(texts[4]).toContain("The tool ran");
+    expect(texts[4]).toContain("1 text block(s) cut");
     expect(result.isError).toBeUndefined();
-    expect(result._meta).toEqual({ truncated: true });
+    expect(result._meta).toEqual({ "dev.appstrate/truncated": true });
+  });
+
+  it("relays a typed tool's output schema in `best_match`", async () => {
+    const outputSchema = { type: "object", properties: { count: { type: "number" } } };
+    const withOutput: Fixture = {
+      listing: listingOf([
+        {
+          kind: "remote",
+          name: "acme_docs__search",
+          integration_package_id: "@acme/docs",
+          description: "Acme Docs.",
+          remote_name: "search",
+          input_schema: { type: "object" },
+          output_schema: outputSchema,
+          connections: [connection({ missing_scopes: [] })],
+        },
+      ]),
+    };
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, withOutput);
+    const result = await made.byName
+      .get("search_integration_tools")!
+      .handler({ query: "acme_docs__search" }, noExtra);
+    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
+      best_match: { output_schema?: unknown };
+    };
+    expect(payload.best_match.output_schema).toEqual(outputSchema);
   });
 });
 
@@ -1197,8 +1230,7 @@ describe("call_integration_tool — a batch's deadline", () => {
       { name: TOOL, integration: INTEGRATION, connections: [], connectionRequired: false },
       { requests: Array.from({ length: 6 }, () => get()) as never },
       noExtra,
-      undefined,
-      50,
+      { defaultConnectionId: undefined, deadlineMs: 50 },
     );
     if ("code" in outcome) throw new Error("refused");
     const payload = parseResult(outcome.result);

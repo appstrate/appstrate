@@ -252,6 +252,7 @@
   "apiError.integration_not_connected": "Connectez d'abord cette intégration : aucune connexion utilisable dans cet espace ne permet d'interroger son serveur.",
   "apiError.integration_not_remote": "Cette intégration n'est pas servie par un serveur MCP distant.",
   "apiError.remote_url_unrenderable": "Cette intégration construit l'URL de son serveur à partir des informations de la connexion, et elles ne donnent pas d'URL valide. Reconnectez-la avec des valeurs valides.",
+  "apiError.upstream_credential_rejected": "Le serveur MCP de l'intégration a refusé l'identifiant de la connexion : reconnectez l'intégration, ou vérifiez que son compte a la permission dont l'outil a besoin.",
   "apiError.upstream_mcp_error": "Le serveur MCP de l'intégration a refusé la requête par une erreur JSON-RPC.",
   "apiError.upstream_response_too_large": "Le serveur MCP de l'intégration a répondu avec plus de données que la plateforme n'en lit en un échange.",
   "apiError.sync_transport_unsupported": "Ce serveur MCP utilise le transport SSE : seuls les serveurs Streamable HTTP peuvent être synchronisés.",

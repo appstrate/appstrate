@@ -127,11 +127,6 @@ const PACKAGE_HOME_PROPERTIES = {
 export const EMOJI_ICON_WRITE_RULE =
   "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
 
-/**
- * The visual identity of an agent, a space or an organization — one `icon`
- * and one `color`, both always present, both nullable. The one definition every
- * resource carrying an identity spreads.
- */
 /** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
 export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
   "Whether members may use the space's connections directly, outside a run: " +
@@ -145,6 +140,11 @@ export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
   "member who may launch an inline run from having an agent make the call inside that run; " +
   "that is governed by the inline-run permission of the member's role. Default `true`.";
 
+/**
+ * The visual identity of an agent, a space or an organization — one `icon`
+ * and one `color`, both always present, both nullable. The one definition every
+ * resource carrying an identity spreads.
+ */
 export const APPEARANCE_PROPERTIES = {
   icon: {
     type: ["string", "null"],

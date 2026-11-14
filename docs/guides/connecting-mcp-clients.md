@@ -426,7 +426,8 @@ role. Runs keep their connections there:
   the integration by opening it.
   `unlisted`, also present when not empty, lists the remote integrations whose
   server the platform refused to list for you (a connection, permission or
-  `authorized_uris` refusal), each with that `refusal`: their typed tools are
+  `authorized_uris` refusal, or the server refusing the connection's
+  credential: `upstream_credential_rejected`), each with that `refusal`: their typed tools are
   missing until it is cleared, and calling one returns that refusal. Tools,
   `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`.
   `connections` lists what a call would accept: per connection, the
@@ -474,8 +475,11 @@ role. Runs keep their connections there:
   never answers for a connection you do not reach. A server URL built from
   connection variables (`{$variable.…}`) is rendered from that connection's.
   At most 500 tools are read per server, and a name over 128 characters is
-  dropped. A server that cannot be listed, or not within the listing's 20 s,
-  leaves the tool names alone, each marked `catalog_unreadable: true`. A call is one `tools/call`
+  dropped, and a catalog keeps at most 512 KiB of descriptors. A tool whose
+  server declares an output schema carries it as `output_schema` in
+  `best_match`. A server that cannot be listed, or not within the listing's 20 s,
+  leaves the tool names alone, each marked `catalog_unreadable: true`; once
+  that wait is over, the search contacts no further server. A call is one `tools/call`
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
   connection named by the `connection_id` argument of `call_integration_tool`
   (one of the tool's `connections`) or, without it, the one the proxy selects
@@ -483,19 +487,27 @@ role. Runs keep their connections there:
   the tool's `tools_policy` entry requires is refused with
   `409 insufficient_scopes` (`missing_scopes`, `required_scopes`, `auth_key`,
   `connection_id`, `owned_by_actor`, and the `remedy`: `upgrade_or_new`,
-  `new_connection` or `rebind_by_admin`), one on an auth that does not serve the
-  tool with `auth_serves_no_selected_tool`, both before anything is sent; when
+  `new_connection` or `rebind_by_admin`), before anything is sent (every auth of
+  the integration serves a typed tool); when
   several qualify, the refusal lists the candidate connections, each with its
   `missing_scopes` for the tool. A refusal you can clear by reconnecting your
   own connection carries a `connect_url` to open when you hold
   `integrations:connect`, as a run launch's does. A call is journaled as one call of
-  that connection, and so is a listing that reached the server (not one served
-  from the cache). It returns the server's own tool result (`isError: true` is
-  the tool's failure); past 256 KiB the tool has run, and the content blocks
-  that do not fit are replaced by a note (`_meta.truncated: true`). A JSON-RPC
+  that connection (the `tools/call` itself, a timeout included), and so is a
+  listing that reached the server (not one served from the cache). It returns
+  the server's own tool result (`isError: true` is the tool's failure), without
+  the `_meta` keys of a reserved prefix (`dev.appstrate/`,
+  `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); past 256 KiB
+  the tool has run: a text block that does not fit whole is cut on a character
+  boundary and marked, any other block that does not fit is replaced by a note,
+  and `_meta["dev.appstrate/truncated"]` is `true`. A JSON-RPC
   error of the server is `upstream_mcp_error` with its `mcp_error.code` and
   `message` (the server's own text), an answer over 2 MiB
-  `upstream_response_too_large`, any other server fault `bad_gateway`. The
+  `upstream_response_too_large` (as JSON or as an event stream), no answer
+  within 45 s `upstream_timeout` (the tool may have run), the server refusing
+  the connection's credential `upstream_credential_rejected` (`upstream_status`,
+  and `credential.status` `needs_reconnection` when the connection is now
+  flagged for its owner to reconnect), any other server fault `bad_gateway`. The
   server's tool annotations are not relayed: `call_integration_tool` stays
   annotated destructive and open-world.
 - **Rate limit.** Each route has its own bucket, at the proxy's per-minute

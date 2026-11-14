@@ -24,9 +24,14 @@ import { seedApiKey } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
+  bearerOauthAuth,
   seedProxyConnection,
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
+import type {
+  IntegrationTool,
+  IntegrationToolListing,
+} from "../../../src/services/credential-proxy/integration-tools.ts";
 import {
   apiIntegrationManifest,
   twoAuthApiIntegrationManifest,
@@ -39,22 +44,7 @@ const OFFERS = { "X-Appstrate-Connect-Offers": "1" };
 const oauthManifest = (name = ID): IntegrationManifest =>
   ({
     ...apiIntegrationManifest({ name, displayName: "Acme Mail", auths: {} }),
-    auths: {
-      oauth: {
-        type: "oauth2",
-        authorization_endpoint: "https://idp.example.com/authorize",
-        token_endpoint: "https://idp.example.com/token",
-        authorized_uris: ["https://api.example.com/**"],
-        delivery: {
-          http: {
-            in: "header",
-            name: "Authorization",
-            prefix: "Bearer ",
-            value: "{$credential.access_token}",
-          },
-        },
-      },
-    },
+    auths: { oauth: bearerOauthAuth(["https://api.example.com/**"]) },
     _meta: { "dev.appstrate/api": { auths: { oauth: {} } } },
   }) as unknown as IntegrationManifest;
 
@@ -69,27 +59,8 @@ const keyManifest = (name: string, extra: Record<string, unknown> = {}): Integra
     ...extra,
   }) as IntegrationManifest;
 
-interface NotReady {
-  integration_package_id: string;
-  display_name: string;
-  proxy_connection: { status: string; imposed: boolean };
-  refusal?: Record<string, unknown>;
-}
-interface Tool {
-  name: string;
-  kind: string;
-  integration_package_id: string;
-  auth_key?: string;
-  connection_required?: boolean;
-  connections: { connection_id: string }[];
-}
-interface Listing {
-  tools: Tool[];
-  not_ready: NotReady[];
-  unlisted: unknown[];
-  truncated_catalogs: unknown[];
-  code?: string;
-}
+type Tool = IntegrationTool & { auth_key?: string; connection_required?: boolean };
+type Listing = Omit<IntegrationToolListing, "tools"> & { tools: Tool[]; code?: string };
 
 describe("GET /api/credential-proxy/tools", () => {
   let ctx: TestContext;

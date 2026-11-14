@@ -503,23 +503,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
   the server's `tools/list`, read through the credential proxy with the
   connection the proxy selects (sanitised; cached 5 minutes per connection and
-  integration version, read only after that selection; at most 500 tools of
-  names up to 128 characters, a longer catalog reported by a `note`). A server
-  that cannot be listed leaves the names, marked `catalog_unreadable`; one the
-  proxy refused to list for the caller comes back in `unlisted` with that
-  refusal. `call_integration_tool` sends one `tools/call` through the proxy, on
+  integration version, read only after that selection, at most 128 catalogs
+  per replica; at most 500 tools of names up to 128 characters and 512 KiB of
+  descriptors, a longer catalog reported by a `note`; a declared output schema
+  relayed as `output_schema`). A server that cannot be listed leaves the names,
+  marked `catalog_unreadable`; one the proxy refused to list for the caller, or
+  whose server refused the connection's credential, comes back in `unlisted`
+  with that refusal. `call_integration_tool` sends one `tools/call` through the proxy, on
   the named `connection_id` or the connection selected for that tool:
   `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
-  `remedy`, `auth_serves_no_selected_tool`, or `must_choose_connection` with the
-  candidates, all before anything is sent. A JSON-RPC error of the server is
-  `502 upstream_mcp_error` (`mcp_error: { code, message }`, the message bounded),
-  an answer over 2 MiB `502 upstream_response_too_large`; the server sync of
-  `POST /api/integrations/{packageId}/discover` answers the same codes where it
-  answered `bad_gateway`. A result over 256 KiB keeps the blocks that fit. The
-  call journal records one row per `tools/call` and one per listing that
-  reached the server, a refused handshake included (one row for the sync as
-  well). A listing waits 20 s for all its servers: a catalog not read by then
-  is listed `catalog_unreadable` and read on for the next listing. Two routes
+  `remedy`, or `must_choose_connection` with the candidates, both before
+  anything is sent (every auth of the integration serves a typed tool). A
+  JSON-RPC error of the server is `502 upstream_mcp_error`
+  (`mcp_error: { code, message }`, the message bounded), an answer over 2 MiB
+  `502 upstream_response_too_large` (at once, as JSON or as an event stream),
+  a 401 or 403 of the server `502 upstream_credential_rejected`
+  (`upstream_status`, and the proxy's `credential` verdict when its forced
+  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`;
+  the server sync of `POST /api/integrations/{packageId}/discover` answers the
+  same codes (its timeout 20 s) where it answered `bad_gateway`. The result
+  keeps no `_meta` key of a reserved prefix (`dev.appstrate/`,
+  `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); past
+  256 KiB, a text block that does not fit is cut on a character boundary, any
+  other is replaced by a note, and `_meta["dev.appstrate/truncated"]` is set.
+  The call journal records one row per `tools/call`, a timeout included, and
+  one per listing that reached the server, a refused or unanswered handshake
+  included (one row for the sync as well). A listing waits 20 s for all its
+  servers, and no longer than its request: a catalog not read by then is
+  listed `catalog_unreadable` and read on for the next listing, and no further
+  server is contacted. Both routes answer `Cache-Control: no-store`, like
+  `/proxy`. Two routes
   back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
   and `unlisted`) and
   `POST /api/credential-proxy/tools/call`, under the access rule of
@@ -533,7 +546,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   policy, `integrations:connect`) connects or reconnects it. The MCP exchange
   of the editor's server sync and of these routes share one proxy adapter;
   `stripForgedRuntimeEvents` moves from the sidecar to
-  `@appstrate/mcp-transport`, which both consume.
+  `@appstrate/mcp-transport`, which both consume, beside the relay's wider
+  `stripReservedResultMeta`.
 
 - **A space can close direct access to its connections** (#2204). A space
   admin turns off « Direct connection access » in the space settings
@@ -553,7 +567,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ones. The switch does not stop a member allowed to launch inline runs from
   having an agent make the call inside a run. The space object carries
   `credential_proxy_open`; a personal space keeps it open
-  (`409 personal_space_immutable`).
+  (`409 personal_space_immutable`). The integration detail's `proxy_connection`
+  verdict (`GET /api/integrations/{packageId}`) is then `proxy_closed`, and the
+  editor's connect step says so instead of offering a connection.
 
 - **A model refused for the runtime version says so** (#2148). When a provider
   refuses a model for the client version the agent SDK announces (Anthropic's

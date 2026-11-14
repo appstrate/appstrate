@@ -12,6 +12,7 @@ import {
   integrationConnectionShares,
   integrationOrgDefaults,
   spacePackages,
+  spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
@@ -169,6 +170,25 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
   it("is not_permitted for a caller holding neither proxy permission, as the proxy refuses", async () => {
     const caller = await memberHolding(ctx, ["integrations:read", "integrations:connect"]);
     await seedProxyConnection(caller, ID, "api", { api_key: "own" }, "own");
+    expect(await verdict(caller)).toEqual({ status: "not_permitted", imposed: false });
+  });
+
+  it("is proxy_closed in a space closing the proxy, whatever the caller's connection, as the proxy refuses", async () => {
+    await seedProxyConnection(ctx, ID, "api", { api_key: "sk" });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+    expect(await verdict(ctx)).toEqual({ status: "proxy_closed", imposed: false });
+    expect(await proxied(ctx)).toEqual({ status: 403, code: "credential_proxy_closed" });
+  });
+
+  it("is not_permitted before proxy_closed for a caller holding neither proxy permission", async () => {
+    const caller = await memberHolding(ctx, ["integrations:read", "integrations:connect"]);
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
     expect(await verdict(caller)).toEqual({ status: "not_permitted", imposed: false });
   });
 

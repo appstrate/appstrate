@@ -333,6 +333,11 @@ async function connectAttempt(
 function isInconclusiveProbe(err: unknown): boolean {
   const status = httpStatusOf(err);
   if (status !== undefined) return status >= 500;
+  return isRequestTimeout(err);
+}
+
+/** The SDK gave up waiting for an answer: its own timeout, or the request's signal aborting. */
+export function isRequestTimeout(err: unknown): boolean {
   return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
 }
 

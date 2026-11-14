@@ -25,21 +25,22 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { allocateMcpToolName, normaliseMcpToolNamespace } from "@appstrate/core/naming";
 import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
-import { ApiError, type ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {
-  assertIntegrationActive,
   listIntegrationIdsActiveInSpace,
   type ProxyConnectionStatus,
 } from "../integration-connections.ts";
 import {
   connectionsOutsideRun,
-  listIntegrationsOutsideRun,
+  integrationsOutsideRun,
+  publishedManifests,
   type ConnectionOutsideRun,
+  type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
+import { MAX_LISTED_TOOLS } from "./mcp-over-proxy.ts";
 import {
   listRemoteTools,
-  MAX_LISTED_TOOLS,
   offeredRemoteToolNames,
   type RemoteToolCatalog,
   type RemoteToolsCaller,
@@ -74,20 +75,13 @@ interface RemoteTool extends ToolBase {
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
   input_schema: Record<string, unknown>;
+  /** The server's declared output schema, when it declares one. */
+  output_schema?: Record<string, unknown>;
   /** The server could not be listed: the tool is declared, without description or schema. */
   catalog_unreadable?: true;
 }
 
 export type IntegrationTool = ApiCallTool | RemoteTool;
-
-/** An integration active here that the caller has no usable connection of. */
-interface NotReadyIntegration {
-  integration_package_id: string;
-  display_name: string;
-  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
-  /** The selection's item, with its `connect_url` when the caller asked for one. */
-  refusal?: ResolutionFieldError;
-}
 
 /** A remote integration whose server the proxy refused to list. */
 interface UnlistedIntegration {
@@ -104,7 +98,8 @@ interface TruncatedCatalog {
 
 export interface IntegrationToolListing {
   tools: IntegrationTool[];
-  not_ready: NotReadyIntegration[];
+  /** The integrations active here that the caller has no usable connection of. */
+  not_ready: IntegrationOutsideRun[];
   unlisted: UnlistedIntegration[];
   truncated_catalogs: TruncatedCatalog[];
 }
@@ -131,6 +126,7 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "not_permitted",
   "default_unavailable",
   "unusable",
+  "proxy_closed",
 ]);
 
 /** Remote servers listed at once. */
@@ -200,16 +196,22 @@ function apiCallTools(
  */
 async function readRemoteCatalog(
   caller: RemoteToolsCaller,
-  integrationId: string,
-  connections: readonly ToolConnection[],
+  entry: { id: string; manifest: IntegrationManifest; connections: readonly ToolConnection[] },
   connectionId: string | undefined,
   waitUntil: AbortSignal,
 ): Promise<RemoteToolCatalog> {
+  const { connections } = entry;
   const named = connections.find(
     (c) => c.connection_id.toLowerCase() === connectionId?.toLowerCase(),
   );
   const list = (id: string | undefined) =>
-    listRemoteTools({ ...caller, integrationId, waitUntil, ...(id ? { connectionId: id } : {}) });
+    listRemoteTools({
+      ...caller,
+      integrationId: entry.id,
+      manifest: entry.manifest,
+      waitUntil,
+      ...(id ? { connectionId: id } : {}),
+    });
   try {
     return await list(named?.connection_id);
   } catch (err) {
@@ -253,22 +255,20 @@ function mayNameRemoteTool(
  */
 async function remoteTools(
   caller: RemoteToolsCaller,
-  entry: { id: string; namespace: string; manifest: IntegrationManifest },
-  connections: readonly ToolConnection[],
+  entry: {
+    id: string;
+    namespace: string;
+    manifest: IntegrationManifest;
+    connections: readonly ToolConnection[];
+  },
   taken: Set<string>,
   query: Pick<IntegrationToolQuery, "name" | "connectionId">,
   waitUntil: AbortSignal,
 ): Promise<RemoteListing> {
-  const { id: integrationId, namespace, manifest } = entry;
+  const { id: integrationId, namespace, manifest, connections } = entry;
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(
-      caller,
-      integrationId,
-      connections,
-      query.connectionId,
-      waitUntil,
-    );
+    catalog = await readRemoteCatalog(caller, entry, query.connectionId, waitUntil);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (query.name !== undefined && !mayNameRemoteTool(manifest, namespace, query.name)) {
@@ -293,6 +293,7 @@ async function remoteTools(
     description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
     remote_name: upstream.name,
     input_schema: upstream.input_schema,
+    ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
     ...(unreadable ? { catalog_unreadable: true as const } : {}),
     connections: connections.map((connection) => ({
       ...connection,
@@ -341,38 +342,43 @@ async function remoteTools(
  * tools first within one; the integrations active here without a usable connection, under the
  * connect-offer policy of the caller (`connectOffers`); and the remote integrations whose server
  * the proxy refused to list, with that refusal. Read under the access rule of
- * `/api/credential-proxy/proxy` without a run (`reach`). Remote servers are waited for until
- * `waitUntil`, {@link LISTING_DEADLINE_MS} from now when omitted.
+ * `/api/credential-proxy/proxy` without a run (`reach`), every integration's activation checked
+ * before any connection is selected. Remote servers are waited for until `waitUntil`
+ * ({@link listingDeadline}).
  */
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,
-  query: IntegrationToolQuery = {},
-  waitUntil: AbortSignal = AbortSignal.timeout(LISTING_DEADLINE_MS),
+  query: IntegrationToolQuery,
+  waitUntil: AbortSignal,
 ): Promise<IntegrationToolListing> {
   const { scope, actor, reach, connectOffers } = caller;
-  if (query.integrationId !== undefined) {
-    await assertIntegrationActive(query.integrationId, scope.spaceId);
+  const activeIds = await listIntegrationIdsActiveInSpace(scope);
+  if (query.integrationId !== undefined && !activeIds.includes(query.integrationId)) {
+    throw notFound(`Integration '${query.integrationId}' is not active in this space`);
   }
-  const [reachable, activeIds, notReady] = await Promise.all([
-    connectionsOutsideRun(scope, actor, reach),
-    listIntegrationIdsActiveInSpace(scope),
+  const manifests = await publishedManifests(
+    scope.orgId,
+    query.integrationId !== undefined ? [query.integrationId] : activeIds,
+  );
+  const [reachable, notReady] = await Promise.all([
+    connectionsOutsideRun(scope, actor, reach, manifests),
     query.name === undefined
-      ? listIntegrationsOutsideRun(scope, actor, reach, connectOffers, query.integrationId)
+      ? integrationsOutsideRun(scope, actor, reach, connectOffers, manifests)
       : [],
   ]);
 
   const byIntegration = new Map<string, ToolConnection[]>();
-  for (const { integration_package_id: id, ...connection } of reachable.connections) {
+  for (const { integration_package_id: id, ...connection } of reachable) {
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);
   }
   // Every integration active in the space takes its namespace, connected by the caller or not.
-  const namespaces = namespacesOf([...new Set([...activeIds, ...byIntegration.keys()])]);
-  const integrations = [...byIntegration]
-    .filter(([id]) => query.integrationId === undefined || id === query.integrationId)
-    .flatMap(([id, connections]) => {
-      const manifest = reachable.manifests.get(id);
-      return manifest ? [{ id, namespace: namespaces.get(id)!, manifest, connections }] : [];
-    });
+  const namespaces = namespacesOf(activeIds);
+  const integrations = [...byIntegration].map(([id, connections]) => ({
+    id,
+    namespace: namespaces.get(id)!,
+    manifest: manifests.get(id)!,
+    connections,
+  }));
 
   const httpTools = new Map(
     integrations.map((entry) => [
@@ -395,8 +401,7 @@ export async function listIntegrationTools(
   const listed = new Map(
     await mapWithConcurrency(remote, LIST_CONCURRENCY, async (entry) => {
       const taken = new Set(httpTools.get(entry.id)!.map((tool) => tool.name));
-      const result = await remoteTools(caller, entry, entry.connections, taken, query, waitUntil);
-      return [entry.id, result] as const;
+      return [entry.id, await remoteTools(caller, entry, taken, query, waitUntil)] as const;
     }),
   );
 
@@ -418,20 +423,13 @@ export async function listIntegrationTools(
   }
   return {
     tools: named(tools),
-    not_ready: notReady.flatMap(
-      ({ integration_package_id, display_name, proxy_connection, refusal }) =>
-        NOT_READY_STATUSES.has(proxy_connection.status)
-          ? [
-              {
-                integration_package_id,
-                display_name,
-                proxy_connection,
-                ...(refusal ? { refusal } : {}),
-              },
-            ]
-          : [],
-    ),
+    not_ready: notReady.filter((entry) => NOT_READY_STATUSES.has(entry.proxy_connection.status)),
     unlisted,
     truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
   };
+}
+
+/** A listing's wait for its remote servers, from now: {@link LISTING_DEADLINE_MS}. */
+export function listingDeadline(): AbortSignal {
+  return AbortSignal.timeout(LISTING_DEADLINE_MS);
 }

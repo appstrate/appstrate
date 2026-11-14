@@ -2,21 +2,18 @@
 
 /**
  * The typed tools of an integration backed by a remote MCP server (`source.kind: "remote"`),
- * outside a run: its `tools/list` and one `tools/call`, both spoken over the credential proxy
- * (`proxyCall`), so `authorized_uris`, the egress guard and the 401 refresh are the proxy's. The
- * connection is selected first, by the proxy's rule (`selectAccessibleConnection`), and every
- * catalog read, URL rendering and exchange uses that connection. The tools offered are the
- * integration catalog's (`"*"` selection less `hidden_tools` and the connect tool), sanitised as
- * `McpHost` registers them in a run.
+ * outside a run: its `tools/list` and one `tools/call`, spoken over the credential proxy
+ * (`mcp-over-proxy.ts`). The connection is selected first, by the proxy's rule
+ * (`selectAccessibleConnection`), and every catalog read, URL rendering and exchange uses it. The
+ * tools offered are the integration catalog's (`"*"` selection less `hidden_tools` and the connect
+ * tool), sanitised as `McpHost` registers them in a run.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   createMcpHttpClient,
-  httpStatusOf,
-  jsonRpcErrorOf,
   sanitiseToolDescriptor,
-  stripForgedRuntimeEvents,
+  stripReservedResultMeta,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { createCache } from "@appstrate/core/cache";
@@ -29,11 +26,10 @@ import {
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { ApiError, badGateway, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { trackAudit } from "../audit.ts";
 import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import {
   assertIntegrationActive,
@@ -41,215 +37,38 @@ import {
   type ProxyReach,
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
-import {
-  readIntegrationManifestForProxy,
-  type ResolvedIntegrationVersion,
-} from "../integration-service.ts";
-import { getCredentialProxyLimits } from "../proxy-limits.ts";
-import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
-import { proxyCall, ProxyCallError } from "./core.ts";
+import { readIntegrationManifestForProxy } from "../integration-service.ts";
+import { ProxyCallError } from "./core.ts";
 import { noConnectionMessage } from "./integration-resolver.ts";
-
-/** Who calls, as the call journal records it. */
-export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
-
-interface ProxiedMcpOperationInput {
-  scope: SpaceScope;
-  actor: Actor;
-  integrationId: string;
-  /** The connection, as a `connection_id` names it; the proxy selects one when omitted. */
-  connectionId?: string;
-  reach: ProxyReach;
-  /** The version the exchange is authorized against; the latest published one when omitted. */
-  version?: ResolvedIntegrationVersion;
-  caller: ProxyCaller;
-  /** Bounds every exchange. */
-  deadline: AbortSignal;
-}
+import {
+  listToolPages,
+  mcpServerFailure,
+  proxiedMcpOperation,
+  type ProxyCaller,
+} from "./mcp-over-proxy.ts";
 
 /**
- * Per MCP exchange (a `tools/list` page or a tool result), bounded like an `api_call` body; the
- * proxy's `max_response_bytes` wins when lower.
+ * Listing a catalog takes a few round trips, each answered within seconds by a healthy server; a
+ * call stays below an MCP client's 60 s request timeout, which the caller's request also counts.
  */
-export const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
+const timeouts = { listMs: 10_000, callMs: 45_000 };
 
-/** An MCP exchange whose answer exceeded the bound it is read under: the server did answer. */
-export class McpExchangeTooLargeError extends Error {
-  constructor(readonly limit: number) {
-    super(`an MCP answer exceeds ${limit} bytes`);
-    this.name = "McpExchangeTooLargeError";
-  }
+/** Shortens the operations' deadlines; with no argument, restores them. */
+export function _setRemoteToolTimeoutsForTesting(next?: Partial<typeof timeouts>): void {
+  Object.assign(timeouts, { listMs: 10_000, callMs: 45_000 }, next);
 }
 
-/** Tools read from one server's `tools/list`, whatever its pages hold. */
-export const MAX_LISTED_TOOLS = 500;
-/** Bounds a server answering `nextCursor` forever with empty pages. */
-export const MAX_LISTED_PAGES = 20;
-/** The longest tool name read (MCP's own bound); a longer one is dropped. */
-const MAX_TOOL_NAME_LENGTH = 128;
-
-/**
- * A server's `tools/list`, page by page, up to {@link MAX_LISTED_TOOLS} tools over at most
- * {@link MAX_LISTED_PAGES} pages; `truncated` when the server lists more. A tool whose name is
- * longer than MCP's bound is dropped.
- */
-export async function listToolPages(
-  client: AppstrateMcpClient,
-  signal: AbortSignal,
-): Promise<{ tools: Tool[]; truncated: boolean }> {
-  const tools: Tool[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_LISTED_PAGES; page++) {
-    const res = await client.listToolsPage({ ...(cursor ? { cursor } : {}), signal });
-    for (const tool of res.tools) {
-      if (tool.name.length <= MAX_TOOL_NAME_LENGTH) tools.push(tool);
-      else
-        logger.warn("credential-proxy: MCP tool name too long, dropped", {
-          length: tool.name.length,
-        });
-    }
-    cursor = res.nextCursor;
-    if (!cursor || tools.length >= MAX_LISTED_TOOLS) break;
-  }
-  return {
-    tools: tools.slice(0, MAX_LISTED_TOOLS),
-    truncated: tools.length > MAX_LISTED_TOOLS || !!cursor,
-  };
-}
-
-/** An exchange that reached a connection: its credential may have been sent. */
-interface JournaledExchange {
-  connectionId: string;
-  method: string;
-  target: string;
-  outcome: string;
-  durationMs: number;
-}
-
-/**
- * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`.
- * Its `fetch`, for `createMcpHttpClient`, sends each exchange through `proxyCall`. The SDK echoes
- * the server's own values (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no
- * placeholder they carry reaches a credential.
- *
- * The call journal keeps one row per operation that reached upstream, written by `settle()` once
- * the operation is over: its own exchange (the `tools/call`, or the first page of a `tools/list`),
- * or, when the operation ended before it (a handshake refused, a transport failure after
- * dispatch), the last exchange that may have sent the credential. An operation that made no
- * exchange, a catalog served from cache, writes none.
- */
-export function proxiedMcpOperation(input: ProxiedMcpOperationInput): {
-  fetch: typeof fetch;
-  settle: () => void;
-} {
-  const { scope, deadline } = input;
-  let nominal: JournaledExchange | undefined;
-  let last: JournaledExchange | undefined;
-  let settled = false;
-  const fetchImpl = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    // The standalone GET stream carries server-initiated messages, which a bounded exchange never reads.
-    if (init?.method === "GET") return new Response(null, { status: 405 });
-    const method = init?.method ?? "POST";
-    const href = target instanceof Request ? target.url : String(target);
-    const body = typeof init?.body === "string" ? init.body : null;
-    const started = Date.now();
-    const reached = (connectionId: string, outcome: string) => {
-      const exchange = {
-        connectionId,
-        method,
-        target: href,
-        outcome,
-        durationMs: Date.now() - started,
-      };
-      last = exchange;
-      if (!nominal && isOperationExchange(body)) nominal = exchange;
-    };
-    const maxResponseBytes = Math.min(
-      MAX_EXCHANGE_BYTES,
-      getCredentialProxyLimits().max_response_bytes,
-    );
-    let result;
-    try {
-      result = await proxyCall({
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-        connectionNaming: "connection_id",
-        reach: input.reach,
-        ...(input.version ? { version: input.version } : {}),
-        integrationId: input.integrationId,
-        method,
-        target: href,
-        headers: Object.fromEntries(new Headers(init?.headers)),
-        body,
-        literalHeaders: true,
-        maxResponseBytes,
-        signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-      });
-    } catch (err) {
-      if (err instanceof ProxyCallError && err.connectionId) reached(err.connectionId, err.code);
-      throw err;
-    }
-    reached(result.connectionId, String(result.status));
-    // A body cut at the bound fails its read, rather than handing the client half a message.
-    const relayed =
-      result.body?.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          flush() {
-            if (result.truncated) throw new McpExchangeTooLargeError(maxResponseBytes);
-          },
-        }),
-      ) ?? null;
-    return new Response(relayed, { status: result.status, headers: result.headers });
-  }) as typeof fetch;
-  const settle = () => {
-    const exchange = nominal ?? last;
-    if (settled || !exchange) return;
-    settled = true;
-    void trackAudit(
-      recordConnectionCall({
-        ...input.caller,
-        ...exchange,
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        integrationId: input.integrationId,
-        actor: input.actor,
-        runId: null,
-      }),
-    );
-  };
-  return { fetch: fetchImpl, settle };
-}
-
-/** Whether a JSON-RPC body is a `tools/call`, or a `tools/list` asking for no cursor. */
-function isOperationExchange(body: string | null): boolean {
-  if (body === null) return false;
-  let message: unknown;
-  try {
-    message = JSON.parse(body);
-  } catch {
-    return false;
-  }
-  if (typeof message !== "object" || message === null) return false;
-  const { method, params } = message as { method?: unknown; params?: { cursor?: unknown } };
-  return method === "tools/call" || (method === "tools/list" && params?.cursor === undefined);
-}
-
-/** Listing a catalog: a few round trips, each answered within seconds by a healthy server. */
-const LIST_TIMEOUT_MS = 10_000;
-/** Below an MCP client's 60 s request timeout, which the caller's own request also counts against. */
-const CALL_TIMEOUT_MS = 45_000;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
+/** A sanitised descriptor weighs up to ~10 KiB: 500 could be 5 MiB. Past this, `truncated`. */
+const MAX_CATALOG_BYTES = 512 * 1024;
+/** Per replica, at most 64 MiB of catalogs; one evicted is listed again on its next use. */
+const MAX_CACHED_CATALOGS = 128;
 
-/**
- * The sanitised upstream descriptors of a connection's catalog ({@link remoteCatalogKey}). Holds
- * no credential and decides no access: it is read only with a connection the caller's selection
- * resolved.
- */
+/** Holds no credential and decides no access: read only with a connection the selection chose. */
 const catalogCache = createCache<{ tools: Tool[]; truncated: boolean }>({
   name: "remote-integration-tools",
   ttlMs: CATALOG_TTL_MS,
+  max: MAX_CACHED_CATALOGS,
 });
 
 /**
@@ -272,7 +91,7 @@ export interface RemoteToolsCaller {
   actor: Actor;
   reach: ProxyReach;
   caller: ProxyCaller;
-  /** The caller's request: its going away ends a tool call (never a shared catalog listing). */
+  /** The caller's request: its going away ends a tool call and its wait for a listing. */
   signal: AbortSignal;
   /**
    * The policy of a caller that asked for connect links (`RUN_CONNECT_OFFERS_HEADER`), `null`
@@ -284,19 +103,9 @@ export interface RemoteToolsCaller {
 
 type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
-/**
- * The latest published manifest, the one `proxyCall` authorizes outside a run against, of an
- * integration active in the space: an inactive one is refused before any connection is selected,
- * so neither a cached catalog nor a connect link answers for it.
- */
-async function remoteManifest(
-  integrationId: string,
-  scope: SpaceScope,
-): Promise<IntegrationManifest> {
-  await assertIntegrationActive(integrationId, scope.spaceId);
-  const loaded = await readIntegrationManifestForProxy(integrationId, scope.orgId, null);
-  if (!loaded.ok) throw notFound(`Integration '${integrationId}' has no published version`);
-  const source = loaded.manifest.source;
+/** `manifest`, when its server speaks Streamable HTTP; else `422 integration_not_remote`. */
+function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
+  const source = manifest.source;
   if (source?.kind !== "remote" || source.remote.transport === "sse") {
     throw new ApiError({
       status: 422,
@@ -305,7 +114,7 @@ async function remoteManifest(
       detail: `Integration '${integrationId}' is not backed by a Streamable HTTP MCP server.`,
     });
   }
-  return loaded.manifest;
+  return manifest;
 }
 
 /**
@@ -338,9 +147,6 @@ async function remoteConnection(
       "credential_not_found",
       noConnectionMessage({
         integrationId: input.integrationId,
-        orgId: input.scope.orgId,
-        spaceId: input.scope.spaceId,
-        actor: input.actor,
         reach: input.reach,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         connectionNaming: "connection_id",
@@ -360,11 +166,7 @@ async function remoteConnection(
   return { connectionId: connection.id, url: remote.url };
 }
 
-/**
- * A selection refusal whose items a connect flow clears, each with its `connect_url`, under the
- * policy and by the one minter of a run launch's 409 (`attachConnectOffers`); any other error as
- * it is.
- */
+/** A selection refusal with the `connect_url` of each item a connect flow clears (`attachConnectOffers`). */
 async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
   const policy = input.connectOffers;
   if (!policy || !(err instanceof ApiError) || !err.fieldErrors?.length) return err;
@@ -398,7 +200,7 @@ export function offeredRemoteToolNames(
   return new Set(catalog.map((entry) => entry.name).filter((name) => !synthetic.has(name)));
 }
 
-/** An MCP client over the proxy for one exchange, bounded by `timeoutMs` and `signal` if given. */
+/** One MCP operation over the proxy, bounded by `timeoutMs` and `signal` if given. */
 async function withClient<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
     connectionId: string;
@@ -406,10 +208,9 @@ async function withClient<T>(
     signal: AbortSignal | null;
   },
   url: string,
-  use: (client: AppstrateMcpClient, deadline: AbortSignal) => Promise<T>,
+  use: (client: AppstrateMcpClient, signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
-  const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const operation = proxiedMcpOperation({
     scope: input.scope,
     actor: input.actor,
@@ -417,22 +218,37 @@ async function withClient<T>(
     connectionId: input.connectionId,
     reach: input.reach,
     caller: input.caller,
-    deadline,
+    deadline: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
   });
   let client: AppstrateMcpClient | undefined;
   try {
-    client = await createMcpHttpClient(url, {
-      fetch: operation.fetch,
-      signal: deadline,
-      onWarning: (message, data) =>
-        logger.warn(message, { integrationId: input.integrationId, ...data }),
-    });
-    return await use(client, deadline);
+    return await operation.guard(
+      (async () => {
+        client = await createMcpHttpClient(url, {
+          fetch: operation.fetch,
+          signal: operation.signal,
+          onWarning: (message, data) =>
+            logger.warn(message, { integrationId: input.integrationId, ...data }),
+        });
+        return use(client, operation.signal);
+      })(),
+    );
   } finally {
     // Before the session's close, which is no exchange of the operation.
-    operation.settle();
+    await operation.settle();
     await client?.close().catch(() => {});
   }
+}
+
+/** The descriptors kept within {@link MAX_CATALOG_BYTES}, in the server's order. */
+function boundedCatalog(tools: Tool[], truncated: boolean): { tools: Tool[]; truncated: boolean } {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  for (const [index, tool] of tools.entries()) {
+    bytes += encoder.encode(JSON.stringify(tool)).byteLength;
+    if (bytes > MAX_CATALOG_BYTES) return { tools: tools.slice(0, index), truncated: true };
+  }
+  return { tools, truncated };
 }
 
 /** A tool as the catalog offers it, in the REST wire's casing. */
@@ -440,33 +256,41 @@ interface RemoteTool {
   name: string;
   description?: string;
   input_schema: Tool["inputSchema"];
+  /** Present when the server declares one. */
+  output_schema?: NonNullable<Tool["outputSchema"]>;
 }
 
 export interface RemoteToolCatalog {
   /** The offered tools: in the server's order when listed, else the declared names. */
   tools: RemoteTool[];
-  /**
-   * False when the server's `tools/list` could not be read: `tools` then holds the declared names
-   * alone, without description or input schema.
-   */
+  /** False when the server could not be listed: `tools` are the declared names alone. */
   listed: boolean;
-  /** The server lists more than {@link MAX_LISTED_TOOLS} tools: only the first ones are read. */
+  /** The server lists more tools than are read: only the first ones are offered. */
   truncated: boolean;
 }
 
 /**
  * The tools the caller's connection of a remote integration offers, described by the server's
- * `tools/list` (cached per connection, integration version and server URL). The connection is
+ * `tools/list` (cached per connection, integration version and server URL), for an integration
+ * whose activation the listing checked and whose published `manifest` it read. The connection is
  * selected before the cache is read, so a cached catalog answers only a caller who reaches that
- * connection. The listing runs under its own timeout alone: callers sharing it never depend on the
- * first one staying, and a caller whose `waitUntil` ends first leaves it running for the next. A
- * server that cannot be listed, or not before `waitUntil`, leaves the declared names; a refusal of
- * the proxy (connection, permission, `authorized_uris`) is thrown.
+ * connection.
+ *
+ * The listing runs under its own timeout alone: callers sharing it never depend on the first one
+ * staying, and a caller whose wait (`waitUntil`, or its own request) ends first leaves it running
+ * for the next. Once that wait is over, no listing is started: a cached catalog answers, else the
+ * declared names. A server that cannot be listed leaves the declared names; a refusal of the proxy
+ * (connection, permission, `authorized_uris`) or of the server (the connection's credential) is
+ * thrown.
  */
 export async function listRemoteTools(
-  input: RemoteToolsInput & { connectionId?: string; waitUntil?: AbortSignal },
+  input: RemoteToolsInput & {
+    manifest: IntegrationManifest;
+    connectionId?: string;
+    waitUntil: AbortSignal;
+  },
 ): Promise<RemoteToolCatalog> {
-  const manifest = await remoteManifest(input.integrationId, input.scope);
+  const manifest = streamableRemote(input.integrationId, input.manifest);
   const { connectionId, url } = await remoteConnection(input, manifest);
   const key = remoteCatalogKey({
     orgId: input.scope.orgId,
@@ -475,36 +299,40 @@ export async function listRemoteTools(
     version: manifest.version,
     url,
   });
-  let described: { tools: Tool[]; truncated: boolean } | undefined;
-  try {
-    described =
-      catalogCache.peek(key) ??
-      (await beforeDeadline(
-        catalogCache.get(key, () =>
-          withClient(
-            { ...input, connectionId, timeoutMs: LIST_TIMEOUT_MS, signal: null },
-            url,
-            async (client, deadline) => {
-              const { tools, truncated } = await listToolPages(client, deadline);
-              return {
-                tools: tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []),
-                truncated,
-              };
-            },
-          ),
-        ),
-        input.waitUntil,
-      ));
-  } catch (err) {
-    // A refusal made before any exchange is the caller's to see; a server fault leaves the names.
-    if (err instanceof ApiError || (err instanceof ProxyCallError && !err.connectionId)) {
-      throw mcpServerFailure(err, { integrationId: input.integrationId, url });
+  const wait = AbortSignal.any([input.waitUntil, input.signal]);
+  let described = catalogCache.peek(key);
+  if (described === undefined && !wait.aborted) {
+    const load = () =>
+      withClient(
+        { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },
+        url,
+        async (client, signal) => {
+          const { tools, truncated } = await listToolPages(client, signal);
+          return boundedCatalog(
+            tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []),
+            truncated,
+          );
+        },
+      );
+    try {
+      described = await beforeDeadline(catalogCache.get(key, load), wait);
+    } catch (err) {
+      const failure = mcpServerFailure(err, { integrationId: input.integrationId, url });
+      // A refusal made before any exchange, or the server refusing the credential, is the
+      // caller's to see; any other fault leaves the declared names.
+      if (
+        err instanceof ApiError ||
+        (err instanceof ProxyCallError && !err.connectionId) ||
+        (failure instanceof ApiError && failure.code === "upstream_credential_rejected")
+      ) {
+        throw failure;
+      }
+      logger.warn("credential-proxy: remote tools/list failed", {
+        integrationId: input.integrationId,
+        connectionId,
+        error: getErrorMessage(err),
+      });
     }
-    logger.warn("credential-proxy: remote tools/list failed", {
-      integrationId: input.integrationId,
-      connectionId,
-      error: getErrorMessage(err),
-    });
   }
   const offered = offeredRemoteToolNames(manifest, described?.tools);
   if (described === undefined) {
@@ -521,6 +349,7 @@ export async function listRemoteTools(
         name: tool.name,
         ...(tool.description !== undefined ? { description: tool.description } : {}),
         input_schema: tool.inputSchema,
+        ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
       })),
     listed: true,
     truncated: described.truncated,
@@ -536,8 +365,7 @@ class ListingDeadlineError extends Error {
 }
 
 /** `work`'s outcome, or a {@link ListingDeadlineError} once `deadline` ends first. */
-function beforeDeadline<T>(work: Promise<T>, deadline: AbortSignal | undefined): Promise<T> {
-  if (!deadline) return work;
+function beforeDeadline<T>(work: Promise<T>, deadline: AbortSignal): Promise<T> {
   // Its outcome after the deadline belongs to the cache alone.
   work.catch(() => {});
   return new Promise<T>((resolve, reject) => {
@@ -550,7 +378,8 @@ function beforeDeadline<T>(work: Promise<T>, deadline: AbortSignal | undefined):
 
 /**
  * One `tools/call` on a remote integration's server, for a tool its catalog offers; the result's
- * forged runtime events are dropped. A tool outside the catalog, or a connection that does not
+ * reserved `_meta` keys are dropped. Entered directly by its route: the integration's activation
+ * is checked before anything else, and a tool outside the catalog, or a connection that does not
  * serve the tool (its auth, its scopes), is refused before any exchange.
  */
 export async function callRemoteTool(
@@ -560,7 +389,14 @@ export async function callRemoteTool(
     arguments: Record<string, unknown>;
   },
 ): Promise<CallToolResult> {
-  const manifest = await remoteManifest(input.integrationId, input.scope);
+  await assertIntegrationActive(input.integrationId, input.scope.spaceId);
+  const loaded = await readIntegrationManifestForProxy(
+    input.integrationId,
+    input.scope.orgId,
+    null,
+  );
+  if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
+  const manifest = streamableRemote(input.integrationId, loaded.manifest);
   // With `allow_undeclared_tools`, any listed name is in the selection; the hidden ones never are.
   const offered = offeredRemoteToolNames(
     manifest,
@@ -572,12 +408,12 @@ export async function callRemoteTool(
   const { connectionId, url } = await remoteConnection(input, manifest, input.name);
   try {
     const result = await withClient(
-      { ...input, connectionId, timeoutMs: CALL_TIMEOUT_MS },
+      { ...input, connectionId, timeoutMs: timeouts.callMs },
       url,
-      (client, deadline) =>
-        client.callTool({ name: input.name, arguments: input.arguments }, { signal: deadline }),
+      (client, signal) =>
+        client.callTool({ name: input.name, arguments: input.arguments }, { signal }),
     );
-    return stripForgedRuntimeEvents(result);
+    return stripReservedResultMeta(result);
   } catch (err) {
     throw mcpServerFailure(err, {
       integrationId: input.integrationId,
@@ -586,79 +422,4 @@ export async function callRemoteTool(
       tooLarge: "the tool ran, but its result is too large to relay; ask it for less",
     });
   }
-}
-
-/** Characters kept of a server's JSON-RPC error message, untrusted text. */
-const MAX_RPC_MESSAGE_CHARS = 512;
-
-/**
- * The error a failed MCP exchange answers: the proxy's own refusal as it is, a server fault as a
- * 502 naming the server's origin only (its message is untrusted text). A 401 or 403 is the server
- * refusing the connection's credential, or, for an integration declaring no auth, asking for one.
- * A JSON-RPC error the server answered (invalid arguments, unknown tool…) is `upstream_mcp_error`
- * carrying its `code` and its message, bounded; an answer over the exchange bound is
- * `upstream_response_too_large`.
- */
-export function mcpServerFailure(
-  err: unknown,
-  input: {
-    integrationId: string;
-    url: string;
-    unauthenticated?: boolean;
-    failed?: string;
-    /** Completes the detail of an answer over the exchange bound. */
-    tooLarge?: string;
-  },
-): Error {
-  if (err instanceof ApiError) return err;
-  if (err instanceof ProxyCallError) return proxyProblem(err.code, err.message);
-  const origin = URL.parse(input.url)?.origin;
-  logger.warn("credential-proxy: remote MCP exchange failed", {
-    integrationId: input.integrationId,
-    origin,
-    error: getErrorMessage(err),
-  });
-  const tooLarge = causeOfType(err, McpExchangeTooLargeError);
-  if (tooLarge) {
-    return new ApiError({
-      status: 502,
-      code: "upstream_response_too_large",
-      title: "Upstream Response Too Large",
-      detail: `The MCP server at ${origin} answered with more than ${tooLarge.limit} bytes: ${input.tooLarge ?? "the answer is too large to read"}.`,
-    });
-  }
-  const status = httpStatusOf(err);
-  if (status === 401 || status === 403) {
-    return badGateway(
-      input.unauthenticated
-        ? `The MCP server at ${origin} asks for a credential (HTTP ${status}), but the integration declares no authentication.`
-        : `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
-    );
-  }
-  const rpc = jsonRpcErrorOf(err);
-  if (rpc) {
-    return new ApiError({
-      status: 502,
-      code: "upstream_mcp_error",
-      title: "Upstream MCP Error",
-      detail: `The MCP server at ${origin} answered JSON-RPC error ${rpc.code}; \`mcp_error.message\` is its own text.`,
-      extensions: {
-        mcp_error: { code: rpc.code, message: rpc.message.slice(0, MAX_RPC_MESSAGE_CHARS) },
-      },
-    });
-  }
-  return badGateway(`The MCP server at ${origin} ${input.failed ?? "did not answer"}.`);
-}
-
-/** `err` or the first error of its `cause` chain that is a `type`. */
-function causeOfType<T extends Error>(
-  err: unknown,
-  type: abstract new (...args: never[]) => T,
-): T | undefined {
-  let current = err;
-  for (let depth = 0; depth < 8 && current instanceof Error; depth++) {
-    if (current instanceof type) return current;
-    current = current.cause;
-  }
-  return undefined;
 }

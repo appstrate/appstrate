@@ -53,7 +53,7 @@
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { readJsonBody } from "@appstrate/core/request-body";
 import {
@@ -104,7 +104,10 @@ import {
   listConnectionsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
-import { listIntegrationTools } from "../services/credential-proxy/integration-tools.ts";
+import {
+  listIntegrationTools,
+  listingDeadline,
+} from "../services/credential-proxy/integration-tools.ts";
 import { callRemoteTool } from "../services/credential-proxy/remote-tools.ts";
 import type { ProxyReach } from "../services/integration-connections.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -130,6 +133,8 @@ export function createCredentialProxyRouter() {
   const limits = getCredentialProxyLimits();
 
   router.use("/proxy", proxyStatusMarker());
+  // A response read with one connection must never answer for another, nor outlive the call.
+  for (const path of ["/proxy", "/tools", "/tools/call"]) router.use(path, noStore());
   // `Idempotency-Key` is the upstream's here: the global guard lets it through to be relayed.
   router.use("/proxy", relayIdempotencyKey());
   router.use("/*", requireSpaceContext());
@@ -409,9 +414,6 @@ export function createCredentialProxyRouter() {
           CALLER_RESPONSE_SKIP_HEADERS,
         );
         responseHeaders.append("Proxy-Status", relayedProxyStatus(result.status));
-        // One URL serves every target and connection (they ride in headers), so an upstream
-        // cache policy must not let a client replay one connection's response for another.
-        responseHeaders.set("Cache-Control", "no-store");
 
         // Streaming upload on a 401: credentials may be stale but the body
         // cannot be replayed. Signal the client to refresh and retry itself.
@@ -520,11 +522,15 @@ export function createCredentialProxyRouter() {
     async (c) => {
       const caller = remoteToolsCaller(c);
       const query = parseBody(listIntegrationToolsQuerySchema, c.req.query());
-      const listing = await listIntegrationTools(caller, {
-        ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
-        ...(query.name ? { name: query.name } : {}),
-        ...(query.connection_id ? { connectionId: query.connection_id } : {}),
-      });
+      const listing = await listIntegrationTools(
+        caller,
+        {
+          ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
+          ...(query.name ? { name: query.name } : {}),
+          ...(query.connection_id ? { connectionId: query.connection_id } : {}),
+        },
+        listingDeadline(),
+      );
       return c.json(listing);
     },
   );
@@ -548,6 +554,18 @@ export function createCredentialProxyRouter() {
   );
 
   return router;
+}
+
+/**
+ * `Cache-Control: no-store` on every response, the upstream's relayed one included: one URL
+ * serves every target and connection (they ride in headers or the body), so no cache may replay
+ * one connection's answer for another.
+ */
+function noStore(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "no-store");
+  };
 }
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */

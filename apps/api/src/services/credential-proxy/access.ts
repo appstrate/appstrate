@@ -22,13 +22,18 @@ import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
 import { ApiError, forbidden } from "../../lib/errors.ts";
 import type { SpaceContextRow } from "../../lib/space-lookup.ts";
-import type { ProxyReach } from "../integration-connections.ts";
+import type { ProxyReach, ReachOutsideRun } from "../integration-connections.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
 /** Reaches the connections usable in the space, and opens the run path. */
 const PROXY_CALL_PERMISSION = "credential-proxy:call" satisfies Permission;
 
-function reachOf(permissions: ReadonlySet<string>): ProxyReach {
+/** The one rule outside a run: the space's switch first, then the caller's permission. */
+function reachOf(
+  permissions: ReadonlySet<string>,
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
+): ProxyReach | "closed" {
+  if (!space.credentialProxyOpen) return "closed";
   return permissions.has(PROXY_CALL_PERMISSION) ? "usable" : "own";
 }
 
@@ -43,7 +48,8 @@ export function reachOutsideRun(
   permissions: ReadonlySet<string>,
   space: Pick<SpaceContextRow, "id" | "name" | "credentialProxyOpen">,
 ): ProxyReach {
-  if (!isCredentialProxyOpen(space)) {
+  const reach = reachOf(permissions, space);
+  if (reach === "closed") {
     throw new ApiError({
       status: 403,
       code: "credential_proxy_closed",
@@ -51,27 +57,25 @@ export function reachOutsideRun(
       detail: credentialProxyClosedDetail(space),
     });
   }
-  return reachOf(permissions);
-}
-
-/** Whether the space serves calls of the credential proxy made outside a run. */
-export function isCredentialProxyOpen(
-  space: Pick<SpaceContextRow, "credentialProxyOpen">,
-): boolean {
-  return space.credentialProxyOpen;
+  return reach;
 }
 
 /** Outside a run: `credential-proxy:call-own`, which `credential-proxy:call` implies. */
 const PROXY_CALL_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
 
 /**
- * The reach a caller's permissions give outside a run, for a readiness verdict that reaches no
- * credential: `null` when it holds neither proxy permission, the caller the route refuses outright.
+ * What {@link reachOutsideRun} gives the caller, for a readiness verdict that reaches no
+ * credential: `null` when it holds neither proxy permission (the route refuses it before anything
+ * else), `closed` when the space closes the proxy outside a run, else its reach.
  */
-export function reachOutsideRunIfPermitted(permissions: ReadonlySet<string>): ProxyReach | null {
-  return permissions.has(PROXY_CALL_PERMISSION) || permissions.has(PROXY_CALL_OWN_PERMISSION)
-    ? reachOf(permissions)
-    : null;
+export function reachOutsideRunIfPermitted(
+  permissions: ReadonlySet<string>,
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
+): ReachOutsideRun {
+  if (!permissions.has(PROXY_CALL_PERMISSION) && !permissions.has(PROXY_CALL_OWN_PERMISSION)) {
+    return null;
+  }
+  return reachOf(permissions, space);
 }
 
 /**

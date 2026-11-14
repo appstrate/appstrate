@@ -38,6 +38,9 @@ import {
 } from "../../lib/space-update-body";
 
 type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
+type SpaceUpdateBody = NonNullable<
+  Parameters<ReturnType<typeof useUpdateSpace>["mutate"]>[0]["body"]
+>;
 
 export function WorkspaceSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -115,50 +118,38 @@ function GeneralForm({
     .filter((role) => role.kind === "preset")
     .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
 
-  // The space mutation leaves its refusals to the caller (`useUpdateSpace`). A refused
-  // choice shows the stored value again, not the one the server refused.
-  const commitVisibility = (next: SpaceVisibility) => {
-    setEditedVisibility(next);
+  // A single choice is shown as picked and written at once. The space mutation leaves its
+  // refusals to the caller (`useUpdateSpace`): a refused choice shows the stored value
+  // again, not the one the server refused.
+  const commitChoice = <T,>(
+    next: T,
+    setEdited: (value: T | null) => void,
+    body: SpaceUpdateBody,
+    onSuccess?: () => void,
+  ) => {
+    setEdited(next);
     updateMutation.mutate(
-      { params: { path: { id: spaceId } }, body: { visibility: next } },
+      { params: { path: { id: spaceId } }, body },
       {
-        onSuccess: () => setPendingClose(null),
+        onSuccess,
         onError: (error) => {
           toastError(error);
-          setEditedVisibility(null);
+          setEdited(null);
         },
       },
     );
   };
+  const commitVisibility = (next: SpaceVisibility) =>
+    commitChoice(next, setEditedVisibility, { visibility: next }, () => setPendingClose(null));
   const chooseVisibility = (next: SpaceVisibility) => {
     if (next === activeVisibility) return;
     if (visibilityChangeNeedsConfirmation(activeVisibility, next)) setPendingClose(next);
     else commitVisibility(next);
   };
-  const commitDefaultRole = (next: SpaceRolePreset) => {
-    setEditedDefaultRole(next);
-    updateMutation.mutate(
-      { params: { path: { id: spaceId } }, body: { default_role: next } },
-      {
-        onError: (error) => {
-          toastError(error);
-          setEditedDefaultRole(null);
-        },
-      },
-    );
-  };
-  const commitProxyOpen = (next: boolean) => {
-    setEditedProxyOpen(next);
-    updateMutation.mutate(
-      { params: { path: { id: spaceId } }, body: { credential_proxy_open: next } },
-      {
-        onError: (error) => {
-          toastError(error);
-          setEditedProxyOpen(null);
-        },
-      },
-    );
-  };
+  const commitDefaultRole = (next: SpaceRolePreset) =>
+    commitChoice(next, setEditedDefaultRole, { default_role: next });
+  const commitProxyOpen = (next: boolean) =>
+    commitChoice(next, setEditedProxyOpen, { credential_proxy_open: next });
   // The picker fires a write per arrow key: one in flight, the newest value after it.
   const writeAppearance = useLatestWrite();
   const saveAppearance = (change: SpaceAppearanceChange) => {

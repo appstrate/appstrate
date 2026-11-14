@@ -118,13 +118,15 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "member shared is reached through " +
       (ctx.runs ? "a run (run_and_wait). " : "an agent run only. ") +
       "With `query` or `integration`, `best_match` adds to the top result (a tool's exact " +
-      "name ranks first) its `input_schema` and its `usage`: how to call it, how to read its " +
-      "result and what its connections' fields mean.",
+      "name ranks first) its `input_schema`, a typed tool's `output_schema` when its server " +
+      "declares one, and its `usage`: how to call it, how to read its result and what its " +
+      "connections' fields mean.",
     annotations: {
       title: "Search integration tools",
       readOnlyHint: true,
       idempotentHint: true,
-      openWorldHint: false,
+      // It queries third-party servers and relays their text.
+      openWorldHint: true,
     },
     inputSchema: {
       type: "object",
@@ -159,18 +161,10 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
 
     const about = (id: string, text = "") =>
       tokens.length === 0 || searchScore(`${id} ${text}`, tokens) > 0;
-    const notReadyShown = read.notReady
-      .filter((entry) => about(entry.integration_package_id, entry.display_name))
-      .map(({ integration_package_id, ...entry }) => ({
-        integration: integration_package_id,
-        ...entry,
-      }));
-    const unlistedShown = read.unlisted
-      .filter((entry) => about(entry.integration_package_id))
-      .map(({ integration_package_id, refusal }) => ({
-        integration: integration_package_id,
-        refusal,
-      }));
+    const notReadyShown = read.not_ready.filter((entry) =>
+      about(entry.integration, entry.display_name),
+    );
+    const unlistedShown = read.unlisted.filter((entry) => about(entry.integration));
     const matches = rankByKeywords(read.tools, tokens, (tool) => ({
       name: tool.name,
       text: `${tool.integration} ${tool.description}`,
@@ -190,10 +184,10 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
           (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
       );
     }
-    const truncated = read.truncatedCatalogs.filter((entry) => about(entry.integration_package_id));
+    const truncated = read.truncated_catalogs.filter((entry) => about(entry.integration));
     for (const entry of truncated) {
       notes.push(
-        `${entry.integration_package_id}'s server lists more tools than the ${entry.max_tools} read: ` +
+        `${entry.integration}'s server lists more tools than the ${entry.max_tools} read: ` +
           "a tool it lists after those is not offered.",
       );
     }
@@ -223,6 +217,7 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
               ...listedTool(top),
               usage: top.usage,
               input_schema: top.inputSchema,
+              ...(top.outputSchema ? { output_schema: top.outputSchema } : {}),
             },
           }
         : {}),
@@ -349,9 +344,13 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
         });
       }
     }
-    const parsed = tool.schema.safeParse(call.data.arguments);
-    if (!parsed.success) return refuse(argumentsRefusal(parsed.error, ["arguments"]));
-    const outcome = await tool.execute(parsed.data, extra, call.data.connection_id);
+    let toolArguments: unknown = call.data.arguments;
+    if (tool.schema) {
+      const parsed = tool.schema.safeParse(call.data.arguments);
+      if (!parsed.success) return refuse(argumentsRefusal(parsed.error, ["arguments"]));
+      toolArguments = parsed.data;
+    }
+    const outcome = await tool.execute(toolArguments, extra, call.data.connection_id);
     if ("code" in outcome) return refuse(outcome);
     ctx.observe({
       tool: "call_integration_tool",
