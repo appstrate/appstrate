@@ -1,0 +1,44 @@
+---
+title: Licensing
+description: Why Appstrate is open source, what the Apache-2.0 licence covers, what a future enterprise edition may contain, and the commitments that hold either way.
+---
+
+## Why Appstrate is open source
+
+- **Transparency and trust**: you can read every line that touches your data and your credentials.
+- **Sovereignty**: run Appstrate anywhere, from a laptop to an air-gapped network, with no account, no call home and no usage caps.
+- **No lock-in**: the same code runs on your servers and on Appstrate Cloud.
+
+## What is Apache-2.0
+
+Everything in the [repository](https://github.com/appstrate/appstrate) outside the root `ee/` directory is licensed under [Apache-2.0](https://github.com/appstrate/appstrate/blob/main/LICENSE), with no usage limits. Today that is the whole platform: `ee/` does not exist yet. Fork it, extend it, ship it, host it for others, even in commercial products.
+
+A future enterprise edition may add features in `ee/`: see [What may become paid](#what-may-become-paid) below.
+
+## Our commitments
+
+- A feature released under Apache-2.0 will never become paid.
+- The core will stay Apache-2.0, and so will every contribution made to it. No relicensing.
+- A feature planned for both editions ships in both on the same day.
+- If we put a feature behind the licence by mistake, we move it back. [Open an issue](https://github.com/appstrate/appstrate/issues/new/choose) to ask.
+- If Appstrate stops maintaining the enterprise edition, it becomes open source.
+
+## What may become paid
+
+Some day, features bought by organizations rather than by the people building agents will live in a clearly marked `ee/` directory under a commercial licence. The rule for drawing that line: if the person who cares most about a feature builds or uses agents, it is open source. If it is the organization (IT security, compliance, management), it can go in `ee/`.
+
+Examples of what that covers: enterprise single sign-on configured per organization, SCIM provisioning, audit log search and export, audit log retention policies, and manager approval policies.
+
+Those features will:
+
+- ship as readable source in the same repository;
+- unlock with a licence key checked offline, with no call home;
+- stay optional: the core works fully without them.
+
+A community image without a single line of commercial code will always be published. `bun run verify:license-boundary` checks the licence header of every source file against this split.
+
+|                               | Self-hosted | Self-hosted Enterprise | Appstrate Cloud |
+| ----------------------------- | ----------- | ---------------------- | --------------- |
+| Everything outside `ee/`      | ✅          | ✅                     | ✅              |
+| Enterprise add-ons from `ee/` |             | ✅                     | ✅              |
+| Fully managed                 |             |                        | ✅              |

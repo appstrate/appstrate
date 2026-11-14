@@ -8,7 +8,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 Appstrate follows a **corporate-backed open-source model** (similar to Supabase). The Appstrate team retains final authority over the project roadmap, architecture, and releases. Community input is welcomed and encouraged through GitHub Issues, Discord, and the RFC process described below.
 
-The repository is licensed under [Apache 2.0](./LICENSE), billing included (`packages/module-billing`). The root `ee/` directory is reserved for code under a separate commercial licence; `bun run verify:license-boundary` checks every source file's licence header against that split.
+The repository is licensed under [Apache 2.0](./LICENSE), billing included (`packages/module-billing`). The root `ee/` directory is reserved for code under a separate commercial licence; `bun run verify:license-boundary` checks every source file's licence header against that split. What may go in `ee/`, and the commitments that hold either way, are on the [Licensing](https://docs.appstrate.com/resources/licensing) page.
 
 ## Roles
 
