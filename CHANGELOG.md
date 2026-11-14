@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
+  `0103` creates `run_reads` and renames the stored run notifications to
+  `run_failed`). It copies each run's read state out of the
+  `run_completed` notifications and removes the notifications of runs that did
+  not fail or time out. Until it runs, runs finished before the deploy read as
+  read and the bell still lists them. The app may keep running. `0103` makes
+  the previous release unable to record a finished run: do not serve both
+  releases at once, and roll back by restoring the backup. Detail in
+  `scripts/migration/README.md`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
@@ -40,7 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     read `pi-1.5.2.json`, published by `publish-model-catalog.yml` once `main`
     carries the bump; until then they run on the embedded registry only.
 
-- **Migration `0103` adds `spaces.credential_proxy_open`** (#2204): a
+- **Migration `0104` adds `spaces.credential_proxy_open`** (#2204): a
   boolean, `NOT NULL DEFAULT true`, so every existing space keeps direct
   connection access open. Applied at boot, no data rewrite;
   `packages/db/schema-catalog.txt` gains the column.
@@ -106,6 +116,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persistence read.
 
 ### Changed
+
+- **Breaking (API): a run's read state leaves the notifications; the bell
+  shows only what needs attention.** Every finished run used to be a bell
+  notification, so the bell repeated the unread runs of the runs page, and the
+  unread totals and acks lived under `/api/notifications`. Now:
+  - A run's read state is its own (`run_reads`): `GET /api/runs?unread=true`
+    lists the caller's unread runs (its `total` is the Runs badge),
+    `PUT /api/runs/{id}/read` marks one read, `PUT /api/runs/read-all` all;
+    `GET /api/agents` items carry `unread_count`, like a schedule.
+  - The bell (`/api/notifications`) receives a run only when it ended `failed`
+    or `timeout`, plus package shares. Opening the run reads its notification.
+    Its notification type is renamed `run_completed` → `run_failed`. Its payload
+    carries `agent_name`, the name stamped on the run, so the bell names an
+    agent that is switched off or deleted.
+  - A scheduled run refused before it starts is now unread and notified like
+    any other failed run; it used to be recorded for nobody.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use
+    `unread_count` on `GET /api/agents`) and
+    `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /
@@ -552,7 +581,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A space can close direct access to its connections** (#2204). A space
   admin turns off « Direct connection access » in the space settings
   (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
-  `spaces.credential_proxy_open`, default `true`, migration `0103`). The
+  `spaces.credential_proxy_open`, default `true`, migration `0104`). The
   credential proxy then answers calls that name no run
   (`GET /api/credential-proxy/connections`, `GET /api/credential-proxy/tools`,
   `POST /api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without

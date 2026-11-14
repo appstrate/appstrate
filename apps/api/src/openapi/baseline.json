@@ -59,7 +59,7 @@
     },
     {
       "name": "Notifications",
-      "description": "Run notification management"
+      "description": "The recipient's notification feed (the dashboard bell)"
     },
     {
       "name": "Organizations",
@@ -865,6 +865,7 @@
                       "published": true,
                       "type": "agent",
                       "running_runs": 1,
+                      "unread_count": 2,
                       "dependencies": {
                         "skills": {},
                         "mcp_servers": {},
@@ -886,6 +887,7 @@
                       "published": true,
                       "type": "agent",
                       "running_runs": 0,
+                      "unread_count": 0,
                       "dependencies": {
                         "skills": {
                           "@appstrate/summarize": "^1.0.0"
@@ -2843,6 +2845,14 @@
           },
           {
             "$ref": "#/components/parameters/RunSearch"
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`."
           }
         ],
         "responses": {
@@ -2901,6 +2911,120 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/runs/read-all": {
+      "put": {
+        "operationId": "markAllRunsRead",
+        "tags": ["Runs"],
+        "summary": "Mark every run read",
+        "description": "Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/AppstrateUser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Update result",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated_count": {
+                      "type": "integer",
+                      "description": "Number of runs marked read"
+                    }
+                  },
+                  "required": ["updated_count"]
+                },
+                "example": {
+                  "updated_count": 3
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/runs/{id}/read": {
+      "put": {
+        "operationId": "markRunRead",
+        "tags": ["Runs"],
+        "summary": "Mark a run read",
+        "description": "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/AppstrateUser"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Run id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Run marked read (idempotent — 204 even if it was already read)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -18241,7 +18365,7 @@
         "operationId": "listNotifications",
         "tags": ["Notifications"],
         "summary": "List notifications",
-        "description": "Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel=\"next\"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.",
+        "description": "Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel=\"next\"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is in it only when it failed or timed out; every unread run is `GET /api/runs?unread=true`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18319,7 +18443,7 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "run_completed"
+                                "const": "run_failed"
                               },
                               "runId": {
                                 "type": ["string", "null"],
@@ -18329,22 +18453,19 @@
                                 "type": ["object", "null"],
                                 "additionalProperties": false,
                                 "description": "Render-without-join data.",
-                                "required": ["packageId", "status"],
+                                "required": ["packageId", "agent_name", "status"],
                                 "properties": {
                                   "packageId": {
                                     "type": ["string", "null"],
                                     "description": "The run's agent; null once the agent is deleted."
                                   },
+                                  "agent_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted)."
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": [
-                                      "pending",
-                                      "running",
-                                      "success",
-                                      "failed",
-                                      "timeout",
-                                      "cancelled"
-                                    ]
+                                    "enum": ["failed", "timeout"]
                                   }
                                 }
                               },
@@ -18419,11 +18540,12 @@
                   "data": [
                     {
                       "id": "550e8400-e29b-41d4-a716-446655440000",
-                      "type": "run_completed",
-                      "runId": "run_cm4jkl012",
+                      "type": "package_shared",
+                      "runId": null,
                       "payload": {
                         "packageId": "@acme/email-sorter",
-                        "status": "success"
+                        "package_type": "agent",
+                        "shared_by_name": "Ada Lovelace"
                       },
                       "read_at": null,
                       "createdAt": "2026-01-15T10:31:12Z"
@@ -18451,7 +18573,7 @@
         "operationId": "getUnreadNotificationCount",
         "tags": ["Notifications"],
         "summary": "Get unread notification count",
-        "description": "Returns the number of unread run notifications for the current user.",
+        "description": "Returns the number of unread notifications in the current recipient's feed. Unread runs are counted by `GET /api/runs?unread=true`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18485,70 +18607,6 @@
                 },
                 "example": {
                   "count": 5
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/notifications/unread-counts-by-agent": {
-      "get": {
-        "operationId": "getUnreadCountsByAgent",
-        "tags": ["Notifications"],
-        "summary": "Get unread notification counts grouped by agent",
-        "description": "Returns the number of unread run notifications per agent for the current user.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XSpaceId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Unread counts keyed by package ID",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "counts": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "integer"
-                      },
-                      "description": "Map of packageId to unread notification count"
-                    }
-                  },
-                  "required": ["counts"]
-                },
-                "example": {
-                  "counts": {
-                    "@acme/email-sorter": 3,
-                    "@appstrate/code-reviewer": 2
-                  }
                 }
               }
             }
@@ -18619,61 +18677,12 @@
         }
       }
     },
-    "/api/notifications/read/{runId}": {
-      "put": {
-        "operationId": "markNotificationRead",
-        "tags": ["Notifications"],
-        "summary": "Mark a run's notification as read",
-        "description": "Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XSpaceId"
-          },
-          {
-            "name": "runId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Notification marked as read (idempotent — 204 even if it was already read)",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/api/notifications/read-all": {
       "put": {
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "description": "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -33788,6 +33797,7 @@
           "source",
           "type",
           "running_runs",
+          "unread_count",
           "dependencies",
           "scope",
           "keywords",
@@ -33847,6 +33857,10 @@
           },
           "running_runs": {
             "type": "integer"
+          },
+          "unread_count": {
+            "type": "integer",
+            "description": "Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`."
           },
           "dependencies": {
             "type": "object",
@@ -34706,7 +34720,7 @@
           },
           "unread": {
             "type": "boolean",
-            "description": "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count."
+            "description": "True when the caller has not read this run yet. Per recipient, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows; `PUT /api/runs/{id}/read` clears it."
           },
           "runNumber": {
             "type": ["integer", "null"],
@@ -35016,7 +35030,7 @@
           "unread_count": {
             "type": "integer",
             "minimum": 0,
-            "description": "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`."
+            "description": "Runs of this schedule the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread`."
           },
           "last_run_number": {
             "type": "integer",

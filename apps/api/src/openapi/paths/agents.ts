@@ -53,6 +53,7 @@ export const agentsPaths = {
                     published: true,
                     type: "agent",
                     running_runs: 1,
+                    unread_count: 2,
                     dependencies: {
                       skills: {},
                       mcp_servers: {},
@@ -74,6 +75,7 @@ export const agentsPaths = {
                     published: true,
                     type: "agent",
                     running_runs: 0,
+                    unread_count: 0,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
                       mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },

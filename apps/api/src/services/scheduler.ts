@@ -6,13 +6,7 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  schedules,
-  endUsers,
-  runs,
-  notifications,
-  type ScheduleDisabledReason,
-} from "@appstrate/db/schema";
+import { schedules, endUsers, runs, type ScheduleDisabledReason } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
@@ -20,6 +14,7 @@ import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
+import { unreadRunCondition } from "./state/run-reads.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import {
   prepareAndExecuteRun,
@@ -45,7 +40,7 @@ import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
-import { actorFromIds, actorMatch, type Actor } from "../lib/actor.ts";
+import { actorFromIds, type Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -817,11 +812,10 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *  - the counts span ALL of a schedule's runs, not the most recent page. The
  *    per-card version counted within the 20 rows it happened to fetch, so a
  *    schedule with 25 unread runs reported 20.
- *  - `unreadCount` is scoped to the VIEWER (`actorMatch` on the polymorphic
+ *  - `unreadCount` is scoped to the VIEWER (`unreadRunCondition` on the polymorphic
  *    recipient tuple), never to the schedule's own actor — the same rule
- *    `unreadForActor` applies to run lists, so a member and an end-user never
- *    observe each other's read state. A null viewer (no actor context) reports
- *    0: unread is a recipient-side concept.
+ *    as run lists, so a member and an end-user never observe each other's
+ *    read state. A null viewer (no actor context) reports 0.
  *
  * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
  * the counters span exactly the runs the caller may open from the card. Without
@@ -836,25 +830,13 @@ async function loadScheduleRunStats(
 ): Promise<Map<string, ScheduleRunStats>> {
   if (scheduleIds.length === 0) return new Map();
 
-  const unreadPredicate = viewer
-    ? sql`exists (
-        select 1 from ${notifications}
-        where ${notifications.runId} = ${runs.id}
-          and ${actorMatch(viewer, {
-            typeCol: notifications.recipientType,
-            idCol: notifications.recipientId,
-          })}
-          and ${notifications.readAt} is null
-      )`
-    : sql`false`;
-
   const rows = await db
     .select({
       scheduleId: runs.scheduleId,
       runningRuns: sql<string>`count(*) filter (where ${inArray(runs.status, [
         ...activeRunStatusValues,
       ])})`,
-      unreadCount: sql<string>`count(*) filter (where ${unreadPredicate})`,
+      unreadCount: sql<string>`count(*) filter (where ${unreadRunCondition(viewer)})`,
       lastRunNumber: sql<string>`coalesce(max(${runs.runNumber}), 0)`,
     })
     .from(runs)
