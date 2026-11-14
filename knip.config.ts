@@ -452,7 +452,9 @@ const config: KnipConfig = {
        * dependency. Deleting one on that report is not hypothetical — it has
        * happened, and only the health-container e2e caught it.
        *
-       * Written as one alternation rather than four literals because knip
+       * `@appstrate/ee` (the root `ee/` package) is loaded the same way.
+       *
+       * Written as one alternation rather than five literals because knip
        * compiles any ignore entry containing `(`, `|`, `*`, `+`, `{`, `^` or
        * `$` to a RegExp, and reports an entry that never suppressed anything
        * as a configuration hint. `@appstrate/module-claude-code` is in that
@@ -466,7 +468,7 @@ const config: KnipConfig = {
        * exact: a new module dependency is not silently covered, it has to be
        * named here.
        */
-      ignoreDependencies: ["@appstrate/module-(chat|claude-code|codex|ee|observability)"],
+      ignoreDependencies: ["@appstrate/(module-(chat|claude-code|codex|ee|observability)|ee)"],
     },
 
     // The one workspace whose entries are NOT derived from its manifest:
@@ -569,6 +571,16 @@ const config: KnipConfig = {
     },
     "packages/module-observability": {
       entry: [...manifestEntries("packages/module-observability"), "test/tables.ts"],
+    },
+    // The commercial root package: same shape as module-ee (own journal, own truncate list,
+    // Postgres-only test requirement, drizzle config run by `db:generate`).
+    ee: {
+      entry: [
+        ...manifestEntries("ee"),
+        "test/tables.ts",
+        "test/requirements.ts",
+        "drizzle/drizzle.config.ts",
+      ],
     },
 
     "packages/core": {

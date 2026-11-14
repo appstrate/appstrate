@@ -163,9 +163,11 @@ delete process.env.SMTP_USER;
 delete process.env.SMTP_PASS;
 delete process.env.SMTP_FROM;
 
-// Disable Google social auth in tests
+// Disable Google and Microsoft social auth in tests
 delete process.env.GOOGLE_CLIENT_ID;
 delete process.env.GOOGLE_CLIENT_SECRET;
+delete process.env.MICROSOFT_CLIENT_ID;
+delete process.env.MICROSOFT_CLIENT_SECRET;
 
 // Clear env-driven system provider keys — local dev configurations
 // shouldn't leak into the test suite (they'd populate the registry

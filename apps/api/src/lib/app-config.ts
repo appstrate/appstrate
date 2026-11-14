@@ -38,6 +38,7 @@ export function buildAppConfig(): AppConfig {
       // `applyModuleFeatures()` after load.
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
+      microsoftAuth: !!(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET),
       smtp: isSmtpConfigured(),
       // Self-hosting closed mode — flag exposed so the SPA
       // can hide signup affordances when the platform is locked down (who

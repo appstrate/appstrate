@@ -107,7 +107,7 @@ export function RegisterForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
-  const hasSocialAuth = features.googleAuth || features.githubAuth;
+  const hasSocialAuth = features.googleAuth || features.githubAuth || features.microsoftAuth;
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -159,10 +159,25 @@ export function RegisterForm({
             </div>
             <div className="flex flex-col gap-2">
               {features.googleAuth && (
-                <SocialSignInButton provider="google" callbackURL={socialCallbackURL} />
+                <SocialSignInButton
+                  provider="google"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
               )}
               {features.githubAuth && (
-                <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+                <SocialSignInButton
+                  provider="github"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
+              )}
+              {features.microsoftAuth && (
+                <SocialSignInButton
+                  provider="microsoft"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
               )}
             </div>
           </>

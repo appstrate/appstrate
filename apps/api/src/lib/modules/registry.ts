@@ -29,6 +29,8 @@ import {
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
+import { provisionMember } from "../../services/organizations.ts";
+import { endAccessForEmailDomain } from "../../services/email-domain-access.ts";
 import {
   listEnforcedChatSkills,
   loadEnforcedChatSkills,
@@ -50,6 +52,8 @@ import type { AppEnv } from "../../types/index.ts";
  * records usage, and gates through here because it has no DB access. See the
  * `PlatformServices` doc in core for the razor.
  */
+const MODULE_PROVISIONABLE_ROLES: ReadonlySet<string> = new Set(["member", "guest"]);
+
 function buildPlatformServices(): PlatformServices {
   return {
     logger,
@@ -102,6 +106,20 @@ function buildPlatformServices(): PlatformServices {
     // carries the same org / actor / request variables a core route audits from.
     audit: {
       record: (c, entry) => recordAuditFromContext(c as Context<AppEnv>, entry),
+    },
+    // The one membership door (RBAC spec §3.6), in a transaction of its own.
+    // Unprivileged roles only, checked here and not left to the type: a module
+    // is untyped at runtime, and this door must never mint an admin or owner.
+    members: {
+      provision: async (orgId, userId, role) => {
+        if (!MODULE_PROVISIONABLE_ROLES.has(role)) {
+          throw new Error(`members.provision: role \`${String(role)}\` is not member or guest`);
+        }
+        return db.transaction((tx) => provisionMember(tx, orgId, userId, role));
+      },
+    },
+    access: {
+      endForEmailDomain: endAccessForEmailDomain,
     },
   };
 }

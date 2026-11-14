@@ -1,0 +1,71 @@
+---
+title: Enterprise sign-in
+description: Bind your organization's Microsoft Entra tenant, prove your email domains, and require Microsoft sign-in for the people at those domains.
+---
+
+<Callout type="info" title="Preview">
+  Enterprise sign-in is on `main` and not yet in a release.
+</Callout>
+
+Enterprise sign-in lets an organization connect its Microsoft Entra tenant and prove that it owns an email domain, such as `example.com`. From then on, a person at that domain who signs in with Microsoft from that tenant joins the organization automatically, and the organization can require Microsoft for every address of the domain.
+
+It is part of the commercial package `@appstrate/ee` (source-available, licence in [`ee/LICENSE`](https://github.com/appstrate/appstrate/blob/main/ee/LICENSE)). An instance offers it when the operator appends `@appstrate/ee` to `MODULES`; the organization settings then show an **Enterprise sign-in** page.
+
+## How it works
+
+There is no application to register per organization and no secret to rotate. The organization binds its tenant to the instance's own "Continue with Microsoft" app:
+
+- The tenant id is read from a real Microsoft sign-in of an owner, never typed.
+- A domain is proven by a DNS TXT record. A verified domain belongs to one organization of the instance.
+- For an address of a verified domain, a Microsoft sign-in is accepted only from the bound tenant. Another tenant is refused (`sso_tenant_mismatch`), even with the right address.
+- The rules follow the address, not the organization: someone at `example.com` who is also a member of a partner's organization signs in with Microsoft there too.
+- Only a domain itself is covered, not its subdomains: `eu.example.com` is proven on its own.
+
+## Set it up (organization owner)
+
+Only an owner can change these settings, and only from the dashboard: an API key, an MCP client or the CLI cannot, even acting for an owner. Admins can read them.
+
+1. **Connect the tenant.** Choose **Connect your tenant** and sign in with your work Microsoft account. Your Appstrate account must use the same address, so that the sign-in lands on it. The tenant of that sign-in is bound to the organization.
+2. **Add a domain.** Appstrate shows a TXT record to publish in the domain's DNS zone:
+
+   ```text
+   _appstrate.example.com  TXT  "appstrate-domain-verification=<token>"
+   ```
+
+   Once the record is live, choose **Verify**.
+
+3. **Choose the join role.** People at a verified domain who sign in with Microsoft from the tenant and are not yet members join as `member` (default) or `guest`. They never join as admin, and existing members keep their role. An existing password account at the domain is linked to its Microsoft identity at its first Microsoft sign-in, when its address is verified.
+4. **Require Microsoft (optional).** See below.
+
+## Requiring Microsoft
+
+Once enforced, for every address of the verified domains:
+
+- only a Microsoft sign-in from the bound tenant opens a session;
+- passwords, magic links, Google and GitHub are refused with `sso_required`, and the sign-in pages point to "Continue with Microsoft". The password is refused before it is checked, so the answer never says whether it was right;
+- when enforcement starts, and when a domain is verified while it is on, those addresses lose what a password change takes away: every session (except the one of the owner enforcing it), their CLI logins and the refresh tokens of their OAuth and MCP clients. Access tokens already handed out are short-lived and run until they expire;
+- a session lives 24 hours at most from the sign-in that opened it, without extension, emergency sessions included, so a person disabled in Entra loses access to the dashboard within a day;
+- an address can neither leave the domain nor move onto it by an email change.
+
+Nothing is deleted: passwords and other linked accounts work again when enforcement is lifted. To avoid locking yourself out, enforcing is only possible from a session opened by Microsoft from the bound tenant. The tenant cannot be unlinked, nor a verified domain removed, while enforcement is on.
+
+**Emergency sign-in.** The owners of the enforcing organization keep their password, through the discreet **Emergency sign-in** link of the login page, for the day the tenant or the Microsoft app is unavailable. Anyone else gets the same answer as for a wrong password, whether their password is right or not. That password can be reset by email, so it is only as strong as the owner's mailbox: protect that mailbox accordingly.
+
+## For the IT administrator
+
+In your Entra tenant:
+
+- **Consent.** Grant admin consent once to the instance's application (multitenant). Tenants that restrict user consent need it before their members can sign in.
+- **Assignment.** To control who can sign in, set **Assignment required** on the application's enterprise app and assign the users or groups allowed in. Conditional access applies as for any app.
+- **Claims.** The application must issue the optional ID-token claims `email` and `xms_edov`. A self-hosted instance configures its own app registration as described in [Sign in with Microsoft Entra ID](/self-hosting/production-checklist#sign-in-with-microsoft-entra-id). Only members of the tenant whose address domain is verified in Entra are accepted; guests and personal accounts are refused.
+- **DNS.** Publish the TXT record shown on the settings page. It is checked when the owner chooses **Verify** and never again: if the organization stops owning the domain, remove it from the settings page.
+
+What disabling a person in Entra does, and does not do:
+
+- their next Microsoft sign-in fails, and their current dashboard session ends within 24 hours of the sign-in that opened it;
+- CLI logins and OAuth or MCP client tokens they obtained after enforcement started are not limited to 24 hours, and neither are API keys: they stay valid until an administrator removes the person from the organization, after which they no longer reach it. Provisioning from Entra (SCIM) is not available, so remove the person in Appstrate too;
+- removing a person in Appstrate alone is not enough while their Entra account stays enabled: at their next Microsoft sign-in they join the organization again, with the join role. Disable or unassign them in Entra as well.
+
+## Self-hosting
+
+The instance needs Microsoft sign-in configured (`MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, see [Sign in with Microsoft Entra ID](/self-hosting/production-checklist#sign-in-with-microsoft-entra-id)), PostgreSQL (the package keeps its tables in the platform database and refuses to start on PGlite), and `@appstrate/ee` in `MODULES`. Production use of the package requires a commercial agreement, see its licence.

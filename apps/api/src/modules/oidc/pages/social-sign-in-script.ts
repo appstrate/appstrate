@@ -25,6 +25,7 @@ import { html, raw, type RawHtml } from "./html.ts";
 interface SocialButtonsOptions {
   google?: boolean;
   github?: boolean;
+  microsoft?: boolean;
   /** When set, renders a "magic link" link next to the social buttons. */
   magicLinkUrl?: string | null;
 }
@@ -40,12 +41,19 @@ const GITHUB_ICON = raw(`<svg viewBox="0 0 24 24" width="18" height="18" fill="c
   <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
 </svg>`);
 
+const MICROSOFT_ICON = raw(`<svg viewBox="0 0 23 23" width="18" height="18">
+  <path fill="#F25022" d="M1 1h10v10H1z" />
+  <path fill="#7FBA00" d="M12 1h10v10H12z" />
+  <path fill="#00A4EF" d="M1 12h10v10H1z" />
+  <path fill="#FFB900" d="M12 12h10v10H12z" />
+</svg>`);
+
 const MAGIC_LINK_ICON = raw(`<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
   <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
 </svg>`);
 
 /**
- * Renders the "or / [Google] [GitHub] [Magic link]" block shared by the
+ * Renders the "or / [Google] [GitHub] [Microsoft] [Magic link]" block shared by the
  * login and register pages. Returns `null` when no alternative method is
  * enabled so callers can conditionally render without wrapping.
  *
@@ -56,8 +64,9 @@ const MAGIC_LINK_ICON = raw(`<svg viewBox="0 0 24 24" width="18" height="18" fil
 export function renderSocialButtons(opts: SocialButtonsOptions): RawHtml | null {
   const google = opts.google ?? false;
   const github = opts.github ?? false;
+  const microsoft = opts.microsoft ?? false;
   const magicLinkUrl = opts.magicLinkUrl ?? null;
-  if (!google && !github && !magicLinkUrl) return null;
+  if (!google && !github && !microsoft && !magicLinkUrl) return null;
   return html`
     <div class="divider"><span>ou</span></div>
     <div class="social-buttons">
@@ -72,6 +81,17 @@ export function renderSocialButtons(opts: SocialButtonsOptions): RawHtml | null 
         github
           ? html`<button type="button" data-social-provider="github" class="social-btn github">
               ${GITHUB_ICON} Continuer avec GitHub
+            </button>`
+          : null
+      }
+      ${
+        microsoft
+          ? html`<button
+              type="button"
+              data-social-provider="microsoft"
+              class="social-btn microsoft"
+            >
+              ${MICROSOFT_ICON} Continuer avec Microsoft
             </button>`
           : null
       }
@@ -97,7 +117,7 @@ const SOCIAL_SIGN_IN_SCRIPT_PATH = "/api/oauth/assets/social-sign-in.js";
  *
  * Contract with the page markup:
  *   - Each social button MUST be `<button type="button"
- *     data-social-provider="google|github">`
+ *     data-social-provider="google|github|microsoft">`
  *   - The button's enclosing page MUST carry the OAuth query string in
  *     `window.location.search` so `callbackURL` points at the authorize
  *     endpoint for the same client.

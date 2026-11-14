@@ -5,6 +5,7 @@ import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthMiddleware, getOAuthState, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import type { MicrosoftEntraIDProfile, MicrosoftOptions } from "better-auth/social-providers";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
@@ -34,7 +35,10 @@ import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./cre
 import { hookSlot } from "./hook-slot.ts";
 import { logger } from "./logger.ts";
 
-export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
+export {
+  CREDENTIAL_CHANGE_REVOCATION_FAILED,
+  endOtherAccessAfterCredentialChange,
+} from "./credential-change.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -704,6 +708,42 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
   ];
 }
 
+/** The tenant of personal Microsoft accounts. */
+const MICROSOFT_CONSUMER_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad";
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * An Entra tenant admin can put ANY address in a user's `email` claim, a
+ * domain the tenant does not own included ("nOAuth"). Microsoft's answer is
+ * `xms_edov` (email domain owner verified), an optional ID-token claim the
+ * app registration must request. It vouches for a member of the tenant only:
+ * a guest (`idp` names another issuer) or a personal account is refused too,
+ * whatever `xms_edov` says. A refused identity carries no email, so Better
+ * Auth stops the sign-in (`email_not_found`) before creating or linking any
+ * user, and the signup gate, the invitation match and account linking can all
+ * trust the address of a Microsoft account that got through.
+ */
+function mapMicrosoftProfile(
+  profile: MicrosoftEntraIDProfile,
+): { emailVerified: true } | { email: undefined; emailVerified: false } {
+  // `idp` is absent for a member, or names the tenant itself, in its v1 or
+  // v2 issuer form.
+  const tid = profile.tid;
+  const member =
+    typeof tid === "string" &&
+    GUID.test(tid) &&
+    tid !== MICROSOFT_CONSUMER_TENANT_ID &&
+    (!profile.idp ||
+      profile.idp === `https://sts.windows.net/${tid}/` ||
+      profile.idp === `https://login.microsoftonline.com/${tid}/v2.0`);
+  if (member && profile.xms_edov === true) return { emailVerified: true };
+  logger.warn("auth: Microsoft sign-in refused", {
+    tenantId: profile.tid,
+    reason: member ? "email_domain_not_verified" : "not_a_tenant_member",
+  });
+  return { email: undefined, emailVerified: false };
+}
+
 // ─── Auth — lazy factory ──────────────────────────────────
 //
 // The Better Auth instance is constructed lazily by `createAuth()` during
@@ -750,14 +790,13 @@ function buildAuth(options: CreateAuthOptions) {
   // env-configured providers only: per-space social applies exclusively to
   // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
-  const anySocialEnabled = googleEnvEnabled || githubEnvEnabled;
-  const socialProviders: Record<
-    string,
-    {
-      clientId: string;
-      clientSecret: string;
-    }
-  > = {
+  const microsoftEnvEnabled = !!(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
+  const anySocialEnabled = googleEnvEnabled || githubEnvEnabled || microsoftEnvEnabled;
+  const socialProviders: {
+    google: { clientId: string; clientSecret: string };
+    github: { clientId: string; clientSecret: string };
+    microsoft?: MicrosoftOptions;
+  } = {
     google: {
       get clientId() {
         return getSocialOverride()?.google?.clientId ?? env.GOOGLE_CLIENT_ID ?? "";
@@ -774,6 +813,24 @@ function buildAuth(options: CreateAuthOptions) {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
     },
+    // Instance-level only: no per-space override, so it is registered only
+    // when configured.
+    ...(microsoftEnvEnabled && {
+      microsoft: {
+        clientId: env.MICROSOFT_CLIENT_ID!,
+        clientSecret: env.MICROSOFT_CLIENT_SECRET!,
+        tenantId: env.MICROSOFT_TENANT_ID,
+        // Sign-in only: no Graph access (`User.Read`) and no refresh token
+        // (`offline_access`) to store. The photo would land in `user.image`
+        // as a base64 data URL.
+        disableDefaultScope: true,
+        scope: ["openid", "profile", "email"],
+        disableProfilePhoto: true,
+        // The SPA uses the redirect flow only; no replayable id_token door.
+        disableIdTokenSignIn: true,
+        mapProfileToUser: mapMicrosoftProfile,
+      },
+    }),
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
   const notifyPasswordChanged = async (account: { id: string; email: string }): Promise<void> => {
@@ -1205,27 +1262,34 @@ function buildAuth(options: CreateAuthOptions) {
             // `RealmResolutionContext`. The extra fields ride alongside the
             // `BeforeSignupContext` contract; modules that only read
             // `headers` are unaffected.
+            // No resolver (no OIDC module) means "platform". A bootstrap-token
+            // redeem is "platform" whatever the request carries: an
+            // instance-owner row in another realm is unrecoverable. Resolved
+            // once, on the first ask: a module hook may need it first.
+            let realmOnce: Promise<string> | null = null;
+            const resolveRealm = (): Promise<string> => {
+              if (realmOnce) return realmOnce;
+              const resolver = realmResolver.get();
+              realmOnce =
+                bootstrapTokenBypass || !resolver
+                  ? Promise.resolve("platform")
+                  : resolver({ headers, path: ctx?.path ?? null, query: ctx?.query ?? null });
+              return realmOnce;
+            };
             const signupHookCtx: BeforeSignupContext & {
               path: string | null;
               query: Record<string, unknown> | null;
-            } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
+            } = {
+              headers,
+              path: ctx?.path ?? null,
+              query: ctx?.query ?? null,
+              realm: resolveRealm,
+            };
             const beforeSignup = beforeSignupHook.get();
             if (beforeSignup) {
               await beforeSignup(user.email, signupHookCtx);
             }
-            // No resolver (no OIDC module) means "platform". A bootstrap-token
-            // redeem is "platform" whatever the request carries: an
-            // instance-owner row in another realm is unrecoverable.
-            const resolver = realmResolver.get();
-            const realm = bootstrapTokenBypass
-              ? "platform"
-              : resolver
-                ? await resolver({
-                    headers,
-                    path: ctx?.path ?? null,
-                    query: ctx?.query ?? null,
-                  })
-                : "platform";
+            const realm = await resolveRealm();
             return { data: { realm } };
           }),
           after: async (user, context) => {

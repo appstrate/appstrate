@@ -52,6 +52,8 @@ const SOURCES = [
   "packages/db/src/**/*.ts",
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
+  // The commercial package (`@appstrate/ee`): enterprise sign-in's refusals.
+  "ee/src/**/*.ts",
 ];
 // The MCP module's `code` literals are tool-result refusals read by the model, never a problem body.
 const NOT_A_SOURCE =
@@ -208,6 +210,8 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
+  // Refused on a space client's hosted login only; the SPA is the instance client.
+  "social_provider_not_configured",
   // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
   "integration_unbound",
   // Warnings of integration discovery and server sync (`POST /api/integrations/discover`,

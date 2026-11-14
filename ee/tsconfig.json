@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.base.json",
+  // `drizzle` so the config driving `db:generate` sits in a program and cannot break silently.
+  "include": ["src", "drizzle", "test"]
+}

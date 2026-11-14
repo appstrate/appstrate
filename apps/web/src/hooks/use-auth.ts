@@ -7,6 +7,7 @@ import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toAuthError, toLoginError, toUnlinkError } from "../lib/auth-errors";
 import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
+import { EMERGENCY_SIGN_IN_QUERY } from "../lib/org-sso";
 import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { registerSessionCheck } from "../lib/stale-authority";
@@ -132,10 +133,22 @@ export function useAuth() {
   // Email/password login (OSS form, invite acceptance). In OIDC mode these forms never render
   // (`HostedAuthGate` redirects first), so there is no OIDC branch here.
   const login = useCallback(
-    // `callbackURL`: where an unverified account's re-sent verification link lands.
-    async (email: string, password: string, callbackURL?: string) => {
+    // `callbackURL`: where an unverified account's re-sent verification link lands. `emergency`:
+    // an owner's sign-in while their organization requires Microsoft (refused to anyone else
+    // exactly like a wrong password).
+    async (
+      email: string,
+      password: string,
+      callbackURL?: string,
+      options?: { emergency?: boolean },
+    ) => {
       rememberSignedIn(localStorage, true);
-      const result = await authClient.signIn.email({ email, password, callbackURL });
+      const result = await authClient.signIn.email({
+        email,
+        password,
+        callbackURL,
+        ...(options?.emergency ? { fetchOptions: { query: EMERGENCY_SIGN_IN_QUERY } } : {}),
+      });
       if (result.error) throw toLoginError(result.error);
       const profile = await fetchProfile();
       if (result.data?.user) {
@@ -199,17 +212,24 @@ export function useAuth() {
   }, []);
 
   const signInWithSocial = useCallback(
-    async (provider: "google" | "github", callbackURL?: string) => {
+    // `errorCallbackURL`: where a refused callback lands with `?error=<code>`; without it, Better
+    // Auth's own error page.
+    async (
+      provider: "google" | "github" | "microsoft",
+      callbackURL?: string,
+      errorCallbackURL?: string,
+    ) => {
       rememberSignedIn(localStorage, true);
       await authClient.signIn.social({
         provider,
         callbackURL: callbackURL ?? "/",
+        ...(errorCallbackURL ? { errorCallbackURL } : {}),
       });
     },
     [],
   );
 
-  const linkSocial = useCallback(async (provider: "google" | "github") => {
+  const linkSocial = useCallback(async (provider: "google" | "github" | "microsoft") => {
     await authClient.linkSocial({
       provider,
       callbackURL: "/preferences",
@@ -219,6 +239,8 @@ export function useAuth() {
   const linkGoogle = useCallback(() => linkSocial("google"), [linkSocial]);
 
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
+
+  const linkMicrosoft = useCallback(() => linkSocial("microsoft"), [linkSocial]);
 
   /**
    * Unlink ONE account by the `id` of its `listAccounts()` row (Better Auth's primary key). The
@@ -300,6 +322,7 @@ export function useAuth() {
     linkSocial,
     linkGoogle,
     linkGithub,
+    linkMicrosoft,
     unlinkAccount,
     resendVerificationEmail,
     requestPasswordReset,

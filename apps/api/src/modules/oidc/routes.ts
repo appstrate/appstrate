@@ -32,6 +32,7 @@ import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
+import { getAppConfig } from "../../lib/app-config.ts";
 import { logger } from "../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -256,7 +257,14 @@ interface PageContext {
   client: OAuthClientRecord;
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
-  features: { smtp: boolean; socialGoogle: boolean; socialGithub: boolean };
+  features: {
+    smtp: boolean;
+    socialGoogle: boolean;
+    socialGithub: boolean;
+    socialMicrosoft: boolean;
+    /** An organization sign-in policy module is loaded: offer its emergency sign-in. */
+    emergencySignIn: boolean;
+  };
   smtp: ResolvedSmtpConfig | null;
   /**
    * Per-client social-provider availability, passed verbatim to
@@ -264,9 +272,10 @@ interface PageContext {
    * clients, reflects `space_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
    * `level=org` / `level=instance`, reflects env presence — those flows
-   * authenticate against the platform's own shared OAuth App.
+   * authenticate against the platform's own shared OAuth App. Microsoft is
+   * platform-level only (env pair): `level=space` clients never get it.
    */
-  socialProviders: { google: boolean; github: boolean };
+  socialProviders: { google: boolean; github: boolean; microsoft: boolean };
 }
 
 /**
@@ -336,6 +345,7 @@ async function loadPageContext(
   let smtp: Awaited<ReturnType<typeof resolveSmtpForClient>>;
   let socialGoogle: boolean;
   let socialGithub: boolean;
+  let socialMicrosoft = false;
   try {
     smtp = await resolveSmtpForClient(record);
     // Space clients read their own provider rows; org/instance ones the platform's env pair.
@@ -350,6 +360,7 @@ async function loadPageContext(
       const env = getEnv();
       socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
       socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+      socialMicrosoft = !!(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
     }
   } catch (err) {
     // A browser page, not a JSON client: the 503 of a key missing from the keyring as a page.
@@ -372,9 +383,15 @@ async function loadPageContext(
       client: record,
       branding: await resolveBrandingForClient(record),
       csrfToken: issueCsrfToken(c),
-      features: { smtp: !!smtp, socialGoogle, socialGithub },
+      features: {
+        smtp: !!smtp,
+        socialGoogle,
+        socialGithub,
+        socialMicrosoft,
+        emergencySignIn: getAppConfig().features.enterpriseSso === true,
+      },
       smtp,
-      socialProviders: { google: socialGoogle, github: socialGithub },
+      socialProviders: { google: socialGoogle, github: socialGithub, microsoft: socialMicrosoft },
     },
   };
 }
@@ -445,7 +462,27 @@ function allowSignupForClient(client: { allowSignup: boolean }): boolean {
  * login page. Codes we don't recognize fall back to a generic message so the
  * user isn't left with a silent white screen.
  */
+/**
+ * Refusals from an organization's sign-in policy (the commercial enterprise
+ * sign-in module): the address belongs to a domain that requires Microsoft, or
+ * the Microsoft account comes from another tenant than the organization's.
+ */
+const SSO_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
+  sso_required:
+    "Votre organisation exige la connexion avec Microsoft pour cette adresse. Utilisez « Continuer avec Microsoft ».",
+  sso_tenant_mismatch:
+    "Ce compte Microsoft n'est pas celui de cette adresse dans l'organisation qui la détient. Connectez-vous avec votre propre compte professionnel.",
+};
+
+/** The policy refusal a Better Auth error body carries, if any. */
+function ssoRefusalIn(bodyText: string): string | null {
+  const code = Object.keys(SSO_REFUSAL_MESSAGES).find((c) => bodyText.includes(`"${c}"`));
+  return code ? SSO_REFUSAL_MESSAGES[code]! : null;
+}
+
 function mapLoginErrorCode(code: string): string {
+  const refusal = SSO_REFUSAL_MESSAGES[code];
+  if (refusal) return refusal;
   switch (code) {
     case "signup_disabled":
       return "L'inscription n'est pas ouverte sur cet espace. Contactez un administrateur pour être ajouté à l'organisation.";
@@ -1047,6 +1084,7 @@ export function createOidcRouter() {
       csrfToken: ctx.csrfToken,
       socialProviders: ctx.socialProviders,
       smtpEnabled: ctx.features.smtp,
+      emergencySignIn: ctx.features.emergencySignIn,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
       email: loginHint ?? notice?.email,
@@ -1105,6 +1143,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders: ctx.socialProviders,
         smtpEnabled: ctx.features.smtp,
+        emergencySignIn: ctx.features.emergencySignIn,
         allowSignup,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
@@ -1123,6 +1162,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders,
         smtpEnabled,
+        emergencySignIn: ctx.features.emergencySignIn,
         allowSignup,
         error,
         email,
@@ -1132,6 +1172,9 @@ export function createOidcRouter() {
 
     const email = readFormString(form, "email")?.toLowerCase().trim();
     const password = readFormString(form, "password");
+    // The emergency variant of the same sign-in: the policy module behind it
+    // answers non-owners exactly like a wrong password, so this page does too.
+    const emergency = ctx.features.emergencySignIn && readFormString(form, "emergency") === "1";
     if (!email || !password) {
       return renderError("Email et mot de passe requis.", 400, email ?? undefined);
     }
@@ -1165,6 +1208,7 @@ export function createOidcRouter() {
             email: string;
             password: string;
           },
+          ...(emergency ? { query: { emergency: "1" } } : {}),
           headers: c.req.raw.headers,
           asResponse: true,
         }),
@@ -1182,6 +1226,8 @@ export function createOidcRouter() {
         logger.error("oidc: signInEmail infra error", { error: msg, email });
         return renderError("Erreur serveur temporaire, veuillez réessayer.", 500, email);
       }
+      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      if (refusal) return renderError(refusal, 403, email);
       logger.warn("oidc: signInEmail threw", { error: msg, email });
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
@@ -1207,6 +1253,8 @@ export function createOidcRouter() {
         });
         return c.html(sentPage.value);
       }
+      const refusal = ssoRefusalIn(bodyText);
+      if (refusal) return renderError(refusal, 403, email);
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
 
@@ -1506,6 +1554,8 @@ export function createOidcRouter() {
       )) as Response;
     } catch (err) {
       const msg = getErrorMessage(err);
+      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      if (refusal) return renderRegError(refusal, 403, email, name);
       logger.error("oidc: signUpEmail failed", { error: msg, email });
       if (msg.includes("already exists") || msg.includes("duplicate")) {
         return renderRegError(
@@ -1525,6 +1575,8 @@ export function createOidcRouter() {
         body: bodyText.slice(0, 400),
         email,
       });
+      const refusal = ssoRefusalIn(bodyText);
+      if (refusal) return renderRegError(refusal, 403, email, name);
       if (authResponse.status === 422 || bodyText.includes("already exists")) {
         return renderRegError(
           "Un compte existe déjà avec cet email. Essayez de vous connecter.",

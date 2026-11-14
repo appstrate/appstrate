@@ -3,7 +3,7 @@
 
 /**
  * Verify that every source file states the licence that actually governs it:
- *   packages/module-ee/**  →  // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
+ *   packages/module-ee/**, ee/**  →  // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
  *   everything else        →  // SPDX-License-Identifier: Apache-2.0
  * within the first 3 lines, so a shebang or `/// <reference>` may precede it. A
  * file on the wrong side is a licensing defect no compiler, linter or test can
@@ -19,7 +19,7 @@ const REPO_ROOT = join(import.meta.dir, "..");
 
 const HEADER_LINES = 3;
 
-const COMMERCIAL_PREFIX = "packages/module-ee/";
+const COMMERCIAL_PREFIXES: readonly string[] = ["packages/module-ee/", "ee/"];
 
 export type ExpectedLicense = "Apache-2.0" | "LicenseRef-Appstrate-Commercial";
 
@@ -60,7 +60,9 @@ export function generatorOf(lines: readonly string[]): string | null {
 }
 
 export function expectedLicenseFor(path: string): ExpectedLicense {
-  return path.startsWith(COMMERCIAL_PREFIX) ? "LicenseRef-Appstrate-Commercial" : "Apache-2.0";
+  return COMMERCIAL_PREFIXES.some((prefix) => path.startsWith(prefix))
+    ? "LicenseRef-Appstrate-Commercial"
+    : "Apache-2.0";
 }
 
 /** The violation `path` commits given the top of its content, or `null`. Pure. */
@@ -137,8 +139,8 @@ if (import.meta.main) {
     for (const problem of problems) console.error(`❌ ${problem}`);
     console.error(
       `\n${problems.length} file(s) with a wrong or missing licence header. ` +
-        `The repository is Apache-2.0 except \`${COMMERCIAL_PREFIX}\`, which is under the ` +
-        `commercial licence in that directory.\n` +
+        `The repository is Apache-2.0 except \`${COMMERCIAL_PREFIXES.join("`, `")}\`, which are ` +
+        `under the commercial licence in those directories.\n` +
         `Note: this gate reads \`git ls-files\`, so a file you have not \`git add\`ed yet is ` +
         `not listed above — stage it and re-run.`,
     );

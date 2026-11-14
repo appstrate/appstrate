@@ -32,11 +32,17 @@ describe("expectedLicenseFor", () => {
     );
   });
 
+  it("puts the root ee/ package under the commercial licence", () => {
+    expect(expectedLicenseFor("ee/src/index.ts")).toBe("LicenseRef-Appstrate-Commercial");
+  });
+
   it("puts everything else under Apache-2.0", () => {
     expect(expectedLicenseFor("packages/module-chat/src/index.ts")).toBe("Apache-2.0");
     // Prefix matching, not substring: a sibling package whose name merely
     // starts the same way is Apache-2.0.
     expect(expectedLicenseFor("packages/module-eee/src/index.ts")).toBe("Apache-2.0");
+    expect(expectedLicenseFor("apps/web/src/ee/x.ts")).toBe("Apache-2.0");
+    expect(expectedLicenseFor("eee/src/index.ts")).toBe("Apache-2.0");
   });
 });
 

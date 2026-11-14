@@ -38,11 +38,12 @@ const BANNER = `/* eslint-disable */
 // Regenerate with: bun run generate:api
 //
 // Source: apps/api/src/openapi/ merged with the OpenAPI contribution of EVERY
-// module in the tree — apps/api/src/modules/*/ and packages/module-*/ — found
-// on the FILESYSTEM, not through MODULES, so this file does not vary by config.
-// That includes packages/module-ee/, which is source-available under its own
-// LICENSE: its Ee* schemas and /api/billing/* paths appear below. Removing that
-// directory and regenerating drops them (packages/module-ee/README.md).
+// module in the tree — apps/api/src/modules/*/, packages/module-*/ and ee/ —
+// found on the FILESYSTEM, not through MODULES, so this file does not vary by
+// config. That includes packages/module-ee/ and ee/, which are source-available
+// under their own LICENSE: their Ee*/Sso* schemas and /api/billing/* and
+// /api/org-sso/* paths appear below. Removing a directory and regenerating
+// drops them.
 
 `;
 

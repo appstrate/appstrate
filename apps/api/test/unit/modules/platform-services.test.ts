@@ -57,6 +57,19 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.listEnforcedChatSkills).toBe("function");
   });
 
+  it("wires membership provisioning, and refuses any privileged role before touching the database", async () => {
+    expect(typeof services.members.provision).toBe("function");
+    for (const role of ["admin", "owner", "superuser"]) {
+      await expect(services.members.provision("org", "user", role as "member")).rejects.toThrow(
+        "is not member or guest",
+      );
+    }
+  });
+
+  it("wires email-domain access revocation (access.endForEmailDomain)", () => {
+    expect(typeof services.access.endForEmailDomain).toBe("function");
+  });
+
   it("wires the audit trail (audit.record — module mutations reach audit_events)", () => {
     expect(typeof services.audit.record).toBe("function");
   });

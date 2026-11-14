@@ -778,11 +778,19 @@ export const envSchema = z
         message: "RUN_TOKEN_SECRET: each comma-separated key must be at least 16 chars",
       }),
 
-    // Social auth (optional — enables Google/GitHub sign-in when both are set)
+    // Social auth (optional — enables Google/GitHub/Microsoft sign-in when both are set)
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
+    MICROSOFT_CLIENT_ID: z.string().optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().optional(),
+    // Entra tenant the Microsoft sign-in accepts: `organizations` (any work or
+    // school account) or one tenant's GUID. Empty (a compose forward) → default.
+    MICROSOFT_TENANT_ID: z.preprocess(
+      (v) => (v === "" ? undefined : v),
+      z.union([z.literal("organizations"), z.guid()]).default("organizations"),
+    ),
 
     // Legal URLs (optional — displayed in footer when set)
     LEGAL_TERMS_URL: z.string().optional(),

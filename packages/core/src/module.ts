@@ -447,6 +447,17 @@ export type ModulePermissionContribution = {
  */
 export interface BeforeSignupContext {
   headers: Headers | null;
+  /**
+   * The Better Auth endpoint creating the account (`"/sign-up/email"`,
+   * `"/callback/:id"`, `"/magic-link/verify"`, …), or `null` outside HTTP.
+   */
+  path?: string | null;
+  /**
+   * The audience the account is about to be created in: `"platform"` for a
+   * member of the platform, `"end_user:<spaceId>"` for an application's end
+   * user. Resolved on demand, at most once per signup.
+   */
+  realm?: () => Promise<string>;
 }
 
 /**
@@ -1603,5 +1614,42 @@ export interface PlatformServices {
         after?: AuditPayload | null;
       },
     ): Promise<void>;
+  };
+  /**
+   * Organization membership writes. A module that admits people into an
+   * organization on its own decision (outside an invitation) goes through the
+   * platform's one membership door, so the new member gets their personal
+   * space and nothing else a member is owed is skipped (RBAC spec §3.6). The
+   * module has no access to the membership table.
+   */
+  members: {
+    /**
+     * Make `userId` a member of `orgId` with `role`, in one transaction.
+     * Idempotent: an existing member keeps their role and `created` is false.
+     * Only an unprivileged role can be given this way. Throws the platform's
+     * RFC 9457 error `not_a_platform_account` (403) for an account that
+     * belongs to an application's end-user realm.
+     */
+    provision(
+      orgId: string,
+      userId: string,
+      role: "member" | "guest",
+    ): Promise<{ created: boolean }>;
+  };
+  /**
+   * Access revocation. Sessions and tokens belong to the platform's auth layer
+   * and to the modules that mint tokens, and ending them must run their hooks
+   * (back-channel logout), so a module asks rather than deletes.
+   */
+  access: {
+    /**
+     * End everything a password change ends, for every platform account whose
+     * email address is at exactly `domain` (no subdomain): its sessions but
+     * `keepSessionId`, its pending sign-in links, and the tokens modules
+     * revoke on a credential change (e.g. OAuth refresh tokens, CLI tokens).
+     * Idempotent. Accounts of an application's end-user realm are untouched.
+     * Resolves to the number of accounts.
+     */
+    endForEmailDomain(domain: string, keepSessionId: string | null): Promise<number>;
   };
 }

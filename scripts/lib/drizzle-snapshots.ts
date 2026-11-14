@@ -57,26 +57,31 @@ interface ModuleTables {
   tables: Set<string>;
 }
 
-/** Every `packages/module-*` owning a migration tree, with the tables it declares. The journal
- * glob matches at any depth — module trees nest `meta/` one level deeper than the platform's. */
+/** Every `packages/module-*` owning a migration tree, plus the root `ee/` package, with the
+ * tables each declares. The journal glob matches at any depth — module trees nest `meta/` one
+ * level deeper than the platform's. */
 export async function moduleOwnedTables(repoRoot: string): Promise<ModuleTables[]> {
-  const packagesDir = join(repoRoot, "packages");
   const found: ModuleTables[] = [];
-  const glob = new Glob("module-*/**/meta/_journal.json");
-  for await (const rel of glob.scan({ cwd: packagesDir })) {
-    if (rel.includes("node_modules/")) continue;
-    const metaDir = join(packagesDir, dirname(rel));
-    const journal: DrizzleJournal = await Bun.file(join(metaDir, "_journal.json")).json();
-    const snapshotName = latestSnapshotName(journal);
-    const snapshotPath = join(metaDir, snapshotName);
-    const snapshot: DrizzleSnapshot = await Bun.file(snapshotPath).json();
-    const dir = rel.split("/")[0]!;
-    found.push({
-      id: dir.replace(/^module-/, ""),
-      packageDir: `packages/${dir}`,
-      snapshot: relative(repoRoot, snapshotPath).split("\\").join("/"),
-      tables: declaredTables(snapshot),
-    });
+  const roots = [
+    { cwd: join(repoRoot, "packages"), pattern: "module-*/**/meta/_journal.json", id: null },
+    { cwd: repoRoot, pattern: "ee/**/meta/_journal.json", id: "enterprise" },
+  ];
+  for (const { cwd, pattern, id } of roots) {
+    for await (const rel of new Glob(pattern).scan({ cwd })) {
+      if (rel.includes("node_modules/")) continue;
+      const metaDir = join(cwd, dirname(rel));
+      const journal: DrizzleJournal = await Bun.file(join(metaDir, "_journal.json")).json();
+      const snapshotName = latestSnapshotName(journal);
+      const snapshotPath = join(metaDir, snapshotName);
+      const snapshot: DrizzleSnapshot = await Bun.file(snapshotPath).json();
+      const dir = rel.split("/")[0]!;
+      found.push({
+        id: id ?? dir.replace(/^module-/, ""),
+        packageDir: relative(repoRoot, join(cwd, dir)).split("\\").join("/"),
+        snapshot: relative(repoRoot, snapshotPath).split("\\").join("/"),
+        tables: declaredTables(snapshot),
+      });
+    }
   }
   return found.sort((a, b) => a.id.localeCompare(b.id));
 }

@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { availableReauthMethods } from "../reauth-methods";
 
-const ALL_ON = { googleAuth: true, githubAuth: true };
+const ALL_ON = { googleAuth: true, githubAuth: true, microsoftAuth: true };
 
 describe("availableReauthMethods", () => {
   it("credential only → password", () => {
@@ -26,7 +26,7 @@ describe("availableReauthMethods", () => {
 
   it("google linked but feature off → []", () => {
     expect(
-      availableReauthMethods([{ providerId: "google" }], { googleAuth: false, githubAuth: true }),
+      availableReauthMethods([{ providerId: "google" }], { ...ALL_ON, googleAuth: false }),
     ).toEqual([]);
   });
 
@@ -68,7 +68,22 @@ describe("availableReauthMethods", () => {
 
   it("github linked but only google feature on → []", () => {
     expect(
-      availableReauthMethods([{ providerId: "github" }], { googleAuth: true, githubAuth: false }),
+      availableReauthMethods([{ providerId: "github" }], { ...ALL_ON, githubAuth: false }),
+    ).toEqual([]);
+  });
+
+  it("microsoft linked and feature on → microsoft social, after github", () => {
+    expect(
+      availableReauthMethods([{ providerId: "microsoft" }, { providerId: "github" }], ALL_ON),
+    ).toEqual([
+      { kind: "social", provider: "github" },
+      { kind: "social", provider: "microsoft" },
+    ]);
+  });
+
+  it("microsoft linked but feature off → []", () => {
+    expect(
+      availableReauthMethods([{ providerId: "microsoft" }], { ...ALL_ON, microsoftAuth: false }),
     ).toEqual([]);
   });
 });
