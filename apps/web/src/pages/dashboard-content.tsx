@@ -228,7 +228,7 @@ function DashboardScheduleRow({
   return (
     <Link
       to={scheduleDetailPath(schedule.id)}
-      className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
+      className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
         type="agent"

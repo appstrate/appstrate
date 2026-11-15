@@ -66,7 +66,7 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-accent/50 relative flex h-full w-full flex-col p-4 transition-colors">
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">

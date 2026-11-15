@@ -353,7 +353,7 @@ function GeneralSection({ schedule, draft, edit }: SectionProps) {
         {/* The agent's identity, as its own Général previews it. */}
         <Link
           to={`/agents/${schedule.packageId}`}
-          className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
+          className="border-border bg-muted/40 hover:bg-muted flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
           {agentPending ? (
             <>

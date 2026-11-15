@@ -405,7 +405,7 @@ function ResourcePicker({
           shown.map((item) => (
             <label
               key={item.id}
-              className="hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3"
+              className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 px-4 py-3"
             >
               <Checkbox
                 checked={picked.includes(item.id)}

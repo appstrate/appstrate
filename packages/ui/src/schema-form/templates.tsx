@@ -123,7 +123,7 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
       className={cn(
         // Form fields stay h-9 (the shadcn Input defaults to h-10).
         "h-9",
-        isReadOnly && "bg-muted/50 cursor-not-allowed",
+        isReadOnly && "bg-muted/40 cursor-not-allowed",
         rawErrors && rawErrors.length > 0 && "border-destructive",
       )}
       onChange={(e) =>

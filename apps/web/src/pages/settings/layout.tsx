@@ -40,7 +40,6 @@ import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import { breadcrumbStore } from "../../stores/breadcrumb-store";
-import { INTEGRATED_TABLE_SURFACE } from "../../lib/table-surface";
 import {
   activeSettingsItem,
   firstSettingsPath,
@@ -250,7 +249,7 @@ export function UnifiedSettingsLayout() {
           />
         </div>
       )}
-      <div key={contentKey} {...INTEGRATED_TABLE_SURFACE} data-settings-content-scope={activeScope}>
+      <div key={contentKey} data-settings-content-scope={activeScope}>
         <SettingsPageActionTargetProvider target={actionTarget} badgeTarget={badgeTarget}>
           <Outlet />
         </SettingsPageActionTargetProvider>

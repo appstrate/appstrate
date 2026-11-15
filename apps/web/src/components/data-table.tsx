@@ -285,7 +285,7 @@ export function DataTable<T>({
   };
 
   // One frame per table: its own card on a page, none inside a surface that is already framed
-  // (`INTEGRATED_TABLE_SURFACE`: the settings dialog, a framed detail tab), whose card it shares.
+  // (`INTEGRATED_TABLE_SURFACE`: every overlay and modal, a framed detail tab), whose card it shares.
   const frameClass = cn(
     "@container/table overflow-hidden",
     "bg-card rounded-lg border [--dt-surface:var(--color-card)] [[data-table-surface=integrated]_&]:rounded-none [[data-table-surface=integrated]_&]:border-0 [[data-table-surface=integrated]_&]:bg-transparent",

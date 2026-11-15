@@ -33,7 +33,7 @@ export function CopyBlock({
 }) {
   return (
     <div
-      className="border-border bg-muted/50 relative rounded-md border"
+      className="border-border bg-muted/40 relative rounded-lg border"
       {...(testId ? { "data-testid": testId } : {})}
     >
       <code
