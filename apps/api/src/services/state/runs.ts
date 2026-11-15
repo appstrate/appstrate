@@ -51,6 +51,7 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
+import { ownRunsFilter, type RunReadGrant } from "../../lib/run-visibility.ts";
 import { recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
@@ -1654,7 +1655,8 @@ async function listRunsWithFilter(
   limit: number,
   offset: number,
   actor: Actor | null,
-  canReadAgentInput: boolean,
+  /** Decided per row, by the row's space: a list may span spaces. */
+  canReadAgentInput: (spaceId: string) => boolean,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead
@@ -1680,7 +1682,7 @@ async function listRunsWithFilter(
   ]);
   const [countRow] = countRows;
 
-  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
+  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput(row.run.spaceId)));
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -1718,15 +1720,9 @@ export async function listPackageRuns(
   ];
   conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, () => canReadAgentInput);
 }
 
-/**
- * List runs across all packages in an org+space, paginated, with
- * optional kind / status / date / end-user filters. Powers the global
- * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
- * the inline flag — UI uses it for the "Inline" badge.
- */
 /**
  * The closed set `?kind=` accepts, as a value — the route validates the query
  * parameter against it, so the tuple and the type cannot drift.
@@ -1734,7 +1730,8 @@ export async function listPackageRuns(
 export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
 type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
-interface ListGlobalRunsOptions {
+/** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
+export interface GlobalRunListFilters {
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
@@ -1750,20 +1747,27 @@ interface ListGlobalRunsOptions {
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
    * run) and the error it ended on; digits also match the run number
-   * (`runSearchCondition`). A substring match inside one space, unindexed.
+   * (`runSearchCondition`). A substring match, unindexed.
    */
   search?: string;
   /** Only the runs the actor has not read (`unreadRunCondition`). */
   unread?: boolean;
-  actor?: Actor | null;
-  /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
-  visibility?: SQL;
-  canReadAgentInput?: boolean;
+  /** `?user=me`: the actor's own runs in every space, even where they read all. */
+  ownOnly?: boolean;
 }
 
+/**
+ * Runs of `orgId` across the spaces of `grants`, paginated, with optional
+ * kind / status / date / chat-session filters. Powers `GET /api/runs` (one
+ * grant, the request's space) and `GET /api/orgs/{orgId}/runs` (one per space
+ * the caller reaches): a space where the caller reads every run contributes
+ * all of them, any other its actor's own (`ownRunsFilter`). No grant, no row.
+ * Joins `packages.ephemeral` so the response carries the inline flag.
+ */
 export async function listGlobalRuns(
-  scope: SpaceScope,
-  options: ListGlobalRunsOptions = {},
+  orgId: string,
+  grants: readonly RunReadGrant[],
+  options: GlobalRunListFilters & { actor?: Actor | null } = {},
 ): Promise<RunListPage> {
   const {
     limit = 50,
@@ -1775,13 +1779,18 @@ export async function listGlobalRuns(
     chatSessionId,
     search,
     unread = false,
+    ownOnly = false,
     actor = null,
-    visibility,
-    canReadAgentInput = false,
   } = options;
 
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
-  if (visibility) conditions.push(visibility);
+  const everyRun = grants.filter((g) => g.readAll && !ownOnly).map((g) => g.spaceId);
+  const ownRuns = grants.filter((g) => !g.readAll || ownOnly).map((g) => g.spaceId);
+  const reach: SQL[] = [];
+  if (everyRun.length) reach.push(inArray(runs.spaceId, everyRun));
+  if (ownRuns.length && actor) {
+    reach.push(and(inArray(runs.spaceId, ownRuns), ownRunsFilter(actor))!);
+  }
+  const conditions = [eq(runs.orgId, orgId), or(...reach) ?? sql`false`];
   conditions.push(...runListConditions({ status, search }));
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
@@ -1797,7 +1806,7 @@ export async function listGlobalRuns(
               .where(
                 and(
                   eq(chatSessions.id, chatSessionId),
-                  eq(chatSessions.orgId, scope.orgId),
+                  eq(chatSessions.orgId, orgId),
                   eq(chatSessions.userId, actor.id),
                 ),
               ),
@@ -1819,7 +1828,10 @@ export async function listGlobalRuns(
     conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
   }
 
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
+  const agentInput = new Set(grants.filter((g) => g.agentInput).map((g) => g.spaceId));
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, (spaceId) =>
+    agentInput.has(spaceId),
+  );
 }
 
 export async function listScheduleRuns(
@@ -1856,7 +1868,7 @@ export async function listScheduleRuns(
     limit,
     offset,
     actor,
-    canReadAgentInput,
+    () => canReadAgentInput,
   );
 }
 

@@ -7,16 +7,9 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
-import { listSpacesForPrincipal } from "../../services/spaces.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-} from "../../lib/view-as.ts";
+import { callerReachableSpaces } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
 import type { Refusal } from "./tool-results.ts";
@@ -43,33 +36,19 @@ export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
   return [c.get("spaceId"), c.req.param("space")].filter((id): id is string => Boolean(id));
 }
 
-/** The spaces of `GET /api/spaces` where the caller holds a role granting `mcp:read`. */
+/** The reachable spaces whose role grants `mcp:read`: the MCP acts, it does not browse. */
 export async function listReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
 ): Promise<Omit<McpSpace, "surface">[]> {
-  const orgRole = callerOrgRole(c, orgId);
-  if (!orgRole) return [];
-  const entries = await listSpacesForPrincipal(
-    orgId,
-    orgRole,
-    c.get("user").id,
-    callerPersonalOwnerId(c, orgId),
-    personaMemberships(personaFor(c, orgId)),
-  );
-  const out: Omit<McpSpace, "surface">[] = [];
-  for (const { space, role } of entries) {
-    if (!role) continue;
-    const permissions = effectiveInSpace(c, role);
-    if (!permissions.has("mcp:read")) continue;
-    out.push({
-      id: space.id,
-      name: space.name,
+  return (await callerReachableSpaces(c, orgId))
+    .filter((space) => space.permissions.has("mcp:read"))
+    .map(({ id, name, role, permissions }) => ({
+      id,
+      name,
       role: toSpaceRoleWire(role)!.name,
       permissions,
-    });
-  }
-  return out;
+    }));
 }
 
 /**

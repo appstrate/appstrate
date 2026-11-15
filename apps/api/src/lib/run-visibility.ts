@@ -45,6 +45,25 @@ export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
   return permissions.has("runs:read-all");
 }
 
+/**
+ * What the caller reads of ONE space's runs, from their effective set there: a
+ * run list spanning spaces decides each row by its own space, never by the
+ * request's. `agentInput` is `agents:read` there (`agentReadIsSummary`).
+ */
+export interface RunReadGrant {
+  spaceId: string;
+  readAll: boolean;
+  agentInput: boolean;
+}
+
+export function runReadGrant(spaceId: string, permissions: ReadonlySet<string>): RunReadGrant {
+  return {
+    spaceId,
+    readAll: canReadEveryRun(permissions),
+    agentInput: permissions.has("agents:read"),
+  };
+}
+
 /** The guard on every surface `runs:read` opens, built from the tuple
  *  `canReadRuns` tests — one spelling of the disjunction, not two. */
 export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);

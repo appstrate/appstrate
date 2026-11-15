@@ -178,6 +178,16 @@ Member mutations record `space.member_added` / `space.member_role_changed` / `sp
 
 Mutations record audit events with `resourceType: "space"` and actions `space.created` / `space.updated` / `space.deleted` (`apps/api/src/routes/spaces.ts`).
 
+## Reading across spaces
+
+Every write acts in ONE space. A read may span the spaces of one organization, and is then served on the org-path family (`/api/orgs/{orgId}/…`, org in the path, no `X-Space-Id`) — today `GET /api/orgs/{orgId}/runs` (`apps/api/src/routes/org-runs.ts`). No space is entered there, so no space-level guard can pass: the authorization is the reach itself.
+
+- **The reach** is `callerReachableSpaces` (`apps/api/src/lib/reachable-spaces.ts`): the spaces `GET /api/spaces` lists where the caller holds a role, each with the caller's effective set there (persona overlay and credential ceiling applied). A space listed without a role — a `closed` space not joined, an orphaned personal space shown to admins — is not reached, and a `private` space where they hold none is not even listed. A credential pinned to a space (API key, space-bound MCP token) reaches that space only. The MCP endpoint's org-wide mode filters the same reach on `mcp:read` (`modules/mcp/spaces.ts`).
+- **Each row follows its own space.** The run list turns the reach into one grant per space (`runReadGrant`, `apps/api/src/lib/run-visibility.ts`): every run where the caller holds `runs:read-all`, their own runs where they hold `runs:read`, nothing elsewhere; `input` is shown where they hold `agents:read`. One query serves both run lists — `GET /api/runs` is the one-grant case (`listGlobalRuns`, `services/state/runs.ts`).
+- **A space filter discloses nothing.** `?spaceId=` naming a space outside the reach is the same 400 whether the space exists or not.
+- **An end-user is refused** (403): it acts in its own space only (RBAC spec §7.2).
+- **Rows carry their `spaceId`**; a client names the space from `GET /api/spaces`.
+
 ## Connections
 
 A connection (`integration_connections`, `packages/db/src/schema/integrations.ts`) is never wider than the OAuth client that minted it: a refresh token is bound to the client that obtained it (RFC 6749 §6). `org_id` is NOT NULL; `space_id IS NULL` is an org-scoped row.

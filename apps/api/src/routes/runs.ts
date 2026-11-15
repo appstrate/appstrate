@@ -13,6 +13,7 @@ import {
   listRunLogs,
   RUN_LOG_LEVELS,
   GLOBAL_RUN_KINDS,
+  type GlobalRunListFilters,
 } from "../services/state/runs.ts";
 import { resolveAgentRunVersion, versionRefOf } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -31,10 +32,11 @@ import {
 } from "../lib/errors.ts";
 import {
   runVisibilityFilter,
-  ownRunsFilter,
   assertRunVisible,
   requireRunsRead,
+  runReadGrant,
 } from "../lib/run-visibility.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -219,6 +221,55 @@ function closedSetQuery<T extends string>(
     throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
   }
   return raw as T;
+}
+
+/**
+ * The query of a run list spanning a space or an organization: `user`, `kind`,
+ * `unread`, `status`, `q`, `start_date`, `end_date`, `chat_session_id` and the
+ * page. `user`, `kind` and `status` are closed sets: an unrecognised value is a
+ * 400, not a dropped filter. `limit`/`offset` deliberately keep their
+ * `.catch()` defaults — a bad page size returns the first page, which narrows
+ * rather than widens, and callers paging by `Link` headers never construct
+ * them by hand.
+ */
+export function parseGlobalRunListQuery(
+  c: Context<AppEnv>,
+): GlobalRunListFilters & { limit: number; offset: number } {
+  const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+  // `user=me` narrows to the caller's own runs even where `runs:read-all`
+  // would have widened the list, and composes with every filter below. An
+  // end-user needs no branch of its own: `read-all` is not grantable to them.
+  const ownOnly = closedSetQuery(c, "user", USER_FILTERS) === "me";
+  const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
+  // `?unread=true`: only the runs the caller has not read yet (per recipient).
+  const unread = closedSetQuery(c, "unread", UNREAD_FILTERS) === "true";
+  const { status, search } = parseRunListFilters({
+    status: c.req.query("status"),
+    q: c.req.query("q"),
+  });
+  const startDateRaw = c.req.query("start_date");
+  const endDateRaw = c.req.query("end_date");
+  const chatSessionId = c.req.query("chat_session_id") || undefined;
+  const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
+  const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
+  if (startDate && Number.isNaN(startDate.getTime())) {
+    throw invalidRequest("start_date is not a valid ISO date", "start_date");
+  }
+  if (endDate && Number.isNaN(endDate.getTime())) {
+    throw invalidRequest("end_date is not a valid ISO date", "end_date");
+  }
+  return {
+    limit,
+    offset,
+    ownOnly,
+    kind,
+    unread,
+    status,
+    search,
+    startDate,
+    endDate,
+    chatSessionId,
+  };
 }
 
 // --- Router ---
@@ -493,66 +544,17 @@ export function createRunsRouter() {
     return c.json(result);
   });
 
-  // GET /api/runs — global paginated run list across the space.
-  // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?q, ?start_date/?end_date, and
-  // ?chat_session_id for the conversation context sidebar.
-  //
-  // `user`, `kind` and `status` are all closed sets: an unrecognised value is
-  // a 400, not a dropped filter.
-  // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
-  // size returns the first page, which narrows rather than widens, and callers
-  // paging by `Link` headers never construct them by hand.
+  // GET /api/runs — global paginated run list across the space. The filters
+  // are `parseGlobalRunListQuery`'s, shared with `GET /api/orgs/{orgId}/runs`.
   router.get("/runs", requireRunsRead, async (c) => {
-    const actor = getActor(c);
+    const filters = parseGlobalRunListQuery(c);
     const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
-    // `user` is a closed set of one: `me`. The param means the same thing for
-    // every caller, so a typo is a 400 rather than something that survives in
-    // an end-user integration until it runs under an org session.
-    const userFilter = closedSetQuery(c, "user", USER_FILTERS);
-    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
-    // would have widened the list; without it the caller reads whatever their
-    // permission allows. An end-user needs no branch of its own: `read-all` is
-    // not grantable to them, so `runVisibilityFilter` already yields exactly
-    // their own runs — and either way the list composes with every filter
-    // below, instead of a self-view that quietly drops them.
-    const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
-
-    const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    // `?unread=true`: only the runs the caller has not read yet (per recipient).
-    const unread = closedSetQuery(c, "unread", UNREAD_FILTERS) === "true";
-    const { status, search } = parseRunListFilters({
-      status: c.req.query("status"),
-      q: c.req.query("q"),
-    });
-    const startDateRaw = c.req.query("start_date");
-    const endDateRaw = c.req.query("end_date");
-    const chatSessionId = c.req.query("chat_session_id") || undefined;
-    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
-    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
-      throw invalidRequest("start_date is not a valid ISO date", "start_date");
-    }
-    if (endDate && Number.isNaN(endDate.getTime())) {
-      throw invalidRequest("end_date is not a valid ISO date", "end_date");
-    }
-
-    const result = await listGlobalRuns(scope, {
-      limit,
-      offset,
-      kind,
-      status,
-      startDate,
-      endDate,
-      chatSessionId,
-      search,
-      unread,
-      actor,
-      visibility,
-      canReadAgentInput: !agentReadIsSummary(c),
-    });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    const result = await listGlobalRuns(
+      scope.orgId,
+      [runReadGrant(scope.spaceId, callerPermissions(c))],
+      { ...filters, actor: getActor(c) },
+    );
+    setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
     return c.json(result);
   });
 
