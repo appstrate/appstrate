@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An inline run may select the `note` / `pin` runtime tools, and finalisation
- * writes what they produce under the run's package id: the inline shadow
+ * An inline run may select the `note` / `pin` tools of `@appstrate/platform`,
+ * which write at call time under the run's package id: the inline shadow
  * (`@inline/r-<uuid>`). The run detail page reads them back through
  * `GET /api/agents/:scope/:name/persistence?runId=`, so that read must serve a
  * shadow whose run the caller may read in this space, and only there: a shadow
@@ -22,7 +22,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
-import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
+import { addMemory, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
@@ -34,7 +34,6 @@ const shadowManifest = {
   type: "agent",
   description: "Inline",
   schema_version: "0.1",
-  runtime_tools: ["note", "pin"],
 } as unknown as AgentManifest;
 
 interface PersistenceBody {
@@ -66,14 +65,14 @@ describe("GET /api/agents/@inline/:name/persistence", () => {
     });
     runId = run.id;
     const scope = { type: "user" as const, id: ctx.user.id };
-    await addMemories(shadowId, ctx.defaultSpaceId, ctx.orgId, scope, ["inline-memo"], runId);
+    await addMemory(shadowId, ctx.defaultSpaceId, ctx.orgId, scope, "inline-memo", runId);
     await upsertPinned(shadowId, ctx.defaultSpaceId, ctx.orgId, scope, "todo", "inline-pin", runId);
-    await addMemories(
+    await addMemory(
       shadowId,
       ctx.defaultSpaceId,
       ctx.orgId,
       { type: "shared" },
-      ["shared-memo"],
+      "shared-memo",
       runId,
     );
   });
@@ -121,7 +120,14 @@ describe("GET /api/agents/@inline/:name/persistence", () => {
     const agentId = "@inlinepersist/plain-agent";
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
     const scope = { type: "user" as const, id: ctx.user.id };
-    await addMemories(agentId, ctx.defaultSpaceId, ctx.orgId, scope, ["plain-memo"], null);
+    const run = await seedRun({
+      packageId: agentId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "success",
+    });
+    await addMemory(agentId, ctx.defaultSpaceId, ctx.orgId, scope, "plain-memo", run.id);
     const res = await app.request(`/api/agents/${agentId}/persistence?kind=memory`, {
       headers: authHeaders(ctx),
     });

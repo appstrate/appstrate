@@ -20,6 +20,7 @@ import {
 } from "../../helpers/seed.ts";
 import { recordRunFinished, markRunRead } from "../../../src/services/state/run-reads.ts";
 import { createFailedRun } from "../../../src/services/state/runs.ts";
+import { createAgentMessageNotifications } from "../../../src/services/state/notifications.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
@@ -390,6 +391,21 @@ describe("Run read state (per-recipient)", () => {
 
       expect(await bellCount(authHeaders(ctx))).toBe(0);
       expect((await notificationsOf(run.id))[0]!.readAt).not.toBeNull();
+    });
+
+    it("also marks the message its agent sent read (`agent_message`)", async () => {
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
+      await createAgentMessageNotifications(
+        scope(),
+        { id: run.id, packageId: run.packageId },
+        [{ type: "user", id: ctx.user.id }],
+        { title: "t", message: "m" },
+      );
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
+
+      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
+
+      expect(await bellCount(authHeaders(ctx))).toBe(0);
     });
 
     it("leaves another run's notification unread", async () => {

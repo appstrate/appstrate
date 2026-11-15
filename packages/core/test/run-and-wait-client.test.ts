@@ -560,8 +560,8 @@ describe("launchRunAndWait launch body", () => {
     schema_version: AFPS_SCHEMA_VERSION,
     type: "agent",
     version: "1.0.0",
-    dependencies: {},
-    runtime_tools: ["log", "output", "publish_file"],
+    dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+    integrations_configuration: { "@appstrate/platform": { tools: ["log"] } },
     output: { schema: { type: "object", properties: {}, additionalProperties: true } },
     ...overrides,
   });
@@ -624,9 +624,13 @@ describe("launchRunAndWait launch body", () => {
       version: "7.3.1",
       description: "Exact caller-owned contract",
       timeout: 42,
-      dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
-      integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
-      runtime_tools: ["output"],
+      dependencies: {
+        integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.3.0" },
+      },
+      integrations_configuration: {
+        "@appstrate/gmail": { tools: ["api_call"] },
+        "@appstrate/platform": { tools: ["log", "note"] },
+      },
       output: {
         schema: {
           type: "object",
@@ -655,23 +659,98 @@ describe("launchRunAndWait launch body", () => {
     );
   });
 
-  it("kind:inline preserves an explicit empty runtime_tools override", async () => {
+  /** The manifest `launchRunAndWait` sends for an inline run of `manifest`. */
+  async function materialized(manifest: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { fetchImpl, captured } = captureLaunch();
-
     const result = await launchRunAndWait(
-      {
-        kind: "inline",
-        manifest: { display_name: "Effet sans outil", runtime_tools: [] },
-        prompt: "Perform the side effect.",
-      },
+      { kind: "inline", manifest, prompt: "do it" },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
-
     expect(result.ok).toBe(true);
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.runtime_tools).toEqual([]);
-    expect(manifest).not.toHaveProperty("output");
+    return (captured()?.body as { manifest: Record<string, unknown> }).manifest;
+  }
+
+  const PLATFORM_DEPENDENCY = { integrations: { "@appstrate/platform": "^1.0.0" } };
+
+  // `configuration: undefined` asserts the manifest has no `integrations_configuration`.
+  it.each<[string, Record<string, unknown>, unknown, unknown]>([
+    [
+      "adds the platform entry beside a caller-declared integration",
+      {
+        dependencies: {
+          integrations: { "@appstrate/gmail": "^1.2.0" },
+          skills: { "@acme/triage": "^1.0.0" },
+        },
+        integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
+      },
+      {
+        integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.0.0" },
+        skills: { "@acme/triage": "^1.0.0" },
+      },
+      {
+        "@appstrate/gmail": { tools: ["api_call"] },
+        "@appstrate/platform": { tools: ["log"] },
+      },
+    ],
+    [
+      "adds the platform entry to dependencies that declare no integrations",
+      { dependencies: { skills: { "@acme/x": "*" } } },
+      { skills: { "@acme/x": "*" }, ...PLATFORM_DEPENDENCY },
+      { "@appstrate/platform": { tools: ["log"] } },
+    ],
+    [
+      "keeps a caller-written platform entry exactly",
+      {
+        dependencies: { integrations: { "@appstrate/platform": "^1.4.0" } },
+        integrations_configuration: { "@appstrate/platform": { tools: [] } },
+      },
+      { integrations: { "@appstrate/platform": "^1.4.0" } },
+      { "@appstrate/platform": { tools: [] } },
+    ],
+    [
+      "injects no platform configuration when the caller declares the dependency alone",
+      { dependencies: PLATFORM_DEPENDENCY },
+      PLATFORM_DEPENDENCY,
+      undefined,
+    ],
+    [
+      "adds the dependency beside a caller-written platform configuration",
+      { integrations_configuration: { "@appstrate/platform": { tools: ["note"] } } },
+      PLATFORM_DEPENDENCY,
+      { "@appstrate/platform": { tools: ["note"] } },
+    ],
+    [
+      "leaves a non-object dependencies value as written",
+      { dependencies: "^1.0.0" },
+      "^1.0.0",
+      undefined,
+    ],
+    [
+      "leaves a non-object dependencies.integrations value as written",
+      { dependencies: { integrations: [] } },
+      { integrations: [] },
+      undefined,
+    ],
+    [
+      "leaves a non-object integrations_configuration string as written",
+      { integrations_configuration: "log" },
+      PLATFORM_DEPENDENCY,
+      "log",
+    ],
+    [
+      "leaves a non-object integrations_configuration array as written",
+      { integrations_configuration: ["log"] },
+      PLATFORM_DEPENDENCY,
+      ["log"],
+    ],
+  ])("kind:inline %s", async (_, fields, dependencies, configuration) => {
+    const manifest = await materialized({ display_name: "Inline", ...fields });
+    expect(manifest.dependencies).toEqual(dependencies);
+    if (configuration === undefined) {
+      expect(manifest).not.toHaveProperty("integrations_configuration");
+    } else {
+      expect(manifest.integrations_configuration).toEqual(configuration);
+    }
   });
 
   it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {

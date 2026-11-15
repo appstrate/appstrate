@@ -53,7 +53,7 @@ An empty list is normal on a fresh instance. A `401` means the key is wrong, exp
 
 ### Run an inline agent
 
-An inline run needs no saved agent: you send the manifest and the prompt in the request. It requires the `agents:write` and `agents:run` scopes. This agent has one runtime tool, `output`, to return a structured result.
+An inline run needs no saved agent: you send the manifest and the prompt in the request. It requires the `agents:write` and `agents:run` scopes. This agent declares an output schema, which gives it the `output` tool to return a structured result.
 
 ```bash
 curl -X POST "$APPSTRATE_URL/api/runs/inline" \
@@ -69,7 +69,6 @@ curl -X POST "$APPSTRATE_URL/api/runs/inline" \
       "type": "agent",
       "schema_version": "0.3",
       "dependencies": {},
-      "runtime_tools": ["output"],
       "output": {
         "schema": {
           "type": "object",

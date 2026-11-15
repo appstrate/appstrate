@@ -111,6 +111,13 @@ export const chatPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
         },
         {
+          name: "q",
+          in: "query",
+          description:
+            "Case-insensitive substring search on the session title (`%`, `_` and `\\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400.",
+          schema: { type: "string", maxLength: 200 },
+        },
+        {
           name: "startingAfter",
           in: "query",
           description:

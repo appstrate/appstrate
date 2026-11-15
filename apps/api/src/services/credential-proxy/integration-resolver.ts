@@ -37,7 +37,7 @@ import { actorOwns, type Actor } from "../../lib/actor.ts";
 import { connectionVariablesOf } from "../../lib/connection-identity.ts";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
-import type { ResolutionFieldError } from "../../lib/errors.ts";
+import { notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
@@ -64,6 +64,7 @@ import {
 } from "../integration-service.ts";
 import { refreshConnectionCredential } from "../integration-token-refresh.ts";
 import {
+  isRuntimeBoundIntegration,
   isUnauthenticatedIntegration,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -272,9 +273,25 @@ export interface ConnectionOutsideRun {
   call_permission_required: boolean;
 }
 
-/** The integrations of the organization (system ones included) active in the space. */
+/**
+ * The integrations a call outside a run considers: those of the organization (system ones
+ * included) active in the space, less the ones bound to the runtime, whose tools exist only
+ * inside a run.
+ */
 export async function activeIntegrationIds(scope: SpaceScope): Promise<string[]> {
-  return (await listActivePackages(scope, "integration")).map((row) => row.id);
+  return (await listActivePackages(scope, "integration"))
+    .filter((row) => !isRuntimeBoundIntegration(row.draftManifest))
+    .map((row) => row.id);
+}
+
+/** Throw `notFound` unless a call outside a run considers the integration ({@link activeIntegrationIds}). */
+export async function assertActiveOutsideRun(
+  scope: SpaceScope,
+  integrationId: string,
+): Promise<void> {
+  if (!(await activeIntegrationIds(scope)).includes(integrationId)) {
+    throw notFound(`Integration '${integrationId}' is not active in this space`);
+  }
 }
 
 /**

@@ -7,8 +7,10 @@
  *
  *   POST /api/runs/:id/events           — one signed CloudEvent
  *   POST /api/runs/:id/events/finalize  — terminal RunResult, idempotent
+ *   POST /api/runs/:id/mcp              — the run MCP server of a remote run
  *
- * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`). No
+ * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`,
+ * `verifyRunUploadSignature` and `verifyRunCallSignature`). No
  * user principal — the request's legitimacy is proven cryptographically.
  * The middleware populates `c.get("run")` with the sink context; handlers
  * consume that and never dereference `c.get("user")` (there isn't one).
@@ -23,14 +25,21 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
+import { invalidRequest, methodNotAllowed, notFound, conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
+  RUN_ROUTE_RATE_PER_MIN,
+  rateLimitByRunId,
+  rateLimitRunFiles,
+  rateLimitRunMcp,
+} from "../middleware/rate-limit.ts";
+import {
+  verifyRunCallSignature,
   verifyRunSignature,
   verifyRunUploadSignature,
 } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { createFileFromStream } from "../services/files.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
@@ -123,38 +132,7 @@ function clampArtifacts(input: unknown): unknown {
  */
 export const RunResultSchema = z
   .object({
-    memories: z
-      .array(
-        z.object({
-          content: z.string().catch(""),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional()
-      .default([]),
-    pinned: z
-      .record(
-        z.string(),
-        z.object({
-          content: z.unknown(),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional(),
     output: z.unknown().nullable().optional(),
-    logs: z
-      .array(
-        z.object({
-          // Cosmetic display fields — degrade rather than reject. A missing
-          // `timestamp` (built-in `log` tool over the sidecar/MCP path used to
-          // omit it) defaults to ingestion time instead of failing finalize.
-          level: z.enum(["info", "warn", "error"]).catch("info"),
-          message: z.string().catch(""),
-          timestamp: z.number().catch(() => Date.now()),
-        }),
-      )
-      .optional()
-      .default([]),
     error: z
       .object({
         message: z.string(),
@@ -247,7 +225,7 @@ function getRemoteRunEventLimits(): { rate_per_sec: number; burst: number } {
   return { rate_per_sec: rate, burst };
 }
 
-export function createRunsEventsRouter() {
+export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const router = new Hono<AppEnv>();
   const limits = getRemoteRunEventLimits();
   // rate-limiter-flexible uses points-per-window; `burst` tokens per
@@ -260,9 +238,14 @@ export function createRunsEventsRouter() {
   // burst 30) so the finalize `outputs/` sweep's many small POSTs never exhaust
   // — or get starved by — the high-rate event-ingestion budget above.
   const fileLimiter = rateLimitRunFiles(30, 6);
+  // The run MCP server gets a per-minute budget of its own: one point per
+  // POST, which carries one MCP message (`initialize`, `tools/list`, a tool
+  // call; `serveRunMcp` refuses batches) — the figure the sidecar's mount of
+  // the same server has (`/internal/mcp`).
+  const mcpLimiter = rateLimitRunMcp(mcpRatePerMin, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
-  // the per-run limiter second. Both limiters key on the `:id` from the
+  // the per-run limiter second. The three limiters key on the `:id` from the
   // URL, so a limiter placed first would let anyone who merely knows a runId
   // burn a legitimate run's ingestion budget with unsigned garbage — a remote
   // DoS on that run's event stream and finalize sweep. Verifying first means
@@ -276,7 +259,7 @@ export function createRunsEventsRouter() {
   // traffic from a fleet of runners behind one NAT egress address is never
   // throttled while an unauthenticated flood is capped.
   //
-  // No handler depends on the limiter having run: both limiters are
+  // No handler depends on the limiter having run: the three limiters are
   // `emitHeaders: false` (no response header the handler reads) and their only
   // effect is consuming a point or throwing 429.
 
@@ -315,10 +298,7 @@ export function createRunsEventsRouter() {
       logger.warn("usage: malformed tier bands dropped", { runId: run.id, seam: "finalize" });
     }
     const result: TerminalRunResult = {
-      memories: d.memories,
-      ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
-      logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
       status: d.status,
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
@@ -409,7 +389,7 @@ export function createRunsEventsRouter() {
   // POST /api/runs/:id/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
-  // here, either via the `publish_file` runtime tool or the entrypoint's
+  // here, either via the runner's `publish_file` tool or the entrypoint's
   // end-of-run `outputs/` sweep. Authenticated by the SAME run HMAC as the GET
   // provisioning routes (verified over an empty body so the up-to-100 MiB
   // payload streams straight to storage without being buffered for the hash).
@@ -519,6 +499,28 @@ export function createRunsEventsRouter() {
     if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
+  });
+
+  // POST /api/runs/:id/mcp — the run MCP server (`@appstrate/platform`
+  // tools) for the host executing a remote run, authenticated like the routes
+  // above: the signature covers the exact request body, and each `webhook-id`
+  // is single-use (a replay is a 409). The tools write in
+  // the run's actor scope at call time.
+  //
+  // Remote runs only. A platform run's container holds the sink secret too
+  // (it signs its events), but it reaches these tools through its sidecar,
+  // which serves only the tools the agent selected; signing here would hand
+  // it all six. A platform run answers the 404 of an unknown run.
+  router.post("/runs/:id/mcp", verifyRunCallSignature, mcpLimiter, async (c) => {
+    const run = c.get("run")!;
+    if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
+    return serveRunMcp(c, run);
+  });
+  // The stateless server has no GET stream and no session to DELETE: every
+  // other verb is a 405 with `Allow: POST`, as the Streamable HTTP transport
+  // requires of a server that offers no GET stream.
+  router.all("/runs/:id/mcp", () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   return router;

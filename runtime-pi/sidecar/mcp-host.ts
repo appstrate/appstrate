@@ -6,7 +6,7 @@
  *
  * The sidecar exposes a single `/mcp` endpoint to the agent. Inside, we
  * aggregate tools from multiple MCP servers:
- *   - First-party (in-process): {ns}__api_call, run_history, recall_memory.
+ *   - First-party (in-process): {ns}__api_call.
  *   - Third-party (subprocess via SubprocessTransport): notion-mcp,
  *     filesystem-mcp, etc.
  *
@@ -30,20 +30,17 @@
  */
 
 import {
-  allocateMcpToolName,
   allocateMcpToolNamespace,
   isValidToolName,
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
-  MAX_PARAMETER_DESCRIPTION_BYTES,
-  MAX_TOOL_DESCRIPTION_BYTES,
+  exposeTool,
   notifyDetached,
   sanitiseTextField,
-  sanitiseToolDescriptor,
+  toolExclusion,
   type AppstrateMcpClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -57,18 +54,6 @@ import {
   budgetMcpToolResult,
   type ToolOutputBudgetDeps,
 } from "./tool-output-spill.ts";
-
-/**
- * A third-party tool result without the first-party runtime-event channel (`dev.appstrate/events`
- * under `_meta`), which only the platform's own runtime tools may set: an integration setting it
- * would forge run events. The result is returned untouched when the key is absent.
- */
-function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
-  const meta = result._meta;
-  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) return result;
-  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
-  return { ...result, _meta: rest };
-}
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
@@ -414,9 +399,16 @@ export class McpHost {
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     // A slot served by several connections puts the selector on every tool it
     // holds, so none of them may declare `connection` itself.
-    const admitted = tools.filter(
-      (tool) => (!allowlist || allowlist.has(tool.name)) && !hiddenSet?.has(tool.name),
-    );
+    const admitted = tools.filter((tool) => {
+      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
+      if (exclusion === null) return true;
+      this.options.onLog?.({
+        source: `host:${normalisedNs}`,
+        level: "info",
+        data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
+      });
+      return false;
+    });
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
     if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
       const conflicting = [
@@ -437,9 +429,7 @@ export class McpHost {
     const trustedReplacements = new Set<string>();
     if (upstream.trusted) {
       const incomingNames = new Set<string>();
-      for (const tool of tools) {
-        if (allowlist && !allowlist.has(tool.name)) continue;
-        if (hiddenSet && hiddenSet.has(tool.name)) continue;
+      for (const tool of admitted) {
         const candidate = `${normalisedNs}__${tool.name}`;
         if (!isValidToolName(candidate)) {
           throw new Error(
@@ -476,135 +466,82 @@ export class McpHost {
         });
       }
     }
-    for (const tool of tools) {
-      if (allowlist && !allowlist.has(tool.name)) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "info",
-          data: {
-            event: "tool_excluded_by_allowlist",
-            originalName: tool.name,
-          },
-        });
-        continue;
-      }
-      if (hiddenSet && hiddenSet.has(tool.name)) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "info",
-          data: {
-            event: "tool_excluded_by_hidden_tools",
-            originalName: tool.name,
-          },
-        });
-        continue;
-      }
-      // Strip hidden Unicode, cap field lengths, defeat tool poisoning
-      // before any third-party descriptor reaches
-      // the agent's LLM. A descriptor that exceeds the schema-size cap
-      // after sanitisation is dropped entirely; the host emits a log
-      // event so operators can audit the rejection. Trusted first-party
-      // upstreams (our own in-process api_call server) bypass the
-      // sanitiser so their rich audited docs survive intact.
-      const sanitised = upstream.trusted ? tool : sanitiseToolDescriptor(tool);
-      if (!sanitised) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "warn",
-          data: {
-            event: "tool_rejected",
-            reason: "schema_too_large_after_sanitisation",
-            originalName: tool.name,
-          },
-        });
-        continue;
-      }
-      const sibling = this.siblingName(normalisedNs, upstream.trusted === true, tool.name, label);
+    const trusted = upstream.trusted === true;
+    // Another connection of the slot exposing the tool gets a route; a trusted tool holding its
+    // plain name shadows an untrusted one.
+    const claim = (originalName: string): boolean => {
+      const sibling = this.siblingName(normalisedNs, trusted, originalName, label);
       if (sibling !== undefined) {
-        this.toolRoutes.get(sibling)!.set(label, this.routeFor(effectiveUpstream, tool.name));
+        this.toolRoutes.get(sibling)!.set(label, this.routeFor(effectiveUpstream, originalName));
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
           data: { event: "tool_connection_route_added", name: sibling, connection: label },
         });
-        continue;
+        return true;
       }
-      // Trusted first-party tools are already emitted in the canonical body
-      // form (e.g. `api_call__primary`), kept verbatim; a malformed one fails
-      // loudly since a fallback name would diverge from the platform catalog.
-      const plainName = `${normalisedNs}__${
-        upstream.trusted ? sanitised.name : normaliseMcpToolBody(sanitised.name)
-      }`;
-      if (upstream.trusted && !isValidToolName(plainName)) {
-        throw new Error(
-          `McpHost: trusted tool ${JSON.stringify(sanitised.name)} produces invalid namespaced name ${JSON.stringify(plainName)}`,
-        );
-      }
-      // Trusted capabilities own their canonical name in either registration
-      // order (the reverse order is handled by `trustedReplacements` above).
-      if (!upstream.trusted && this.toolTrusted.get(plainName) === true) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "warn",
-          data: {
-            event: "untrusted_tool_shadowed_by_trusted",
-            originalName: tool.name,
-            name: plainName,
-          },
-        });
-        continue;
-      }
-      let finalName = plainName;
-      if (!upstream.trusted) {
-        try {
-          finalName = allocateMcpToolName(normalisedNs, tool.name, (name) =>
-            this.toolToNamespace.has(name),
-          );
-        } catch {
-          // An unresolvable collision costs that one tool, not the upstream.
+      const plainName = `${normalisedNs}__${normaliseMcpToolBody(originalName)}`;
+      if (trusted || this.toolTrusted.get(plainName) !== true) return false;
+      this.options.onLog?.({
+        source: `host:${normalisedNs}`,
+        level: "warn",
+        data: { event: "untrusted_tool_shadowed_by_trusted", originalName, name: plainName },
+      });
+      return true;
+    };
+    for (const tool of admitted) {
+      // Trusted first-party upstreams (our own in-process api_call server) are neither sanitised
+      // nor renamed: their audited docs and canonical names (`api_call__primary`) reach the agent.
+      const exposure = trusted
+        ? null
+        : exposeTool(tool, {
+            namespace: normalisedNs,
+            isTaken: (name) => this.toolToNamespace.has(name),
+          });
+      // A claimed tool needs no name of its own; a descriptor too large once sanitised gets no
+      // route either.
+      const tooLarge =
+        exposure !== null &&
+        "exclusion" in exposure &&
+        exposure.exclusion === "schema_too_large_after_sanitisation";
+      if (!tooLarge && claim(tool.name)) continue;
+      let descriptor: Tool;
+      if (exposure === null) {
+        descriptor = { ...tool, name: `${normalisedNs}__${tool.name}` };
+      } else {
+        if ("exclusion" in exposure) {
           this.options.onLog?.({
             source: `host:${normalisedNs}`,
             level: "warn",
             data: {
               event: "tool_rejected",
-              reason: "name_collision",
+              reason: exposure.exclusion,
               namespace: normalisedNs,
               originalName: tool.name,
             },
           });
           continue;
         }
+        descriptor = exposure.descriptor;
       }
-      let descriptor: Tool = { ...sanitised, name: finalName };
+      const finalName = descriptor.name;
       if (finalName !== `${normalisedNs}__${tool.name}`) {
-        // The model only sees the exposed name; give it the upstream one so it
-        // can match the tool against the server's own documentation.
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
           data: { event: "tool_name_rewritten", originalName: tool.name, name: finalName },
         });
-        const upstreamName = JSON.stringify(
-          sanitiseTextField(tool.name, MAX_PARAMETER_DESCRIPTION_BYTES),
-        );
-        descriptor = {
-          ...descriptor,
-          description: sanitiseTextField(
-            `Upstream tool name: ${upstreamName}.${sanitised.description ? `\n\n${sanitised.description}` : ""}`,
-            MAX_TOOL_DESCRIPTION_BYTES,
-          ),
-        };
       }
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolRoutes.set(
         finalName,
         new Map([[label, this.routeFor(effectiveUpstream, tool.name)]]),
       );
-      this.toolTrusted.set(finalName, upstream.trusted === true);
+      this.toolTrusted.set(finalName, trusted);
       this.toolDescriptors.push(descriptor);
       const siblings = this.siblingNames.get(normalisedNs) ?? new Map<string, string>();
       this.siblingNames.set(normalisedNs, siblings);
-      const key = siblingKey(upstream.trusted === true, tool.name);
+      const key = siblingKey(trusted, tool.name);
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
@@ -668,18 +605,11 @@ export class McpHost {
    * Build {@link AppstrateToolDefinition}s — a flat list ready for
    * `createMcpServer(...)`. The handler dispatches `tools/call` to the
    * upstream client identified by the prefix.
-   *
-   * Optional `inject` parameter merges first-party tools ({ns}__api_call,
-   * run_history, recall_memory) into the same flat list. The host does
-   * not validate name collisions between first-party and third-party
-   * tools — first-party names take precedence.
    */
-  buildTools(inject: AppstrateToolDefinition[] = []): AppstrateToolDefinition[] {
-    const firstPartyNames = new Set(inject.map((t) => t.descriptor.name));
+  buildTools(): AppstrateToolDefinition[] {
     const labelsBySlot = this.labelsBySlot();
-    const thirdParty: AppstrateToolDefinition[] = [];
+    const tools: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
-      if (firstPartyNames.has(desc.name)) continue;
       const routes = this.toolRoutes.get(desc.name)!;
       const forward = async (
         route: ToolRoute,
@@ -690,14 +620,12 @@ export class McpHost {
         const budget = route.trusted ? undefined : this.options.outputBudget;
         let result: CallToolResult;
         try {
-          result = stripForgedRuntimeEvents(
-            await route.client.callTool(
-              { name: route.originalName, arguments: args },
-              {
-                ...(extra.signal ? { signal: extra.signal } : {}),
-                ...(relay ? { onProgress: relay.onProgress } : {}),
-              },
-            ),
+          result = await route.client.callTool(
+            { name: route.originalName, arguments: args },
+            {
+              ...(extra.signal ? { signal: extra.signal } : {}),
+              ...(relay ? { onProgress: relay.onProgress } : {}),
+            },
           );
         } catch (err) {
           // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
@@ -711,14 +639,14 @@ export class McpHost {
       // slot names its connection, so a call always states the account it acts on.
       if (labelsBySlot.get(this.toolToNamespace.get(desc.name)!)!.size < 2) {
         const [sole] = [...routes.values()];
-        thirdParty.push({
+        tools.push({
           descriptor: desc,
           handler: async (args, extra) => forward(sole!, args, extra),
         });
         continue;
       }
       const labels = routeLabels(routes);
-      thirdParty.push({
+      tools.push({
         descriptor: withConnectionParam(desc, routes),
         handler: async (args, extra): Promise<CallToolResult> => {
           const { [CONNECTION_PARAM]: selected, ...rest } = args;
@@ -728,7 +656,7 @@ export class McpHost {
         },
       });
     }
-    return [...inject, ...thirdParty];
+    return tools;
   }
 
   /**

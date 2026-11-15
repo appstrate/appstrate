@@ -12,7 +12,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { CallToolResult } from "@appstrate/mcp-transport";
-import { spillResourcesToWorkspace } from "../src/runtime-tools/resource-spill.ts";
+import { spillResourcesToWorkspace } from "../src/resource-spill.ts";
 
 let workspace: string;
 

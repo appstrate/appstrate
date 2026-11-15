@@ -49,7 +49,8 @@ import {
   isBareAuthSchemePrefix,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { normaliseMcpToolBody, normaliseMcpToolNamespace } from "@appstrate/afps-shared/mcp-naming";
+import { isPlainObject } from "./safe-json.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
@@ -85,6 +86,69 @@ const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 export const API_META_KEY = "dev.appstrate/api";
 
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
+
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: runtime binding (`_meta["dev.appstrate/platform"]`)
+// ─────────────────────────────────────────────
+
+/**
+ * `_meta` key binding an integration to the runtime that executes the run: its MCP endpoint is the
+ * runtime's own, and the runtime authenticates to it. The declared `source.remote.url` is never
+ * contacted by a runtime that honours the key; a runtime that does not know the key leaves the
+ * integration unbound.
+ *
+ * Shape: `{}`. The declaration is a JSON object under the key (AFPS §10.1); any other value binds
+ * nothing. Legal only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
+ * (`integrationManifestSchema`). Only a system package may carry it: every org write path refuses
+ * it (`findRuntimeBinding`), because a bound integration receives the platform's own run tools,
+ * called as the run.
+ */
+export const PLATFORM_META_KEY = "dev.appstrate/platform";
+
+/**
+ * Id of the system integration that ships the run tools and carries {@link PLATFORM_META_KEY}
+ * (its catalog: the manifest of the `@appstrate/platform` system package). An agent
+ * declares it to receive those tools; the manifests the platform writes on an author's behalf
+ * (inline-run defaults, the default agent) name it.
+ * Whether an integration is bound to the runtime is never read from this id:
+ * {@link isRuntimeBoundIntegration} decides.
+ */
+export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
+
+/** The exposed name of `tool` of {@link PLATFORM_INTEGRATION_ID}, as the agent sees it. */
+export function platformToolName(tool: string): string {
+  return `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
+}
+
+/** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
+export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
+
+/**
+ * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
+ * resolver, activation, the manifest schema, the write rule and the CLI read it, never the
+ * package id. The value
+ * must be a JSON object (AFPS §10.1), so `null` or a scalar binds nothing.
+ */
+export function isRuntimeBoundIntegration(manifest: unknown): boolean {
+  if (!isPlainObject(manifest)) return false;
+  const meta = manifest._meta;
+  return isPlainObject(meta) && isPlainObject(meta[PLATFORM_META_KEY]);
+}
+
+/**
+ * WRITE-path refusal of {@link PLATFORM_META_KEY} on a package the platform did not ship. The
+ * caller applies it to every non-system manifest it stores.
+ */
+export function findRuntimeBinding(manifest: unknown): { path: IssuePath; message: string }[] {
+  return isRuntimeBoundIntegration(manifest)
+    ? [
+        {
+          path: ["_meta", PLATFORM_META_KEY],
+          message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+        },
+      ]
+    : [];
+}
 
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
@@ -730,6 +794,26 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
+  // (5b) `_meta["dev.appstrate/platform"]` (runtime binding): only on an unauthenticated
+  // `remote` integration — the runtime authenticates to its own endpoint, so an auth would never
+  // be used, and only a remote source has an MCP endpoint to bind.
+  if (isRuntimeBoundIntegration(manifest)) {
+    if (manifest.auths !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires an integration without auths`,
+        path: ["auths"],
+      });
+    }
+    if (manifest.source?.kind !== "remote") {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires source.kind "remote"`,
+        path: ["source", "kind"],
+      });
+    }
+  }
+
   // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent
   // inherits when it depends on this integration but omits `integrations_configuration.<id>`.
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
@@ -806,6 +890,28 @@ export function getLocalServerTools(
     (t): t is { name: string; description?: string } =>
       !!t && typeof t === "object" && typeof (t as { name?: unknown }).name === "string",
   );
+}
+
+export function getIntegrationSourceKind(
+  manifest: IntegrationManifest,
+): "local" | "remote" | "none" | undefined {
+  const kind = manifest.source?.kind;
+  return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
+}
+
+/**
+ * `transport` is checked against AFPS §7.1's enum so no caller is tempted to coerce an unknown one
+ * to HTTP. The schema parse already refuses it; this keeps the type honest, it is not the gate.
+ */
+export function getRemoteSource(
+  manifest: IntegrationManifest,
+): { url: string; transport: "streamable-http" | "sse" } | null {
+  const source = manifest.source;
+  if (source?.kind !== "remote" || !source.remote) return null;
+  const { url, transport } = source.remote;
+  if (typeof url !== "string") return null;
+  if (transport !== "streamable-http" && transport !== "sse") return null;
+  return { url, transport };
 }
 
 /**

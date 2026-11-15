@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionConflictContent, problemContent } from "../responses.ts";
+import { connectionConflictContent, jsonRpcRequestBody, problemContent } from "../responses.ts";
+import {
+  RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpMethodNotAllowed,
+  runToolsMcpResponses,
+} from "./run-tools-mcp.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
@@ -1574,13 +1579,10 @@ const canonicalRunsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
+                "AFPS runtime `TerminalRunResult` — `output`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored.",
               required: ["status"],
               properties: {
-                memories: { type: "array" },
-                pinned: { type: "object" },
                 output: {},
-                logs: { type: "array" },
                 error: {
                   type: "object",
                   properties: {
@@ -1784,7 +1786,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the runner's `publish_file` tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
@@ -1978,6 +1980,51 @@ const canonicalRunsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
+    },
+  },
+  "/api/runs/{id}/mcp": {
+    post: {
+      operationId: "runToolsMcpPost",
+      tags: ["Runs"],
+      summary: "Run MCP server of a remote run (HMAC)",
+      description:
+        RUN_TOOLS_MCP_DESCRIPTION +
+        " Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes, and each `webhook-id` is single-use (a replay answers 409 `message_replayed`). It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      requestBody: jsonRpcRequestBody,
+      responses: {
+        ...runToolsMcpResponses,
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or a platform-origin run.",
+          content: problemContent,
+        },
+        "409": {
+          description:
+            "`message_replayed` — this `webhook-id` was already used for this run. Each id is " +
+            "single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`, so a captured request cannot be " +
+            "replayed inside the timestamp tolerance; the CLI signs a fresh id on every request.",
+          content: problemContent,
+        },
+        "410": runSinkGone,
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
+      },
+    },
+    get: {
+      operationId: "runToolsMcpGet",
+      tags: ["Runs"],
+      summary: "Run MCP server of a remote run (GET)",
+      description:
+        "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      security: [],
+      responses: { "405": runToolsMcpMethodNotAllowed },
     },
   },
 } as const;

@@ -1,0 +1,901 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The run MCP server (`services/run-tools-mcp.ts`) on its two mounts:
+ * `POST /internal/mcp` (run token) and `POST /api/runs/{id}/mcp` (the run's
+ * sink signature, remote runs only).
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { encrypt } from "@appstrate/connect";
+import { sign } from "@appstrate/afps-runtime/events";
+import { notifications, packagePersistence, packages, runLogs, runs } from "@appstrate/db/schema";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
+import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import {
+  seedAgent,
+  seedEndUser,
+  seedRun,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
+import { addMemory, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
+import { signRunToken } from "../../../src/lib/run-token.ts";
+import { errorHandler } from "../../../src/middleware/error-handler.ts";
+import { createInternalRouter } from "../../../src/routes/internal.ts";
+import { createRunsEventsRouter } from "../../../src/routes/runs-events.ts";
+import type { AppEnv } from "../../../src/types/index.ts";
+
+const app = getTestApp();
+
+/** Both mounts with a budget of 2 requests a minute, so a test reaches 429 on its third call. */
+function limitedApp(): Hono<AppEnv> {
+  const limited = new Hono<AppEnv>();
+  limited.onError(errorHandler);
+  limited.route("/internal", createInternalRouter(2));
+  limited.route("/api", createRunsEventsRouter(2));
+  return limited;
+}
+
+interface ToolResult {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+}
+
+/** Headers for one request, given the exact body it carries. */
+type HeadersFor = Record<string, string> | ((body: string) => Record<string, string>);
+
+async function rpc(
+  path: string,
+  headers: HeadersFor,
+  method: string,
+  params: Record<string, unknown> = {},
+  target: Hono<AppEnv> = app,
+): Promise<{ status: number; envelope: JsonRpcEnvelope & { code?: string } }> {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  const res = await target.request(path, {
+    method: "POST",
+    headers: {
+      ...(typeof headers === "function" ? headers(body) : headers),
+      "content-type": "application/json",
+      Accept: MCP_ACCEPT,
+    },
+    body,
+  });
+  const text = await res.text();
+  // A problem+json refusal from the route parses too: its `code` lands on `envelope`.
+  let envelope: JsonRpcEnvelope & { code?: string } = {};
+  try {
+    envelope = text ? (JSON.parse(text) as typeof envelope) : {};
+  } catch {
+    // Not JSON.
+  }
+  return { status: res.status, envelope };
+}
+
+async function callTool(
+  path: string,
+  headers: HeadersFor,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const { status, envelope } = await rpc(path, headers, "tools/call", { name, arguments: args });
+  expect(status).toBe(200);
+  expect(envelope.error).toBeUndefined();
+  return envelope.result as unknown as ToolResult;
+}
+
+describe("run MCP server", () => {
+  let ctx: TestContext;
+  const pkgId = "@runtoolsorg/agent";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "runtoolsorg" });
+    await seedAgent({ id: pkgId, orgId: ctx.orgId, createdBy: ctx.user.id });
+  });
+
+  const path = "/internal/mcp";
+  const bearer = (runId: string) => ({ Authorization: `Bearer ${signRunToken(runId)}` });
+
+  function seedRunningRun(overrides: Partial<Parameters<typeof seedRun>[0]> = {}) {
+    return seedRun({
+      packageId: pkgId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+      ...overrides,
+    });
+  }
+
+  describe("POST /internal/mcp", () => {
+    it("returns 401 without a run token", async () => {
+      const { status } = await rpc(path, {}, "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("returns 401 with a forged run token", async () => {
+      const run = await seedRunningRun();
+      const forged = `${run.id}.${"0".repeat(64)}`;
+      const { status } = await rpc(path, { Authorization: `Bearer ${forged}` }, "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("accepts a lowercase `bearer` scheme on the run token", async () => {
+      const run = await seedRunningRun();
+      const { status } = await rpc(
+        path,
+        { Authorization: `bearer ${signRunToken(run.id)}` },
+        "tools/list",
+      );
+      expect(status).toBe(200);
+    });
+
+    it("returns 403 when the run is not running", async () => {
+      const done = await seedRunningRun({ status: "success" });
+      const { status } = await rpc(path, bearer(done.id), "tools/list");
+      expect(status).toBe(403);
+    });
+
+    // The shipped manifest is the catalog an author selects from; the server is what a run
+    // gets. Neither may name a tool the other does not.
+    it("lists exactly the tools the shipped `@appstrate/platform` manifest declares", async () => {
+      const manifest = (await Bun.file(
+        new URL(
+          "../../../../../scripts/system-packages/integration-platform-1.0.0/manifest.json",
+          import.meta.url,
+        ).pathname,
+      ).json()) as { tools_policy: Record<string, unknown>; default_tools: string[] };
+      const run = await seedRunningRun();
+      const { envelope } = await rpc(path, bearer(run.id), "tools/list");
+      const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
+      expect(names).toEqual(["log", "note", "pin", "recall_memory", "run_history", "notify"]);
+      expect(Object.keys(manifest.tools_policy).sort()).toEqual([...names].sort());
+      // `notify` reaches people: an agent receives it by selecting it, never by default.
+      expect([...manifest.default_tools].sort()).toEqual(
+        names.filter((n) => n !== "notify").sort(),
+      );
+    });
+
+    it("`log` appends a progress run log at call time", async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "log", {
+        level: "warn",
+        message: "halfway there",
+      });
+      expect(result.isError).toBeUndefined();
+      const rows = await db.select().from(runLogs).where(eq(runLogs.runId, run.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        orgId: ctx.orgId,
+        type: "progress",
+        event: "log",
+        message: "halfway there",
+        level: "warn",
+      });
+    });
+
+    it("refuses arguments outside the input schema as a tool error", async () => {
+      const run = await seedRunningRun();
+      for (const [tool, args] of [
+        ["log", { level: "loud", message: "x" }],
+        ["log", { level: "info", message: "x".repeat(2001) }],
+        ["note", { content: "x".repeat(2001) }],
+        ["run_history", { limit: 51 }],
+        ["recall_memory", { limit: 51 }],
+        ["recall_memory", { q: "x".repeat(2001) }],
+      ] as const) {
+        const result = await callTool(path, bearer(run.id), tool, args);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toContain(`${tool}: invalid arguments`);
+      }
+      expect(await db.select().from(runLogs).where(eq(runLogs.runId, run.id))).toHaveLength(0);
+      expect(
+        await db.select().from(packagePersistence).where(eq(packagePersistence.runId, run.id)),
+      ).toHaveLength(0);
+    });
+
+    it("refuses a JSON-RPC batch with 400 `-32600`", async () => {
+      const run = await seedRunningRun();
+      const message = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+      const res = await app.request(path, {
+        method: "POST",
+        headers: {
+          ...bearer(run.id),
+          "content-type": "application/json",
+          Accept: MCP_ACCEPT,
+        },
+        body: JSON.stringify([message, { ...message, id: 2 }]),
+      });
+      expect(res.status).toBe(400);
+      const envelope = (await res.json()) as JsonRpcEnvelope;
+      expect(envelope.error?.code).toBe(-32600);
+    });
+
+    it("answers 405 with `Allow: POST` to a GET", async () => {
+      const res = await app.request(path, { method: "GET", headers: { Accept: MCP_ACCEPT } });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("Allow")).toBe("POST");
+    });
+
+    it("`note` and `pin` write at call time, in the run's org, space and actor", async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "note", { content: "API paginates at 100" });
+      await callTool(path, bearer(run.id), "note", { content: "team fact", scope: "shared" });
+      await callTool(path, bearer(run.id), "pin", { key: "persona", content: { tone: "dry" } });
+
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      const byContent = (content: unknown) =>
+        rows.find((r) => JSON.stringify(r.content) === JSON.stringify(content));
+      for (const row of rows) {
+        expect(row).toMatchObject({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+      }
+      expect(byContent("API paginates at 100")).toMatchObject({
+        key: null,
+        pinned: false,
+        actorType: "user",
+        actorId: ctx.user.id,
+        runId: run.id,
+      });
+      expect(byContent("team fact")).toMatchObject({ actorType: "shared", actorId: null });
+      expect(byContent({ tone: "dry" })).toMatchObject({ key: "persona", pinned: true });
+      expect(rows).toHaveLength(3);
+    });
+
+    it("`log`, `note`, `pin` and `notify` write in the run's space, not the agent's home", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId });
+      await seedSpacePackage(space.id, pkgId);
+      const home = await seedRunningRun({ status: "success", checkpoint: { home: true } });
+      await addMemory(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "user", id: ctx.user.id },
+        "home memory",
+        home.id,
+      );
+      const run = await seedRunningRun({ spaceId: space.id });
+      for (const [tool, args] of [
+        ["log", { level: "info", message: "elsewhere" }],
+        ["note", { content: "fact" }],
+        ["pin", { key: "persona", content: "dry" }],
+        ["notify", { title: "t", message: "m" }],
+      ] as const) {
+        expect((await callTool(path, bearer(run.id), tool, args)).isError).toBeUndefined();
+      }
+      const memories = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.runId, run.id));
+      expect(memories.map((r) => r.spaceId)).toEqual([space.id, space.id]);
+      const sent = await db.select().from(notifications).where(eq(notifications.runId, run.id));
+      expect(sent.map((r) => r.spaceId)).toEqual([space.id]);
+      // A run log has no space column: it belongs to the run, which lives in that space.
+      expect(await db.select().from(runLogs).where(eq(runLogs.runId, run.id))).toHaveLength(1);
+
+      const history = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      expect((JSON.parse(history.content[0]!.text) as { data: unknown[] }).data).toEqual([]);
+      const recalled = await callTool(path, bearer(run.id), "recall_memory", {});
+      const memoriesRead = JSON.parse(recalled.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(memoriesRead.memories.map((m) => m.content)).toEqual(["fact"]);
+    });
+
+    it('`pin("checkpoint")` is read back by the next run\'s `run_history`', async () => {
+      const first = await seedRunningRun();
+      await callTool(path, bearer(first.id), "pin", { key: "checkpoint", content: { cursor: 42 } });
+      const [snapshot] = await db
+        .select({ checkpoint: runs.checkpoint })
+        .from(runs)
+        .where(eq(runs.id, first.id));
+      expect(snapshot!.checkpoint).toEqual({ cursor: 42 });
+      await db.update(runs).set({ status: "success" }).where(eq(runs.id, first.id));
+
+      const second = await seedRunningRun();
+      const result = await callTool(path, bearer(second.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      const body = JSON.parse(result.content[0]!.text) as {
+        data: Array<{ id: string; checkpoint: unknown }>;
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({ id: first.id, checkpoint: { cursor: 42 } });
+    });
+
+    it("`run_history` never returns another actor's run", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_history",
+      });
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: null,
+        endUserId: eu.id,
+        status: "success",
+        checkpoint: { secret: true },
+      });
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      const body = JSON.parse(result.content[0]!.text) as { data: unknown[] };
+      expect(body.data).toEqual([]);
+    });
+
+    it("`recall_memory` never returns another actor's archive", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_recall",
+      });
+      const run = await seedRunningRun();
+      await addMemory(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "end_user", id: eu.id },
+        "secret end-user memory",
+        run.id,
+      );
+      const result = await callTool(path, bearer(run.id), "recall_memory", {});
+      const body = JSON.parse(result.content[0]!.text) as { memories: unknown[] };
+      expect(body.memories).toEqual([]);
+    });
+
+    it("`run_history` and `recall_memory` never return another member's run or archive", async () => {
+      const other = await memberContext(ctx, "member");
+      const theirs = await seedRunningRun({
+        userId: other.user.id,
+        status: "success",
+        checkpoint: { secret: true },
+      });
+      await addMemory(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "user", id: other.user.id },
+        "secret member memory",
+        theirs.id,
+      );
+      const run = await seedRunningRun();
+      const history = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      expect((JSON.parse(history.content[0]!.text) as { data: unknown[] }).data).toEqual([]);
+      const recalled = await callTool(path, bearer(run.id), "recall_memory", {});
+      expect((JSON.parse(recalled.content[0]!.text) as { memories: unknown[] }).memories).toEqual(
+        [],
+      );
+    });
+
+    it("`run_history` without `fields` returns the checkpoint and not the result", async () => {
+      await seedRunningRun({ status: "success", checkpoint: { n: 1 }, result: { output: 1 } });
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "run_history", {});
+      const body = JSON.parse(result.content[0]!.text) as {
+        data: Array<Record<string, unknown>>;
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({ checkpoint: { n: 1 } });
+      expect(body.data[0]).not.toHaveProperty("result");
+    });
+
+    it("`run_history` excludes the current run and honours `limit` and `fields`", async () => {
+      for (const [i, startedAt] of ["2026-01-01", "2026-01-02", "2026-01-03"].entries()) {
+        await seedRunningRun({
+          status: "success",
+          startedAt: new Date(startedAt),
+          checkpoint: { n: i },
+          result: { output: { n: i } },
+        });
+      }
+      const run = await seedRunningRun({ startedAt: new Date("2026-01-04") });
+      const result = await callTool(path, bearer(run.id), "run_history", {
+        limit: 2,
+        fields: ["result"],
+      });
+      const body = JSON.parse(result.content[0]!.text) as {
+        data: Array<Record<string, unknown>>;
+      };
+      expect(body.data).toHaveLength(2);
+      expect(body.data.map((r) => r.id)).not.toContain(run.id);
+      expect(body.data.map((r) => r.result)).toEqual([{ output: { n: 2 } }, { output: { n: 1 } }]);
+      for (const entry of body.data) expect(entry).not.toHaveProperty("checkpoint");
+    });
+
+    it("`recall_memory` honours `q` and `limit`", async () => {
+      const run = await seedRunningRun();
+      for (const content of ["Gmail quota", "gmail pagination", "Slack rate limit"]) {
+        await callTool(path, bearer(run.id), "note", { content });
+      }
+      const filtered = await callTool(path, bearer(run.id), "recall_memory", { q: "GMAIL" });
+      const byQuery = JSON.parse(filtered.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      // Most recent first.
+      expect(byQuery.memories.map((m) => m.content)).toEqual(["gmail pagination", "Gmail quota"]);
+      const limited = await callTool(path, bearer(run.id), "recall_memory", { limit: 1 });
+      const byLimit = JSON.parse(limited.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(byLimit.memories.map((m) => m.content)).toEqual(["Slack rate limit"]);
+      const blank = await callTool(path, bearer(run.id), "recall_memory", { q: "   " });
+      const unfiltered = JSON.parse(blank.content[0]!.text) as { memories: unknown[] };
+      expect(unfiltered.memories).toHaveLength(3);
+    });
+
+    it('`note` and `pin` with `scope: "shared"` reach another actor of the space; the default does not', async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "note", { content: "team fact", scope: "shared" });
+      await callTool(path, bearer(run.id), "note", { content: "private fact" });
+      await callTool(path, bearer(run.id), "pin", {
+        key: "repo",
+        content: { head: "abc" },
+        scope: "shared",
+      });
+      await callTool(path, bearer(run.id), "pin", { key: "persona", content: "dry" });
+
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_shared",
+      });
+      const other = await seedRunningRun({ userId: null, endUserId: eu.id });
+      const recalled = await callTool(path, bearer(other.id), "recall_memory", {});
+      const body = JSON.parse(recalled.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(body.memories.map((m) => m.content)).toEqual(["team fact"]);
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId, {
+        type: "end_user",
+        id: eu.id,
+      });
+      expect(slots.map((r) => r.key)).toEqual(["repo"]);
+    });
+
+    it("`note` at the archive limit is a tool error and writes nothing", async () => {
+      const run = await seedRunningRun();
+      await db.insert(packagePersistence).values(
+        Array.from({ length: 100 }, (_, i) => ({
+          packageId: pkgId,
+          spaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          pinned: false,
+          actorType: "user" as const,
+          actorId: ctx.user.id,
+          content: `memory ${i}`,
+          runId: run.id,
+        })),
+      );
+      const result = await callTool(path, bearer(run.id), "note", { content: "one too many" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("archive memory limit");
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows).toHaveLength(100);
+    });
+
+    // The race itself runs on PostgreSQL (the integration job); PGlite serialises
+    // statements, so there it proves the count logic.
+    it("two concurrent `note` calls one below the archive limit save exactly one", async () => {
+      const run = await seedRunningRun();
+      await db.insert(packagePersistence).values(
+        Array.from({ length: 99 }, (_, i) => ({
+          packageId: pkgId,
+          spaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          pinned: false,
+          actorType: "user" as const,
+          actorId: ctx.user.id,
+          content: `memory ${i}`,
+          runId: run.id,
+        })),
+      );
+      const results = await Promise.all(
+        ["first", "second"].map((content) => callTool(path, bearer(run.id), "note", { content })),
+      );
+      expect(results.filter((r) => r.isError)).toHaveLength(1);
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows).toHaveLength(100);
+    });
+
+    it('`pin("checkpoint", <non-object>)` keeps the slot but does not write `runs.checkpoint`', async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "pin", {
+        key: "checkpoint",
+        content: "page 3",
+      });
+      expect(result.isError).toBeUndefined();
+      const [snapshot] = await db
+        .select({ checkpoint: runs.checkpoint })
+        .from(runs)
+        .where(eq(runs.id, run.id));
+      expect(snapshot!.checkpoint).toBeNull();
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId);
+      expect(slots.map((r) => [r.key, r.content])).toEqual([["checkpoint", "page 3"]]);
+    });
+
+    it("`pin` refuses a malformed key as a tool error, writing nothing", async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "pin", { key: "Bad Key", content: 1 });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toStartWith("pin: invalid arguments — key: ");
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("`pin` refuses a content over the size cap as a tool error", async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "pin", {
+        key: "big",
+        content: "x".repeat(65 * 1024),
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toStartWith("pin: Invalid");
+      expect(await listPinnedSlots(pkgId, ctx.defaultSpaceId)).toEqual([]);
+    });
+
+    it("a thrown handler error reaches the model as a generic tool error", async () => {
+      const run = await seedRunningRun();
+      // The agent deleted mid-run: the memory insert violates its foreign key.
+      await db.delete(packages).where(eq(packages.id, pkgId));
+      const result = await callTool(path, bearer(run.id), "note", { content: "orphan" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toBe("note: the platform could not complete this call");
+    });
+
+    it("`note`, `pin` and `notify` store NULs and lone surrogates sanitised", async () => {
+      const run = await seedRunningRun();
+      const raw = "a\u0000b\uD800";
+      const safe = "a\uFFFDb\uFFFD";
+      for (const [tool, args] of [
+        ["note", { content: raw }],
+        ["pin", { key: "persona", content: { [raw]: raw } }],
+        ["notify", { title: raw, message: raw }],
+      ] as const) {
+        const result = await callTool(path, bearer(run.id), tool, args);
+        expect(result.isError).toBeUndefined();
+      }
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows.map((r) => r.content).sort()).toEqual([safe, { [safe]: safe }].sort());
+      const [notification] = await db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.runId, run.id));
+      expect(notification!.payload).toMatchObject({ title: safe, message: safe });
+    });
+
+    it('`pin("checkpoint")` stores the same sanitised value in the slot and the run snapshot', async () => {
+      const first = await seedRunningRun();
+      const result = await callTool(path, bearer(first.id), "pin", {
+        key: "checkpoint",
+        content: { cursor: "a\u0000b\uD800" },
+      });
+      expect(result.isError).toBeUndefined();
+      const safe = { cursor: "a�b�" };
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId);
+      expect(slots.map((r) => [r.key, r.content])).toEqual([["checkpoint", safe]]);
+      const [snapshot] = await db
+        .select({ checkpoint: runs.checkpoint })
+        .from(runs)
+        .where(eq(runs.id, first.id));
+      expect(snapshot!.checkpoint).toEqual(safe);
+      await db.update(runs).set({ status: "success" }).where(eq(runs.id, first.id));
+
+      const second = await seedRunningRun();
+      const history = await callTool(path, bearer(second.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      const body = JSON.parse(history.content[0]!.text) as {
+        data: Array<{ id: string; checkpoint: unknown }>;
+      };
+      expect(body.data).toEqual([expect.objectContaining({ id: first.id, checkpoint: safe })]);
+    });
+
+    it("answers 429 past the per-minute budget of one run", async () => {
+      const run = await seedRunningRun();
+      const limited = limitedApp();
+      for (let i = 0; i < 2; i++) {
+        expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(200);
+      }
+      expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(429);
+    });
+
+    it("keeps one budget per run: another run is served after one hits 429", async () => {
+      const run = await seedRunningRun();
+      const other = await seedRunningRun();
+      const limited = limitedApp();
+      for (let i = 0; i < 3; i++) await rpc(path, bearer(run.id), "tools/list", {}, limited);
+      expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(429);
+      expect((await rpc(path, bearer(other.id), "tools/list", {}, limited)).status).toBe(200);
+    });
+  });
+
+  describe("`notify`", () => {
+    const notificationsOf = (runId: string) =>
+      db.select().from(notifications).where(eq(notifications.runId, runId));
+
+    it("notifies the run's trigger with an `agent_message` linked to the run", async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "notify", {
+        title: "Invoices ready",
+        message: "12 invoices await your review.",
+      });
+      expect(result.isError).toBeUndefined();
+      const rows = await notificationsOf(run.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: ctx.user.id,
+        type: "agent_message",
+        runId: run.id,
+        payload: {
+          packageId: pkgId,
+          title: "Invoices ready",
+          message: "12 invoices await your review.",
+        },
+        readAt: null,
+      });
+    });
+
+    it("notifies the end-user who triggered the run", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_notify",
+      });
+      const run = await seedRunningRun({ userId: null, endUserId: eu.id });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBeUndefined();
+      const rows = await notificationsOf(run.id);
+      expect(rows.map((r) => [r.recipientType, r.recipientId])).toEqual([["end_user", eu.id]]);
+    });
+
+    it("fans an unattended run's message out to the org owners and admins", async () => {
+      const admin = await memberContext(ctx, "admin");
+      await memberContext(ctx, "member");
+      const run = await seedRunningRun({ userId: null });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBeUndefined();
+      const recipients = (await notificationsOf(run.id)).map((r) => r.recipientId).sort();
+      expect(recipients).toEqual([ctx.user.id, admin.user.id].sort());
+
+      const second = await callTool(path, bearer(run.id), "notify", { title: "t2", message: "m" });
+      expect(second.isError).toBe(true);
+      expect(await notificationsOf(run.id)).toHaveLength(2);
+    });
+
+    it("refuses arguments outside the input schema as a tool error, writing nothing", async () => {
+      const run = await seedRunningRun();
+      for (const args of [
+        { title: "only a title" },
+        { title: "", message: "m" },
+        { title: "t".repeat(101), message: "m" },
+        { title: "t", message: "m".repeat(501) },
+      ]) {
+        const result = await callTool(path, bearer(run.id), "notify", args);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toContain("notify: invalid arguments");
+      }
+      expect(await notificationsOf(run.id)).toHaveLength(0);
+    });
+
+    it("refuses a run nobody can be notified for, writing nothing", async () => {
+      const inlineId = `@inline/r-${crypto.randomUUID()}`;
+      await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
+      const run = await seedRunningRun({ packageId: inlineId });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("nobody can be notified");
+      expect(await notificationsOf(run.id)).toHaveLength(0);
+    });
+
+    it("notifies each recipient once per run: a second call is a tool error", async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "notify", { title: "first", message: "m" });
+      const second = await callTool(path, bearer(run.id), "notify", {
+        title: "second",
+        message: "m",
+      });
+      expect(second.isError).toBe(true);
+      expect(second.content[0]!.text).toContain("already sent its notification");
+      const rows = await notificationsOf(run.id);
+      expect(rows.map((r) => (r.payload as { title: string }).title)).toEqual(["first"]);
+    });
+  });
+
+  describe("POST /api/runs/{id}/mcp", () => {
+    const path = (runId: string) => `/api/runs/${runId}/mcp`;
+    const SECRET = "a".repeat(43);
+    const OTHER_SECRET = "b".repeat(43);
+
+    /** Standard Webhooks headers over the exact body, as the CLI signs its `/events`. */
+    const signed =
+      (secret: string) =>
+      (body: string): Record<string, string> => {
+        const headers = sign({
+          msgId: `msg_${crypto.randomUUID()}`,
+          timestampSec: Math.floor(Date.now() / 1000),
+          body,
+          secret,
+        });
+        return {
+          "webhook-id": headers["webhook-id"],
+          "webhook-timestamp": headers["webhook-timestamp"],
+          "webhook-signature": headers["webhook-signature"],
+        };
+      };
+
+    function seedRemoteRun(overrides: Partial<Parameters<typeof seedRun>[0]> = {}) {
+      return seedRunningRun({
+        runOrigin: "remote",
+        sinkSecretEncrypted: encrypt(SECRET),
+        sinkExpiresAt: new Date(Date.now() + 3_600_000),
+        ...overrides,
+      });
+    }
+
+    it("serves a remote run whose sink secret signs the body, in the run's actor scope", async () => {
+      const run = await seedRemoteRun();
+      const result = await callTool(path(run.id), signed(SECRET), "log", {
+        level: "info",
+        message: "from the CLI",
+      });
+      expect(result.isError).toBeUndefined();
+      const rows = await db.select().from(runLogs).where(eq(runLogs.runId, run.id));
+      expect(rows.map((r) => r.message)).toEqual(["from the CLI"]);
+
+      await callTool(path(run.id), signed(SECRET), "note", { content: "CLI fact" });
+      const [memory] = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.runId, run.id));
+      expect(memory).toMatchObject({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        actorType: "user",
+        actorId: ctx.user.id,
+      });
+    });
+
+    it("answers 429 past the per-minute budget of one run", async () => {
+      const run = await seedRemoteRun();
+      const limited = limitedApp();
+      const call = () => rpc(path(run.id), signed(SECRET), "tools/list", {}, limited);
+      for (let i = 0; i < 2; i++) expect((await call()).status).toBe(200);
+      expect((await call()).status).toBe(429);
+    });
+
+    it("verifies the signature before spending the run's budget", async () => {
+      const run = await seedRemoteRun();
+      const limited = limitedApp();
+      for (let i = 0; i < 3; i++) {
+        expect((await rpc(path(run.id), {}, "tools/list", {}, limited)).status).toBe(401);
+      }
+      for (let i = 0; i < 2; i++) {
+        const { status } = await rpc(path(run.id), signed(SECRET), "tools/list", {}, limited);
+        expect(status).toBe(200);
+      }
+    });
+
+    it("keeps one budget per run: another run is served after one hits 429", async () => {
+      const run = await seedRemoteRun();
+      const other = await seedRemoteRun();
+      const limited = limitedApp();
+      const call = (runId: string) => rpc(path(runId), signed(SECRET), "tools/list", {}, limited);
+      for (let i = 0; i < 2; i++) await call(run.id);
+      expect((await call(run.id)).status).toBe(429);
+      expect((await call(other.id)).status).toBe(200);
+    });
+
+    it("refuses a JSON-RPC batch with 400 `-32600`", async () => {
+      const run = await seedRemoteRun();
+      const message = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+      const body = JSON.stringify([message, { ...message, id: 2 }]);
+      const res = await app.request(path(run.id), {
+        method: "POST",
+        headers: {
+          ...signed(SECRET)(body),
+          "content-type": "application/json",
+          Accept: MCP_ACCEPT,
+        },
+        body,
+      });
+      expect(res.status).toBe(400);
+      const envelope = (await res.json()) as JsonRpcEnvelope;
+      expect(envelope.error?.code).toBe(-32600);
+    });
+
+    it("returns 401 without signature headers", async () => {
+      const run = await seedRemoteRun();
+      const { status } = await rpc(path(run.id), {}, "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("returns 401 for a signature over another body", async () => {
+      const run = await seedRemoteRun();
+      const { status } = await rpc(path(run.id), () => signed(SECRET)("{}"), "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("refuses a replayed request with 409 `message_replayed`", async () => {
+      const run = await seedRemoteRun();
+      const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+      const send = (headers: Record<string, string>) =>
+        app.request(path(run.id), {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+          body,
+        });
+      const headers = signed(SECRET)(body);
+      expect((await send(headers)).status).toBe(200);
+      const replay = await send(headers);
+      expect(replay.status).toBe(409);
+      expect(((await replay.json()) as { code: string }).code).toBe("message_replayed");
+    });
+
+    it("returns 401 for a secret that is not the run's", async () => {
+      const run = await seedRemoteRun();
+      const { status } = await rpc(path(run.id), signed(OTHER_SECRET), "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("returns 410 `run_sink_closed` once the sink is closed — a finished run", async () => {
+      const run = await seedRemoteRun({ status: "success", sinkClosedAt: new Date() });
+      const { status, envelope } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      expect(status).toBe(410);
+      expect(envelope.code).toBe("run_sink_closed");
+    });
+
+    it("returns 410 `run_sink_expired` once the sink has expired", async () => {
+      const run = await seedRemoteRun({ sinkExpiresAt: new Date(Date.now() - 1000) });
+      const { status, envelope } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      expect(status).toBe(410);
+      expect(envelope.code).toBe("run_sink_expired");
+    });
+
+    it("returns 404 for a platform-origin run, whose sidecar serves these tools", async () => {
+      const run = await seedRemoteRun({ runOrigin: "platform" });
+      const { status } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      expect(status).toBe(404);
+    });
+
+    it("answers 405 with `Allow: POST` to a GET", async () => {
+      const run = await seedRemoteRun();
+      const res = await app.request(path(run.id), {
+        method: "GET",
+        headers: { Accept: MCP_ACCEPT },
+      });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("Allow")).toBe("POST");
+    });
+  });
+});

@@ -1,32 +1,5 @@
 [
   {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "level": "info",
-    "message": "Pulling sources for topic"
-  },
-  {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "level": "info",
-    "message": "Cross-referencing with 2 prior memories"
-  },
-  {
-    "type": "memory.added",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "content": "Client prefers bullet-point summaries over prose."
-  },
-  {
-    "type": "pinned.set",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "key": "checkpoint",
-    "content": { "lastBriefing": "2026-04-20", "sourceCount": 5 }
-  },
-  {
     "type": "output.emitted",
     "timestamp": 0,
     "runId": "brief_001",

@@ -200,11 +200,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect-run grant or verifyRunToken",
   },
   getOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
-  getRunHistory: { category: "internal", reason: "verifyRunToken" },
   heartbeatRemoteRun: { category: "internal", reason: "verifyRunSignature" },
   ingestRunEvent: { category: "internal", reason: "verifyRunSignature" },
+  internalRunToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  internalRunToolsMcpPost: { category: "internal", reason: "verifyRunToken" },
   publishRunFile: { category: "internal", reason: "verifyRunUploadSignature" },
-  recallMemories: { category: "internal", reason: "verifyRunToken" },
   refreshIntegrationCredentials: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
@@ -215,6 +215,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiResponses: { category: "internal", reason: "verifyRunToken" },
+  runToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  runToolsMcpPost: { category: "internal", reason: "verifyRunSignature, remote-origin runs" },
 
   // handler-guarded — the permission is checked inside the handler (or by a
   // guard the route table cannot read) against the ceiling-applied permission set.

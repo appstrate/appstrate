@@ -169,6 +169,8 @@ export interface ChatHost {
    * packages, as its own editor and import dialog do after a write.
    */
   onPackagesChanged: () => void;
+  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
+  firstName?: string | null;
 }
 
 /**

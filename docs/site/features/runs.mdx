@@ -96,7 +96,7 @@ curl -X POST https://your-instance/api/runs/inline \
 
 The body takes `manifest` and `prompt` (required), `input`, `context_files` (existing `appfile://` files mounted read-only), `connection_overrides`, `modelId`, `proxyId` and `generation`. The platform stores a temporary **shadow package** (`package_ephemeral: true` on the run), runs it through the normal pipeline, and keeps the manifest and prompt snapshot for the retention window (default 30 days) before compacting them.
 
-An inline run can select the `note` and `pin` runtime tools, and what they write is readable on the run page by whoever can read the run. Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
+An inline run can select the `note` and `pin` tools of the `@appstrate/platform` integration, and what they write is readable on the run page by whoever can read the run. Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
 
 `POST /api/runs/inline/validate` runs the same preflight (manifest, input, integration readiness) without creating anything. It has the same per-minute cap as inline runs, counted separately.
 

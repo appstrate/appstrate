@@ -46,6 +46,11 @@ import {
   getLocalServer,
   getLocalServerTools,
   type LocalServer,
+  PLATFORM_META_KEY,
+  isRuntimeBoundIntegration,
+  findRuntimeBinding,
+  getIntegrationSourceKind,
+  getRemoteSource,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -3118,5 +3123,90 @@ describe("getLocalServer / getLocalServerTools", () => {
       source: { kind: "local", server: { ...LOCAL_SOURCE.server, tools: [] } },
     });
     expect(getLocalServerTools(m)).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Runtime binding — `_meta["dev.appstrate/platform"]`
+// ─────────────────────────────────────────────
+
+describe("runtime binding (_meta dev.appstrate/platform)", () => {
+  function runtimeBound(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    const m = baseManifest({ _meta: { [PLATFORM_META_KEY]: {} }, ...overrides });
+    delete m.auths;
+    return m;
+  }
+
+  it("accepts the key on an unauthenticated remote integration", () => {
+    expect(errorPaths(runtimeBound())).toEqual([]);
+  });
+
+  it("refuses an integration that declares auths", () => {
+    const m = baseManifest({ _meta: { [PLATFORM_META_KEY]: {} } });
+    expect(errorPaths(m)).toContain("auths");
+  });
+
+  it("refuses a source other than remote", () => {
+    expect(errorPaths(runtimeBound({ source: { kind: "none" } }))).toContain("source.kind");
+  });
+
+  it("isRuntimeBoundIntegration reads the key and nothing else", () => {
+    expect(isRuntimeBoundIntegration(runtimeBound())).toBe(true);
+    expect(isRuntimeBoundIntegration(baseManifest())).toBe(false);
+    expect(isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/api": {} } }))).toBe(
+      false,
+    );
+    expect(isRuntimeBoundIntegration(null)).toBe(false);
+    expect(isRuntimeBoundIntegration({ _meta: "x" })).toBe(false);
+    // AFPS §10.1: a `_meta` value is a JSON object.
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": null } })),
+    ).toBe(false);
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": [] } })),
+    ).toBe(false);
+  });
+
+  it("findRuntimeBinding reports the key for the write path", () => {
+    expect(findRuntimeBinding(runtimeBound())).toEqual([
+      {
+        path: ["_meta", PLATFORM_META_KEY],
+        message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+      },
+    ]);
+    expect(findRuntimeBinding(baseManifest())).toEqual([]);
+  });
+});
+
+describe("source accessors", () => {
+  const manifest = (source: unknown) => baseManifest({ source }) as unknown as IntegrationManifest;
+
+  it.each<[unknown, ReturnType<typeof getIntegrationSourceKind>]>([
+    [{ kind: "local" }, "local"],
+    [{ kind: "none" }, "none"],
+    [{ kind: "http" }, undefined],
+    [undefined, undefined],
+  ])("getIntegrationSourceKind(%j) is %p", (source, expected) => {
+    expect(getIntegrationSourceKind(manifest(source))).toBe(expected);
+  });
+
+  const remote = (url: unknown, transport: unknown, kind = "remote") =>
+    manifest({ kind, remote: { url, transport } });
+
+  it.each<[string, IntegrationManifest, ReturnType<typeof getRemoteSource>]>([
+    ["sse", remote("https://x/mcp", "sse"), { url: "https://x/mcp", transport: "sse" }],
+    [
+      "streamable-http",
+      remote("https://x/mcp", "streamable-http"),
+      { url: "https://x/mcp", transport: "streamable-http" },
+    ],
+    ["an unknown transport", remote("https://x/mcp", "ws"), null],
+    ["a transport in another case", remote("https://x/mcp", "STREAMABLE-HTTP"), null],
+    ["an empty transport", remote("https://x/mcp", ""), null],
+    ["websocket", remote("https://x/mcp", "websocket"), null],
+    ["a non-string url", remote(1, "sse"), null],
+    ["a non-remote kind", remote("https://x/mcp", "sse", "local"), null],
+  ])("getRemoteSource with %s", (_, source, expected) => {
+    expect(getRemoteSource(source)).toEqual(expected);
   });
 });

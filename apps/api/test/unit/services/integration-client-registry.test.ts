@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
-  isSystemIntegration,
+  listSystemIntegrationIds,
   getSystemIntegrationClientById,
   listSystemIntegrationClientsFor,
   getDefaultSystemIntegrationClient,
@@ -46,9 +46,7 @@ describe("integration-client-registry", () => {
       ]);
 
       // Membership = both integrations are system (auto-active).
-      expect(isSystemIntegration(GMAIL)).toBe(true);
-      expect(isSystemIntegration(DRIVE)).toBe(true);
-      expect(isSystemIntegration("@x/none")).toBe(false);
+      expect(listSystemIntegrationIds()).toEqual([GMAIL, DRIVE]);
 
       const gmail = getSystemIntegrationClientById("gmail-system");
       expect(gmail).not.toBeNull();
@@ -71,7 +69,7 @@ describe("integration-client-registry", () => {
     it("offers a clientless (DCR) integration: member but no client", () => {
       initSystemIntegrations([{ id: MCP }]);
       // Auto-active by membership, even though it ships no static client.
-      expect(isSystemIntegration(MCP)).toBe(true);
+      expect(listSystemIntegrationIds()).toEqual([MCP]);
       expect(getDefaultSystemIntegrationClient(MCP, "oauth")).toBeNull();
       expect(listSystemIntegrationClientsFor(MCP, "oauth")).toEqual([]);
     });
@@ -190,8 +188,7 @@ describe("integration-client-registry", () => {
         },
         { id: MCP },
       ]);
-      expect(isSystemIntegration(GMAIL)).toBe(true);
-      expect(isSystemIntegration(MCP)).toBe(true);
+      expect(listSystemIntegrationIds()).toEqual([GMAIL, MCP]);
       expect(listSystemIntegrationClientsFor(GMAIL, "google").map((d) => d.id)).toEqual(["good"]);
       expect(listSystemIntegrationClientsFor(MCP, "oauth")).toEqual([]);
     });
@@ -291,7 +288,7 @@ describe("integration-client-registry", () => {
       expect(listSystemIntegrationClientsFor("@x/y", "google")).toEqual([]);
       expect(getSystemIntegrationClientById("x")).toBeNull();
       expect(getDefaultSystemIntegrationClient("@x/y", "google")).toBeNull();
-      expect(isSystemIntegration("@x/y")).toBe(false);
+      expect(listSystemIntegrationIds()).toEqual([]);
     });
   });
 

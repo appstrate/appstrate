@@ -48,11 +48,10 @@ import {
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
-import { getLocalServer } from "@appstrate/core/integration";
+import { getIntegrationSourceKind, getLocalServer } from "@appstrate/core/integration";
 import { effectiveMcpServerType, getLocalServerEnv } from "@appstrate/core/mcp-server";
 import { resolveConnectBundleVersion } from "../integration-service.ts";
 import {
-  getIntegrationSourceKind,
   getAppstrateConnectMeta,
   runnerEgressFor,
   type AfpsManifestAuth,

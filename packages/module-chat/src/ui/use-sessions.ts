@@ -18,6 +18,7 @@ import {
   fetchSessionsPage,
   flattenSessions,
   sessionsQueryKey,
+  sessionsSearchQueryKey,
   spaceIdFromHeaders,
   type SessionsCache,
 } from "./sessions.ts";
@@ -56,11 +57,11 @@ export function sessionsRefetchInterval(query: {
 }
 
 /** The session-list query, shared by the list and the nav badge (one key, one request). */
-function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boolean) {
+function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boolean, q = "") {
   const spaceId = spaceIdFromHeaders(transport?.getHeaders);
   return infiniteQueryOptions({
-    queryKey: sessionsQueryKey(spaceId),
-    queryFn: ({ pageParam }) => fetchSessionsPage(transport!.request, pageParam),
+    queryKey: q ? sessionsSearchQueryKey(spaceId, q) : sessionsQueryKey(spaceId),
+    queryFn: ({ pageParam }) => fetchSessionsPage(transport!.request, pageParam, q || undefined),
     ...keysetPaging,
     select: flattenSessions,
     // The route requires `X-Space-Id`. Firing before the host's space store
@@ -72,11 +73,15 @@ function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boo
   });
 }
 
-export function useSessions(transport?: ChatTransport) {
+/**
+ * `q` (already trimmed/debounced by the caller) narrows the list to titles
+ * containing it, server-side; empty is the plain list and shares its key.
+ */
+export function useSessions(transport?: ChatTransport, q = "") {
   const contextTransport = useChatTransport();
   // ChatPage owns the provider below its render, so its own observer receives
   // the host transport directly. Descendants read the same one from context.
-  return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true));
+  return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true, q));
 }
 
 /**

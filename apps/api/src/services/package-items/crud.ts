@@ -12,8 +12,11 @@ import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { ApiError } from "@appstrate/core/api-errors";
 import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
-import { getLocalServer, type IntegrationManifest } from "@appstrate/core/integration";
-import { getIntegrationSourceKind } from "../integration-manifest-helpers.ts";
+import {
+  getIntegrationSourceKind,
+  getLocalServer,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,

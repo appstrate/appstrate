@@ -14,17 +14,8 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import {
-  AFPS_SCHEMA_URLS,
-  AFPS_SCHEMA_VERSION,
-  dropRetiredRuntimeTools,
-} from "@appstrate/core/validation";
-import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import {
-  dropRetiredDependencyKeys,
-  parseManifestIntegrations,
-  writeManifestIntegrations,
-} from "@appstrate/core/dependencies";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -113,42 +104,6 @@ export function defaultIntegrationManifest(
       },
     },
   };
-}
-
-// ─── Runtime tools (manifest.runtime_tools) ──────────────────
-
-/** The manifest's `runtime_tools`; tolerates a missing or malformed field and drops ids the platform no longer offers. */
-export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtime_tools;
-  return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
-}
-
-/**
- * Strips retired vocabulary (retired `runtime_tools` ids, AFPS 1.x `dependencies` keys) once, when an
- * existing agent is loaded — otherwise the user sees an error for a field the editor cannot display.
- * Delegates to core, the same code the publish path runs, so both serialise identically; core is
- * agent-gated and `package-editor.tsx` calls this only in its agent branch.
- */
-export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
-}
-
-/** An empty selection drops the field (never mints `runtime_tools: []`), matching `dropRetiredRuntimeTools` so the manifest bytes are the same either way. */
-export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
-  if (tools.length > 0) {
-    m.runtime_tools = tools;
-  } else {
-    delete m.runtime_tools;
-  }
-}
-
-/** The server refuses an output schema without the `output` runtime tool; declaring a schema turns it on. */
-export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
-  const tools = getRuntimeTools(m);
-  if (tools.includes("output")) return m;
-  const next = { ...m };
-  setRuntimeTools(next, [...tools, "output"]);
-  return next;
 }
 
 // ─── Manifest accessors ─────────────────────────────────────

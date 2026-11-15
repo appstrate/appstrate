@@ -44,7 +44,7 @@ export interface Dependencies {
  * which is what lets a manifest carrying a retired key keep validating when it is
  * re-imported from outside the platform (the platform's own stored versions are
  * rewritten by script 0054). See
- * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
+ * {@link import("./validation.ts").RetiredDependencyKeysPolicy}.
  */
 export const MCP_SERVER_GUIDANCE =
   "MCP servers are now declared inline on their local integration (`source.server`); depend on that integration instead";
@@ -95,8 +95,7 @@ export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyK
 /**
  * Strip the retired AFPS 1.x `dependencies` keys from an EDITABLE manifest.
  *
- * The mirror image of `dropRetiredRuntimeTools` in `validation.ts`, and used
- * for the same reason: an agent whose draft carries a retired key (imported
+ * An agent whose draft carries a retired key (imported
  * from a bundle assembled out of a legacy published version, say) would
  * otherwise round-trip it forever, and the first save through the author path
  * — where the key is rejected — would fail on a field the editor cannot even

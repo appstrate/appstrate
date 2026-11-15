@@ -22,6 +22,7 @@ import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { Thread } from "../src/ui/thread.tsx";
+import { createMessageQueue } from "../src/ui/message-queue.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 type Parts = ChatHelpers["messages"][number]["parts"];
@@ -67,7 +68,7 @@ function Turn({ helpers }: { helpers: ChatHelpers }) {
   const runtime = useAISDKRuntime(helpers);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
+      <Thread messageQueue={createMessageQueue()} />
     </AssistantRuntimeProvider>
   );
 }

@@ -493,16 +493,13 @@ describe("runRemote — happy path", () => {
     // private debugging extras carried only on stderr/JSONL envelopes.
     // The local `RunResult` has no such fields and we want byte-for-byte
     // parity here.
-    expect(parsed.status).toBe("success");
-    expect(parsed.output).toEqual({ final: 42 });
-    expect(parsed.memories).toEqual([]);
-    expect(parsed.pinned).toEqual({});
-    expect(parsed.logs).toEqual([]);
-    expect(parsed.durationMs).toBe(42_000);
-    expect(parsed.cost).toBe(0.0123);
-    expect(parsed.error).toBeUndefined();
-    expect(parsed.runId).toBeUndefined();
-    expect(parsed.instance).toBeUndefined();
+    expect(parsed).toEqual({
+      status: "success",
+      output: { final: 42 },
+      durationMs: 42_000,
+      cost: 0.0123,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
   });
 
   it("--output payload carries error envelope on non-success", async () => {
@@ -1668,5 +1665,44 @@ describe("runRemote — appstrate.error advisory routing", () => {
     expect(child.stdout).toContain("CAPTURED:");
     expect(child.stdout).toContain("adapter blew up");
     expect(child.stderr).toBe("");
+  });
+});
+
+describe("runRemote — messages of the `log` tool", () => {
+  it("prints a progress/log row's message", async () => {
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_log" } },
+        "GET /api/runs/run_log/logs": {
+          status: 200,
+          body: {
+            object: "list",
+            data: [
+              {
+                id: 1,
+                runId: "run_log",
+                type: "progress",
+                event: "log",
+                message: "3 invoices filed",
+                level: "info",
+              },
+            ] satisfies RemoteRunLog[],
+            hasMore: false,
+          },
+        },
+        "GET /api/runs/run_log": {
+          status: 200,
+          body: recordSummary({ id: "run_log", status: "success" }),
+        },
+      },
+      [],
+    );
+
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    );
+
+    expect(writers.stdout.join("")).toContain("→ 3 invoices filed\n");
   });
 });

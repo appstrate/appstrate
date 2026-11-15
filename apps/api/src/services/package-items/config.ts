@@ -14,6 +14,7 @@ import {
   findUnevaluableExpressions,
   findConnectionlessVariables,
   findUnexposedDefaultTools,
+  findRuntimeBinding,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
@@ -86,6 +87,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findUnevaluableExpressions(manifest),
       ...findConnectionlessVariables(manifest),
       ...findUnexposedDefaultTools(manifest),
+      ...findRuntimeBinding(manifest),
     ],
     manifestIsStoredFile: true,
   },

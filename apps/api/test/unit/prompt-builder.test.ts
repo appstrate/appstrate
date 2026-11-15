@@ -34,13 +34,11 @@ function makeTestBundle(opts: {
    * produces in production.
    */
   packageDocs?: Array<{ id: string; content: string }>;
-  runtimeTools?: string[];
 }): Bundle {
   const rootManifest: Record<string, unknown> = {
     name: "@test/agent",
     version: "1.0.0",
     type: "agent",
-    ...(opts.runtimeTools ? { runtime_tools: opts.runtimeTools } : {}),
     ...(opts.schemaVersion ? { schema_version: opts.schemaVersion } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
@@ -127,7 +125,6 @@ interface PromptContext {
   availableIntegrations?: ToolMeta[];
   memberlessIntegrations?: string[];
   packageDocs?: Array<{ id: string; content: string }>;
-  runtimeTools?: string[];
   resources?: AppstrateRunPlan["resources"];
   droppedIntegrations?: AppstrateRunPlan["droppedIntegrations"];
   /** Integration ids spawned for the run, one entry per connection. */
@@ -156,7 +153,6 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.availableIntegrations ? { integrations: ctx.availableIntegrations } : {}),
     ...(ctx.memberlessIntegrations ? { memberlessIntegrations: ctx.memberlessIntegrations } : {}),
     ...(ctx.packageDocs ? { packageDocs: ctx.packageDocs } : {}),
-    ...(ctx.runtimeTools ? { runtimeTools: ctx.runtimeTools } : {}),
   });
   const plan: AppstrateRunPlan = {
     bundle,
@@ -744,15 +740,13 @@ describe("buildEnrichedPrompt — files", () => {
 
 describe("buildEnrichedPrompt — tools and skills", () => {
   it("never renders a Tools section — tools are advertised via MCP tools/list", () => {
-    // The prompt no longer lists tools (a partial/stale in-prompt list
-    // would contradict the live tool set). The agent discovers every tool
-    // — bundle, integration, runtime (output/log/note/pin), and the
-    // platform-injected run_history/recall_memory — from `tools/list`.
+    // An in-prompt list would contradict the live tool set. The agent
+    // discovers every tool — bundle, integration (`@appstrate/platform`
+    // included) and harness (`output`, `publish_file`) — from `tools/list`.
     const ctx = baseContext({
       availableTools: [
         { id: "@org/scraper", name: "Web Scraper", description: "Scrapes web pages" },
       ],
-      runtimeTools: ["note"],
     });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Tools");

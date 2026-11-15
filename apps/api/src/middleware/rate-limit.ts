@@ -213,6 +213,12 @@ export const rateLimitByIp = createRateLimitMiddleware({
 });
 
 /**
+ * Requests a minute one run may send to each of its own routes: every
+ * `/internal/*` path, and the run MCP server of a remote run.
+ */
+export const RUN_ROUTE_RATE_PER_MIN = 200;
+
+/**
  * Per-run rate limiter for the unified-runner event ingestion routes
  * (`POST /api/runs/:id/events` + `/finalize`). The runId path param IS
  * the identity — a misbehaving sink cannot evade the limit by rotating
@@ -229,7 +235,7 @@ export const rateLimitByRunId = createRateLimitMiddleware({
  * `middleware/verify-run-signature.ts` before it trusts anything.
  *
  * The run-HMAC routes take their identity from the `:id` path param, so the
- * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` limiters can only
+ * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` / `rateLimitRunMcp` limiters can only
  * be applied AFTER the signature proves the caller is that run — applying them
  * first lets anyone who knows a runId burn a legitimate run's ingestion budget
  * with unsigned garbage. But with nothing in front, every attempt (including a
@@ -314,5 +320,17 @@ export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void
 export const rateLimitRunFiles = createRateLimitMiddleware({
   category: "run-file",
   extractKey: (c) => `run-file:${c.req.param("id") ?? "unknown"}`,
+  emitHeaders: false,
+});
+
+/**
+ * Per-run rate limiter for the run MCP server of a remote run
+ * (`POST /api/runs/:id/mcp`), kept SEPARATE from `rateLimitByRunId`: tool
+ * calls and event telemetry each spend their own budget. Same runId-keyed
+ * anti-evasion property.
+ */
+export const rateLimitRunMcp = createRateLimitMiddleware({
+  category: "run-mcp",
+  extractKey: (c) => `run-mcp:${c.req.param("id") ?? "unknown"}`,
   emitHeaders: false,
 });

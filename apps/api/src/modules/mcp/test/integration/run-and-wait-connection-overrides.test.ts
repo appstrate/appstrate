@@ -41,6 +41,7 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
+import { installRuntimeBoundSystemPackages } from "../../../../../test/helpers/runtime-bound-system-packages.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import {
@@ -111,6 +112,7 @@ interface ProblemDetails {
 describe("mcp run_and_wait — connection_overrides", () => {
   let ctx: TestContext;
   let headers: Record<string, string>;
+  let restoreSystemPackages: () => void;
 
   beforeAll(() => {
     _setOrchestratorForTesting(createFakeOrchestrator());
@@ -122,6 +124,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    restoreSystemPackages = await installRuntimeBoundSystemPackages();
     // A session owner: it holds mcp:read + mcp:invoke AND the `agents:run`
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
@@ -133,7 +136,10 @@ describe("mcp run_and_wait — connection_overrides", () => {
   // fire-and-forget, so a FAILING assertion would skip the drain and leave the
   // pipeline's background writes racing the next test's `truncateAll()` — one
   // red test would cascade into unrelated FK failures.
-  afterEach(waitForRunPipelineSettled);
+  afterEach(async () => {
+    await waitForRunPipelineSettled();
+    restoreSystemPackages();
+  });
 
   it("returns the 409 must_choose_connection payload through the tool when no pick is given", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);

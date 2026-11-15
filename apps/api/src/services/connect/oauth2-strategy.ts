@@ -9,7 +9,7 @@
  */
 
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { acquiresByConnectLogin } from "@appstrate/core/integration";
+import { acquiresByConnectLogin, getRemoteSource } from "@appstrate/core/integration";
 import {
   initiateIntegrationOAuth,
   performTokenRequest,
@@ -25,7 +25,6 @@ import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { buildIntegrationOAuthRefreshContext } from "../integration-token-refresh.ts";
 import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import {
-  getRemoteSource,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   type AfpsManifestAuth,

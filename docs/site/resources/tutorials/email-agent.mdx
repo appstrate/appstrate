@@ -166,7 +166,7 @@ An output schema makes the result structured and validated. Open **Settings → 
 }
 ```
 
-The agent returns it through the `output` runtime tool. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in its outcome. Publish a new version after changing the agent.
+The agent returns it through the `output` tool, which the runner adds because the agent declares an output schema. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in its outcome. Publish a new version after changing the agent.
 
 </Step>
 
@@ -222,7 +222,7 @@ Save the `whsec_...` secret from the response and verify signatures on your side
 
 ## Going further
 
-- **Memory.** Enable the `note` and `pin` runtime tools so the agent can remember the last email it processed and skip duplicates. See [Memory](/features/memory).
+- **Memory.** Select the `note` and `pin` tools of the `@appstrate/platform` integration so the agent can remember the last email it processed and skip duplicates. See [Memory](/features/memory).
 - **More inputs.** Make the time window or the label to read configurable with more input fields.
 - **A skill.** Attach a skill with your own rules for what counts as urgent.
 - **End-users.** Run the same agent for each of your customers, with their own mailboxes, using the `Appstrate-User` header. See [End-user impersonation](/api/authentication#end-user-impersonation).

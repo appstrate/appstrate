@@ -446,6 +446,7 @@ export async function resolveRunIntegrationVersions(params: {
   const entries = parseManifestIntegrations(params.agentManifest);
   const versions: ResolvedIntegrationVersionMap = {};
   const unresolved: Array<{ name: string; versionSpec: string }> = [];
+  const seeded: Array<Promise<IntegrationManifestLoadResult>> = [];
 
   for (const entry of entries) {
     const override = params.dependencyOverrides?.[entry.id];
@@ -480,13 +481,17 @@ export async function resolveRunIntegrationVersions(params: {
     // pinned manifest transparently (one entry per integration, overwriting any
     // draft entry an earlier readiness pass may have memoized).
     if (params.manifestCache) {
-      params.manifestCache.set(
-        entry.id,
-        readIntegrationManifestAt(entry.id, descriptor, params.executor),
-      );
+      const read = readIntegrationManifestAt(entry.id, descriptor, params.executor);
+      params.manifestCache.set(entry.id, read);
+      seeded.push(read);
     }
     versions[entry.id] = descriptorToResolved(descriptor);
   }
+
+  // The freeze is complete when this function returns: every seeded read has
+  // settled, so a draft saved afterwards cannot reach this run through a read
+  // still in flight.
+  await Promise.all(seeded);
 
   if (unresolved.length > 0) return { ok: false, unresolved };
   return { ok: true, versions };

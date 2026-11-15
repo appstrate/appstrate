@@ -9,7 +9,7 @@
  * - Pinned memos        = `key IS NULL`, `pinned=true`   (rendered in prompt)
  * - Archive memos       = `key IS NULL`, `pinned=false`  (recall_memory only)
  *
- * `key`/`pinned` are orthogonal storage attributes; the agent-facing AFPS
+ * `key`/`pinned` are orthogonal storage attributes; the agent-facing
  * tools (`pin`, `note`) wrap them so external runners never see this
  * column shape.
  *
@@ -26,35 +26,34 @@ import { packagePersistence } from "@appstrate/db/schema";
 import type { PackagePersistenceRow } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 
 /**
- * Validate any JSON value bound for `package_persistence.content` against
- * the shared Zod schema (JSON-safe + soft 64 KB cap). Throws on failure
- * with a path-prefixed message so callers (sidecar tool handlers, route
- * handlers) bubble a clear `invalidRequest` to the agent. Strings are
- * passed through unchanged — the AFPS `note` tool stores plain text.
+ * Validate a pinned slot's value against the shared Zod schema (JSON-safe +
+ * soft 64 KB cap). Throws `invalidRequest` (400), the one error
+ * `upsertPinned` raises for a refused value, so a caller can tell it from a
+ * database failure.
  */
 function assertValidContent(value: unknown, label: string): void {
   const parsed = packagePersistenceContentSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new Error(`Invalid ${label} content: ${issue?.message ?? "JSON validation failed"}`);
+    throw invalidRequest(`Invalid ${label} content: ${issue?.message ?? "JSON validation failed"}`);
   }
 }
 
-// Per-entry char cap and per-scope row cap (archive memories only;
-// pinned/checkpoint paths cap differently because they are bounded by
-// design — at most one checkpoint, and pinned memories are written by
-// admins or future tooling, not by agent loops).
+// Per-entry char cap and per-scope row cap of archive memories. Pinned slots
+// have no row cap: the `pin` tool upserts one row per (scope, key), and the
+// number of keys is not bounded.
 export const MAX_MEMORY_CONTENT = 2000;
 const MAX_MEMORIES_PER_SCOPE = 100;
 
 /** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
-/** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
-const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
-const MAX_PINNED_KEY_LENGTH = 64;
+/** Pattern of a pinned slot key, enforced by the `pin` tool's argument schema. */
+export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
+export const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
@@ -186,8 +185,6 @@ export async function getCheckpoint(
  * expression-based conflict target, and the `ON CONFLICT` columns must
  * match the index byte-for-byte.
  *
- * `key` is validated against {@link PINNED_KEY_PATTERN} so a malformed
- * agent payload fails loud here rather than silently corrupting storage.
  * `key === "checkpoint"` is the carry-over slot snapshotted onto runs.checkpoint;
  * every other key is a Letta-style named pinned block.
  */
@@ -200,17 +197,6 @@ export async function upsertPinned(
   content: unknown,
   runId: string | null,
 ): Promise<void> {
-  if (
-    typeof key !== "string" ||
-    key.length === 0 ||
-    key.length > MAX_PINNED_KEY_LENGTH ||
-    !PINNED_KEY_PATTERN.test(key)
-  ) {
-    throw new Error(
-      `Invalid pinned slot key "${key}" — must match ${PINNED_KEY_PATTERN} and be ≤${MAX_PINNED_KEY_LENGTH} chars`,
-    );
-  }
-
   assertValidContent(content, key === CHECKPOINT_KEY ? "checkpoint" : "pinned slot");
 
   const { actorType, actorId } = storageActor(scope);
@@ -359,8 +345,7 @@ export async function listMemories(
  * archive rows.
  *
  * Sorted `createdAt DESC` so the agent sees the most recent learnings
- * first; capped at `RECALL_LIMIT_MAX` (50) to bound the prompt-injection
- * cost when an agent passes a runaway limit.
+ * first. `RECALL_LIMIT_MAX` bounds the `recall_memory` tool's `limit`.
  */
 export const RECALL_LIMIT_DEFAULT = 10;
 export const RECALL_LIMIT_MAX = 50;
@@ -371,8 +356,6 @@ export async function recallMemories(
   scope: PersistenceScope,
   opts: { query?: string; limit?: number } = {},
 ): Promise<Memory[]> {
-  const limit = Math.max(1, Math.min(opts.limit ?? RECALL_LIMIT_DEFAULT, RECALL_LIMIT_MAX));
-
   const conditions = [
     eq(packagePersistence.packageId, packageId),
     eq(packagePersistence.spaceId, spaceId),
@@ -380,11 +363,12 @@ export async function recallMemories(
     eq(packagePersistence.pinned, false),
     buildVisibilityFilter(scope)!,
   ];
-  if (opts.query && opts.query.trim().length > 0) {
+  const query = opts.query?.trim();
+  if (query) {
     // jsonb stringified for ILIKE: matches both string and structured
     // content without a separate index. Cheap on the modest row counts
     // we cap memories at; replace with FTS / pgvector if cardinality grows.
-    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${opts.query.trim()}%`));
+    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${query}%`));
   }
 
   const rows = await db
@@ -400,54 +384,43 @@ export async function recallMemories(
     .from(packagePersistence)
     .where(and(...conditions))
     .orderBy(desc(packagePersistence.createdAt), desc(packagePersistence.id))
-    .limit(limit);
+    .limit(opts.limit ?? RECALL_LIMIT_DEFAULT);
 
   return rows as Memory[];
 }
 
 /**
- * Append memories for a scope. Always `pinned=false` (archive tier); the
- * AFPS `note` tool has no pinning parameter so every agent-written memory
- * lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per
- * `(package, space, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
- * characters per entry.
+ * Append one archive memory (`pinned=false`) for a scope — the `note` tool's
+ * write. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per `(package, space,
+ * scope)`. Returns `false`, writing nothing, when the scope is full. A
+ * per-scope advisory lock serialises the count and the insert, so parallel
+ * calls cannot pass the cap.
  */
-export async function addMemories(
+export async function addMemory(
   packageId: string,
   spaceId: string,
   orgId: string,
   scope: PersistenceScope,
-  contents: unknown[],
-  runId: string | null,
-): Promise<number> {
-  if (contents.length === 0) return 0;
-
+  content: string,
+  runId: string,
+): Promise<boolean> {
   const { actorType, actorId } = storageActor(scope);
-
-  const [row] = await db
-    .select({ count: count() })
-    .from(packagePersistence)
-    .where(
-      and(
-        eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.spaceId, spaceId),
-        isNull(packagePersistence.key),
-        buildScopeFilter(scope),
-      ),
-    );
-  const existing = row?.count ?? 0;
-  const available = Math.max(0, MAX_MEMORIES_PER_SCOPE - existing);
-  if (available === 0) return 0;
-
-  const toInsert = contents.slice(0, available).map((c) => {
-    // Sanitised after the trim: the slice can split a surrogate pair.
-    const trimmed = toPgSafe(
-      typeof c === "string"
-        ? (c.slice(0, MAX_MEMORY_CONTENT) as unknown as Record<string, unknown>)
-        : (c as Record<string, unknown>),
-    );
-    assertValidContent(trimmed, "memory");
-    return {
+  return db.transaction(async (tx) => {
+    const lockKey = `package-memories:${packageId}:${spaceId}:${actorType}:${actorId ?? ""}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+    const [row] = await tx
+      .select({ count: count() })
+      .from(packagePersistence)
+      .where(
+        and(
+          eq(packagePersistence.packageId, packageId),
+          eq(packagePersistence.spaceId, spaceId),
+          isNull(packagePersistence.key),
+          buildScopeFilter(scope),
+        ),
+      );
+    if ((row?.count ?? 0) >= MAX_MEMORIES_PER_SCOPE) return false;
+    await tx.insert(packagePersistence).values({
       packageId,
       spaceId,
       orgId,
@@ -455,18 +428,11 @@ export async function addMemories(
       pinned: false,
       actorType,
       actorId,
-      content: trimmed,
+      content: toPgSafe(content),
       runId,
-    };
+    });
+    return true;
   });
-
-  if (toInsert.length === 0) return 0;
-
-  const inserted = await db
-    .insert(packagePersistence)
-    .values(toInsert)
-    .returning({ id: packagePersistence.id });
-  return inserted.length;
 }
 
 /** Delete a single memory by id, scoped to (package, space). */

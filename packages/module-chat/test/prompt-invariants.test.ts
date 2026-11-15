@@ -13,6 +13,7 @@ import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -83,11 +84,7 @@ describe("full persona invariants", () => {
   });
 
   it("keeps inline manifests concise while allowing exact complete overrides", () => {
-    expect(FULL).toContain("PARTIAL canonical AFPS agent");
-    expect(FULL).toMatch(/Defaults apply ONLY to absent top-level fields/);
-    expect(FULL).toContain("runtime_tools: []");
-    expect(FULL).toMatch(/override EVERY field/);
-    expect(FULL).toContain("complete strict `output.schema`");
+    expect(FULL).toContain(INLINE_MANIFEST_RULE);
   });
 
   it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
@@ -386,7 +383,7 @@ describe("the persona without inline composition", () => {
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');
-    expect(REDUCED).not.toContain("PARTIAL canonical AFPS agent");
+    expect(REDUCED).not.toContain(INLINE_MANIFEST_RULE);
     expect(REDUCED).not.toContain("Give EVERY inline run a task-specific identity");
     expect(REDUCED).not.toContain("runInline");
   });

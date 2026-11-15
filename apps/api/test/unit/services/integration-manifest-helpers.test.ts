@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure AFPS integration-manifest accessors — the
- * `source` discriminant narrowing (`local` | `remote` | `none`), the
- * orchestrated-connect `_meta` extension reader, and the
+ * Unit tests for the pure AFPS integration-manifest accessors — the local
+ * server reference, the orchestrated-connect `_meta` extension reader, and the
  * `{$credential.<field>}` value-template renderer. Pure functions, no DB.
  */
 
@@ -13,8 +12,6 @@ import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
-  getIntegrationSourceKind,
-  getRemoteSource,
   renderRemoteSource,
   hasPerConnectionAuthServer,
   getAppstrateConnectMeta,
@@ -64,65 +61,6 @@ describe("renderCredentialTemplate", () => {
     ).toBe("https://forge.example.com|t");
     expect(renderCredentialTemplate("{$variable.absent}", {}, {})).toBeNull();
   });
-});
-
-describe("getIntegrationSourceKind", () => {
-  it("returns each valid discriminant", () => {
-    expect(getIntegrationSourceKind(manifest({ kind: "local" }))).toBe("local");
-    expect(getIntegrationSourceKind(manifest({ kind: "remote" }))).toBe("remote");
-    expect(getIntegrationSourceKind(manifest({ kind: "none" }))).toBe("none");
-  });
-
-  it("returns undefined for an unknown or absent kind", () => {
-    expect(getIntegrationSourceKind(manifest({ kind: "weird" }))).toBeUndefined();
-    expect(getIntegrationSourceKind(manifest(undefined))).toBeUndefined();
-  });
-});
-
-describe("getRemoteSource", () => {
-  it.each(["streamable-http", "sse"] as const)("returns the remote url + %s transport", (t) => {
-    expect(
-      getRemoteSource(
-        manifest({ kind: "remote", remote: { url: "https://mcp.example.com/v1", transport: t } }),
-      ),
-    ).toEqual({ url: "https://mcp.example.com/v1", transport: t });
-  });
-
-  it("returns null when source is not remote", () => {
-    expect(getRemoteSource(manifest({ kind: "local", server: {} }))).toBeNull();
-  });
-
-  it("returns null when remote block is malformed", () => {
-    expect(
-      getRemoteSource(
-        manifest({ kind: "remote", remote: { url: 1, transport: "streamable-http" } }),
-      ),
-    ).toBeNull();
-    expect(getRemoteSource(manifest({ kind: "remote" }))).toBeNull();
-  });
-
-  /**
-   * A transport outside AFPS §7.1's enum is malformed, not "close enough".
-   *
-   * This case used to assert the opposite — `transport: "http"` round-tripped
-   * verbatim, because the helper checked only `typeof transport === "string"`.
-   * That made every caller's narrowing a lie: the spawn resolver turned the
-   * `string` into the union by mapping everything that was not `"sse"` onto
-   * `"streamable-http"`, so a manifest declaring `"http"` or `"websocket"` was
-   * silently rewritten into one declaring HTTP and handed to the sidecar
-   * wearing a valid transport's name. Rejecting here is what lets the resolver
-   * forward the value verbatim and the sidecar's own guard mean something.
-   */
-  it.each(["http", "websocket", "STREAMABLE-HTTP", ""])(
-    "returns null for a transport outside the enum: %p",
-    (transport) => {
-      expect(
-        getRemoteSource(
-          manifest({ kind: "remote", remote: { url: "https://mcp.example.com/v1", transport } }),
-        ),
-      ).toBeNull();
-    },
-  );
 });
 
 describe("getAppstrateConnectMeta", () => {

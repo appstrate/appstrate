@@ -14,7 +14,7 @@ import { describe, it, expect } from "bun:test";
 import {
   derivePiCompactionSettings,
   installSessionBridge,
-  MAX_TERMINAL_TOOL_REJECTIONS,
+  MAX_OUTPUT_REJECTIONS,
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
@@ -1138,14 +1138,14 @@ describe("installSessionBridge — fire-and-forget rejection handling", () => {
   });
 });
 
-describe("installSessionBridge — terminal tools (early stop on output)", () => {
-  it("invokes onTerminalTool once on the first successful terminal tool execution", () => {
+describe("installSessionBridge — early stop on `output`", () => {
+  it("invokes onOutputSettled once on the first successful `output` execution", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         calls += 1;
       },
     });
@@ -1156,13 +1156,13 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(calls).toBe(1);
   });
 
-  it("does NOT invoke onTerminalTool on a failed terminal tool call (validation retry)", () => {
+  it("does NOT invoke onOutputSettled on a failed `output` call (validation retry)", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         calls += 1;
       },
     });
@@ -1180,13 +1180,13 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(calls).toBe(1);
   });
 
-  it("fails the run once the terminal tool has refused its budget of calls", () => {
+  it("fails the run once `output` has refused its budget of calls", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     let exhausted = 0;
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         exhausted += 1;
       },
     });
@@ -1198,7 +1198,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
         isError: true,
       });
 
-    for (let i = 1; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) refuse();
+    for (let i = 1; i < MAX_OUTPUT_REJECTIONS; i += 1) refuse();
     expect(exhausted).toBe(0);
     expect(bridge.getTerminalError()).toBeUndefined();
 
@@ -1237,15 +1237,15 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     let stops = 0;
     const failed = createFakeSession();
     const failedBridge = installSessionBridge(failed, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         stops += 1;
       },
     });
-    for (let i = 0; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) failed.emit(end(true));
+    for (let i = 0; i < MAX_OUTPUT_REJECTIONS; i += 1) failed.emit(end(true));
     failed.emit(end(false));
     expect(stops).toBe(1);
-    expect(failedBridge.terminalToolCompleted).toBe(false);
+    expect(failedBridge.outputCompleted).toBe(false);
     expect(failedBridge.getTerminalError()).toMatchObject({ code: "terminal_tool_rejected" });
 
     // Delivered, then sibling calls are refused: still a success.
@@ -1253,37 +1253,37 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const done = createFakeSession();
     const doneSink = createInternalCapture();
     const doneBridge = installSessionBridge(done, doneSink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         stops += 1;
       },
     });
     done.emit(end(false));
-    for (let i = 0; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) done.emit(end(true));
+    for (let i = 0; i < MAX_OUTPUT_REJECTIONS; i += 1) done.emit(end(true));
     expect(stops).toBe(1);
-    expect(doneBridge.terminalToolCompleted).toBe(true);
+    expect(doneBridge.outputCompleted).toBe(true);
     expect(doneBridge.getTerminalError()).toBeUndefined();
     expect(doneSink.events.find((e) => e.type === "appstrate.error")).toBeUndefined();
   });
 
-  it("does not count a failing non-terminal tool against the budget", () => {
+  it("does not count a failing tool other than `output` against the budget", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
-    for (let i = 0; i <= MAX_TERMINAL_TOOL_REJECTIONS; i += 1) {
+    for (let i = 0; i <= MAX_OUTPUT_REJECTIONS; i += 1) {
       session.emit({ type: "tool_execution_end", toolName: "bash", result: "boom", isError: true });
     }
     expect(bridge.getTerminalError()).toBeUndefined();
   });
 
-  it("does NOT invoke onTerminalTool for non-terminal tools", () => {
+  it("does NOT invoke onOutputSettled for tools other than `output`", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {
+      outputRequired: true,
+      onOutputSettled: () => {
         calls += 1;
       },
     });
@@ -1294,12 +1294,12 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(calls).toBe(0);
   });
 
-  it("treats a trailing aborted turn after a successful terminal tool as clean (no error event, no terminal error)", () => {
+  it("treats a trailing aborted turn after a successful `output` as clean (no error event, no terminal error)", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {},
+      outputRequired: true,
+      onOutputSettled: () => {},
     });
 
     session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
@@ -1318,12 +1318,12 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(bridge.getTerminalError()).toBeUndefined();
   });
 
-  it("treats a provider-normalized abort error after a successful terminal tool as clean", () => {
+  it("treats a provider-normalized abort error after a successful `output` as clean", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {},
+      outputRequired: true,
+      onOutputSettled: () => {},
     });
 
     session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
@@ -1342,12 +1342,12 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(bridge.getTerminalError()).toBeUndefined();
   });
 
-  it("still reports a genuine error turn after a successful terminal tool", () => {
+  it("still reports a genuine error turn after a successful `output`", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {},
+      outputRequired: true,
+      onOutputSettled: () => {},
     });
 
     session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
@@ -1367,12 +1367,12 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     });
   });
 
-  it("keeps aborted-as-failure semantics when no terminal tool completed", () => {
+  it("keeps aborted-as-failure semantics when no `output` completed", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
-      onTerminalTool: () => {},
+      outputRequired: true,
+      onOutputSettled: () => {},
     });
 
     session.pushMessage({

@@ -70,8 +70,8 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
   );
   return createTestApp({
     ...appDeps,
-    runtimeDeps,
-    additionalMcpToolsProvider: () => host.buildTools(),
+    blobStore: runtimeDeps.blobStore,
+    mcpToolsProvider: () => host.buildTools(),
   });
 }
 

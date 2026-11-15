@@ -16,7 +16,7 @@
  * first image that does not fit, it and every older one are replaced by a short
  * text block. User-message images are never touched. MCP images keep their
  * bytes on disk: they are saved under `resources/` and the pointer next to each
- * one names the file (`runtime-tools/resource-spill.ts`).
+ * one names the file (`resource-spill.ts`).
  *
  * The budget bounds the OLDER images only: the newest is always sent whatever
  * its size (Pi keeps the unprocessed original when its resize fails), so one

@@ -44,6 +44,7 @@ import {
   enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
+  INLINE_MANIFEST_RULE,
   RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
@@ -1073,6 +1074,11 @@ function startRunProgress(
   };
 }
 
+/** What a caller composing an inline run tells it about the `log` tool. */
+export const INLINE_LOG_INSTRUCTION =
+  "The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level " +
+  "`prompt` to log meaningful steps whenever that tool is selected.";
+
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -1083,13 +1089,8 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
     type: "object",
     description:
-      "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
-      "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-      "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
-      "provided field is an exact top-level replacement: arrays and nested objects are not " +
-      "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
-      "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
-      "the manifest — it goes in the separate top-level `prompt` argument.",
+      `${INLINE_MANIFEST_RULE} Do NOT put the prompt inside the manifest — it goes in the ` +
+      "separate top-level `prompt` argument.",
     properties: {
       display_name: {
         type: "string",
@@ -1112,14 +1113,6 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
         type: "object",
         description: "Exact AFPS integration configuration override.",
         additionalProperties: true,
-      },
-      runtime_tools: {
-        type: "array",
-        description:
-          "Exact runtime-tool selection. Omit for " +
-          "log/output/publish_file defaults; " +
-          "an explicit [] disables them all.",
-        items: { type: "string" },
       },
       output: {
         type: "object",
@@ -1175,17 +1168,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
-        ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
-          "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-          "publish_file), and an open object output schema. Defaults apply only " +
-          "to fields you omit; " +
-          "every field you provide replaces its default exactly, with no array or nested-object merge. " +
-          "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
-          "A complete deterministic manifest may override every field, including a strict " +
-          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
-          "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        ? `${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION} ` +
+          "Never use an id or a generic display name such as `one-shot`. "
         : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +

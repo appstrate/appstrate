@@ -251,7 +251,7 @@ The profile/member family stays camelCase as a fixed set of names:
 | `runs.metadata`                                                                                                                                 | `degraded_integrations`, …                                                                                                                                                                                     | the run DTO                                                            |
 | `runs.generation_config`, `runs.generation_config_override`, `space_packages.generation_config`, `package_schedules.generation_config_override` | `ModelGenerationSettings` (`packages/core/src/model-generation.ts`): `temperature`, `reasoning_level`                                                                                                          | run DTO (`generation`, `generation_override`), space package, schedule |
 | `runs.token_usage`                                                                                                                              | `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic/OpenAI SDK names)                                                                                         | run DTO `token_usage`                                                  |
-| `notifications.payload`                                                                                                                         | `packageId` (4b), `agent_name`, `status` (`run_failed`); `packageId`, `package_type`, `shared_by_name` (`package_shared`)                                                                                      | `GET /api/notifications`                                               |
+| `notifications.payload`                                                                                                                         | `packageId` (4b), `agent_name`, `status` (`run_failed`); `packageId`, `package_type`, `shared_by_name` (`package_shared`); `packageId`, `title`, `message` (`agent_message`)                                   | `GET /api/notifications`                                               |
 | `spaces.settings`                                                                                                                               | `allowedRedirectDomains` (4n); `branding.{name, logo_url, primary_color, accent_color, support_email, from_name}`                                                                                              | the spaces routes                                                      |
 | `integration_connections.identity_claims`                                                                                                       | the manifest's `identity_claims` keys — snake_case, refused otherwise on every package write (`findNonSnakeCaseIdentityClaimKeys`, see the manifest section); a stored manifest predating the rule still reads | connection DTOs                                                        |
 
@@ -281,9 +281,9 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 #### Carve-out 4i — Run events (CloudEvents-style)
 
-**Files**: `packages/afps-runtime/src/types/canonical-events.ts`, `packages/afps-runtime/src/types/run-result.ts`
+**Files**: `packages/afps-runtime/src/runner/event-builders.ts`, `packages/afps-runtime/src/types/run-result.ts`
 
-**Rule**: event envelopes and payloads are camelCase — `BaseEnvelope`: `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
+**Rule**: event envelopes and payloads are camelCase — the `RunEvent` envelope (`@afps-spec/types`, re-exported by `packages/afps-runtime/src/types/index.ts`): `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
 
 The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{id}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
 
@@ -520,7 +520,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Dependencies subkeys**: `skills`, `integrations`
 
-**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
+**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`
 
 **Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
 

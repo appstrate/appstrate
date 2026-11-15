@@ -50,7 +50,7 @@ import { runs } from "./runs.ts";
  * carries the few fields the bell needs to render without a join.
  */
 /** The notification kinds — `notifications.type`, held by the CHECK below. */
-export const notificationTypeValues = ["run_failed", "package_shared"] as const;
+export const notificationTypeValues = ["run_failed", "package_shared", "agent_message"] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
 /**
@@ -69,6 +69,8 @@ export type RunAlertStatus = (typeof runAlertStatusValues)[number];
 export interface NotificationPayloads {
   run_failed: { packageId: string | null; agent_name: string | null; status: RunAlertStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
+  /** Sent by the agent of `runId` from inside the run (the `notify` tool). */
+  agent_message: { packageId: string | null; title: string; message: string };
 }
 
 export const notifications = pgTable(
@@ -172,11 +174,11 @@ export const notifications = pgTable(
     // One column, not a composite: the cascade states `space_id` and nothing
     // else, and every other read path here is already org-leading.
     index("idx_notifications_space").on(table.spaceId),
-    // Defense-in-depth against a double fan-out: at most one notification of
-    // a given type per (run, recipient). The fan-out path is already
-    // exactly-once (finalizeRun CAS winner), so this never fires in practice
-    // — but it makes a duplicate structurally impossible if that invariant
-    // ever regresses. A single index now that the recipient is one tuple.
+    // At most one notification of a given type per (run, recipient). For
+    // `run_failed` it is defense-in-depth against a double fan-out (the
+    // fan-out path is already exactly-once, finalizeRun CAS winner). For
+    // `agent_message` it is the rule itself: an agent's `notify` reaches each
+    // recipient once per run, and a second call inserts nothing.
     uniqueIndex("uq_notifications_run_recipient_type")
       .on(table.runId, table.recipientType, table.recipientId, table.type)
       .where(sql`${table.runId} IS NOT NULL`),

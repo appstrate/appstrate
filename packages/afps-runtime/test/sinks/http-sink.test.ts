@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { HttpSink } from "../../src/sinks/http-sink.ts";
+import { HttpSink, sinkSiblingUrl } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
 import type { RunEvent } from "@afps-spec/types";
 import type { TerminalRunResult } from "../../src/types/run-result.ts";
@@ -62,15 +62,13 @@ function startTestServer(): ServerContext {
 
 const RUN_SECRET = "test-secret-k9rdqs";
 const SAMPLE_EVENT: RunEvent = {
-  type: "memory.added",
+  type: "@my-org/audit.logged",
   timestamp: 1714000000000,
   runId: "run_http_test",
   content: "sent via http sink",
 };
 const SAMPLE_RESULT: TerminalRunResult = {
-  memories: [{ content: "sent via http sink" }],
-  output: null,
-  logs: [],
+  output: { text: "sent via http sink" },
   status: "success",
   usage: { input_tokens: 3, output_tokens: 2 },
 };
@@ -115,7 +113,7 @@ describe("HttpSink", () => {
 
     const cloudEvent = JSON.parse(req.body);
     expect(cloudEvent.specversion).toBe("1.0");
-    expect(cloudEvent.type).toBe("memory.added");
+    expect(cloudEvent.type).toBe("@my-org/audit.logged");
     expect(cloudEvent.source).toBe("/afps/runs/run_http_test");
     expect(cloudEvent.id).toBe("id_0001");
     // First emitted event is sequence=1. The platform's ingestion endpoint
@@ -470,4 +468,18 @@ describe("HttpSink.abort", () => {
     expect(exitCode).toBe(0);
     expect(performance.now() - started).toBeLessThan(5_000);
   }, 15_000);
+});
+
+describe("sinkSiblingUrl", () => {
+  it("swaps the /events suffix for the endpoint", () => {
+    expect(sinkSiblingUrl("https://x.test/api/runs/run_1/events", "files")).toBe(
+      "https://x.test/api/runs/run_1/files",
+    );
+  });
+
+  it("throws on a URL that is not the events endpoint", () => {
+    expect(() => sinkSiblingUrl("https://x.test/api/runs/run_1/events/", "files")).toThrow(
+      "/events",
+    );
+  });
 });
