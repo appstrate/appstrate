@@ -5,6 +5,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { LogEntryInspector, LogViewer } from "../log-viewer";
 import type { JournalOverviewFilter } from "../log-viewer";
 import type { ExecutionEntry } from "../log-utils";
+import { useJournalIntegrations } from "./journal-integrations";
 
 export function RunExecutionView({
   run,
@@ -24,6 +25,8 @@ export function RunExecutionView({
   // must show the row as it is now.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedEntry = selectedId ? (logs.find((entry) => entry.id === selectedId) ?? null) : null;
+  // Read here once, for the list and the inspector alike.
+  const integrations = useJournalIntegrations(logs);
 
   // Laid on the page like every list tab: the viewer draws its toolbar, then its own card
   // holding the event list and, when a row is open, the inspector beside it.
@@ -31,6 +34,7 @@ export function RunExecutionView({
     <LogViewer
       key={initialFilter ?? "all"}
       entries={logs}
+      integrations={integrations}
       isLoading={logsLoading}
       focusError={run.status === "failed"}
       headerActions={headerActions}
@@ -39,7 +43,11 @@ export function RunExecutionView({
       initialFocus={initialFilter}
       inspector={
         selectedEntry && (
-          <LogEntryInspector entry={selectedEntry} onClose={() => setSelectedId(null)} />
+          <LogEntryInspector
+            entry={selectedEntry}
+            integrations={integrations}
+            onClose={() => setSelectedId(null)}
+          />
         )
       }
     />
