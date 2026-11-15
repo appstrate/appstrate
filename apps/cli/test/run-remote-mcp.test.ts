@@ -19,7 +19,7 @@ import {
 import { verify } from "@appstrate/afps-runtime/events";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { forgetProtocolEras, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
-import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
+import { buildApiCallExtensionFactory, integrationOf } from "@appstrate/runner-pi";
 import { buildRemoteMcpExtensions } from "../src/commands/run/remote-mcp.ts";
 import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
 import {
@@ -145,6 +145,21 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       expect(extensions.unavailable).toEqual([]);
       const result = await tools[1]!.execute("call_1", { q: "hi" });
       expect(result.content).toEqual([{ type: "text", text: "b:hi" }]);
+    } finally {
+      await extensions.close();
+    }
+  });
+
+  it("registers each tool with its integration and its name on the server", async () => {
+    // Taken names push the namespace to `_2`: the identity still names the package.
+    const { extensions, tools } = await wire(makeBundle(), {
+      takenToolNames: new Set(["acme_docs__api_call"]),
+    });
+    try {
+      expect(tools.map((t) => [t.name, integrationOf(t)])).toEqual([
+        ["acme_docs_2__a", { id: DOCS, tool: "a" }],
+        ["acme_docs_2__b", { id: DOCS, tool: "b" }],
+      ]);
     } finally {
       await extensions.close();
     }

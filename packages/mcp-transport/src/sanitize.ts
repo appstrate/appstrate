@@ -33,7 +33,11 @@
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import { API_CALL_TOOL_META_KEY, API_UPLOAD_TOOL_META_KEY } from "./tool-meta.ts";
+import {
+  API_CALL_TOOL_META_KEY,
+  API_UPLOAD_TOOL_META_KEY,
+  TOOL_INTEGRATION_META_KEY,
+} from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
 export const MAX_PARAMETER_DESCRIPTION_BYTES = 512;
@@ -155,7 +159,8 @@ function sanitiseSchemaDescriptions(schema: unknown, depth = 0): unknown {
  * Strip first-party capability markers from an untrusted tool descriptor while
  * preserving every unrelated metadata entry. The runtime treats these markers
  * as privileged routing claims: allowing a third-party MCP server to forge one
- * could make it impersonate the sidecar's credential proxy or upload sibling.
+ * could make it impersonate the sidecar's credential proxy or upload sibling,
+ * or report its calls as another integration's.
  *
  * `McpHost` deliberately bypasses {@link sanitiseToolDescriptor} for trusted
  * first-party tools, so genuine sidecar markers never pass through this filter.
@@ -164,7 +169,13 @@ function sanitiseToolMeta(meta: Tool["_meta"]): Tool["_meta"] | undefined {
   if (!meta) return undefined;
   const out: NonNullable<Tool["_meta"]> = {};
   for (const [key, value] of Object.entries(meta)) {
-    if (key === API_CALL_TOOL_META_KEY || key === API_UPLOAD_TOOL_META_KEY) continue;
+    if (
+      key === API_CALL_TOOL_META_KEY ||
+      key === API_UPLOAD_TOOL_META_KEY ||
+      key === TOOL_INTEGRATION_META_KEY
+    ) {
+      continue;
+    }
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;

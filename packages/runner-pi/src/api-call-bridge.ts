@@ -18,6 +18,7 @@ import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "./runtime-event.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
+import { registerIntegrationTool } from "./tool-integration.ts";
 import {
   apiCallRequestJsonSchema,
   apiCallTargetJsonSchema,
@@ -90,7 +91,7 @@ export async function buildApiCallExtensionFactory(
   // tool so the index pairing below stays aligned with the resolver's
   // (ref, auth) iteration order.
   const refsWithApiCall: IntegrationRef[] = [];
-  const perTool: { integrationId: string; selected: boolean }[] = [];
+  const perTool: { integrationId: string; toolName: string; selected: boolean }[] = [];
   for (const ref of refs) {
     const metas = readApiCallIntegrationMetas(opts.bundle, ref);
     const selected = selectedApiCallToolNames(
@@ -100,7 +101,11 @@ export async function buildApiCallExtensionFactory(
     if (!metas.some((m) => selected.has(m.toolName))) continue;
     refsWithApiCall.push(ref);
     for (const meta of metas) {
-      perTool.push({ integrationId: ref.name, selected: selected.has(meta.toolName) });
+      perTool.push({
+        integrationId: ref.name,
+        toolName: meta.toolName,
+        selected: selected.has(meta.toolName),
+      });
     }
   }
   if (refsWithApiCall.length === 0) return NO_EXTENSIONS;
@@ -115,9 +120,10 @@ export async function buildApiCallExtensionFactory(
   const toolNames = new Set<string>();
   for (let i = 0; i < tools.length; i++) {
     const tool = tools[i]!;
-    if (perTool[i]?.selected === false) continue;
-    const integrationId = perTool[i]?.integrationId ?? tool.name;
-    factories.push(makeApiCallExtension(tool, integrationId, opts));
+    const owner = perTool[i];
+    if (owner?.selected === false) continue;
+    const integrationId = owner?.integrationId ?? tool.name;
+    factories.push(makeApiCallExtension(tool, integrationId, owner?.toolName, opts));
     integrationIds.add(integrationId);
     toolNames.add(tool.name);
   }
@@ -140,13 +146,17 @@ function selectedApiCallToolNames(
   return new Set(selectedApiCallConfigs(integration, selection).map((cfg) => cfg.toolName));
 }
 
+/** `upstreamName`: the tool's name within its integration (`api_call…`), as the sidecar names it. */
 function makeApiCallExtension(
   tool: AfpsTool,
   integrationId: string,
+  upstreamName: string | undefined,
   opts: BuildApiCallExtensionFactoryOptions,
 ): ExtensionFactory {
+  const integration =
+    upstreamName !== undefined ? { id: integrationId, tool: upstreamName } : undefined;
   return (pi: ExtensionAPI) => {
-    pi.registerTool({
+    registerIntegrationTool(pi, integration, {
       name: tool.name,
       label: tool.name,
       description: tool.description,

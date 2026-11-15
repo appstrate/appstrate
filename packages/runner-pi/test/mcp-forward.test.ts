@@ -4,8 +4,9 @@ import { afterAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { CallToolResult } from "@appstrate/mcp-transport";
+import { TOOL_INTEGRATION_META_KEY, type CallToolResult } from "@appstrate/mcp-transport";
 import { mcpToolForwardFactory, type McpToolForwardOptions } from "../src/mcp-forward.ts";
+import { integrationOf } from "../src/tool-integration.ts";
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-forward-"));
 afterAll(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -54,6 +55,19 @@ describe("mcpToolForwardFactory", () => {
       ["integration_tool.called", "docs__search", "call_1", undefined],
       ["integration_tool.completed", "docs__search", "call_1", false],
     ]);
+  });
+
+  it("records the integration tool its host stamped on the descriptor, none without one", () => {
+    const integration = { id: "@acme/docs", tool: "search", title: "Search" };
+    const { tool } = forward(text(""), {
+      tool: {
+        name: "docs__search",
+        inputSchema: { type: "object" },
+        _meta: { [TOOL_INTEGRATION_META_KEY]: integration },
+      },
+    });
+    expect(integrationOf(tool)).toEqual(integration);
+    expect(integrationOf(forward(text("")).tool)).toBeUndefined();
   });
 
   it("spills an embedded resource to the workspace", async () => {

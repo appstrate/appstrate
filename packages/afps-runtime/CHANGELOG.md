@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the integration tool on tool events (#2233)
+
+- `buildToolStartProgress` and `buildToolResultProgress` take an optional `integration`
+  (`{ id, tool, title? }`) and put it in `data`: the integration's package id, the tool's name on
+  its server and, when the server gives one, its title. The Pi runner passes it for every tool an
+  integration serves; a harness tool (`output`, `publish_file`) carries none.
+
 ### Removed — the stdout bridge (#2199)
 
 - **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`

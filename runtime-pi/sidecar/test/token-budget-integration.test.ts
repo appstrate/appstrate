@@ -129,6 +129,7 @@ async function buildTestApp(opts: {
   if (opts.thirdParty) {
     const pair = await createInProcessPair(opts.thirdParty);
     await host.register({
+      integrationId: "fs",
       namespace: "fs",
       client: wrapClient(pair.client, { close: () => pair.close() }),
     });

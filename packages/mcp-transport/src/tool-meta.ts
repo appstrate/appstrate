@@ -81,3 +81,28 @@ export function readApiCallToolKey(tool: ToolMetaCarrier): string | undefined {
 export function readApiUploadSiblingKey(tool: ToolMetaCarrier): string | undefined {
   return readMarkerField(tool, API_UPLOAD_TOOL_META_KEY, "api_call_tool_key");
 }
+
+/**
+ * `_meta` key naming the integration tool an exposed descriptor serves, since the exposed name is
+ * lossy. Written by `withToolIntegration`; stripped from untrusted descriptors.
+ */
+export const TOOL_INTEGRATION_META_KEY = "dev.appstrate/integration";
+
+/** Payload of {@link TOOL_INTEGRATION_META_KEY}. */
+export interface ToolIntegration {
+  /** Integration package id (`@scope/name`). */
+  id: string;
+  /** The tool's name on its server. */
+  tool: string;
+  /** The server's `title`, else `annotations.title`. */
+  title?: string;
+}
+
+/** An empty field reads as absent. */
+export function readToolIntegration(tool: ToolMetaCarrier): ToolIntegration | undefined {
+  const id = readMarkerField(tool, TOOL_INTEGRATION_META_KEY, "id");
+  const name = readMarkerField(tool, TOOL_INTEGRATION_META_KEY, "tool");
+  if (id === undefined || name === undefined) return undefined;
+  const title = readMarkerField(tool, TOOL_INTEGRATION_META_KEY, "title");
+  return { id, tool: name, ...(title !== undefined ? { title } : {}) };
+}

@@ -23,6 +23,7 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
+import { integrationOf } from "@appstrate/runner-pi";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
 import { McpHost } from "../sidecar/mcp-host.ts";
@@ -136,6 +137,7 @@ async function registerApiSurface(
   const pair = await createInProcessPair(defs);
   await host.register({
     connection: CONN_A,
+    integrationId: integration.integrationId,
     namespace: integration.namespace,
     client: wrapClient(pair.client, { close: () => pair.close() }),
     trusted: true,
@@ -282,6 +284,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
       ]);
       await host.register({
         connection: CONN_A,
+        integrationId: "browser",
         namespace: "browser",
         client: wrapClient(browser.client, { close: () => browser.close() }),
       });
@@ -430,6 +433,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
       ]);
       await host.register({
         connection: CONN_A,
+        integrationId: "@appstrate/google-drive",
         namespace: "drive",
         intoNamespace: "drive",
         client: wrapClient(forged.client, { close: () => forged.close() }),
@@ -577,6 +581,56 @@ describe("buildMcpDirectFactories — integration tools", () => {
 const echo: (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> = async () => ({ content: [{ type: "text", text: "{}" }] });
+
+describe("buildMcpDirectFactories — integration identity", () => {
+  it("registers every tool of the sidecar's host with its integration tool, api_call and api_upload included", async () => {
+    const host = new McpHost();
+    let gateway: Awaited<ReturnType<typeof createInProcessPair>> | undefined;
+    const native = await createInProcessPair([
+      {
+        descriptor: { name: "files.list", title: "List files", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [] }),
+      },
+    ]);
+    try {
+      await registerApiSurface(
+        host,
+        apiIntegration("drive", "@appstrate/google-drive", ["google-resumable"]),
+        async () => upstreamResult(200, {}),
+      );
+      await host.register({
+        connection: CONN_A,
+        integrationId: "@appstrate/google-drive",
+        namespace: "drive",
+        intoNamespace: "drive",
+        client: wrapClient(native.client, { close: () => native.close() }),
+      });
+      gateway = await createInProcessPair(host.buildTools());
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
+        runId: "run-identity",
+        emit: () => {},
+        workspace: "/tmp",
+      });
+      const definitions: Array<{ name: string }> = [];
+      for (const factory of factories) {
+        factory({ registerTool: (d: { name: string }) => definitions.push(d) } as never);
+      }
+      expect(Object.fromEntries(definitions.map((d) => [d.name, integrationOf(d)]))).toEqual({
+        drive__files_list: {
+          id: "@appstrate/google-drive",
+          tool: "files.list",
+          title: "List files",
+        },
+        drive__api_call: { id: "@appstrate/google-drive", tool: "api_call" },
+        drive__api_upload: { id: "@appstrate/google-drive", tool: "api_upload" },
+      });
+    } finally {
+      await gateway?.close();
+      await host.dispose();
+    }
+  });
+});
 
 describe("buildMcpDirectFactories — result _meta", () => {
   // A sidecar tool whose result `_meta` carries a canonical event shape. The

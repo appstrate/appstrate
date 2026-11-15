@@ -12,6 +12,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import type { Tool as AfpsTool, ToolResult } from "@appstrate/afps-runtime/resolvers";
 import { buildApiCallExtensionFactory } from "../src/api-call-bridge.ts";
+import { integrationOf } from "../src/tool-integration.ts";
 import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 const INTEGRATION = "@acme/api";
@@ -99,10 +100,20 @@ async function registerApiCall(execute: AfpsTool["execute"]) {
     parameters: unknown;
   }> = [];
   factory!({ registerTool: (t: never) => registered.push(t) } as never);
-  return { execute: registered[0]!.execute, parameters: registered[0]!.parameters, events };
+  return {
+    definition: registered[0]!,
+    execute: registered[0]!.execute,
+    parameters: registered[0]!.parameters,
+    events,
+  };
 }
 
 describe("buildApiCallExtensionFactory", () => {
+  it("records the integration and the api_call tool's name within it, as the sidecar names it", async () => {
+    const { definition } = await registerApiCall(async () => ({ content: [] }));
+    expect(integrationOf(definition)).toEqual({ id: INTEGRATION, tool: "api_call" });
+  });
+
   it("throws an `isError` result as a Pi tool error, reported as completed", async () => {
     const { execute, events } = await registerApiCall(async (): Promise<ToolResult> => ({
       content: [{ type: "text", text: '{"status":404}' }],

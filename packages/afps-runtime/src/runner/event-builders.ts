@@ -40,10 +40,25 @@ export function buildProgress(base: EventBase, message: string): RunEvent {
   };
 }
 
-/** Tool invocation start → `appstrate.progress` carrying `{ tool, args, toolCallId? }`. */
+/** Same shape as `ToolIntegration` (`@appstrate/mcp-transport`); absent on harness tools. */
+interface ToolEventIntegration {
+  id: string;
+  tool: string;
+  title?: string;
+}
+
+/**
+ * Tool invocation start → `appstrate.progress` carrying `{ tool, args, toolCallId?,
+ * integration? }`.
+ */
 export function buildToolStartProgress(
   base: EventBase,
-  input: { tool: string | undefined; args: unknown; toolCallId?: string },
+  input: {
+    tool: string | undefined;
+    args: unknown;
+    toolCallId?: string;
+    integration?: ToolEventIntegration;
+  },
 ): RunEvent {
   return {
     type: "appstrate.progress",
@@ -54,13 +69,14 @@ export function buildToolStartProgress(
       tool: input.tool,
       args: input.args,
       ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+      ...(input.integration !== undefined ? { integration: input.integration } : {}),
     },
   };
 }
 
 /**
  * Tool result → `appstrate.progress` carrying `{ tool?, result, isError,
- * toolCallId?, durationMs? }`. `tool` is optional: the Pi SDK reports the tool
+ * toolCallId?, durationMs?, integration? }`. `tool` is optional: the Pi SDK reports the tool
  * name on its end event, but a caller that only has a tool-use id can pass no
  * name — and the message then omits the `: <tool>` suffix and the `tool` data
  * field accordingly.
@@ -80,6 +96,7 @@ export function buildToolResultProgress(
     isError: boolean;
     toolCallId?: string;
     durationMs?: number;
+    integration?: ToolEventIntegration;
   },
 ): RunEvent {
   const label = input.isError ? "Tool error" : "Tool result";
@@ -94,6 +111,7 @@ export function buildToolResultProgress(
       isError: input.isError,
       ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.integration !== undefined ? { integration: input.integration } : {}),
     },
   };
 }

@@ -15,6 +15,8 @@ import {
   isApiUploadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
+  readToolIntegration,
+  TOOL_INTEGRATION_META_KEY,
 } from "../src/tool-meta.ts";
 
 describe("isApiCallTool / isApiUploadTool", () => {
@@ -85,5 +87,41 @@ describe("readApiCallToolKey / readApiUploadSiblingKey", () => {
         _meta: { [API_UPLOAD_TOOL_META_KEY]: { api_call_tool_key: "api_call" } },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("readToolIntegration", () => {
+  it("reads the integration tool a descriptor exposes, its title when present", () => {
+    expect(
+      readToolIntegration({
+        _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "@acme/gh", tool: "list_issues" } },
+      }),
+    ).toEqual({ id: "@acme/gh", tool: "list_issues" });
+    expect(
+      readToolIntegration({
+        _meta: {
+          [TOOL_INTEGRATION_META_KEY]: { id: "@acme/gh", tool: "list_issues", title: "Issues" },
+        },
+      }),
+    ).toEqual({ id: "@acme/gh", tool: "list_issues", title: "Issues" });
+  });
+
+  it("is undefined without a complete identity", () => {
+    expect(readToolIntegration({})).toBeUndefined();
+    expect(
+      readToolIntegration({ _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "@acme/gh" } } }),
+    ).toBeUndefined();
+    expect(
+      readToolIntegration({ _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "", tool: "x" } } }),
+    ).toBeUndefined();
+    expect(
+      readToolIntegration({ _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "@acme/gh", tool: "" } } }),
+    ).toBeUndefined();
+    expect(
+      readToolIntegration({
+        _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "@acme/gh", tool: "x", title: "" } },
+      }),
+    ).toEqual({ id: "@acme/gh", tool: "x" });
+    expect(readToolIntegration({ _meta: { [TOOL_INTEGRATION_META_KEY]: "x" } })).toBeUndefined();
   });
 });

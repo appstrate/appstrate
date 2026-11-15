@@ -47,6 +47,8 @@ import {
 } from "./harness-tools.ts";
 import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
+import { integrationOf } from "./tool-integration.ts";
+import type { ToolIntegration } from "@appstrate/mcp-transport";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
@@ -764,6 +766,7 @@ export class PiRunner {
       ...(this.opts.toolResultByteLimit !== undefined
         ? { toolResultByteLimit: this.opts.toolResultByteLimit }
         : {}),
+      toolIntegration: (toolName) => integrationOf(session.getToolDefinition(toolName)),
       // Abort the SDK loop as soon as `output` has settled the run
       // (delivered, or refused too often). `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1225,8 +1228,8 @@ export interface BridgeableSession {
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
  *   - `message_end`    (turn usage deltas)     → `appstrate.progress` + data { event: "turn", … }
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
- *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
- *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
+ *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args, integration? }
+ *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs?, integration? }
  *   - `compaction_end` (summarisation usage)   → `appstrate.progress` + data { event: "compaction", … } + `appstrate.metric`
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
@@ -1435,6 +1438,8 @@ interface SessionBridgeOptions {
   cost?: ModelCost;
   /** See {@link PiRunnerOptions.toolResultByteLimit}. */
   toolResultByteLimit?: number;
+  /** Stamped as `integration` on both events of the tool `toolName`. */
+  toolIntegration?: (toolName: string) => ToolIntegration | undefined;
 }
 
 export function installSessionBridge(
@@ -1505,6 +1510,8 @@ export function installSessionBridge(
   // `toolCallId` ONLY — a tool-name fallback would cross-attribute a parallel
   // batch of two `bash` calls, which is worse than no timing at all.
   const toolCallStarts = new Map<string, number>();
+  const integrationOfTool = (toolName: string | undefined): ToolIntegration | undefined =>
+    toolName === undefined ? undefined : options.toolIntegration?.(toolName);
 
   // Per-turn context-growth tracking. `settledTurnIndex` counts every settled
   // assistant turn (1-based), so a gap in the emitted breadcrumbs is itself
@@ -1719,6 +1726,7 @@ export function installSessionBridge(
         // (the LLM can dispatch a parallel batch and the results land
         // out-of-order). Optional — omitted from `data` when the SDK gave none.
         if (e.toolCallId !== undefined) toolCallStarts.set(e.toolCallId, Date.now());
+        const integration = integrationOfTool(e.toolName);
         fire(
           buildToolStartProgress(
             { runId, timestamp: Date.now() },
@@ -1726,6 +1734,7 @@ export function installSessionBridge(
               tool: e.toolName,
               args: e.args,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+              ...(integration !== undefined ? { integration } : {}),
             },
           ),
         );
@@ -1748,6 +1757,7 @@ export function installSessionBridge(
         // honest, a zero would read as an instant call.
         const startedAt = e.toolCallId !== undefined ? toolCallStarts.get(e.toolCallId) : undefined;
         if (e.toolCallId !== undefined) toolCallStarts.delete(e.toolCallId);
+        const integration = integrationOfTool(e.toolName);
         fire(
           buildToolResultProgress(
             { runId, timestamp: Date.now() },
@@ -1757,6 +1767,7 @@ export function installSessionBridge(
               isError: e.isError === true,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
               ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),
+              ...(integration !== undefined ? { integration } : {}),
             },
           ),
         );

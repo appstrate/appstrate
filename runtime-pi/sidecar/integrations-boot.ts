@@ -1245,6 +1245,7 @@ async function registerLocalIntegration(
 ): Promise<{ allocatedNs: string; toolCount: number }> {
   const sizeBefore = host.routeCount();
   const allocatedNs = await host.register({
+    integrationId: spec.integrationId,
     namespace: spec.namespace,
     client: wrapped,
     connection: spec.connection,
@@ -1866,6 +1867,7 @@ export async function bootIntegrations(
       const sizeBefore = host.routeCount();
       const merging = sharedNamespace !== undefined;
       const allocatedNamespace = await host.register({
+        integrationId: spec.integrationId,
         namespace: spec.namespace,
         client: wrapped,
         connection,
@@ -1929,6 +1931,7 @@ export async function bootIntegrations(
         const { client, authKey } = upstream;
         const sizeBefore = host.routeCount();
         const allocatedNs = await host.register({
+          integrationId: spec.integrationId,
           namespace: spec.namespace,
           client,
           connection,

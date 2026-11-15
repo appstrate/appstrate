@@ -477,8 +477,9 @@ export {
 } from "./sanitize.ts";
 
 // Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor
-// the model sees under the exposed name. Shared by the sidecar's McpHost and the CLI.
-export { exposeTool, toolExclusion } from "./tool-exposure.ts";
+// the model sees under the exposed name, stamped with the integration tool it exposes. Shared by
+// the sidecar's McpHost and the CLI.
+export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
 export { mcpFetch } from "./mcp-fetch.ts";
@@ -507,6 +508,9 @@ export {
   isApiUploadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
+  readToolIntegration,
+  TOOL_INTEGRATION_META_KEY,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
+  type ToolIntegration,
 } from "./tool-meta.ts";
