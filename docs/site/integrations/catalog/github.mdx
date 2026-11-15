@@ -15,7 +15,7 @@ GitHub hosts code and collaboration. Appstrate ships three GitHub integrations, 
 
 **GitHub (MCP)** accepts an OAuth App registered by an administrator (GitHub's MCP server does not support dynamic client registration) or a personal access token, classic or fine-grained, pasted into the connect form. With OAuth, consent asks only for the scopes the selected tools use; a token carries whatever permissions you gave it. This integration allows `tools: "*"`, so an agent can select every tool the server advertises, but prefer an explicit list.
 
-**GitHub Git** runs the `@appstrate/github-git-mcp` server in a sandboxed runner container, with a per-run workspace at `/workspace`, and shells out to `git`. The agent edits the files with its own file tools. Its tools are `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push` and `open_pr`. It needs the `docker` or `firecracker` run adapter.
+**GitHub Git** runs its bundled MCP server in a sandboxed runner container, with a per-run workspace at `/workspace`, and shells out to `git`. The agent edits the files with its own file tools. Its tools are `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push` and `open_pr`. It needs the `docker` or `firecracker` run adapter.
 
 ## Connect GitHub
 

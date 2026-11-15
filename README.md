@@ -27,10 +27,9 @@ Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format 
                 └───────────────────────────────┘
 ```
 
-- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, mcp-servers, integrations), and its input/output schemas. There is no separate `config` schema: migration `0040_config_into_input` folded that second parameter namespace into `input`, leaving one. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
+- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, integrations), and its input/output schemas. There is no separate `config` schema: migration `0040_config_into_input` folded that second parameter namespace into `input`, leaving one. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
 - A **skill** adds knowledge — reusable instructions the agent follows during a run (`SKILL.md` + the [Anthropic Agent Skills](https://agentskills.io/) format).
-- An **mcp-server** adds runnable tools. A packaged MCP Bundle (MCPB-vocabulary `server` / `tools` / `user_config`) that runs as a subprocess and speaks JSON-RPC. The agent calls its tools through the sidecar. `server.type ∈ { node, python, binary, uv }` with an optional `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override for Bun-native servers.
-- An **integration** adds authenticated access to an external service. Declares a `source` (local mcp-server, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
+- An **integration** adds authenticated access to an external service. Declares a `source` (local MCP server shipped inside the integration archive, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
 
 Agents are **prompt-driven**: the AI coding agent inside the container interprets the goal and writes its own execution code. Change the prompt, change the behavior — no node graphs, no pre-scripted steps.
 
@@ -205,7 +204,7 @@ appstrate/
 │   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
-├── system-packages/           # System package `.afps` archives — integrations + one mcp-server, loaded at boot
+├── system-packages/           # System package `.afps` archives — integrations (a local integration carries its MCP server), loaded at boot
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
@@ -222,7 +221,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | Domain                  | Description                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | **Auth**                | Better Auth email/password + cookie sessions                                                                                    |
-| **Agents**              | Agent CRUD, input settings, skills/mcp-servers/integrations binding, versions, bundle export                                    |
+| **Agents**              | Agent CRUD, input settings, skills/integrations binding, versions, bundle export                                                |
 | **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension                             |
 | **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                                                    |
 | **Schedules**           | Cron-based agent scheduling                                                                                                     |

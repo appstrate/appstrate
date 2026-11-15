@@ -21,12 +21,11 @@ It is published under CC-BY-4.0, and the schemas and TypeScript types are on npm
 
 AFPS defines four types. Appstrate stores, versions, and runs all four.
 
-| Type          | What it is                                                                                                                                               | Main file                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `agent`       | A goal for an agent to pursue, with the resources it depends on, and optional input, output, and configuration schemas                                   | `prompt.md`                                                     |
-| `skill`       | Reusable instructions, compatible with Anthropic's Agent Skills                                                                                          | `SKILL.md` (with optional `scripts/`, `references/`, `assets/`) |
-| `mcp-server`  | A runnable MCP tool server, described with the MCPB vocabulary (`node`, `python`, `binary`, `uv`)                                                        | the entry point named in the manifest                           |
-| `integration` | A connection to a service: its authentication methods, the URLs it may call, and the MCP tools it exposes, backed by an `mcp-server` or a remote MCP URL | `manifest.json`                                                 |
+| Type          | What it is                                                                                                                                                                                    | Main file                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `agent`       | A goal for an agent to pursue, with the resources it depends on, and optional input, output, and configuration schemas                                                                        | `prompt.md`                                                     |
+| `skill`       | Reusable instructions, compatible with Anthropic's Agent Skills                                                                                                                               | `SKILL.md` (with optional `scripts/`, `references/`, `assets/`) |
+| `integration` | A connection to a service: its authentication methods, the URLs it may call, and the MCP tools it exposes, backed by a local MCP server declared inline (`source.server`) or a remote MCP URL | `manifest.json`                                                 |
 
 Packages are identified by a scoped name, `@scope/name`, and versioned with semver.
 

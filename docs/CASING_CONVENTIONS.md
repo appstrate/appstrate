@@ -518,7 +518,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Common** (every package type): `name`, `version`, `type`, `display_name`, `description`, `long_description`, `keywords`, `license`, `author`, `repository`, `homepage`, `documentation`, `support`, `icon`, `icons[].{src, theme, …}`, `screenshots`, `privacy_policies`, `compatibility.{platforms, runtimes, clients}`, `schema_version`, `dependencies`, `_meta`
 
-**Dependencies subkeys**: `skills`, `mcp_servers`, `integrations`
+**Dependencies subkeys**: `skills`, `integrations`
 
 **Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
 
@@ -529,12 +529,11 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 - `file_constraints.{key}`: `accept`, `max_size`
 - `ui_hints.{key}`: `placeholder`
 
-**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override; per AFPS the mcp-server manifest is AFPS-native at the root — no `_meta["dev.afps/mcp-server"]` identity wrapper)
-
 **Integration**:
 
 - `source.kind`: `"local" | "remote" | "none"`
-- `source.server.{name, version, vendored}`
+- `source.server.{type, entry_point, mcp_config, tools}`, `source.server.mcp_config.{command, args, env, platform_overrides}`, `source.server.tools[].{name, description}`
+- `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override of the local server, on the integration manifest)
 - `source.remote.{url, transport}`
 - `_meta["dev.appstrate/api"].auths.<key>.upload_protocols`
 - `auths.{key}.{type, issuer, authorization_endpoint, token_endpoint, userinfo_endpoint, token_endpoint_auth_method, code_challenge_methods_supported, resource, authorization_params, default_scopes, scope_catalog, identity_claims, required_identity_claims, credentials, connect, delivery, authorized_uris, allow_all_uris, callback_url_hint}`
@@ -544,7 +543,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 - `auths.{key}.connect.login.{request, success_criteria, outputs, expires_in_output, identity_outputs}`
 - `auths.{key}.connect.limits.{request_timeout_ms, max_response_bytes}`
 - `auths.{key}.delivery.http.{in, name, prefix, value, encoding, allow_server_override}`
-- `auths.{key}.delivery.env.{key}.{value, sensitive, user_config_key}`
+- `auths.{key}.delivery.env.{key}.{value, sensitive}`
 - `auths.{key}.delivery.files.{key}.{value, mode}`
 - `tools_policy.{name}.required_scopes` — a map keyed by auth key (`{ "<auth_key>": ["scope", …] }`)
 - `hidden_tools`
