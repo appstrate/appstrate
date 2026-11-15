@@ -421,7 +421,9 @@ function ConversationTitle({
   // you are, and it carries the same weight in both products. Renaming is a
   // write, so a reader gets the name alone.
   if (!can("chat:write")) {
-    return <span className="min-w-0 truncate px-1.5 text-sm font-semibold">{title}</span>;
+    return (
+      <span className="text-foreground min-w-0 truncate px-1.5 text-sm font-semibold">{title}</span>
+    );
   }
 
   if (editing) {
@@ -441,7 +443,9 @@ function ConversationTitle({
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
       title={t("common:btn.rename")}
     >
-      <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{title}</span>
+      <span className="text-foreground min-w-0 flex-1 truncate text-left text-sm font-semibold">
+        {title}
+      </span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />
     </button>
   );

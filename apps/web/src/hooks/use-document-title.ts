@@ -7,7 +7,8 @@ const APP_NAME = "Appstrate";
 
 /** The tab's title: where the header's trail ends (a page's or a detail bar's own title), else the app's name. */
 export function documentTitle(trail: readonly BreadcrumbEntry[]): string {
-  const named = trail.filter((crumb) => !crumb.slot && crumb.label);
+  // A slot counts once it carries its label (a conversation's title); while it loads its label is empty.
+  const named = trail.filter((crumb) => crumb.label);
   const current = named[named.length - 1];
   return current ? `${current.label} · ${APP_NAME}` : APP_NAME;
 }

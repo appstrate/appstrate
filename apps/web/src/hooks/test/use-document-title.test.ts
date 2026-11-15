@@ -14,12 +14,18 @@ describe("documentTitle", () => {
     );
   });
 
-  it("skips a slot, which the page draws itself", () => {
+  it("skips a slot still loading, then names it once it carries its label", () => {
     expect(
       documentTitle([
         { label: "Chat", href: "/chat" },
         { label: "", slot: true },
       ]),
     ).toBe("Chat · Appstrate");
+    expect(
+      documentTitle([
+        { label: "Chat", href: "/chat" },
+        { label: "Bilan du trimestre", slot: true },
+      ]),
+    ).toBe("Bilan du trimestre · Appstrate");
   });
 });
