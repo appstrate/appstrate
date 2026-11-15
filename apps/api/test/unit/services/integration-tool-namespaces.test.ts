@@ -59,6 +59,89 @@ describe("remoteToolName", () => {
   });
 });
 
+/** The bodies of the platform's own tools: no typed tool's body is one or starts with one. */
+const RESERVED = ["api_call", "api_upload"];
+const isReserved = (body: string) =>
+  RESERVED.some((name) => body === name || body.startsWith(`${name}__`));
+
+/** A deterministic xorshift32 stream: the same names on every run. */
+function* names(seed: number, count: number): Generator<string> {
+  const alphabet = ["a", "Z", "0", "9", "f", "_", "-", ".", "?", "é", " ", "/", "__"];
+  const stems = ["", "api_call", "api_upload", "api_call__", "api_upload__", "x", "_"];
+  let state = seed;
+  const next = () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return state >>> 0;
+  };
+  for (let i = 0; i < count; i++) {
+    let name = stems[next() % stems.length]!;
+    const length = next() % 70;
+    for (let j = 0; j < length; j++) name += alphabet[next() % alphabet.length]!;
+    if (next() % 4 === 0) name += `_${fnv1a64Hex(name).slice(0, 8)}`;
+    yield name;
+  }
+}
+
+describe("remoteToolName, for every upstream name", () => {
+  const explicit = [
+    "api_call.",
+    "api_uploadé",
+    "api_call__",
+    "api_call?",
+    "a.b",
+    "export_20240101",
+  ];
+
+  it("is valid, never reserved, and a hashed body holds no `__`, whatever the namespace length", () => {
+    const upstream = [...explicit, ...names(0x2206, 3_000)];
+    for (let length = 1; length <= 37; length++) {
+      const namespace = "n".repeat(length);
+      for (const raw of upstream) {
+        const name = remoteToolName(namespace, raw);
+        expect(isValidMcpToolName(name)).toBe(true);
+        expect(name.length).toBeLessThanOrEqual(56);
+        const body = name.slice(namespace.length + 2);
+        expect(isReserved(body)).toBe(false);
+        if (body !== raw) expect(body.includes("__")).toBe(false);
+      }
+    }
+  });
+
+  it("gives a reserved-looking name a hashed body that is no reserved form", () => {
+    for (const raw of ["api_call.", "api_uploadé", "api_call__", "api_call?"]) {
+      const body = remoteToolName("a", raw).slice("a__".length);
+      expect(body).toMatch(new RegExp(`^api_(call|upload)_${hash(raw, 8)}$`));
+    }
+  });
+
+  it("never exposes a raw name shaped like a hashed body under its plain form", () => {
+    const shaped = `a_b_${hash("a.b", 8)}`;
+    expect(remoteToolName("gh", "a.b")).toBe(`gh__${shaped}`);
+    expect(remoteToolName("gh", shaped)).toBe(`gh__${shaped}_${hash(shaped, 8)}`);
+    expect(remoteToolName("gh", "export_20240101")).toBe(
+      `gh__export_20240101_${hash("export_20240101", 8)}`,
+    );
+    expect(remoteToolName("gh", "deadbeef")).toBe(`gh__deadbeef_${hash("deadbeef", 8)}`);
+  });
+
+  it("never gives a plain name and a hashed name the same exposed name", () => {
+    const upstream = [...explicit, ...names(0x2209, 3_000)];
+    for (const namespace of ["gh", "n".repeat(37)]) {
+      const plain = new Set<string>();
+      const hashed = new Set<string>();
+      for (const raw of upstream) {
+        const name = remoteToolName(namespace, raw);
+        (name === `${namespace}__${raw}` && !/(?:^|_)[0-9a-f]{8}$/.test(raw) ? plain : hashed).add(
+          name,
+        );
+      }
+      for (const name of plain) expect(hashed.has(name)).toBe(false);
+    }
+  });
+});
+
 describe("integrationNamespaces", () => {
   it("hashes apart a namespace the length cut leaves equal to another, its trailing `_` dropped", () => {
     const cut = "@acme/abcdefghijklmn-op";

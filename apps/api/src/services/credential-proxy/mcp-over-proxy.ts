@@ -382,7 +382,11 @@ export function mcpServerFailure(
     origin,
     error: untrustedText(getErrorMessage(err)),
   });
-  const protocolError = upstreamProxyStatus({ error: "http_protocol_error" });
+  // A response generated from the server's answer: its HTTP status, when one was received.
+  const protocolError = upstreamProxyStatus({
+    error: "http_protocol_error",
+    ...(input.receivedStatus !== undefined ? { receivedStatus: input.receivedStatus } : {}),
+  });
   const tooLarge = findCause(err, (e) => e instanceof McpExchangeTooLargeError);
   if (tooLarge instanceof McpExchangeTooLargeError) {
     return new ApiError({
@@ -398,7 +402,7 @@ export function mcpServerFailure(
     if (input.unauthenticated) {
       return gatewayFault(
         `${server} asks for a credential (HTTP ${status}), but the integration declares no authentication.`,
-        upstreamProxyStatus({ receivedStatus: status }),
+        upstreamProxyStatus({ error: "http_protocol_error", receivedStatus: status }),
       );
     }
     const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
@@ -425,11 +429,8 @@ export function mcpServerFailure(
   if (rpc) {
     const mcpError = { code: rpc.code, message: untrustedText(rpc.message) };
     const detail = `${server} answered JSON-RPC error ${rpc.code}; \`mcp_error.message\` is its own text.`;
-    // The server answered valid HTTP; what it carried is a JSON-RPC error.
-    const headers =
-      input.receivedStatus !== undefined
-        ? upstreamProxyStatus({ receivedStatus: input.receivedStatus })
-        : protocolError;
+    // The server answered valid HTTP carrying a JSON-RPC error: refused params are the
+    // caller's request (`http_request_error`), any other error the server's (`http_protocol_error`).
     return rpc.code === JSON_RPC_INVALID_PARAMS && input.toolCall
       ? new ApiError({
           status: 422,
@@ -437,7 +438,10 @@ export function mcpServerFailure(
           title: "Upstream Invalid Params",
           detail: `${detail} The server refused the arguments or the tool name.`,
           extensions: { mcp_error: mcpError },
-          headers,
+          headers: upstreamProxyStatus({
+            error: "http_request_error",
+            ...(input.receivedStatus !== undefined ? { receivedStatus: input.receivedStatus } : {}),
+          }),
         })
       : new ApiError({
           status: 502,
@@ -445,7 +449,7 @@ export function mcpServerFailure(
           title: "Upstream MCP Error",
           detail,
           extensions: { mcp_error: mcpError },
-          headers,
+          headers: protocolError,
         });
   }
   return gatewayFault(`${server} ${input.failed ?? "did not answer"}.`, protocolError);

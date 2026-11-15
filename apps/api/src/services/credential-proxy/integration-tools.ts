@@ -182,37 +182,39 @@ function isReservedBody(body: string): boolean {
 
 /**
  * `{namespace}__{prefix}{head}_{hash}` within {@link MCP_TOOL_NAME_MAX_LENGTH}: `head` cut to
- * what is left, dropped (with its `_`) when nothing is, the hash of `seed` shortened only when
- * the prefix leaves it less room.
+ * what is left and stripped of leading and trailing `_`, dropped (with its `_`) when nothing is
+ * left, the hash of `seed` shortened only when the prefix leaves it less room.
  */
 function hashedToolName(namespace: string, prefix: string, head: string, seed: string): string {
   const room = MCP_TOOL_NAME_MAX_LENGTH - namespace.length - 2 - prefix.length;
   const hash = fnv1a64Hex(seed).slice(0, Math.min(TOOL_NAME_HASH_LENGTH, room));
-  const kept = head.slice(0, Math.max(0, room - hash.length - 1));
+  const kept = head.slice(0, Math.max(0, room - hash.length - 1)).replace(/^_+|_+$/g, "");
   return `${namespace}__${prefix}${kept ? `${kept}_` : ""}${hash}`;
 }
 
+/** A body shaped like a hashed one: ending in `_` and a hash, or a hash alone. */
+const HASHED_BODY = new RegExp(`(?:^|_)[0-9a-f]{${TOOL_NAME_HASH_LENGTH}}$`);
+
 /**
  * The name a typed tool of the integration of `namespace` is exposed by, a function of its
- * upstream name alone: `{namespace}__{upstream}` when that is a valid tool name and the upstream
- * name is no reserved body ({@link isReservedBody}); otherwise the upstream name mapped onto the
- * body alphabet, its `_` runs collapsed (so it never starts with a reserved `…__` form), cut to
- * fit and always followed by `_` and a hash of the upstream name.
+ * upstream name alone: `{namespace}__{upstream}` when that is a valid tool name, the upstream
+ * name is no reserved body ({@link isReservedBody}) and is not shaped like a hashed body
+ * ({@link HASHED_BODY}); otherwise the hashed form: the upstream name mapped onto the body
+ * alphabet, its `_` runs collapsed, cut to fit, stripped of leading and trailing `_`, and
+ * followed by `_` and a hash of the upstream name. A hashed body holds no `__`, so it never is
+ * nor starts with a reserved form, and no plain name can equal a hashed one.
  */
 export function remoteToolName(namespace: string, upstreamName: string): string {
   const plain = `${namespace}__${upstreamName}`;
-  if (!isReservedBody(upstreamName) && isValidMcpToolName(plain)) return plain;
+  if (!isReservedBody(upstreamName) && !HASHED_BODY.test(upstreamName) && isValidMcpToolName(plain))
+    return plain;
   const head = normaliseMcpToolBody(upstreamName).replace(/_+/g, "_");
   return hashedToolName(namespace, "", head, upstreamName);
 }
 
-/** A body that may be a transformed name's: ending in `_` and a hash, or a hash alone. */
-const HASHED_BODY = new RegExp(`(?:^|_)[0-9a-f]{${TOOL_NAME_HASH_LENGTH}}$`);
-
 /**
  * The upstream name `name` calls without a catalog to prove it: its body, when `name` is that
- * body's own exposed name and could be no other's. A transformed name, or one shaped like it, needs
- * the catalog.
+ * body's own plain exposed name. A hashed name, or one shaped like it, needs the catalog.
  */
 function selfNamedUpstream(namespace: string, name: string): string | undefined {
   if (!name.startsWith(`${namespace}__`)) return undefined;
@@ -221,9 +223,9 @@ function selfNamedUpstream(namespace: string, name: string): string | undefined 
 }
 
 /**
- * Each exposed name of `upstreamNames`, mapped to the one upstream name it calls. Two names
- * exposed alike (a hash collision) keep the one exposed by its own name, else neither; the
- * dropped ones are logged, as `McpHost` logs a collision in a run.
+ * Each exposed name of `upstreamNames`, mapped to the one upstream name it calls. Only hashed
+ * names can be exposed alike (a hash collision): every holder of one is dropped and logged, as
+ * `McpHost` logs a collision in a run, so what a name calls never depends on the set read.
  */
 function exposeRemoteTools(
   integrationId: string,
@@ -237,9 +239,11 @@ function exposeRemoteTools(
   }
   const exposed = new Map<string, string>();
   for (const [name, group] of holders) {
-    const kept = group.length === 1 ? group[0] : group.find((u) => `${namespace}__${u}` === name);
-    if (kept !== undefined) exposed.set(name, kept);
-    for (const dropped of group.filter((u) => u !== kept)) {
+    if (group.length === 1) {
+      exposed.set(name, group[0]!);
+      continue;
+    }
+    for (const dropped of group) {
       logger.warn("credential-proxy: MCP tool name collides, tool dropped", {
         integrationId,
         name,
@@ -378,15 +382,25 @@ function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
   ).has(name);
 }
 
-/** The catalog was not read in time to prove what `name` calls: retry. */
-function catalogUnavailable(integrationId: string, name: string): ApiError {
+/**
+ * The catalog could not be read to prove what `name` calls, `listing_failure` saying why when
+ * known. Retryable: a later listing may read it.
+ */
+function catalogUnavailable(
+  integrationId: string,
+  name: string,
+  listingFailure: string | undefined,
+): ApiError {
   return new ApiError({
     status: 503,
     code: "tool_catalog_unavailable",
     title: "Tool Catalog Unavailable",
     detail:
-      `The catalog of ${integrationId}'s MCP server could not be read in time, and only it can ` +
-      `say which of its tools '${name}' names; nothing was sent. Retry.`,
+      `The catalog of ${integrationId}'s MCP server could not be read` +
+      (listingFailure ? ` (${listingFailure})` : "") +
+      `, and only it can say which of its tools '${name}' names; nothing was sent. ` +
+      `The call may be retried once a listing reads the catalog.`,
+    ...(listingFailure ? { extensions: { listing_failure: listingFailure } } : {}),
   });
 }
 
@@ -473,7 +487,7 @@ async function remoteTools(
       return {
         unlisted: {
           integration_package_id: integrationId,
-          refusal: catalogUnavailable(integrationId, named).toProblemDetail(
+          refusal: catalogUnavailable(integrationId, named, catalog.listingFailure).toProblemDetail(
             caller.caller.requestId,
           ),
         },

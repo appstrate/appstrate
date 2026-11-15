@@ -139,8 +139,10 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "`connection_ids` it reaches among the result's `connections`, each with the " +
       "`connection_id` to pass; `catalog_unreadable: true` marks a typed " +
       "tool whose server could not be listed, named without description or schema. " +
-      "Listing a cold server's catalog sends the connection's credential, and a server refusing " +
-      "it can flag the connection for reconnection: the one change a search can make. " +
+      "Listing a cold server's catalog sends the connection's credential, which has effects: " +
+      "the listing is journaled as a call of the connection, a 401 goes through the forced " +
+      "refresh, which can rotate its stored OAuth tokens, and a server refusing the credential " +
+      "can flag the connection for reconnection. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
       "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
       "`not_ready`, the integrations active here you have no usable connection of, each with " +
@@ -157,11 +159,11 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "connections' fields mean.",
     annotations: {
       title: "Search integration tools",
-      // Not read-only: a server refusing the credential can flag the connection for
-      // reconnection. That change is neither destructive nor repeated by the same search again.
+      // A listing writes a call-journal row, can rotate OAuth tokens and flag the connection;
+      // none destroys data, and each listing reaching a server writes one more row: not idempotent.
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       // It queries third-party servers and relays their text.
       openWorldHint: true,
     },
@@ -291,8 +293,9 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       "tool's exact name returns) says how to read the result. A missing required argument is " +
       "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
       "not declare the same way, while a typed tool's server validates the rest itself. " +
-      "`tool_catalog_unavailable` means the server of a typed tool could not be listed in time " +
-      "to say which of its tools the name is: nothing was sent, retry. Call " +
+      "`tool_catalog_unavailable` means the catalog of a typed tool's server could not be read " +
+      "to say which of its tools the name is (`listing_failure`, when known, says why): " +
+      "nothing was sent, and a retry may succeed once a listing reads it. Call " +
       "directly for deterministic or bulk reads and writes" +
       (ctx.runs
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +

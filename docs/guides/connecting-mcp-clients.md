@@ -477,12 +477,15 @@ role. Runs keep their connections there:
   that server offers, each named by its upstream name alone, whatever the order
   the server lists it in, the connection it is listed with or the server's other
   tools: `{ns}__{tool}` when that is a valid name (56 characters at most, the
-  tool part in `[A-Za-z0-9_-]`) and the tool is not named `api_call`,
-  `api_upload` or a `…__{auth}` form of either; otherwise its name with every
-  other character made `_`, `_` runs collapsed, cut to fit and always followed
-  by `_` and 8 hex digits of its hash (two names still equal after that keep the
-  one exposed by its own name, else neither; a run keeps a transformed name's
-  plain form while it is free, so that name differs from a run's). Those are
+  tool part in `[A-Za-z0-9_-]`), the tool is not named `api_call`,
+  `api_upload` or a `…__{auth}` form of either, and its name does not end in
+  `_` and 8 hex digits (nor is 8 hex digits alone); otherwise its name with
+  every other character made `_`, `_` runs collapsed, cut to fit, stripped of
+  leading and trailing `_` and always followed by `_` and 8 hex digits of its
+  hash, so it holds no `__` and never equals another tool's plain name (two
+  names still equal after that, a hash collision, are both left out; a run
+  keeps a transformed name's plain form while it is free, so that name differs
+  from a run's). Those are
   its catalog's selection (the `tools_policy` keys,
   or every tool the server lists when `allow_undeclared_tools` is `true`), less
   `hidden_tools` and its connect tool. Descriptions and input schemas come from
@@ -502,11 +505,15 @@ role. Runs keep their connections there:
   marked `catalog_unreadable: true`; once that wait is over, the search
   contacts no further server. A call naming a tool its catalog is not there to
   prove — under `allow_undeclared_tools`, neither declared nor an upstream name
-  exposed as itself (one ending in `_` and 8 hex digits could be a transformed
-  name) — is refused, retryably, with `503 tool_catalog_unavailable`, and
-  nothing is sent. Listing a server sends the connection's credential: a server
-  refusing it can flag the connection `needs_reconnection`, as a call does, so a
-  search is annotated not read-only (and idempotent). A call is one `tools/call`
+  exposed as itself (a name ending in `_` and 8 hex digits never is) — is
+  refused with `503 tool_catalog_unavailable`: the catalog could not be read
+  (`listing_failure`, when known: the proxy's problem code or `timeout`),
+  nothing is sent, and a retry may succeed once a listing reads it. Listing a
+  server sends the connection's credential: the listing is journaled as a call
+  of the connection, a 401 goes through the forced refresh, which can rotate
+  the stored OAuth tokens, and a server refusing the credential can flag the
+  connection `needs_reconnection`, as a call does, so a search is annotated
+  neither read-only nor idempotent (and not destructive). A call is one `tools/call`
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
   connection named by the `connection_id` argument of `call_integration_tool`
   (one of the tool's `connection_ids`) or, without it, the one the proxy selects

@@ -1038,10 +1038,81 @@ describe("the typed tools of a remote MCP integration", () => {
             expect(
               body.unlisted.map((entry) => [entry.refusal.status, entry.refusal.code]),
             ).toEqual([[503, "tool_catalog_unavailable"]]);
+            // The listing's wait ended before the catalog was read.
+            expect(body.unlisted[0]!.refusal).toMatchObject({ listing_failure: "timeout" });
             // Its own name needs no catalog.
             const own = await list({ name: "acme_docs__files_read" });
             expect(pairs(own.remote)).toEqual([["acme_docs__files_read", "files_read"]]);
             await Bun.sleep(250);
+            expect(other.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+          },
+        );
+      } finally {
+        _setRemoteToolTimeoutsForTesting();
+      }
+    });
+
+    it("maps a name to the same upstream tool cold and warm, a raw name shaped like a hashed one included", async () => {
+      // `a.b` is exposed as `acme_docs__a_b_{hash}`; a raw `a_b_{hash}` takes a hashed name of its
+      // own, so the server listing it changes nothing `a.b`'s name calls.
+      const shaped = `a_b_${hash("a.b")}`;
+      _setRemoteToolTimeoutsForTesting({ resolveMs: 50 });
+      try {
+        await withServer(
+          { tools: ["a.b", shaped], delayMs: 250, delayedMethod: "tools/list" },
+          async (other) => {
+            await seedProxyIntegration(
+              ctx,
+              on(other, { tools_policy: { "a.b": {} }, allow_undeclared_tools: true }),
+            );
+            await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+            const name = `acme_docs__${shaped}`;
+            const cold = await list({ name });
+            expect(pairs(cold.remote)).toEqual([[name, "a.b"]]);
+            // The listing runs on and fills the cache: the same name, read warm.
+            await Bun.sleep(300);
+            const warm = await list({ name });
+            expect(pairs(warm.remote)).toEqual([[name, "a.b"]]);
+            const all = await list({ integration_package_id: ID });
+            expect(pairs(all.remote)).toEqual(
+              [
+                [name, "a.b"],
+                [`acme_docs__${shaped}_${hash(shaped)}`, shaped],
+              ].sort(([a], [b]) => a!.localeCompare(b!)),
+            );
+          },
+        );
+      } finally {
+        _setRemoteToolTimeoutsForTesting();
+      }
+    });
+
+    it("exposes a raw name ending in `_` and 8 hex digits under a hashed name, which only its catalog proves", async () => {
+      const raw = "export_20240101";
+      const exposed = `acme_docs__${raw}_${hash(raw)}`;
+      _setRemoteToolTimeoutsForTesting({ resolveMs: 50 });
+      try {
+        await withServer(
+          { tools: [raw], delayMs: 250, delayedMethod: "tools/list" },
+          async (other) => {
+            await seedProxyIntegration(ctx, on(other, { allow_undeclared_tools: true }));
+            await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+            // Cold, undeclared: neither its plain nor its hashed name is provable.
+            for (const name of [exposed, `acme_docs__${raw}`]) {
+              const { body } = await list({ name });
+              expect(body.tools).toEqual([]);
+              expect(
+                body.unlisted.map((entry) => [entry.refusal.status, entry.refusal.code]),
+              ).toEqual([[503, "tool_catalog_unavailable"]]);
+            }
+            await Bun.sleep(300);
+            // Warm: the hashed name calls it, the plain one names nothing.
+            expect(pairs((await list({ name: exposed })).remote)).toEqual([[exposed, raw]]);
+            const plain = await list({ name: `acme_docs__${raw}` });
+            expect(plain.body.tools).toEqual([]);
+            expect(plain.body.unlisted).toEqual([]);
             expect(other.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
           },
         );
@@ -1168,7 +1239,9 @@ describe("the typed tools of a remote MCP integration", () => {
       // -32602 to the tools/call refuses the caller's tool name or arguments: a 4xx, the
       // server's text relayed, and the HTTP status it came in.
       expect(res.status).toBe(422);
-      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
+      expect(res.headers.get("proxy-status")).toBe(
+        "appstrate; error=http_request_error; received-status=200",
+      );
       const problem = (await res.json()) as {
         code: string;
         mcp_error: { code: number; message: string };
@@ -1204,7 +1277,9 @@ describe("the typed tools of a remote MCP integration", () => {
 
       const res = await post("call", { integration_package_id: ID, name: "search" });
       expect(res.status).toBe(502);
-      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
+      expect(res.headers.get("proxy-status")).toBe(
+        "appstrate; error=http_protocol_error; received-status=200",
+      );
       const problem = (await res.json()) as { code: string; mcp_error: { code: number } };
       expect(problem.code).toBe("upstream_mcp_error");
       expect(problem.mcp_error.code).toBe(-32602);
@@ -1268,7 +1343,10 @@ describe("the typed tools of a remote MCP integration", () => {
       const res = await post("call", { integration_package_id: ID, name: "search" });
       expect(res.status).toBe(502);
       expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
-      expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_protocol_error");
+      // It answered (HTTP 200), not as an MCP server.
+      expect(res.headers.get("proxy-status")).toBe(
+        "appstrate; error=http_protocol_error; received-status=200",
+      );
     } finally {
       plain.stop(true);
     }

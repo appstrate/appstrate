@@ -512,7 +512,9 @@ describe("POST /api/integrations/{packageId}/discover", () => {
 
       const res = await sync(ctx, {});
       expect(res.status).toBe(502);
-      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
+      expect(res.headers.get("proxy-status")).toBe(
+        "appstrate; error=http_protocol_error; received-status=200",
+      );
       const body = (await res.json()) as { code: string; mcp_error: { code: number } };
       expect(body.code).toBe("upstream_mcp_error");
       expect(body.mcp_error.code).toBe(-32602);

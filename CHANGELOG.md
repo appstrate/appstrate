@@ -538,12 +538,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the server's `tools/list`. The name is a function of the upstream name alone,
   whatever the listing order, the connection listed with or the other tools:
   `{ns}__{tool}` when that is a valid tool name (56 characters at most, the body
-  in `[A-Za-z0-9_-]`) and the tool is not named `api_call`, `api_upload` or a
-  `…__{auth}` form of either; otherwise the upstream name with each other
-  character made `_`, `_` runs collapsed, cut to fit and always followed by `_`
-  and 8 hex digits of its hash (two names still equal after that keep the one
-  exposed by its own name, else neither; a run keeps a transformed name's plain
-  form while it is free, so there the name differs from a run's). The catalog
+  in `[A-Za-z0-9_-]`), the tool is not named `api_call`, `api_upload` or a
+  `…__{auth}` form of either, and its name does not end in `_` and 8 hex digits
+  (nor is 8 hex digits alone); otherwise the upstream name with each other
+  character made `_`, `_` runs collapsed, cut to fit, stripped of leading and
+  trailing `_` and always followed by `_` and 8 hex digits of its hash, so a
+  hashed name holds no `__` and never equals a plain one (two hashed names
+  still equal, a hash collision, are both dropped and logged; a run keeps a
+  transformed name's plain form while it is free, so there the name differs
+  from a run's). The catalog
   is read through the credential proxy with the connection the proxy selects (when several qualify, the first of the caller's
   own connections it accepts, never a colleague's shared one the caller did not
   name; sanitised; cached 5 minutes per connection, integration version and
@@ -571,7 +574,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`upstream_status`, and the proxy's `credential` verdict when its forced
   refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
   each with its `Proxy-Status` (`received-status` on a credential rejection and
-  on a JSON-RPC error, the status the error came in); the server sync of
+  on a JSON-RPC error, the status the error came in, with
+  `error=http_request_error` on `upstream_invalid_params` and
+  `error=http_protocol_error` on `upstream_mcp_error` and on a `bad_gateway`
+  that received an answer); the server sync of
   `POST /api/integrations/{packageId}/discover` answers the same codes (its
   timeout 20 s, never `upstream_invalid_params`: it sends no arguments) where it
   answered `bad_gateway`. The result
@@ -587,16 +593,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one of its session), a timeout included, and one per listing that reached the
   server, a refused or unanswered handshake
   included (one row for the sync as well), and a listing reaching a server
-  can flag the connection on a credential refusal, as a call does. A
+  goes through the forced refresh on a 401, which can rotate the stored OAuth
+  tokens, and can flag the connection on a credential refusal, as a call does:
+  a search is annotated neither read-only nor idempotent. A
   listing waits 20 s for all its servers (5 s when `call_integration_tool`
   resolves its tool by name, keeping resolution and call under a client's
   60 s), and no longer than its request: a catalog not read by then is listed
   `catalog_unreadable` and read on for the next listing, and no further server
   is contacted. Resolving a name its catalog is not there to prove — not
   declared, under `allow_undeclared_tools`, and not an upstream name exposed as
-  itself that no transformed name could be (one ending in `_` and 8 hex digits) —
-  answers, in `unlisted`, `503 tool_catalog_unavailable` (retry) and sends
-  nothing. Tool names are unique in a space: a namespace equal to another
+  itself (a name ending in `_` and 8 hex digits never is) — answers, in
+  `unlisted`, `503 tool_catalog_unavailable` and sends nothing: the catalog
+  could not be read, `listing_failure` naming why when known (the proxy's
+  problem code, or `timeout`); retryable, a later listing may read it. Tool names are unique in a space: a namespace equal to another
   active integration's after normalisation (cut at 20 characters, without a
   trailing `_`) takes a hash of its package id, and a name never depends on the
   caller's connections. The listing gives the connections the tools reach

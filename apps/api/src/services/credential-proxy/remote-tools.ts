@@ -9,6 +9,7 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   createMcpHttpClient,
+  isRequestTimeout,
   sanitiseToolDescriptor,
   stripReservedResultMeta,
   type AppstrateMcpClient,
@@ -23,6 +24,7 @@ import {
 } from "@appstrate/core/integration";
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
+import { findCause } from "../../lib/error-cause.ts";
 import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
@@ -270,6 +272,11 @@ interface ServerTool {
 export interface RemoteToolCatalog {
   tools: ServerTool[];
   listed: boolean;
+  /**
+   * Unlisted, why when known: the proxy's problem code, or `timeout` when the catalog was not read
+   * before the listing's wait or its own timeout ended.
+   */
+  listingFailure?: string;
   /** How many tools were read when the server lists more; `null` when all were. */
   truncatedAt: number | null;
 }
@@ -293,6 +300,7 @@ export async function listRemoteTools(
     url,
   });
   let described = catalogCache.peek(key);
+  let listingFailure: string | undefined = described === undefined ? "timeout" : undefined;
   if (described === undefined && !input.signal.aborted) {
     const load = () =>
       withClient(
@@ -314,6 +322,12 @@ export async function listRemoteTools(
       } else if (isCatalogRefusal(err)) {
         throw mcpServerFailure(err, { integrationId: input.integrationId, url });
       } else {
+        listingFailure =
+          err instanceof ProxyCallError
+            ? err.code
+            : isRequestTimeout(err) || findCause(err, (e) => e.name === "TimeoutError")
+              ? "timeout"
+              : undefined;
         logger.warn("credential-proxy: remote tools/list failed", {
           integrationId: input.integrationId,
           connectionId,
@@ -329,6 +343,7 @@ export async function listRemoteTools(
     return {
       tools: [...offered].map((name) => ({ name, input_schema: { type: "object" } })),
       listed: false,
+      ...(listingFailure ? { listingFailure } : {}),
       truncatedAt: null,
     };
   }
@@ -384,7 +399,9 @@ export async function callRemoteTool(
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
   const { connectionId, url } = await remoteConnection(input, manifest, input.name);
-  // Set once the session is open: a failure after it is the `tools/call` exchange's.
+  // Set once the session is open: a failure after it is the `tools/call` exchange's. No tool
+  // definition was listed on this client, so the SDK validates no output and raises no -32602
+  // of its own after the call: one caught here is the server's.
   let calling = false;
   const result = await withClient(
     { ...input, connectionId, timeoutMs: timeouts.callMs },
