@@ -22,10 +22,9 @@ import {
   API_CALL_INPUT_SCHEMA,
   API_CALL_USAGE,
   apiCallSchema,
-  BATCH_DEADLINE_MS,
   executeApiCall,
+  jsonTextHead,
   MAX_RESULT_BYTES,
-  utf8Head,
   type ApiCallArguments,
   type DispatchContext,
   type ToolCallOutcome,
@@ -115,7 +114,8 @@ const REMOTE_TOOL_USAGE =
   "`errors[0].candidate_connections` (retry with one `id` as `connection_id`). The result is " +
   `the server's own tool result, relayed as is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
   "tool has run: a text block that does not fit whole is cut, any other block that does not " +
-  'fit is replaced by a note, and `_meta["dev.appstrate/truncated"]` is `true`. An error ' +
+  "fit is replaced by a note while one fits, a closing note counts what was cut or dropped, " +
+  'and `_meta["dev.appstrate/truncated"]` is `true`. An error ' +
   "result carrying `content` is the tool's own failure (`isError: true`); one carrying `code`, " +
   "`status` and `detail` is the platform's answer: a refusal before anything was sent, or the " +
   "server failing the exchange: `bad_gateway`, `upstream_mcp_error`, `upstream_timeout` (no " +
@@ -131,56 +131,79 @@ const REMOTE_TOOL_USAGE =
 const cutMarker = (kept: number, total: number) =>
   `\n[cut: ${kept} of ${total} bytes kept, over the ${MAX_RESULT_BYTES}-byte result budget]`;
 
+/** The closing note of a bounded result. */
+const truncationNote = (cut: number, omitted: number, droppedStructured: boolean) =>
+  `The tool ran; its result exceeds ${MAX_RESULT_BYTES} bytes: ${cut} text block(s) cut, ` +
+  `${omitted} other block(s)${droppedStructured ? " and its structuredContent" : ""} ` +
+  "dropped, the rest is as it answered.";
+
+const TRUNCATED_META = { "dev.appstrate/truncated": true } as const;
+
 /**
- * A tool result over {@link MAX_RESULT_BYTES}, bounded: its content blocks kept in order while
- * they fit, the first text block that does not fit cut to what is left (on a character boundary,
- * marked), any other block that does not fit replaced by a note, `structuredContent` kept only if
- * it still fits. The call has run: nothing of what fits is dropped.
+ * A tool result over {@link MAX_RESULT_BYTES}, bounded so that its JSON is at most that many
+ * bytes: its content blocks kept in order while they fit, the first text block that does not fit
+ * cut to what is left (its text alone, on a character boundary, marked), any other block that does
+ * not fit replaced by a note while one fits, `structuredContent` kept only if it still fits, and a
+ * closing note counting what was cut or dropped. The call has run: nothing of what fits is
+ * dropped.
  */
 function boundedResult(result: CallToolResult): CallToolResult {
   const encoder = new TextEncoder();
   const size = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
-  let budget = MAX_RESULT_BYTES;
+  const blocks = Array.isArray(result.content) ? result.content : [];
+  const isError = result.isError ? { isError: true as const } : {};
+  // The result with no block but the closing note, its counts at their widest.
+  const frame = size({
+    content: [{ type: "text", text: truncationNote(blocks.length, blocks.length, true) }],
+    ...isError,
+    _meta: TRUNCATED_META,
+  });
+  // Each block added to the array costs its JSON and a comma.
+  let budget = MAX_RESULT_BYTES - frame;
+  const take = (bytes: number) => {
+    if (bytes + 1 > budget) return false;
+    budget -= bytes + 1;
+    return true;
+  };
+  const emptyText = size({ type: "text", text: "" });
   let cut = 0;
   let omitted = 0;
-  const content = (Array.isArray(result.content) ? result.content : []).map((block, index) => {
+  const content: CallToolResult["content"] = [];
+  for (const [index, block] of blocks.entries()) {
     const bytes = size(block);
-    if (bytes <= budget) {
-      budget -= bytes;
-      return block;
+    if (take(bytes)) {
+      content.push(block);
+      continue;
     }
-    if (block.type === "text" && budget > 0) {
-      const text = encoder.encode(block.text);
-      const head = utf8Head(text, budget, false);
-      budget -= head.keptBytes;
-      cut += 1;
-      return { ...block, text: head.text + cutMarker(head.keptBytes, text.byteLength) };
+    if (block.type === "text") {
+      const total = encoder.encode(block.text).byteLength;
+      const marker = jsonTextHead(cutMarker(total, total), Infinity).jsonBytes;
+      const head = jsonTextHead(block.text, budget - 1 - emptyText - marker);
+      if (head.text.length > 0 && take(emptyText + head.jsonBytes + marker)) {
+        cut += 1;
+        content.push({
+          type: "text",
+          text: head.text + cutMarker(encoder.encode(head.text).byteLength, total),
+        });
+        continue;
+      }
     }
     omitted += 1;
-    return {
+    const note = {
       type: "text" as const,
       text: `[content block ${index} omitted: ${bytes} bytes, over the ${MAX_RESULT_BYTES}-byte result budget]`,
     };
-  });
+    if (take(size(note))) content.push(note);
+  }
   const structured =
-    result.structuredContent !== undefined && size(result.structuredContent) <= budget
+    result.structuredContent !== undefined &&
+    size({ structuredContent: result.structuredContent }) - 2 + 1 <= budget
       ? { structuredContent: result.structuredContent }
       : {};
   const droppedStructured =
     result.structuredContent !== undefined && !("structuredContent" in structured);
-  content.push({
-    type: "text",
-    text:
-      `The tool ran; its result exceeds ${MAX_RESULT_BYTES} bytes: ${cut} text block(s) cut, ` +
-      `${omitted} other block(s)${droppedStructured ? " and its structuredContent" : ""} ` +
-      "dropped, the rest is as it answered.",
-  });
-  return {
-    content,
-    ...structured,
-    ...(result.isError ? { isError: true } : {}),
-    _meta: { "dev.appstrate/truncated": true },
-  };
+  content.push({ type: "text", text: truncationNote(cut, omitted, droppedStructured) });
+  return { content, ...structured, ...isError, _meta: TRUNCATED_META };
 }
 
 /**
@@ -256,7 +279,6 @@ function callable(ctx: DispatchContext, tool: ListedIntegrationTool): Integratio
       execute: (args, extra, named) =>
         executeApiCall(ctx, target, args as ApiCallArguments, extra, {
           defaultConnectionId: named,
-          deadlineMs: BATCH_DEADLINE_MS,
         }),
     };
   }

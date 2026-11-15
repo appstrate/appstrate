@@ -108,7 +108,7 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "reaches, each with the `connection_id` to pass; `catalog_unreadable: true` marks a typed " +
       "tool whose server could not be listed, named without description or schema. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
-      "server lists more tools than are read. Present when not empty, filtered like the tools: " +
+      "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
       "`not_ready`, the integrations active here you have no usable connection of, each with " +
       "its `proxy_connection` verdict (`status`, `imposed`) and, when a selection refusal " +
       "explains it, that `refusal`, whose `connect_url` is a single-use link to hand to the " +
@@ -187,8 +187,9 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     const truncated = read.truncated_catalogs.filter((entry) => about(entry.integration));
     for (const entry of truncated) {
       notes.push(
-        `${entry.integration}'s server lists more tools than the ${entry.max_tools} read: ` +
-          "a tool it lists after those is not offered.",
+        `${entry.integration}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
+          "tool(s) its server lists were read, and a tool listed after them is not offered. " +
+          "Narrow with `integration`, or search the tool by name.",
       );
     }
     if (

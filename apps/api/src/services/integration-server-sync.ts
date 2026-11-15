@@ -177,7 +177,7 @@ export async function syncIntegrationFromServer(input: {
     throw syncFailure(err, packageId, url, unauthenticated);
   } finally {
     // Before the session's close, which is no exchange of the listing.
-    await proxied?.settle();
+    proxied?.settle();
     await client?.close().catch(() => {});
   }
   return proposalFromServer(

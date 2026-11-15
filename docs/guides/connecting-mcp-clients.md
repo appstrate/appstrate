@@ -410,8 +410,10 @@ role. Runs keep their connections there:
   adds the first result's `input_schema` and `usage` (how to call the tool and
   read its result), so a search by a tool's exact name stands for a describe
   call, which does not exist. `note` says when more tools match than `limit`
-  shows, and when a remote server lists more tools than are read (500 per
-  server: a tool it lists after those is not offered).
+  shows, and when a remote server's catalog was read incomplete (it lists more
+  than 500 tools over 20 pages, or more than 512 KiB of descriptors): the
+  listing's `truncated_catalogs` gives the tools read, `listed_tools`, and a
+  tool the server lists after those is not offered.
   `not_ready`, apart from the tools and present when not empty, lists the
   integrations active in the space you have no usable connection of, filtered
   by `query` and `integration` like the tools: each `integration` with its
@@ -496,11 +498,16 @@ role. Runs keep their connections there:
   that connection (the `tools/call` itself, a timeout included), and so is a
   listing that reached the server (not one served from the cache). It returns
   the server's own tool result (`isError: true` is the tool's failure), without
-  the `_meta` keys of a reserved prefix (`dev.appstrate/`,
-  `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); past 256 KiB
-  the tool has run: a text block that does not fit whole is cut on a character
-  boundary and marked, any other block that does not fit is replaced by a note,
-  and `_meta["dev.appstrate/truncated"]` is `true`. A JSON-RPC
+  the reserved `_meta` keys of the result and of each content block: a key
+  whose prefix (the part before its first `/`, in any case) is the platform's
+  `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or
+  second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`,
+  `api.modelcontextprotocol.org/`). Past 256 KiB the tool has run, and the
+  result is cut so that its JSON stays within 256 KiB: a text block that does
+  not fit whole is cut on a character boundary (its text alone) and marked, any
+  other block that does not fit is replaced by a note while one fits, a closing
+  note counts what was cut or dropped, and `_meta["dev.appstrate/truncated"]`
+  is `true`. A JSON-RPC
   error of the server is `upstream_mcp_error` with its `mcp_error.code` and
   `message` (the server's own text), an answer over 2 MiB
   `upstream_response_too_large` (as JSON or as an event stream), no answer

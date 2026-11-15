@@ -272,17 +272,25 @@ export interface ConnectionOutsideRun {
   call_permission_required: boolean;
 }
 
-/** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
+/**
+ * What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. Only the
+ * manifests of the active integrations the caller reaches a connection of are read.
+ */
 export async function listConnectionsOutsideRun(
   scope: SpaceScope,
   actor: Actor,
   reach: ProxyReach,
 ): Promise<ConnectionOutsideRun[]> {
+  const [rows, activeIds] = await Promise.all([
+    listReachableConnections({ spaceId: scope.spaceId, actor }, reach),
+    listIntegrationIdsActiveInSpace(scope),
+  ]);
+  const connected = new Set(rows.map((row) => row.integrationId));
   const manifests = await publishedManifests(
     scope.orgId,
-    await listIntegrationIdsActiveInSpace(scope),
+    activeIds.filter((id) => connected.has(id)),
   );
-  return connectionsOutsideRun(scope, actor, reach, manifests);
+  return projectConnectionsOutsideRun(scope.spaceId, actor, reach, rows, manifests);
 }
 
 /**
@@ -314,10 +322,19 @@ export async function connectionsOutsideRun(
   reach: ProxyReach,
   manifests: ReadonlyMap<string, IntegrationManifest>,
 ): Promise<ConnectionOutsideRun[]> {
-  const [rows, orgDefaults] = await Promise.all([
-    listReachableConnections({ spaceId: scope.spaceId, actor }, reach),
-    listOrgDefaultsForResolver(scope.spaceId),
-  ]);
+  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, reach);
+  return projectConnectionsOutsideRun(scope.spaceId, actor, reach, rows, manifests);
+}
+
+/** The connections of `rows` a call outside a run may use, over the integrations of `manifests`. */
+async function projectConnectionsOutsideRun(
+  spaceId: string,
+  actor: Actor,
+  reach: ProxyReach,
+  rows: Awaited<ReturnType<typeof listReachableConnections>>,
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+): Promise<ConnectionOutsideRun[]> {
+  const orgDefaults = await listOrgDefaultsForResolver(spaceId);
   const listed = rows.flatMap((row): ConnectionOutsideRun[] => {
     const authDef = manifests.get(row.integrationId)?.auths?.[row.authKey] as
       AfpsManifestAuth | undefined;

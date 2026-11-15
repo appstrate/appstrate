@@ -10,7 +10,7 @@
  * `src/modules/mcp/test/integration/integration-tools.test.ts`.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { withImpliedPermissions } from "@appstrate/core/permissions";
 import {
@@ -21,7 +21,10 @@ import {
 } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
-import { executeApiCall } from "../../../../src/modules/mcp/api-call-batch.ts";
+import {
+  _setBatchDeadlineForTesting,
+  executeApiCall,
+} from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
@@ -920,6 +923,22 @@ describe("call_integration_tool — result", () => {
     expect(entries(payload)[1]).toMatchObject({ body: "", truncated: true });
   });
 
+  it("counts a body's JSON escaping against the budget", async () => {
+    const { payload } = await apiCall(
+      { requests: Array.from({ length: 3 }, () => get()), max_response_bytes: 262_144 },
+      () => relayed("\u0001".repeat(100 * 1024), { headers: { "content-type": "text/plain" } }),
+    );
+    const bodies = entries(payload).map((entry) => entry.body as string);
+    const escaped = bodies.reduce(
+      (sum, body) => sum + new TextEncoder().encode(JSON.stringify(body)).byteLength - 2,
+      0,
+    );
+    expect(escaped).toBeLessThanOrEqual(256 * 1024);
+    // Six bytes each as JSON: 43 690 characters of the first body, none of the others.
+    expect(bodies.map((body) => body.length)).toEqual([Math.floor((256 * 1024) / 6), 0, 0]);
+    expect(entries(payload).every((entry) => entry.truncated === true)).toBe(true);
+  });
+
   it("reports one event per call, counting its entries", async () => {
     const { events } = await apiCall({ requests: [get(), get()] });
     expect(events).toEqual([
@@ -1095,16 +1114,19 @@ describe("search_integration_tools — what a search says it leaves out", () => 
     expect((await search({}, { listing: listingOf(tools) })).note).toBeUndefined();
   });
 
-  it("says when a server lists more tools than are read", async () => {
+  it("says when a server's catalog was read incomplete, with the number of tools read", async () => {
     const payload = await search(
       {},
       {
         listing: listingOf([named(TOOL)], {
-          truncated_catalogs: [{ integration_package_id: INTEGRATION, max_tools: 500 }],
+          truncated_catalogs: [{ integration_package_id: INTEGRATION, listed_tools: 212 }],
         }),
       },
     );
-    expect(payload.note).toContain(`${INTEGRATION}'s server lists more tools than the 500 read`);
+    expect(payload.note).toContain(`${INTEGRATION}'s catalog is incomplete`);
+    expect(payload.note).toContain("only the first 212 tool(s)");
+    expect(payload.note).toContain("`integration`");
+    expect(payload.note).not.toContain("500");
   });
 
   it("says when the integration it filters on offers nothing", async () => {
@@ -1135,6 +1157,13 @@ describe("integration tools — descriptors", () => {
         const bytes = new TextEncoder().encode(byName.get(name)!.descriptor.description!).length;
         expect(bytes, name).toBeLessThan(2048);
       }
+    }
+  });
+
+  it("annotates both tools as reaching the open world", () => {
+    const { byName } = makeTools(CALL_OWN);
+    for (const name of BOTH) {
+      expect(byName.get(name)!.descriptor.annotations?.openWorldHint, name).toBe(true);
     }
   });
 });
@@ -1176,11 +1205,63 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(prefix!.length).toBeGreaterThan(100 * 1024);
     expect(prefix).toBe("é".repeat(prefix!.length));
     expect(marker).toContain(`of ${300 * 1024} bytes kept`);
-    expect(texts[3]).toContain("content block 3 omitted");
-    expect(texts[4]).toContain("The tool ran");
-    expect(texts[4]).toContain("1 text block(s) cut");
+    // The cut spent the budget: the last block is counted in the closing note.
+    expect(texts).toHaveLength(4);
+    expect(texts[3]).toContain("The tool ran");
+    expect(texts[3]).toContain("1 text block(s) cut, 2 other block(s)");
     expect(result.isError).toBeUndefined();
     expect(result._meta).toEqual({ "dev.appstrate/truncated": true });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+  });
+
+  /** What `call_integration_tool` relays for a tool answering `upstream`. */
+  const relayedResult = (upstream: Record<string, unknown>) =>
+    makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture)
+      .byName.get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
+  const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+  it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {
+    const result = await relayedResult({
+      content: [{ type: "text", text: "x", _meta: { pad: "p".repeat(1536 * 1024) } }],
+    });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    const [cut] = result.content as Array<Record<string, unknown>>;
+    expect(Object.keys(cut!).sort()).toEqual(["text", "type"]);
+    expect(cut!.text).toStartWith("x\n[cut: 1 of 1 bytes kept");
+  });
+
+  it("counts a text's JSON escaping against the budget", async () => {
+    const result = await relayedResult({
+      content: [{ type: "text", text: "\u0001".repeat(600 * 1024) }],
+    });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
+    // Each control character weighs six bytes as JSON.
+    expect(cut!.split("\n[cut: ")[0]!.length).toBeGreaterThan(40 * 1024);
+  });
+
+  it("keeps a multi-block result and a large structuredContent within the budget", async () => {
+    const result = await relayedResult({
+      content: Array.from({ length: 2000 }, (_, i) => ({ type: "text", text: `${i}`.repeat(80) })),
+      structuredContent: { rows: "r".repeat(300 * 1024) },
+    });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(result.structuredContent).toBeUndefined();
+    const texts = (result.content as Array<{ text: string }>).map((block) => block.text);
+    expect(texts.at(-1)).toContain("and its structuredContent dropped");
+  });
+
+  it("keeps a structuredContent that still fits", async () => {
+    const result = await relayedResult({
+      content: [
+        { type: "text", text: "a".repeat(200 * 1024) },
+        { type: "image", data: "A".repeat(100 * 1024), mimeType: "image/png" },
+      ],
+      structuredContent: { count: 1 },
+    });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(result.structuredContent).toEqual({ count: 1 });
   });
 
   it("relays a typed tool's output schema in `best_match`", async () => {
@@ -1211,6 +1292,8 @@ describe("call_integration_tool — a result past the budget", () => {
 });
 
 describe("call_integration_tool — a batch's deadline", () => {
+  afterEach(() => _setBatchDeadlineForTesting());
+
   it("stops sending at the deadline and keeps what was answered", async () => {
     const calls: Request[] = [];
     const ctx = {
@@ -1225,12 +1308,13 @@ describe("call_integration_tool — a batch's deadline", () => {
         throw req.signal.reason;
       },
     };
+    _setBatchDeadlineForTesting(50);
     const outcome = await executeApiCall(
       ctx,
       { name: TOOL, integration: INTEGRATION, connections: [], connectionRequired: false },
       { requests: Array.from({ length: 6 }, () => get()) as never },
       noExtra,
-      { defaultConnectionId: undefined, deadlineMs: 50 },
+      { defaultConnectionId: undefined },
     );
     if ("code" in outcome) throw new Error("refused");
     const payload = parseResult(outcome.result);

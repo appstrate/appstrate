@@ -38,7 +38,6 @@ import {
   type ConnectionOutsideRun,
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
-import { MAX_LISTED_TOOLS } from "./mcp-over-proxy.ts";
 import {
   listRemoteTools,
   offeredRemoteToolNames,
@@ -92,8 +91,8 @@ interface UnlistedIntegration {
 /** A remote integration whose server lists more tools than are read. */
 interface TruncatedCatalog {
   integration_package_id: string;
-  /** The tools read: the first ones the server lists. */
-  max_tools: number;
+  /** The tools read from its catalog: the first ones the server lists. */
+  listed_tools: number;
 }
 
 export interface IntegrationToolListing {
@@ -118,7 +117,8 @@ interface IntegrationToolQuery {
 
 /**
  * The `proxy_connection` statuses of an integration without a usable connection: a call naming
- * none is refused, and no connection a call could name instead clears it.
+ * none is refused, and no connection a call could name instead clears it. `proxy_closed` is none
+ * of a listing's: `reachOutsideRun` refuses a closed space before it.
  */
 const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "none",
@@ -126,7 +126,6 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "not_permitted",
   "default_unavailable",
   "unusable",
-  "proxy_closed",
 ]);
 
 /** Remote servers listed at once. */
@@ -229,7 +228,7 @@ async function readRemoteCatalog(
 
 /** What one remote integration contributes to a listing. */
 type RemoteListing =
-  { tools: RemoteTool[]; truncated: boolean } | { unlisted: UnlistedIntegration };
+  { tools: RemoteTool[]; truncatedAt: number | null } | { unlisted: UnlistedIntegration };
 
 /**
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
@@ -272,7 +271,7 @@ async function remoteTools(
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (query.name !== undefined && !mayNameRemoteTool(manifest, namespace, query.name)) {
-      return { tools: [], truncated: false };
+      return { tools: [], truncatedAt: null };
     }
     return {
       unlisted: {
@@ -334,7 +333,7 @@ async function remoteTools(
     const remoteName = named.slice(namespace.length + 2);
     tools.push(remoteTool(named, { name: remoteName, input_schema: { type: "object" } }, true));
   }
-  return { tools, truncated: catalog.truncated };
+  return { tools, truncatedAt: catalog.truncatedAt };
 }
 
 /**
@@ -417,8 +416,8 @@ export async function listIntegrationTools(
       continue;
     }
     tools.push(...result.tools);
-    if (result.truncated) {
-      truncatedCatalogs.push({ integration_package_id: id, max_tools: MAX_LISTED_TOOLS });
+    if (result.truncatedAt !== null) {
+      truncatedCatalogs.push({ integration_package_id: id, listed_tools: result.truncatedAt });
     }
   }
   return {

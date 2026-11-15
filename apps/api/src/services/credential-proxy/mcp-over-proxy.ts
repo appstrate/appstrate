@@ -136,8 +136,12 @@ export interface ProxiedMcpOperation {
    * erroring) and wait for its timeout; the operation answers at once.
    */
   guard<T>(work: Promise<T>): Promise<T>;
-  /** Writes the operation's journal row, once every exchange it dispatched has ended. */
-  settle(): Promise<void>;
+  /**
+   * Schedules the operation's journal row, written once every exchange it dispatched has ended
+   * (`trackAudit`, which shutdown drains); returns at once, so no answer waits on an exchange
+   * still in flight.
+   */
+  settle(): void;
 }
 
 /**
@@ -183,8 +187,11 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
       own: isOperationExchange(body) && !dispatched.some((d) => d.own),
       done: new Promise<void>((resolve) => (markDone = resolve)),
     };
-    dispatched.push(exchange);
+    // An exchange after `settle` (the session's close) is none of the operation's.
+    const journaled = !settled;
+    if (journaled) dispatched.push(exchange);
     const reached = (connectionId: string, outcome: string) => {
+      if (!journaled) return;
       exchange.reached = {
         connectionId,
         method,
@@ -254,23 +261,26 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
         throw failure ?? err;
       }
     },
-    settle: async () => {
+    settle: () => {
       if (settled) return;
       settled = true;
-      // An exchange still in flight ends by the deadline at the latest.
-      await Promise.all(dispatched.map((d) => d.done));
-      const row = dispatched.find((d) => d.own)?.reached ?? lastReached;
-      if (!row) return;
+      const exchanges = dispatched;
+      if (exchanges.length === 0) return;
       void trackAudit(
-        recordConnectionCall({
-          ...input.caller,
-          ...row,
-          orgId: scope.orgId,
-          spaceId: scope.spaceId,
-          integrationId: input.integrationId,
-          actor: input.actor,
-          runId: null,
-        }),
+        (async () => {
+          await Promise.all(exchanges.map((d) => d.done));
+          const row = exchanges.find((d) => d.own)?.reached ?? lastReached;
+          if (!row) return;
+          await recordConnectionCall({
+            ...input.caller,
+            ...row,
+            orgId: scope.orgId,
+            spaceId: scope.spaceId,
+            integrationId: input.integrationId,
+            actor: input.actor,
+            runId: null,
+          });
+        })(),
       );
     },
   };

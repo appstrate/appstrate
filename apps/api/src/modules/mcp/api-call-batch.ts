@@ -63,13 +63,20 @@ const CONCURRENCY = 3;
  * What one batch may take, below an MCP client's 60 s request timeout: past it nothing more is
  * sent, and a request still in flight is abandoned.
  */
-export const BATCH_DEADLINE_MS = 45_000;
+const BATCH_DEADLINE_MS = 45_000;
+let batchDeadlineMs = BATCH_DEADLINE_MS;
+
+/** @internal Test-only. Shortens a batch's deadline; with no argument, restores the default. */
+export function _setBatchDeadlineForTesting(ms?: number): void {
+  batchDeadlineMs = ms ?? BATCH_DEADLINE_MS;
+}
 /** Default cap on one text body: the sidecar's inline budget for a tool output (~8 000 tokens). */
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024;
 /**
- * Body bytes one result carries across all its entries, and so the most `max_response_bytes` may
- * ask for one. A result travels twice (text and `structuredContent`) and JSON-escaped: 256 KiB of
- * bodies keeps it under the ~1 MB practical MCP response limit.
+ * Body bytes one result carries across all its entries, counted as the bodies weigh JSON-escaped
+ * (`jsonTextHead`), and so the most `max_response_bytes` may ask for one. A result travels twice
+ * (text and `structuredContent`): 256 KiB of bodies keeps it under the ~1 MB practical MCP
+ * response limit.
  */
 export const MAX_RESULT_BYTES = 256 * 1024;
 /** Characters kept of one projected response header. */
@@ -318,18 +325,38 @@ async function dispatchCall(
   };
 }
 
+/** The bytes one code point takes inside a JSON string, as `JSON.stringify` writes it. */
+function jsonCodePointBytes(code: number): number {
+  if (code === 0x22 || code === 0x5c) return 2;
+  // `\b`, `\t`, `\n`, `\f`, `\r`; any other control character as `\u00XX`.
+  if (code < 0x20)
+    return code === 8 || code === 9 || code === 10 || code === 12 || code === 13 ? 2 : 6;
+  if (code < 0x80) return 1;
+  if (code < 0x800) return 2;
+  // A lone surrogate, written `\uXXXX`.
+  if (code >= 0xd800 && code <= 0xdfff) return 6;
+  return code < 0x10000 ? 3 : 4;
+}
+
 /**
- * The first `maxBytes` of a UTF-8 body as text; `cut` when bytes were left out here or before
- * (`cutBefore`), in which case a character the cut falls inside is held back.
+ * The longest prefix of `text`, on a character boundary, whose JSON-escaped form (quotes left
+ * out) takes at most `maxBytes`; `jsonBytes` is what it takes, `cut` whether characters were left
+ * out.
  */
-export function utf8Head(
-  bytes: Uint8Array,
+export function jsonTextHead(
+  text: string,
   maxBytes: number,
-  cutBefore: boolean,
-): { text: string; keptBytes: number; cut: boolean } {
-  const kept = bytes.subarray(0, Math.max(0, maxBytes));
-  const cut = cutBefore || kept.byteLength < bytes.byteLength;
-  return { text: new TextDecoder().decode(kept, { stream: cut }), keptBytes: kept.byteLength, cut };
+): { text: string; jsonBytes: number; cut: boolean } {
+  let bytes = 0;
+  let end = 0;
+  while (end < text.length) {
+    const code = text.codePointAt(end)!;
+    const size = jsonCodePointBytes(code);
+    if (bytes + size > maxBytes) return { text: text.slice(0, end), jsonBytes: bytes, cut: true };
+    bytes += size;
+    end += code > 0xffff ? 2 : 1;
+  }
+  return { text, jsonBytes: bytes, cut: false };
 }
 
 /**
@@ -381,9 +408,15 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
         ...(outcome.truncated ? { truncated: true } : {}),
       };
     }
-    const { text, keptBytes, cut: truncated } = utf8Head(bytes, budget, outcome.truncated);
-    budget -= keptBytes;
-    if (keptBytes < bytes.byteLength) budgetSpent = true;
+    // A body the proxy cut may end inside a character: that character is held back.
+    const head = jsonTextHead(
+      new TextDecoder().decode(bytes, { stream: outcome.truncated }),
+      budget,
+    );
+    budget -= head.jsonBytes;
+    if (head.cut) budgetSpent = true;
+    const { text } = head;
+    const truncated = outcome.truncated || head.cut;
     let body: unknown = text;
     if (!truncated && outcome.contentType.toLowerCase().includes("json")) {
       try {
@@ -450,11 +483,10 @@ export async function executeApiCall(
   options: {
     /** Applies to each request naming no `connection_id` of its own. */
     defaultConnectionId: string | undefined;
-    /** {@link BATCH_DEADLINE_MS}, unless a test shortens it. */
-    deadlineMs: number;
   },
 ): Promise<ToolCallOutcome | Refusal> {
-  const { defaultConnectionId, deadlineMs } = options;
+  const { defaultConnectionId } = options;
+  const deadlineMs = batchDeadlineMs;
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
   const sessionId = args.session_id ?? crypto.randomUUID();

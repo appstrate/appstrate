@@ -234,4 +234,55 @@ describe("stripReservedResultMeta", () => {
     const clean = { content: [], _meta: { other: 1 } };
     expect(stripReservedResultMeta(clean)).toBe(clean);
   });
+
+  it("reserves a prefix whose second label is `modelcontextprotocol` or `mcp`, in any case", () => {
+    const stripped = stripReservedResultMeta({
+      content: [],
+      _meta: {
+        "dev.mcp/a": 1,
+        "api.modelcontextprotocol.org/b": 2,
+        "com.MCP.tools/c": 3,
+        "IO.ModelContextProtocol/d": 4,
+        "com.example.mcp/kept": 5,
+        "example.com/mcp": 6,
+      },
+    });
+    expect(stripped._meta).toEqual({ "com.example.mcp/kept": 5, "example.com/mcp": 6 });
+  });
+
+  it("reserves a prefix whose first label is `mcp` or `modelcontextprotocol` (AFPS §10.1)", () => {
+    const stripped = stripReservedResultMeta({
+      content: [],
+      _meta: { "MCP/a": 1, "mcp.example/b": 2, "Modelcontextprotocol.io/c": 3, "mcpx/kept": 4 },
+    });
+    expect(stripped._meta).toEqual({ "mcpx/kept": 4 });
+  });
+
+  it("reserves the platform's own prefix in any case, and no key without a prefix", () => {
+    const stripped = stripReservedResultMeta({
+      content: [],
+      _meta: { "Dev.Appstrate/events": [], mcp: 1, "dev.appstrate.example/kept": 2 },
+    });
+    expect(stripped._meta).toEqual({ mcp: 1, "dev.appstrate.example/kept": 2 });
+  });
+
+  it("strips each content block's reserved keys too, leaving untouched blocks as they are", () => {
+    const clean = { type: "text" as const, text: "a", _meta: { "com.example/kept": 1 } };
+    const result = {
+      content: [
+        clean,
+        { type: "text" as const, text: "b", _meta: { "dev.appstrate/events": [], kept: 2 } },
+        { type: "text" as const, text: "c", _meta: { "io.modelcontextprotocol/x": 3 } },
+      ],
+    };
+    const stripped = stripReservedResultMeta(result);
+    expect(stripped.content).toEqual([
+      clean,
+      { type: "text", text: "b", _meta: { kept: 2 } },
+      { type: "text", text: "c" },
+    ]);
+    expect(stripped.content[0]).toBe(clean);
+    const untouched = { content: [clean] };
+    expect(stripReservedResultMeta(untouched)).toBe(untouched);
+  });
 });

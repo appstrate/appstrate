@@ -534,7 +534,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection the proxy selects (sanitised; cached 5 minutes per connection and
   integration version, read only after that selection, at most 128 catalogs
   per replica; at most 500 tools of names up to 128 characters and 512 KiB of
-  descriptors, a longer catalog reported by a `note`; a declared output schema
+  descriptors, a longer catalog reported by a `note` and, on the listing route,
+  in `truncated_catalogs` with the number of tools read, `listed_tools`; a
+  declared output schema
   relayed as `output_schema`). A server that cannot be listed leaves the names,
   marked `catalog_unreadable`; one the proxy refused to list for the caller, or
   whose server refused the connection's credential, comes back in `unlisted`
@@ -551,10 +553,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refresh judged the rejection), no answer within 45 s `504 upstream_timeout`;
   the server sync of `POST /api/integrations/{packageId}/discover` answers the
   same codes (its timeout 20 s) where it answered `bad_gateway`. The result
-  keeps no `_meta` key of a reserved prefix (`dev.appstrate/`,
-  `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); past
-  256 KiB, a text block that does not fit is cut on a character boundary, any
-  other is replaced by a note, and `_meta["dev.appstrate/truncated"]` is set.
+  keeps no reserved `_meta` key, on the result or on any content block: a key
+  whose prefix (before its first `/`, in any case) is `dev.appstrate`, or has
+  `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`,
+  `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`).
+  Past 256 KiB the result is cut so that its JSON stays within 256 KiB: a text
+  block that does not fit is cut on a character boundary, any other is
+  replaced by a note while one fits, a closing note counts what was cut or
+  dropped, and `_meta["dev.appstrate/truncated"]` is set.
   The call journal records one row per `tools/call`, a timeout included, and
   one per listing that reached the server, a refused or unanswered handshake
   included (one row for the sync as well). A listing waits 20 s for all its

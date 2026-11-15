@@ -25,7 +25,6 @@ import {
 } from "@appstrate/core/integration";
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { proxyProblem } from "../../lib/proxy-status.ts";
@@ -51,11 +50,12 @@ import {
  * Listing a catalog takes a few round trips, each answered within seconds by a healthy server; a
  * call stays below an MCP client's 60 s request timeout, which the caller's request also counts.
  */
-const timeouts = { listMs: 10_000, callMs: 45_000 };
+const TIMEOUTS = { listMs: 10_000, callMs: 45_000 } as const;
+let timeouts: { listMs: number; callMs: number } = TIMEOUTS;
 
-/** Shortens the operations' deadlines; with no argument, restores them. */
+/** @internal Test-only. Shortens the operations' deadlines; with no argument, restores them. */
 export function _setRemoteToolTimeoutsForTesting(next?: Partial<typeof timeouts>): void {
-  Object.assign(timeouts, { listMs: 10_000, callMs: 45_000 }, next);
+  timeouts = { ...TIMEOUTS, ...next };
 }
 
 const CATALOG_TTL_MS = 5 * 60 * 1000;
@@ -64,8 +64,14 @@ const MAX_CATALOG_BYTES = 512 * 1024;
 /** Per replica, at most 64 MiB of catalogs; one evicted is listed again on its next use. */
 const MAX_CACHED_CATALOGS = 128;
 
+/** A server's catalog as read: `truncated` when the server lists more than `tools`. */
+interface ReadCatalog {
+  tools: Tool[];
+  truncated: boolean;
+}
+
 /** Holds no credential and decides no access: read only with a connection the selection chose. */
-const catalogCache = createCache<{ tools: Tool[]; truncated: boolean }>({
+const catalogCache = createCache<ReadCatalog>({
   name: "remote-integration-tools",
   ttlMs: CATALOG_TTL_MS,
   max: MAX_CACHED_CATALOGS,
@@ -235,13 +241,13 @@ async function withClient<T>(
     );
   } finally {
     // Before the session's close, which is no exchange of the operation.
-    await operation.settle();
+    operation.settle();
     await client?.close().catch(() => {});
   }
 }
 
 /** The descriptors kept within {@link MAX_CATALOG_BYTES}, in the server's order. */
-function boundedCatalog(tools: Tool[], truncated: boolean): { tools: Tool[]; truncated: boolean } {
+function boundedCatalog(tools: Tool[], truncated: boolean): ReadCatalog {
   const encoder = new TextEncoder();
   let bytes = 0;
   for (const [index, tool] of tools.entries()) {
@@ -265,8 +271,11 @@ export interface RemoteToolCatalog {
   tools: RemoteTool[];
   /** False when the server could not be listed: `tools` are the declared names alone. */
   listed: boolean;
-  /** The server lists more tools than are read: only the first ones are offered. */
-  truncated: boolean;
+  /**
+   * When the server lists more tools than are read, how many were read (the first ones it lists):
+   * only those are offered. `null` when its whole catalog was read.
+   */
+  truncatedAt: number | null;
 }
 
 /**
@@ -317,21 +326,25 @@ export async function listRemoteTools(
     try {
       described = await beforeDeadline(catalogCache.get(key, load), wait);
     } catch (err) {
-      const failure = mcpServerFailure(err, { integrationId: input.integrationId, url });
-      // A refusal made before any exchange, or the server refusing the credential, is the
-      // caller's to see; any other fault leaves the declared names.
-      if (
-        err instanceof ApiError ||
-        (err instanceof ProxyCallError && !err.connectionId) ||
-        (failure instanceof ApiError && failure.code === "upstream_credential_rejected")
-      ) {
-        throw failure;
+      // A refusal made before any exchange is the caller's to see.
+      if (err instanceof ApiError || (err instanceof ProxyCallError && !err.connectionId)) {
+        throw mcpServerFailure(err, { integrationId: input.integrationId, url });
       }
-      logger.warn("credential-proxy: remote tools/list failed", {
-        integrationId: input.integrationId,
-        connectionId,
-        error: getErrorMessage(err),
-      });
+      // Any other fault leaves the declared names, logged once; a listing not read before the
+      // caller's wait ended is no fault: it runs on for the next one.
+      if (err instanceof ProxyCallError) {
+        logger.warn("credential-proxy: remote tools/list failed", {
+          integrationId: input.integrationId,
+          connectionId,
+          code: err.code,
+        });
+      } else if (!(err instanceof ListingDeadlineError)) {
+        const failure = mcpServerFailure(err, { integrationId: input.integrationId, url });
+        // The server refusing the connection's credential is the caller's to see.
+        if (failure instanceof ApiError && failure.code === "upstream_credential_rejected") {
+          throw failure;
+        }
+      }
     }
   }
   const offered = offeredRemoteToolNames(manifest, described?.tools);
@@ -339,7 +352,7 @@ export async function listRemoteTools(
     return {
       tools: [...offered].map((name) => ({ name, input_schema: { type: "object" } })),
       listed: false,
-      truncated: false,
+      truncatedAt: null,
     };
   }
   return {
@@ -352,7 +365,7 @@ export async function listRemoteTools(
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
       })),
     listed: true,
-    truncated: described.truncated,
+    truncatedAt: described.truncated ? described.tools.length : null,
   };
 }
 

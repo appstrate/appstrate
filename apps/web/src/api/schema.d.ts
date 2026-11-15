@@ -1328,7 +1328,7 @@ export interface paths {
         put?: never;
         /**
          * Call a typed tool of a remote MCP integration
-         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the `_meta` keys of a reserved prefix (`dev.appstrate/`, `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks or a transport fault carries RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks or a transport fault carries RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
          */
         post: operations["callRemoteIntegrationTool"];
         delete?: never;
@@ -12632,10 +12632,11 @@ export interface operations {
                                 };
                             };
                         }[];
-                        /** @description The remote integrations whose server lists more tools than are read: only its first `max_tools` at most are listed, fewer when their descriptors exceed 512 KiB. Empty when `name` is given. */
+                        /** @description The remote integrations whose catalog was read incomplete: the server lists more tools than are read (500 at most over 20 pages, and 512 KiB of descriptors), and a tool it lists after those is not offered. Empty when `name` is given. */
                         truncated_catalogs: {
                             integration_package_id: string;
-                            max_tools: number;
+                            /** @description The tools read: the first ones the server lists. */
+                            listed_tools: number;
                         }[];
                     };
                 };
