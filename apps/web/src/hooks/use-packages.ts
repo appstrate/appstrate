@@ -331,26 +331,6 @@ export function usePackageDownload(scope: string | undefined, name: string | und
   );
 }
 
-/** Exports a local integration as an MCP Bundle (`.mcpb`, AFPS §7.1.1) via `downloadOrToast`. */
-export function useIntegrationMcpbExport(scope: string | undefined, name: string | undefined) {
-  return useCallback(
-    async (version: string) => {
-      if (!scope || !name) return;
-      await downloadOrToast(
-        () =>
-          client.GET("/api/packages/integrations/{scope}/{name}/mcpb", {
-            params: { path: { scope, name }, query: { version } },
-            parseAs: "blob",
-          }),
-        `${name}-${version}.mcpb`,
-        // The server's refusal says why this integration has no .mcpb form.
-        { surfaceRefusal: true },
-      );
-    },
-    [scope, name],
-  );
-}
-
 /** Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a release, defaulting to the one resolved in the current space. */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
   return useCallback(

@@ -7,7 +7,7 @@
  *   - the literal ones — `code: "…"`, `conflict("…")`, `gone("…")`,
  *     `new GithubImportError("…")`, `new PackageZipError("…")` — read from the API SOURCE, plus
  *     the `error: "UPPER"` of the modules that build a connection-test result;
- *   - the closed unions an error class or a validator forwards, each written out below as a
+ *   - the four closed unions an error class or a validator forwards, each written out below as a
  *     `Record<Union, true>` so a member added to the type fails the typecheck here;
  *   - Better Auth's, checked against the installed package's own table.
  * A code assembled any other way (a ternary, a lookup table, a third-party module) is invisible
@@ -23,7 +23,6 @@ import { join } from "node:path";
 import { BASE_ERROR_CODES } from "better-auth";
 import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-files";
 import type { FieldErrorCode } from "@appstrate/core/api-errors";
-import type { McpbProjectionErrorCode } from "@appstrate/core/mcpb";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -115,15 +114,6 @@ const FORWARDED = [
     SKILL_MISSING_FRONTMATTER_DESCRIPTION: true,
     SKILL_INVALID_FRONTMATTER_DESCRIPTION: true,
     LOCAL_SERVER_MISSING_ENTRY_POINT: true,
-  }),
-  ...membersOf<McpbProjectionErrorCode>({
-    mcpb_not_local: true,
-    mcpb_unsupported_auth: true,
-    mcpb_unsupported_variables: true,
-    mcpb_invalid_manifest: true,
-    mcpb_unsupported_user_config: true,
-    mcpb_unsupported_placeholder: true,
-    mcpb_unsupported_platform: true,
   }),
 ];
 

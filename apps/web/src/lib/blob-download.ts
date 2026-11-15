@@ -2,8 +2,6 @@
 
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { ApiError } from "../api/errors";
-import { toastError } from "./mutation-error";
 
 /**
  * `data ?? ""`: `data` is `undefined` for a zero-byte 200 (openapi-fetch short-circuits on
@@ -22,19 +20,14 @@ export function triggerBlobDownload(data: BlobPart | undefined, filename: string
   URL.revokeObjectURL(url);
 }
 
-/**
- * Any failure, from the request or the DOM, is one `error.downloadFailed` toast. With
- * `surfaceRefusal`, a refusal the API names (an `ApiError`) is toasted with its own sentence.
- */
+/** Any failure, from the request or the DOM, is one `error.downloadFailed` toast. */
 export async function downloadOrToast(
   read: () => Promise<{ data?: BlobPart }>,
   filename: string,
-  { surfaceRefusal = false }: { surfaceRefusal?: boolean } = {},
 ): Promise<void> {
   try {
     triggerBlobDownload((await read()).data, filename);
-  } catch (err) {
-    if (surfaceRefusal && err instanceof ApiError) toastError(err);
-    else toast.error(i18n.t("common:error.downloadFailed"));
+  } catch {
+    toast.error(i18n.t("common:error.downloadFailed"));
   }
 }

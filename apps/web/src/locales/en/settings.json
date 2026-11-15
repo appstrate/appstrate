@@ -785,7 +785,7 @@
   "creation.manual.title": "Create manually",
   "creation.manual.description": "Fill in the essentials in a short form, then set the rest in its settings.",
   "creation.import.title": "Import a package",
-  "creation.import.description": "Upload an .afps, .mcpb or .zip archive, or import it from GitHub.",
+  "creation.import.description": "Upload an .afps or .zip archive, or import it from GitHub.",
   "creation.chat.title": "Build with Chat",
   "creation.chat.description": "Open Chat with a short, editable request for this resource.",
   "creation.chat.unavailableDescription": "Chat is not available to you on this Appstrate installation.",
@@ -1470,6 +1470,5 @@
   "integration.structure.localTools": "Declared tools",
   "integration.structure.localToolsList_one": "{{count}} tool: {{names}}",
   "integration.structure.localToolsList_other": "{{count}} tools: {{names}}",
-  "integration.structure.localToolsNone": "No catalog declared",
-  "integrations.exportMcpb": "Export as .mcpb"
+  "integration.structure.localToolsNone": "No catalog declared"
 }

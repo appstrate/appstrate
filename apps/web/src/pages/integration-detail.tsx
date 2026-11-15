@@ -63,16 +63,9 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
-import { mcpbExportRefusal } from "../lib/mcpb-exportability";
-import { refusalMessage } from "../lib/mutation-error";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
-import {
-  useIntegrationMcpbExport,
-  usePackageDetail,
-  usePackageDownload,
-  type Versioned,
-} from "../hooks/use-packages";
+import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
@@ -367,7 +360,6 @@ export function IntegrationDetailPage() {
   );
   const activation = usePackageActivation(packageId);
   const downloadPackage = usePackageDownload(scope, name);
-  const exportMcpb = useIntegrationMcpbExport(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
   // id (withheld unless this caller reaches that space) and the write verdict.
@@ -416,11 +408,6 @@ export function IntegrationDetailPage() {
   const source = pkg?.source;
   const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
-
-  // `.mcpb` is offered for a local integration; one the format cannot carry shows why instead.
-  const mcpbOffered = m.source?.kind === "local";
-  const mcpbRefusal = mcpbOffered ? mcpbExportRefusal(m) : null;
-  const mcpbBlockedReason = mcpbRefusal ? (refusalMessage(mcpbRefusal) ?? undefined) : undefined;
 
   const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
     { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
@@ -478,8 +465,6 @@ export function IntegrationDetailPage() {
                 isHistoricalVersion={false}
                 downloadVersion={version}
                 onDownload={downloadPackage}
-                onExportMcpb={mcpbOffered ? exportMcpb : undefined}
-                mcpbBlockedReason={mcpbBlockedReason}
                 isActiveHere={active}
               />
             )}

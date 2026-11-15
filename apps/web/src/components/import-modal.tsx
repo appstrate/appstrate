@@ -36,24 +36,16 @@ interface ImportModalProps {
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-/** An MCP Bundle is an integration: only an import that may bring one accepts it. */
-const acceptsMcpb = (type: PackageType | undefined) => type === undefined || type === "integration";
-
-function fileRefusal(
-  f: File,
-  mcpb: boolean,
-): "import.errZip" | "import.errZipMcpb" | "import.errSize" | null {
+function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
   const lower = f.name.toLowerCase();
-  const accepted = [".afps", ".afps-bundle", ...(mcpb ? [".mcpb"] : []), ".zip"];
-  if (!accepted.some((extension) => lower.endsWith(extension))) {
-    return mcpb ? "import.errZipMcpb" : "import.errZip";
+  if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
+    return "import.errZip";
   }
   return f.size > MAX_SIZE ? "import.errSize" : null;
 }
 
 export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const mcpb = acceptsMcpb(type);
   const [file, setFile] = useState<File | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
   const [error, setError] = useState("");
@@ -76,7 +68,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   };
 
   const handleFile = (f: File) => {
-    const refusal = fileRefusal(f, mcpb);
+    const refusal = fileRefusal(f);
     clearConfirmations();
     setGithubUrl("");
     setError(refusal ? t(refusal) : "");
@@ -185,7 +177,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
         <input
           ref={inputRef}
           type="file"
-          accept={mcpb ? ".afps,.afps-bundle,.mcpb,.zip" : ".afps,.afps-bundle,.zip"}
+          accept=".afps,.afps-bundle,.zip"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -196,9 +188,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
           <p className="text-foreground text-sm font-medium">{file.name}</p>
         ) : (
           <>
-            <p className="text-foreground text-sm">
-              {t(mcpb ? "import.dropTextMcpb" : "import.dropText")}
-            </p>
+            <p className="text-foreground text-sm">{t("import.dropText")}</p>
             <p className="text-muted-foreground mt-1 text-xs">{t("import.dropHint")}</p>
           </>
         )}

@@ -97,7 +97,7 @@ export function getMcpServerRuntime(manifest: IntegrationManifest): McpServerRun
  * {@link McpServerRuntime}: the SPA reads unvalidated DRAFT manifests, where an
  * author's typo must still be displayed as written instead of silently
  * vanishing. Spawn callers read a schema-validated manifest, where the value is
- * always an MCPB type. `undefined` means neither source declared one — for a
+ * always one of `node|python|binary|uv`. `undefined` means neither source declared one — for a
  * spawn that is "not runnable", and it is the caller's job to fail closed on it.
  */
 export function effectiveMcpServerType(manifest: IntegrationManifest): string | undefined {

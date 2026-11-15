@@ -19173,7 +19173,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "`.afps-bundle` (preferred), `.afps`, `.mcpb` or `.zip` archive — detected automatically via the bundle.json marker. A `.mcpb` (an MCP Bundle whose root `manifest.json` carries `manifest_version`) is converted to a local integration named `@<org slug>/<mcpb name>` first (AFPS §7.1.1)."
+                    "description": "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker."
                   }
                 }
               }
@@ -19258,7 +19258,7 @@
             }
           },
           "400": {
-            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A `.mcpb` the integration projection cannot carry answers `mcpb_invalid_manifest`, `mcpb_unsupported_user_config`, `mcpb_unsupported_placeholder` or `mcpb_unsupported_platform`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19294,7 +19294,7 @@
         "operationId": "importPackage",
         "tags": ["Packages"],
         "summary": "Import a package from ZIP",
-        "description": "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Accepts `.afps`, `.zip` and `.mcpb` files. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "description": "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19333,7 +19333,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "ZIP file containing the package, or a `.mcpb` MCP Bundle (converted to a local integration named `@<org slug>/<mcpb name>`, payload kept verbatim — AFPS §7.1.1)."
+                    "description": "ZIP file containing the package"
                   }
                 }
               }
@@ -19387,7 +19387,7 @@
             }
           },
           "400": {
-            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A `.mcpb` the integration projection cannot carry answers `mcpb_invalid_manifest`, `mcpb_unsupported_user_config`, `mcpb_unsupported_placeholder` or `mcpb_unsupported_platform`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19523,7 +19523,7 @@
             }
           },
           "400": {
-            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A `.mcpb` the integration projection cannot carry answers `mcpb_invalid_manifest`, `mcpb_unsupported_user_config`, `mcpb_unsupported_placeholder` or `mcpb_unsupported_platform`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19889,121 +19889,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/api/packages/integrations/{scope}/{name}/mcpb": {
-      "get": {
-        "operationId": "exportIntegrationMcpb",
-        "tags": ["Packages"],
-        "summary": "Export a local integration as an MCP Bundle (.mcpb)",
-        "description": "Export a published version (or the author's draft) of a `local` integration as a `.mcpb` MCP Bundle (AFPS §7.1.1): the strict MCPB `manifest.json` projected from the integration, plus every payload file of the archive verbatim; the integration's own `manifest.json` and `INTEGRATION.md` are dropped. Guarded as the archive download is — visibility, `integrations:read`, then `restrict_package_copy` for a published version; naming the draft is an author's act (`403 draft_not_writable`). A package that is not a local integration answers `422 mcpb_not_local`; one the MCPB form cannot carry faithfully (a credential delivered as a file or over HTTP, more than one auth method, connection variables) answers `422` with `mcpb_unsupported_auth` or `mcpb_unsupported_variables`. Rate-limited to 50 requests/minute.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XSpaceId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": false,
-            "description": "Exact version, dist-tag, semver range, or the literal `draft`. Defaults to `latest`; an empty value is a 400.",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The MCP Bundle.",
-            "headers": {
-              "X-Yanked": {
-                "description": "`true` when the exported version is yanked.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Referrer-Policy": {
-                "description": "Always `no-referrer`.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Cross-Origin-Resource-Policy": {
-                "description": "Always `same-origin`.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Disposition": {
-                "description": "Attachment filename: `<name>-<version>.mcpb`.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Length": {
-                "description": "Archive size in bytes.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Cache-Control": {
-                "description": "Always `private, no-cache`.",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Vary": {
-                "description": "Always `X-Org-Id, X-Space-Id`.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/zip": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden",
-            "description": "Insufficient permissions — `integrations:read`; `draft_not_writable` when `draft` is asked by a caller who cannot WRITE the package; or `package_copy_restricted` under `restrict_package_copy`."
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "422": {
-            "description": "The package has no faithful MCPB form: `mcpb_not_local`, `mcpb_unsupported_auth` or `mcpb_unsupported_variables` (RFC 9457 problem+json), or its archive is unreadable.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
