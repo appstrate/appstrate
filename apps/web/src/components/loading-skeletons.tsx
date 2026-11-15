@@ -137,8 +137,8 @@ export function DetailPageSkeleton({
   return (
     <Waiting>
       <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
-      {/* `DetailTabPanel`'s frame. */}
-      <Card className="overflow-hidden p-6">{panel ?? <CardBlocks count={3} />}</Card>
+      {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
+      {panel ?? <CardBlocks count={3} />}
     </Waiting>
   );
 }
@@ -385,7 +385,7 @@ function DashboardSectionHeadingSkeleton() {
 /** The dashboard's `MetricCard`: label, figure, detail. */
 function MetricCardSkeleton() {
   return (
-    <Card className="flex min-h-32 flex-col justify-between rounded-xl p-4">
+    <Card className="flex min-h-32 flex-col justify-between p-4">
       <SkeletonLine className="w-20 text-xs font-medium" />
       <div>
         <SkeletonLine className="w-12 text-3xl font-semibold" />

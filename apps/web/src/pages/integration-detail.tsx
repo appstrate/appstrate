@@ -33,7 +33,6 @@ import {
   Settings2,
   Info,
 } from "lucide-react";
-import { InlineMarkdown } from "../components/markdown";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
@@ -542,11 +541,6 @@ export function IntegrationDetailPage() {
 
       {/* Capabilities, connected accounts and package usage are distinct concepts. */}
       <DetailTabPanel value="overview">
-        {m.description && (
-          <p className="mb-6 text-sm">
-            <InlineMarkdown>{m.description}</InlineMarkdown>
-          </p>
-        )}
         <IntegrationOverview
           detail={detail}
           dependentIds={pkg?.agents.map((agent) => agent.id)}

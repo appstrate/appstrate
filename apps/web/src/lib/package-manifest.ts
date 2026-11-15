@@ -58,18 +58,12 @@ export interface ManifestLink extends ManifestFact {
   href?: string;
 }
 
-interface ManifestDependencyGroup {
-  labelKey: string;
-  entries: Array<{ id: string; range: string }>;
-}
-
 interface ManifestOverview {
   longDescription?: string;
   keywords: string[];
   /** license → author → schema_version → compatibility, in that order. */
   facts: ManifestFact[];
   links: ManifestLink[];
-  dependencies: ManifestDependencyGroup[];
   /** True when the manifest declares none of the above. */
   isEmpty: boolean;
 }
@@ -110,27 +104,6 @@ function present<T>(entries: Array<T | undefined>): T[] {
   return entries.filter((entry): entry is T => entry !== undefined);
 }
 
-function readDependencies(value: unknown): ManifestDependencyGroup[] {
-  const deps = obj(value);
-  if (!deps) return [];
-  const groups: Array<[field: string, labelKey: string]> = [
-    ["skills", "manifest.depSkills"],
-    ["mcp_servers", "manifest.depMcpServers"],
-    ["integrations", "manifest.depIntegrations"],
-  ];
-  return present(
-    groups.map(([field, labelKey]) => {
-      const entries = present(
-        Object.entries(obj(deps[field]) ?? {}).map(([id, raw]) => {
-          const range = str(raw);
-          return range ? { id, range } : undefined;
-        }),
-      );
-      return entries.length > 0 ? { labelKey, entries } : undefined;
-    }),
-  );
-}
-
 /**
  * The metadata fields every AFPS type shares. Left out on purpose: the header's fields
  * (`name`/`type`/`display_name`/`description`/`version`); `icon`/`icons`/`screenshots`, because
@@ -161,20 +134,13 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
 
   const longDescription = str(m.long_description);
   const keywords = strArray(m.keywords);
-  const dependencies = readDependencies(m.dependencies);
 
   return {
     ...(longDescription ? { longDescription } : {}),
     keywords,
     facts,
     links,
-    dependencies,
-    isEmpty:
-      !longDescription &&
-      keywords.length === 0 &&
-      facts.length === 0 &&
-      links.length === 0 &&
-      dependencies.length === 0,
+    isEmpty: !longDescription && keywords.length === 0 && facts.length === 0 && links.length === 0,
   };
 }
 

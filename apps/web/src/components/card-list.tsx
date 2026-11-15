@@ -12,7 +12,7 @@ import { cn } from "@appstrate/ui/cn";
 export function CardList({ className, ...props }: ComponentProps<typeof Card>) {
   return (
     <Card
-      className={cn("divide-border divide-y overflow-hidden rounded-xl", className)}
+      className={cn("divide-border divide-y overflow-hidden rounded-lg", className)}
       {...props}
     />
   );

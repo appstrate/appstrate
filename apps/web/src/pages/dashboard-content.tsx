@@ -164,7 +164,7 @@ function MetricCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("flex min-h-32 flex-col justify-between rounded-xl p-4", className)}>
+    <Card className={cn("flex min-h-32 flex-col justify-between p-4", className)}>
       <span className="text-muted-foreground text-xs font-medium">{label}</span>
       <div>
         <p className="text-3xl font-semibold tabular-nums">{value}</p>
