@@ -58,27 +58,43 @@ export interface ListingRefusal {
   body: unknown;
 }
 
-/** What every tool's `usage` says of its connections. */
-const CONNECTIONS_USAGE =
-  "Its `connection_ids` name, among the result's `connections`, those it reaches: with " +
-  "`credential-proxy:call`, yours and those other members shared into the space " +
-  "(`owned_by_actor: false`); with `credential-proxy:call-own` alone, yours only. Each " +
-  "connection has the `connection_id` to pass, the `authorized_uris` a target must match " +
-  "(unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone " +
-  "resolves), its `scopes_granted`, and what a call passing that `connection_id` would still " +
-  "refuse: a typed tool's `missing_scopes` maps a connection id to the scopes its policy " +
-  "requires that the connection lacks (the call answers `insufficient_scopes`), and " +
-  "`needs_reconnection` and " +
-  "`call_permission_required` (an enforced organization default governs the integration and " +
-  "you hold `credential-proxy:call-own` alone). With no `connection_id` and " +
-  "`credential-proxy:call` held, an organization default applies first. A connection you do " +
-  "not own is used when you pass its `connection_id` or an organization default designates it.";
+/** Scopes of a connection a search lists; past it `scopes_granted_count` gives the total. */
+export const MAX_LISTED_SCOPES = 20;
+
+/**
+ * What a tool's `usage` says of its connections. `missing_scopes` is the tool's own field, carried
+ * by typed tools alone.
+ */
+function connectionsUsage(typed: boolean): string {
+  return (
+    "Its `connection_ids` name, among the result's `connections`, those it reaches: with " +
+    "`credential-proxy:call`, yours and those other members shared into the space " +
+    "(`owned_by_actor: false`); with `credential-proxy:call-own` alone, yours only. Each " +
+    "connection has the `connection_id` to pass, the `authorized_uris` a target must match " +
+    "(unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone " +
+    `resolves), its \`scopes_granted\` (the first ${MAX_LISTED_SCOPES}, \`scopes_granted_count\` ` +
+    "giving the total when it is longer: the full list is in the entry of " +
+    "`listCredentialProxyConnections`, through invoke_operation), and what a call passing that " +
+    "`connection_id` would still refuse: " +
+    (typed
+      ? "the tool's `missing_scopes` maps a connection id to the scopes its policy requires " +
+        "that the connection lacks (the call answers `insufficient_scopes`), "
+      : "") +
+    "`needs_reconnection` and " +
+    "`call_permission_required` (an enforced organization default governs the integration and " +
+    "you hold `credential-proxy:call-own` alone). With no `connection_id` and " +
+    "`credential-proxy:call` held, an organization default applies first. A connection you do " +
+    "not own is used when you pass its `connection_id` or an organization default designates it."
+  );
+}
 
 const REMOTE_TOOL_USAGE =
   "Pass the tool's own arguments in `arguments`, following its `input_schema`: the platform " +
-  "checks only that the required ones are present, the server validates the rest (a refusal " +
-  "of the call by the server answers `upstream_invalid_params` for its arguments or tool name, else " +
-  "`upstream_mcp_error`, either with its `mcp_error.code` and `message`). When " +
+  "checks that the required ones are present and, when the schema closes its properties " +
+  "(`additionalProperties: false`), that no key is unknown (`unknown_argument`); the server " +
+  "validates the rest. A server may refuse the call with a protocol error (the platform's " +
+  "`upstream_invalid_params` for its arguments or tool name, else `upstream_mcp_error`, " +
+  "either with its `mcp_error.code` and `message`) or with its own `isError` tool result. When " +
   "it has an `output_schema`, its `structuredContent` follows it. The `connection_id` of " +
   "call_integration_tool names the connection; without it the proxy chooses as for an " +
   "`api_call`, and `must_choose_connection` lists the candidates in " +
@@ -97,7 +113,7 @@ const REMOTE_TOOL_USAGE =
   "credential with HTTP `upstream_status`; do not retry: with `credential.status` " +
   "`needs_reconnection`, its owner must reconnect it, otherwise the connection may lack a " +
   "permission the tool needs; tell the user). " +
-  CONNECTIONS_USAGE;
+  connectionsUsage(true);
 
 /** Appended to a text block cut at the result budget. */
 const cutMarker = (kept: number, total: number) =>
@@ -239,7 +255,7 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
     return {
       ...tool,
       description: `${tool.description} ${API_CALL_DESCRIPTION}`,
-      usage: `${API_CALL_USAGE} ${CONNECTIONS_USAGE}`,
+      usage: `${API_CALL_USAGE} ${connectionsUsage(false)}`,
       schema: apiCallSchema,
       input_schema: API_CALL_INPUT_SCHEMA,
       execute: (args, extra, named) =>

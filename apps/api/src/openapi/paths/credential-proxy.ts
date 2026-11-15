@@ -105,7 +105,9 @@ const proxyParameters = [
       "`Location`, body) and nothing is sent to that URL, so the caller can fetch a signed " +
       "URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is " +
       "refused instead (`403 unauthorized_target`): its `Location` could carry the " +
-      "substituted value.",
+      "substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an " +
+      "empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects " +
+      "the credential itself.",
     schema: { type: "string" },
   },
   {
@@ -306,7 +308,8 @@ const proxyResponses = {
   },
   "403": {
     description:
-      "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a " +
+      "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is " +
+      "not in `authorized_uris`, or, on a " +
       "call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call " +
       "gets that 3xx back unfollowed), or the connection does not render the declared list " +
       "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
