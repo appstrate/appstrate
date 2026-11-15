@@ -49,7 +49,14 @@ test("integration cards remain reachable on a narrow dark screen", async ({
   await page.goto("/integrations");
   const link = page.getByRole("link", { name: `Test Integration ${name}`, exact: true });
   await expect(link).toBeVisible();
-  await expect(page.getByText(/0 connexion/)).toBeVisible();
+  // The unfiltered list also shows system integrations: read the count on this card only
+  // (the deepest element holding both the title link and the count).
+  const card = page
+    .locator("div")
+    .filter({ has: link })
+    .filter({ hasText: /0 connexion/ })
+    .last();
+  await expect(card).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({
     path: testInfo.outputPath("integrations-grid-mobile.png"),
