@@ -17,6 +17,7 @@ import {
   fetchSessionsPage,
   flattenSessions,
   sessionsQueryKey,
+  sessionsSearchQueryKey,
   spaceIdFromHeaders,
   type SessionsCache,
 } from "./sessions.ts";
@@ -55,11 +56,11 @@ export function sessionsRefetchInterval(query: {
 }
 
 /** The session-list query, shared by the list and the nav badge (one key, one request). */
-function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boolean) {
+function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boolean, q = "") {
   const spaceId = spaceIdFromHeaders(getHeaders);
   return infiniteQueryOptions({
-    queryKey: sessionsQueryKey(spaceId),
-    queryFn: ({ pageParam }) => fetchSessionsPage(getHeaders, pageParam),
+    queryKey: q ? sessionsSearchQueryKey(spaceId, q) : sessionsQueryKey(spaceId),
+    queryFn: ({ pageParam }) => fetchSessionsPage(getHeaders, pageParam, q || undefined),
     initialPageParam: null as string | null,
     getNextPageParam: (last) =>
       last.hasMore ? (last.data[last.data.length - 1]?.id ?? null) : null,
@@ -73,11 +74,15 @@ function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boole
   });
 }
 
-export function useSessions(headers?: GetHeaders) {
+/**
+ * `q` (already trimmed/debounced by the caller) narrows the list to titles
+ * containing it, server-side; empty is the plain list and shares its key.
+ */
+export function useSessions(headers?: GetHeaders, q = "") {
   const contextHeaders = useChatHeaders();
   // ChatPage owns the provider below its render, so its own observer receives
   // the host headers directly. Descendants read the same headers from context.
-  return useInfiniteQuery(sessionsQuery(headers ?? contextHeaders, true));
+  return useInfiniteQuery(sessionsQuery(headers ?? contextHeaders, true, q));
 }
 
 /**

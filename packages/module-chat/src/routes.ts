@@ -27,7 +27,7 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
@@ -51,6 +51,17 @@ const sessionsLimit = z.coerce
   .min(1)
   .max(SESSIONS_PAGE_SIZE)
   .catch(SESSIONS_PAGE_SIZE);
+
+const SESSIONS_SEARCH_MAX = 200;
+
+/**
+ * `%`, `_` and `\` taken as typed (Postgres' default LIKE escape is the
+ * backslash). Mirrors `apps/api/src/lib/like-pattern.ts`, which a module
+ * package cannot import.
+ */
+function likeContains(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+}
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -171,6 +182,13 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       eq(chatSessions.userId, scope.userId),
       eq(chatSessions.spaceId, scope.spaceId),
     ];
+    // `?q=` narrows by title; blank = no filter. Untitled rows never match
+    // (`NULL ILIKE …` is not true). The cursor stays any of the caller's rows.
+    const search = c.req.query("q")?.trim();
+    if (search && search.length > SESSIONS_SEARCH_MAX) {
+      throw invalidRequest(`q must be ${SESSIONS_SEARCH_MAX} characters or fewer`, "q");
+    }
+    if (search) conditions.push(ilike(chatSessions.title, likeContains(search)));
     const startingAfter = c.req.query("startingAfter");
     if (startingAfter) {
       if (!(await findOwnedSession(startingAfter, scope))) {
