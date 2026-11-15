@@ -25,10 +25,10 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
-  PaperclipIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
   SquareIcon,
+  UploadIcon,
   XIcon,
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
@@ -56,65 +56,87 @@ import { isImageMime } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 
 export function Thread({
+  composerTools,
   composerSlot,
   initialComposerDraft,
 }: {
+  /** Left of the composer's bottom row: the "+" menu and the active-setting chips. */
+  composerTools?: React.ReactNode;
+  /** Right of it, before send: the model picker. */
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
 }) {
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
+  const { can, t } = useChatHost();
   return (
-    <ThreadPrimitive.Root
-      // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
-      // this shell are grey with white cards on top (the composer, the tool
-      // cards). `background` is shadcn's component surface, which would make
-      // the chat the one flat white screen in the product.
-      className="bg-canvas flex h-full flex-col"
-      style={{ ["--thread-max-width" as string]: "42rem" }}
+    // The whole thread is the drop target, welcome screen and transcript alike;
+    // dropped files take the same adapter path as the picker. A reader gets no
+    // drop target (and no overlay: `data-dragging` is only set when enabled).
+    <ComposerPrimitive.AttachmentDropzone
+      disabled={!can("chat:write")}
+      className="group/drop relative h-full min-h-0"
     >
-      {/* Register the rich tool cards (these render nothing themselves). */}
-      <InvokeOperationToolUI />
-      <RunAndWaitToolUI />
-      <SearchOperationsToolUI />
-      <DescribeOperationToolUI />
-      <ImportPackageFileToolUI />
+      <ThreadPrimitive.Root
+        // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+        // this shell are grey with white cards on top (the composer, the tool
+        // cards). `background` is shadcn's component surface, which would make
+        // the chat the one flat white screen in the product.
+        className="bg-canvas flex h-full flex-col"
+        style={{ ["--thread-max-width" as string]: "42rem" }}
+      >
+        {/* Register the rich tool cards (these render nothing themselves). */}
+        <InvokeOperationToolUI />
+        <RunAndWaitToolUI />
+        <SearchOperationsToolUI />
+        <DescribeOperationToolUI />
+        <ImportPackageFileToolUI />
 
-      {/* Empty: composer centered mid-screen for a strong first impression.
+        {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
-      <AuiIf condition={(s) => s.thread.isEmpty}>
-        <ThreadWelcome
-          composerSlot={composerSlot}
-          initialComposerDraft={initialComposerDraft}
-          draftSeededRef={draftSeededRef}
-        />
-      </AuiIf>
+        <AuiIf condition={(s) => s.thread.isEmpty}>
+          <ThreadWelcome
+            composerTools={composerTools}
+            composerSlot={composerSlot}
+            initialComposerDraft={initialComposerDraft}
+            draftSeededRef={draftSeededRef}
+          />
+        </AuiIf>
 
-      <AuiIf condition={(s) => !s.thread.isEmpty}>
-        {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+        <AuiIf condition={(s) => !s.thread.isEmpty}>
+          {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
             and amplifies any residual layout shift. `relative` makes the
             viewport the containing block of its absolutely positioned
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-        <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
-          <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+          <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
-          <div className="min-h-6 flex-grow" />
+            <div className="min-h-6 flex-grow" />
 
-          <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
-            <ScrollToBottom />
-            <Composer
-              slot={composerSlot}
-              initialDraft={initialComposerDraft}
-              draftSeededRef={draftSeededRef}
-            />
-            <Disclaimer />
-          </ThreadPrimitive.ViewportFooter>
-        </ThreadPrimitive.Viewport>
-      </AuiIf>
-    </ThreadPrimitive.Root>
+            <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+              <ScrollToBottom />
+              <Composer
+                tools={composerTools}
+                slot={composerSlot}
+                initialDraft={initialComposerDraft}
+                draftSeededRef={draftSeededRef}
+              />
+              <Disclaimer />
+            </ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
+        </AuiIf>
+      </ThreadPrimitive.Root>
+      <div
+        aria-hidden="true"
+        className="bg-canvas/80 duration-base ease-surface pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+      >
+        <UploadIcon className="text-muted-foreground motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+        <p className="text-muted-foreground text-sm font-medium">{t("composer.dropzone")}</p>
+      </div>
+    </ComposerPrimitive.AttachmentDropzone>
   );
 }
 
@@ -128,10 +150,12 @@ const WELCOME_SUGGESTION_KEYS = [
 ];
 
 function ThreadWelcome({
+  composerTools,
   composerSlot,
   initialComposerDraft,
   draftSeededRef,
 }: {
+  composerTools?: React.ReactNode;
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
@@ -149,6 +173,7 @@ function ThreadWelcome({
           </p>
         </div>
         <Composer
+          tools={composerTools}
           slot={composerSlot}
           initialDraft={initialComposerDraft}
           draftSeededRef={draftSeededRef}
@@ -207,11 +232,61 @@ function ScrollToBottom() {
   );
 }
 
-/** A pending composer attachment chip: file icon, name, size, remove button. */
+/**
+ * A pending image's thumbnail. The object URL lives exactly as long as the
+ * element (React 19 ref cleanup), with no state round-trip. Not the staged
+ * cache of `upload.ts`: that one is filled at send time, after the chip is gone.
+ */
+function PendingImage({ file, name }: { file: File; name: string }) {
+  const attach = React.useCallback(
+    (img: HTMLImageElement | null) => {
+      if (!img) return;
+      const url = URL.createObjectURL(file);
+      img.src = url;
+      return () => URL.revokeObjectURL(url);
+    },
+    [file],
+  );
+  return (
+    <img
+      ref={attach}
+      alt={name || "image"}
+      title={name}
+      className="size-12 shrink-0 rounded-md border object-cover"
+    />
+  );
+}
+
+/** A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both removable. */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
-  const size = useAuiState((s) => s.attachment.file?.size ?? 0);
+  const file = useAuiState((s) => s.attachment.file);
+  const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
+  const previewFile = file && isImageMime(file.type) ? file : undefined;
+  const remove = (
+    <AttachmentPrimitive.Remove asChild>
+      <button
+        type="button"
+        aria-label={t("composer.removeAttachment")}
+        className={
+          previewFile
+            ? "bg-foreground/70 text-background hover:bg-foreground absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full"
+            : "text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+        }
+      >
+        <XIcon className={previewFile ? "size-3" : "size-3.5"} />
+      </button>
+    </AttachmentPrimitive.Remove>
+  );
+  if (previewFile) {
+    return (
+      <AttachmentPrimitive.Root className="relative inline-flex">
+        <PendingImage file={previewFile} name={name} />
+        {remove}
+      </AttachmentPrimitive.Root>
+    );
+  }
   return (
     <AttachmentPrimitive.Root className="inline-flex">
       <InertAttachmentChip
@@ -221,15 +296,7 @@ function ComposerAttachmentChip() {
             {size > 0 && (
               <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
             )}
-            <AttachmentPrimitive.Remove asChild>
-              <button
-                type="button"
-                aria-label={t("composer.removeAttachment")}
-                className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </AttachmentPrimitive.Remove>
+            {remove}
           </>
         }
       />
@@ -304,10 +371,12 @@ function ComposerAttachmentError() {
 }
 
 function Composer({
+  tools,
   slot,
   initialDraft,
   draftSeededRef,
 }: {
+  tools?: React.ReactNode;
   slot?: React.ReactNode;
   initialDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
@@ -342,49 +411,40 @@ function Composer({
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
+        addAttachmentOnPaste
         placeholder={t("composer.placeholder")}
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <ComposerPrimitive.AddAttachment multiple asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.attach")}
-            >
-              <PaperclipIcon />
-            </Button>
-          </ComposerPrimitive.AddAttachment>
+        <div className="min-w-0">{tools}</div>
+        <div className="flex shrink-0 items-center gap-2">
           <div className="min-w-0">{slot}</div>
+          <ThreadPrimitive.If running={false}>
+            <ComposerPrimitive.Send asChild>
+              <Button
+                type="button"
+                size="icon"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label={t("composer.send")}
+              >
+                <SendHorizontalIcon />
+              </Button>
+            </ComposerPrimitive.Send>
+          </ThreadPrimitive.If>
+          <ThreadPrimitive.If running>
+            <ComposerPrimitive.Cancel asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label={t("composer.stop")}
+              >
+                <SquareIcon className="fill-current" />
+              </Button>
+            </ComposerPrimitive.Cancel>
+          </ThreadPrimitive.If>
         </div>
-        <ThreadPrimitive.If running={false}>
-          <ComposerPrimitive.Send asChild>
-            <Button
-              type="button"
-              size="icon"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.send")}
-            >
-              <SendHorizontalIcon />
-            </Button>
-          </ComposerPrimitive.Send>
-        </ThreadPrimitive.If>
-        <ThreadPrimitive.If running>
-          <ComposerPrimitive.Cancel asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.stop")}
-            >
-              <SquareIcon className="fill-current" />
-            </Button>
-          </ComposerPrimitive.Cancel>
-        </ThreadPrimitive.If>
       </div>
     </ComposerPrimitive.Root>
   );
