@@ -2634,6 +2634,8 @@ interface UsableIntegration {
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
   default_tools?: readonly string[] | "*";
+  /** Present (true) when none of the actor's usable connections of it is healthy. */
+  needs_reconnection?: true;
 }
 
 /**
@@ -2652,16 +2654,18 @@ export async function listUsableIntegrationsForActor(
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
       shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
+      needsReconnection: integrationConnections.needsReconnection,
     })
     .from(integrationConnections)
     .where(usableInSpace(scope.spaceId, actor));
   if (rows.length === 0) return [];
 
-  const acc = new Map<string, { own: boolean; shared: boolean }>();
+  const acc = new Map<string, { own: boolean; shared: boolean; healthy: boolean }>();
   for (const row of rows) {
-    const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
+    const entry = acc.get(row.integrationId) ?? { own: false, shared: false, healthy: false };
     entry.own ||= actorOwns(actor, row);
     entry.shared ||= row.shared;
+    entry.healthy ||= !row.needsReconnection;
     acc.set(row.integrationId, entry);
   }
 
@@ -2689,7 +2693,7 @@ export async function listUsableIntegrationsForActor(
   );
 
   return ids.map((integrationId) => {
-    const { own, shared } = acc.get(integrationId)!;
+    const { own, shared, healthy } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
     return {
       integration_package_id: integrationId,
@@ -2697,6 +2701,7 @@ export async function listUsableIntegrationsForActor(
       source,
       version: versionMap.get(integrationId),
       default_tools: defaultToolsMap.get(integrationId),
+      ...(healthy ? {} : { needs_reconnection: true as const }),
     };
   });
 }

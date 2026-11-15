@@ -200,21 +200,24 @@ function RailPanelBlocks() {
   );
 }
 
-/** A framed one-pane tab (memory): the panel's card around its padded content. */
-function FramedPanelBlocks() {
+/** An agent's memory: its toolbar, the one-line hint under it, then the table's own card. */
+function MemoryTabBlocks() {
   return (
-    <Card className="overflow-hidden p-6">
-      <SettingsSkeleton />
-    </Card>
+    <>
+      <ToolbarBlocks />
+      <SkeletonLine className="mb-2 w-2/3 text-xs" />
+      <TableBlocks framed />
+    </>
   );
 }
 
-/** A run's journal: the log viewer's ruled head and rows, in the tab panel's card. */
-function JournalPanelBlocks() {
+/** A run's journal: its toolbar (with the actions menu), then its own card and tinted head. */
+function JournalTabBlocks() {
   return (
-    <Card className="overflow-hidden">
-      <TableBlocks framed={false} />
-    </Card>
+    <>
+      <ToolbarBlocks action />
+      <TableBlocks framed tintedHead />
+    </>
   );
 }
 
@@ -256,7 +259,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
         tab === "settings" ? (
           <RailPanelBlocks />
         ) : tab === "memory" ? (
-          <FramedPanelBlocks />
+          <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
           <ListTabBlocks />
         ) : type === "agent" ? (
@@ -287,7 +290,7 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
       meta={false}
       panel={
         tab === "journal" ? (
-          <JournalPanelBlocks />
+          <JournalTabBlocks />
         ) : tab === "results" ? (
           <RailPanelBlocks />
         ) : (
@@ -382,12 +385,15 @@ function ToolbarBlocks({
   filters = true,
   columns = false,
   views = false,
+  action = false,
 }: {
   tabs?: boolean;
   /** The filter button: absent on a list that only searches. */
   filters?: boolean;
   columns?: boolean;
   views?: boolean;
+  /** An action at the bar's end (`ListToolbar`'s `actions`, `TOOLBAR_ACTION` size). */
+  action?: boolean;
 }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -395,7 +401,8 @@ function ToolbarBlocks({
       <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
       {filters && <Skeleton className="h-8 w-[5.5rem]" />}
       {columns && <Skeleton className="h-8 w-[6.5rem]" />}
-      {views && <Skeleton className="ml-auto h-9 w-[4.5rem]" />}
+      {views && <Skeleton className="ml-auto h-8 w-[5.25rem]" />}
+      {action && <Skeleton className="ml-auto h-8 w-24" />}
     </div>
   );
 }
@@ -404,13 +411,14 @@ function ToolbarBlocks({
  * `DataTable`'s head and rows: in its own card on a page, frameless (the head ruled above and
  * below) on an integrated surface.
  */
-function TableBlocks({ framed }: { framed: boolean }) {
+function TableBlocks({ framed, tintedHead = false }: { framed: boolean; tintedHead?: boolean }) {
   const body = (
     <>
       <div
         className={cn(
           "border-border flex h-10 items-center px-3",
           framed ? "border-b" : "border-y",
+          tintedHead && "bg-muted/40",
         )}
       >
         <Skeleton className="h-3 w-1/3" />

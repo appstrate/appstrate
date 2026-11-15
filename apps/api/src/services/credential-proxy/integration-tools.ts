@@ -516,6 +516,7 @@ export async function listIntegrationTools(
   query: IntegrationToolQuery,
 ): Promise<IntegrationToolListing> {
   const { scope, actor, reach, connectOffers } = caller;
+  const listingByName = query.name !== undefined;
   const activeIds = await activeIntegrationIds(scope);
   if (query.integrationId !== undefined && !activeIds.includes(query.integrationId)) {
     throw notFound(`Integration '${query.integrationId}' is not active in this space`);
@@ -524,18 +525,7 @@ export async function listIntegrationTools(
     scope.orgId,
     query.integrationId !== undefined ? [query.integrationId] : activeIds,
   );
-  const [reachable, notReady] = await Promise.all([
-    connectionsOutsideRun(scope, actor, reach, manifests),
-    query.name === undefined
-      ? integrationsOutsideRun(
-          scope,
-          actor,
-          reach,
-          connectOffers,
-          new Map([...manifests].filter(([, manifest]) => offersToolsOutsideRun(manifest))),
-        )
-      : [],
-  ]);
+  const reachable = await connectionsOutsideRun(scope, actor, reach, manifests);
 
   const byIntegration = new Map<string, ConnectionOutsideRun[]>();
   for (const connection of reachable) {
@@ -580,8 +570,11 @@ export async function listIntegrationTools(
       entry.manifest.source?.kind === "remote" &&
       (query.name === undefined || query.name.startsWith(`${entry.namespace}__`)),
   );
+  // A listing offers a connect link once, in `not_ready`: a refusal read here mints none. A call
+  // by name has no `not_ready`, so its refusal keeps the offer.
   const listing = {
     ...caller,
+    connectOffers: listingByName ? connectOffers : null,
     signal: AbortSignal.any([caller.signal, listingDeadline(query.name !== undefined)]),
   };
   const listed = new Map(
@@ -592,6 +585,20 @@ export async function listIntegrationTools(
     ),
   );
 
+  // Judged after the catalog reads: an upstream rejection flags its connection during one.
+  const notReady = listingByName
+    ? []
+    : (
+        await integrationsOutsideRun(
+          scope,
+          actor,
+          reach,
+          connectOffers,
+          new Map([...manifests].filter(([, manifest]) => offersToolsOutsideRun(manifest))),
+        )
+      ).filter((entry) => NOT_READY_STATUSES.has(entry.proxy_connection.status));
+  const notReadyIds = new Set(notReady.map((entry) => entry.integration_package_id));
+
   const tools: IntegrationTool[] = [];
   const unlisted: UnlistedIntegration[] = [];
   const truncatedCatalogs: TruncatedCatalog[] = [];
@@ -600,7 +607,8 @@ export async function listIntegrationTools(
     const result = listed.get(id);
     if (result === undefined) continue;
     if ("unlisted" in result) {
-      unlisted.push(result.unlisted);
+      // An integration to reconnect or connect is told once, in `not_ready`.
+      if (!notReadyIds.has(id)) unlisted.push(result.unlisted);
       continue;
     }
     tools.push(...result.tools);
@@ -612,7 +620,7 @@ export async function listIntegrationTools(
   return {
     tools: shown,
     connections: connectionsOf(shown),
-    not_ready: notReady.filter((entry) => NOT_READY_STATUSES.has(entry.proxy_connection.status)),
+    not_ready: notReady,
     unlisted,
     truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
   };

@@ -178,7 +178,7 @@ export function OrgSettingsRolesPage() {
           ]}
         />
         <Tabs value={view} onValueChange={(next) => setView(next === "matrix" ? "matrix" : "list")}>
-          <TabsList className="h-9">
+          <TabsList className="h-8 shrink-0 p-0.5">
             <TabsTrigger value="list" aria-label={t("roles.viewList")}>
               <Rows3 className="size-4" />
             </TabsTrigger>

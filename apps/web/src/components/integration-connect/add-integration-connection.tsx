@@ -4,6 +4,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Plus, Settings2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +13,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { authMethodLabel } from "../../lib/integration-presentation";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-hosted-connect-popup";
@@ -91,8 +93,7 @@ function AddConnectionButton({
   return (
     <Button
       variant="outline"
-      size="sm"
-      className="@max-sm/bar:size-8 @max-sm/bar:p-0"
+      className={cn(TOOLBAR_ACTION, "@max-sm/bar:size-8 @max-sm/bar:p-0")}
       aria-label={label}
       title={label}
       {...props}

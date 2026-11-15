@@ -33,7 +33,11 @@ they start with `packages/` or `e2e/`.
   included; inside a surface that is already framed (every overlay: settings and
   the catalogue, every `Modal`, a `framed` `DetailTabPanel`) it draws none,
   because that surface spreads `INTEGRATED_TABLE_SURFACE`. Never choose a
-  table's frame at the call site.
+  table's frame at the call site. A detail tab lays its content on the page:
+  a list tab (runs, memory, connections, usage, a run's journal) is its
+  `ListToolbar` over the list's own card, at the panel's edge; only a rail split
+  (settings, a run's results) is a `framed` panel. A toolbar's buttons are its
+  32px (`lib/toolbar-button.ts`), never a stock `size="sm"` beside them.
 - **Grey has two values**: a static muted surface (inset, notice, header band,
   read-only field, code block) is `bg-muted/40` (insets add `rounded-lg border`);
   hovering a row, a list item or a card is `hover:bg-muted/50`, the table row's

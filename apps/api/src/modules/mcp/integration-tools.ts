@@ -22,6 +22,7 @@ import { renderFieldPath } from "@appstrate/core/api-errors";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
 import {
+  MAX_LISTED_SCOPES,
   readIntegrationTools,
   type CallableTool,
   type ListingRefusal,
@@ -34,7 +35,7 @@ import {
   searchScore,
   searchTokens,
 } from "./search.ts";
-import { jsonResult, refusalResult, type Refusal } from "./tool-results.ts";
+import { asRecord, jsonResult, refusalResult, type Refusal } from "./tool-results.ts";
 import type { McpObserver, McpToolName } from "./tools.ts";
 
 interface IntegrationToolContext extends DispatchContext {
@@ -56,6 +57,15 @@ function valueAt(value: unknown, path: readonly PropertyKey[]): unknown {
   return current;
 }
 
+/** The refusal of arguments the tool does not declare. */
+function unknownArgumentsRefusal(unknown: string[]): Refusal {
+  return {
+    code: "unknown_argument",
+    error: `Unknown argument(s): ${unknown.join(", ")}.`,
+    arguments: unknown,
+  };
+}
+
 /**
  * The refusal of a parse of `input`; `prefix` places the parsed object among the tool's
  * arguments. Required arguments absent and nothing else is `missing_argument`; any other issue is
@@ -66,13 +76,7 @@ function argumentsRefusal(error: z.ZodError, input: unknown, prefix: PropertyKey
   const unknown = error.issues.flatMap((issue) =>
     issue.code === "unrecognized_keys" ? issue.keys.map((key) => path([...issue.path, key])) : [],
   );
-  if (unknown.length > 0) {
-    return {
-      code: "unknown_argument",
-      error: `Unknown argument(s): ${unknown.join(", ")}.`,
-      arguments: unknown,
-    };
-  }
+  if (unknown.length > 0) return unknownArgumentsRefusal(unknown);
   const absent = (issue: (typeof error.issues)[number]) =>
     issue.code === "invalid_type" && valueAt(input, issue.path) === undefined;
   const issues = error.issues.slice(0, MAX_REPORTED_ISSUES);
@@ -111,6 +115,18 @@ function listingRefused(
     outcome: "invoked",
   });
   return jsonResult({ ...refused }, true);
+}
+
+/** A connection as a search lists it: a long `scopes_granted` cut, its total beside it. */
+function listedConnection<C extends { scopes_granted: string[] }>(connection: C) {
+  const { scopes_granted: scopes } = connection;
+  return scopes.length > MAX_LISTED_SCOPES
+    ? {
+        ...connection,
+        scopes_granted: scopes.slice(0, MAX_LISTED_SCOPES),
+        scopes_granted_count: scopes.length,
+      }
+    : connection;
 }
 
 /** A tool as a search lists it, its connections among the result's `connections`. */
@@ -256,7 +272,11 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       total: matches.length,
       tools: shown.map(listedTool),
       ...(reached.size > 0
-        ? { connections: read.connections.filter((c) => reached.has(c.connection_id)) }
+        ? {
+            connections: read.connections
+              .filter((c) => reached.has(c.connection_id))
+              .map(listedConnection),
+          }
         : {}),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
@@ -293,7 +313,9 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       "following its `input_schema`; its `usage` (in `best_match`, which a search by the " +
       "tool's exact name returns) says how to read the result. A missing required argument is " +
       "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
-      "not declare the same way, while a typed tool's server validates the rest itself. " +
+      "not declare the same way, and so does a typed tool whose `input_schema` closes its " +
+      "properties (`additionalProperties: false`); a typed tool's server validates the rest " +
+      "itself, and may answer with a protocol error or with its own `isError` tool result. " +
       "`tool_catalog_unavailable` means the catalog of a typed tool's server could not be read " +
       "to say which of its tools the name is (`listing_failure`, when known, says why): " +
       "nothing was sent, and a retry may succeed once a listing reads it. Call " +
@@ -400,7 +422,24 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       }
       toolArguments = parsed.data;
     } else {
-      // A typed tool: only the presence of its required arguments; its server validates the rest.
+      // A typed tool: required arguments present and, when its schema closes its properties, no
+      // unknown key (a missing `properties` allows none); its server validates the rest. Only the
+      // plain form is judged: `patternProperties` would mean running the server's regexes, and
+      // under composition (allOf, anyOf, oneOf, $ref) validators disagree with JSON Schema's
+      // sibling-only rule, so the platform never refuses what the server might accept.
+      const schema = tool.input_schema;
+      const composed = ["patternProperties", "allOf", "anyOf", "oneOf", "$ref"].some(
+        (keyword) => keyword in schema,
+      );
+      if (schema.additionalProperties === false && !composed) {
+        const properties = asRecord(schema.properties) ?? {};
+        const unknown = Object.keys(call.data.arguments).filter(
+          (key) => !Object.hasOwn(properties, key),
+        );
+        if (unknown.length > 0) {
+          return refuse(unknownArgumentsRefusal(unknown.map((key) => `arguments.${key}`)));
+        }
+      }
       const required = Array.isArray(tool.input_schema.required) ? tool.input_schema.required : [];
       const missing = required.filter(
         (name): name is string =>

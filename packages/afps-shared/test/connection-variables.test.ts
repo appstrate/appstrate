@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  hasUserinfo,
   isVariableTemplate,
   parseUrlTemplate,
   renderUrlTemplate,
@@ -245,5 +246,24 @@ describe("stripTrailingSlashes", () => {
     const started = performance.now();
     expect(stripTrailingSlashes(hostile)).toBe(hostile);
     expect(performance.now() - started).toBeLessThan(50);
+  });
+});
+
+describe("hasUserinfo", () => {
+  it("detects userinfo, even empty, through WHATWG normalisation", () => {
+    for (const url of [
+      "https://user@host/",
+      "https://u:p@host/x",
+      "https://@host/",
+      " https://u:p@host/",
+      "https://u:p\t@host/",
+      "https:\\\\u:p@host/",
+    ])
+      expect(hasUserinfo(url)).toBe(true);
+  });
+
+  it("ignores an `@` past the authority", () => {
+    for (const url of ["https://host/a@b", "https://host?x=@y", "https://host#@z", "https://host"])
+      expect(hasUserinfo(url)).toBe(false);
   });
 });
