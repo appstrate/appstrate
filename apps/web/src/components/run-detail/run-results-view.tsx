@@ -6,9 +6,10 @@ import { BrainCircuit, Braces, FileOutput, LoaderCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
-import { useFile, useFiles, type FileDto } from "../../hooks/use-files";
+import { useFile, useFilesPaged, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
@@ -56,13 +57,18 @@ function RunDeliverable({ fileId }: { fileId: string }) {
 
 /** Fetches the run's file container and hands it to the view. */
 export function RunResultsView(props: RunResultsProps) {
-  const { data, isLoading, error } = useFiles({ runId: props.run.id, limit: 100 });
+  const { data, isLoading, error, hasNextPage, isFetchingNextPage, fetchNextPage } = useFilesPaged({
+    runId: props.run.id,
+    limit: 100,
+  });
   const { can } = usePermissions();
   return (
     <RunResultsContent
       {...props}
-      files={data?.data ?? []}
-      hasMore={data?.hasMore ?? false}
+      files={data?.pages.flatMap((page) => page.data) ?? []}
+      hasMore={hasNextPage}
+      loadingMore={isFetchingNextPage}
+      onLoadMore={() => void fetchNextPage()}
       isLoading={isLoading}
       error={error}
       filesDenied={!can("files:read")}
@@ -81,13 +87,17 @@ export function RunResultsContent({
   memoryLoading,
   files,
   hasMore,
+  loadingMore = false,
+  onLoadMore,
   isLoading,
   error,
   filesDenied,
 }: RunResultsProps & {
   files: FileDto[];
-  /** The 100-row page was capped: the run's file container holds more rows. */
+  /** The run's file container holds more rows than the pages read so far. */
   hasMore: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   isLoading: boolean;
   error: unknown;
   /** The caller may not list files (`files:read`), so none were fetched. */
@@ -108,8 +118,8 @@ export function RunResultsContent({
   // told apart only by its own `runId` (`producedRunFiles`).
   const outputDocuments = useMemo(() => producedRunFiles(files, run.id), [files, run.id]);
   // `hasMore` describes the whole container, inputs included: the produced list
-  // is cut only when fewer produced rows arrived than the run's own count.
-  const producedCut = hasMore && outputDocuments.length < run.file_counts.output;
+  // is unfinished only while fewer produced rows arrived than the run's own count.
+  const producedUnfinished = hasMore && outputDocuments.length < run.file_counts.output;
   const { hasStructuredOutput, shouldRenderDocuments, hasProduction, isPartial } =
     classifyRunResults({
       status: run.status,
@@ -211,8 +221,16 @@ export function RunResultsContent({
             }}
             tableSurface="integrated"
             footer={
-              producedCut && (
-                <p className="text-muted-foreground text-xs">{t("run.producedFilesTruncated")}</p>
+              producedUnfinished && (
+                <PendingButton
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  pending={loadingMore}
+                  onClick={onLoadMore}
+                >
+                  {t("pagination.loadMore", { ns: "common" })}
+                </PendingButton>
               )
             }
           />

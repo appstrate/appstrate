@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
-import { $api } from "../api/client";
+import { useInfiniteQuery, useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
+import { $api, client } from "../api/client";
+import { keysetPaging } from "../lib/keyset-paging";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
@@ -30,21 +31,27 @@ export function useUnreadCount() {
   );
 }
 
-/** Recipient's notifications (newest first). `unread` filters to unread only. */
+/** Recipient's notifications (newest first), keyset-paged. `unread` filters to unread only. */
 export function useNotifications(opts: { unread?: boolean; limit?: number } = {}) {
   const scope = useOrgScope();
   const spaceId = useCurrentSpaceId();
   const { unread = true, limit = 50 } = opts;
-  return $api.useQuery(
-    "get",
-    "/api/notifications",
-    { params: { header: scope.header, query: { unread, limit } } },
-    {
-      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!spaceId,
-      select: (d) => d.data,
+  return useInfiniteQuery({
+    // Same `[method, path]` prefix as the generated keys, so the invalidations reach it.
+    queryKey: ["get", "/api/notifications", { header: scope.header, query: { unread, limit } }],
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await client.GET("/api/notifications", {
+        params: { header: scope.header, query: { unread, limit, startingAfter: pageParam } },
+        signal,
+      });
+      if (!data) throw new Error("empty response");
+      return data;
     },
-  );
+    ...keysetPaging,
+    refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
+    enabled: !!spaceId,
+    select: (d) => d.pages.flatMap((page) => page.data),
+  });
 }
 
 /** The feed and its badge. */

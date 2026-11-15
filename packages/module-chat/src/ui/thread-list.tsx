@@ -28,13 +28,14 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@appstrate/ui/components/dialog";
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@appstrate/ui/components/alert-dialog";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -240,10 +241,24 @@ function ConversationRow({
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
 
+  // The dialog stays open while the delete is in flight and on failure (it says
+  // so); it closes only once the row is gone.
   const onDelete = async () => {
+    setDeleting(true);
+    setDeleteFailed(false);
+    try {
+      await deleteSession(getHeaders, session.id);
+    } catch {
+      // The chat's own fetch is not toasted by the app's mutation cache: say it in the dialog.
+      setDeleteFailed(true);
+      setDeleting(false);
+      return;
+    }
     setConfirmingDelete(false);
-    await deleteSession(getHeaders, session.id);
+    setDeleting(false);
     // Reflect the delete in the cached list. Cancel any in-flight poll first so
     // its stale (pre-delete) response can't land afterwards and resurrect the
     // row; then drop the row. The server is already updated and the periodic
@@ -325,7 +340,10 @@ function ConversationRow({
               type="button"
               aria-label={t("common:btn.delete")}
               title={t("common:btn.delete")}
-              onClick={() => setConfirmingDelete(true)}
+              onClick={() => {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }}
               className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
             >
               <Trash2Icon className="size-3.5" />
@@ -333,24 +351,36 @@ function ConversationRow({
           </div>
         )}
       </div>
-      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
-        <DialogContent data-testid="chat-delete-confirm">
-          <DialogHeader>
-            <DialogTitle>{t("threads.delete.title")}</DialogTitle>
-            <DialogDescription>
+      <AlertDialog
+        open={confirmingDelete}
+        onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
+      >
+        <AlertDialogContent data-testid="chat-delete-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
               {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmingDelete(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteFailed && (
+            <p role="alert" className="text-destructive text-sm">
+              {t("threads.delete.error")}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void onDelete()}
+            >
+              {deleting && <Spinner className="mr-1.5 size-3.5" />}
               {t("common:btn.delete")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SidebarMenuItem>
   );
 }

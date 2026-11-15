@@ -11,8 +11,8 @@
  *  2. `GET /api/realtime/runs/:id?verbose=true` (EventSource) — the live tail
  *     while the run is in flight. Closed as soon as the run goes terminal.
  *  3. `GET /api/files?runId=…&purpose=agent_output` — the AUTHORITATIVE list of
- *     what the run produced, read once the run is terminal. The log window is
- *     capped (`?limit=1000`, ascending) and the end-of-run publication frames
+ *     what the run produced, read once the run is terminal. The log history is
+ *     read in 1000-row pages up to a page cap, and the end-of-run publication frames
  *     are the last rows a run writes, so a chatty run pushes exactly those
  *     frames out of the window; the same happens to a reopened conversation
  *     whose logs have since been pruned. The frames stay the live incremental
@@ -35,10 +35,10 @@ import {
   mergeLogs,
   mergeRunFiles,
   orgSpaceFromHeaders,
-  parseLogListResponse,
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
+  readRunLogPages,
   producedFilesFromFileList,
   shouldOpenLiveTail,
   shouldRaiseSweepDone,
@@ -191,6 +191,21 @@ export function useRunLogStream(
       setLogs((prev) => mergeLogs(prev, incoming));
     };
 
+    /** One page of `/logs`, or undefined on any failure. */
+    const fetchLogPage = async (since: number | undefined): Promise<unknown | undefined> => {
+      try {
+        const qs = since === undefined ? "limit=1000" : `limit=1000&since=${since}`;
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/logs?${qs}`, {
+          headers,
+          credentials: "include",
+        });
+        if (!res.ok || cancelled) return undefined;
+        return await res.json();
+      } catch {
+        return undefined;
+      }
+    };
+
     /**
      * Read the authoritative produced-file set, and report whether the read
      * produced EVIDENCE: `"ok"` only when the response was 2xx AND the payload
@@ -224,18 +239,7 @@ export function useRunLogStream(
 
     // 1. History fetch (best-effort — a failure just means the live tail is the
     //    only source). Same-origin, cookie auth + forwarded org/space headers.
-    void (async () => {
-      try {
-        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/logs?limit=1000`, {
-          headers,
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        apply(parseLogListResponse(await res.json()));
-      } catch {
-        // ignore — SSE remains the source of truth
-      }
-    })();
+    void readRunLogPages(fetchLogPage, apply);
 
     // 1b. One-shot current-status fetch (best-effort). On a mid-run reload the
     //     persisted launch result only holds the transient `pending`, so the
@@ -305,7 +309,7 @@ export function useRunLogStream(
     // `sendInitialRunSnapshot` emits a `run_update` on EVERY connect, and
     // `es.close()` below only lands two awaits later, so a reconnect (or a
     // fan-out UPDATE on an already-terminal run) can otherwise start a second
-    // sweep: two 1000-row log fetches plus two `/api/files` reads. Both merges
+    // sweep: two full log walks plus two `/api/files` reads. Both merges
     // dedup, so correctness held — the duplicated work did not.
     let swept = false;
 
@@ -330,20 +334,7 @@ export function useRunLogStream(
           let logSweep: SweepRead = "failed";
           let producedFileRead: SweepRead = "not-attempted";
           try {
-            try {
-              const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/logs?limit=1000`, {
-                headers,
-                credentials: "include",
-              });
-              if (res.ok) {
-                const finalLogs = parseLogListResponse(await res.json());
-                logSweep = "ok";
-                apply(finalLogs);
-              }
-            } catch {
-              // `logSweep` stays "failed": an errored sweep yields no rows,
-              // which is indistinguishable from a run that wrote none.
-            }
+            logSweep = await readRunLogPages(fetchLogPage, apply);
             if (!cancelled) producedFileRead = await readProducedFiles();
           } finally {
             es.close();
