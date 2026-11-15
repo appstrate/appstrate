@@ -230,18 +230,13 @@ function StatValueSkeleton({ size = "md" }: { size?: "md" | "sm" }) {
 }
 
 /**
- * The overview panel while the agent loads (`PackageDetailSkeleton`): the
- * identity lines (`AgentIdentity`), then the three summary cards drawn by the
- * very components the loaded panel uses, labels included — only the values wait.
+ * The overview panel while the agent loads (`PackageDetailSkeleton`): the three summary cards
+ * drawn by the very components the loaded panel uses, labels included — only the values wait.
  */
 export function AgentOverviewSkeleton() {
   const { t } = useTranslation("agents");
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <SkeletonLine className="w-2/3 text-sm" />
-        <SkeletonLine className="w-40 text-sm" />
-      </section>
       <div className="flex flex-col gap-8">
         <div className="grid gap-6 xl:grid-cols-3">
           <DetailSectionCard

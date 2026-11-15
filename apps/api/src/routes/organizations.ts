@@ -42,7 +42,7 @@ import {
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import {
   createInvitation,
   InvitationAlreadyPendingError,

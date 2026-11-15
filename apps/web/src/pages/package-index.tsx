@@ -129,27 +129,25 @@ function PackageIndexBody({
         variant="collection"
         breadcrumbs={[{ label: words.title }]}
         actions={
-          canCreate || canActivate ? (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse", { ns: "settings" }),
-                  icon: LibraryBig,
-                  to: catalogueHref(type),
-                  hidden: !canActivate,
-                },
-                {
-                  id: "import",
-                  label: t("nav.import", { ns: "common" }),
-                  icon: Upload,
-                  onSelect: () => setImporting(true),
-                  hidden: !canCreate,
-                },
-                createAction,
-              ]}
-            />
-          ) : undefined
+          <PageActionsMenu
+            actions={[
+              {
+                id: "catalogue",
+                label: t("catalogue.browse", { ns: "settings" }),
+                icon: LibraryBig,
+                to: catalogueHref(type),
+                hidden: !canActivate,
+              },
+              {
+                id: "import",
+                label: t("nav.import", { ns: "common" }),
+                icon: Upload,
+                onSelect: () => setImporting(true),
+                hidden: !canCreate,
+              },
+              createAction,
+            ]}
+          />
         }
       />
       <PackageCollection

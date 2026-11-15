@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { orgPermissions } from "../lib/permissions.ts";
 import type { AppEnv } from "../types/index.ts";
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client, type components } from "../api/client";
 import { useCurrentOrgId } from "./use-org";
@@ -37,12 +37,14 @@ export function useRun(runId: string | undefined) {
     // runs are left out: their manifest and prompt ride only on the detail ("details expired").
     placeholderData: () => {
       if (!runId) return undefined;
-      const pages = qc.getQueriesData<ListEnvelope<EnrichedRun>>({
+      const lists = qc.getQueriesData<InfiniteData<ListEnvelope<EnrichedRun>>>({
         queryKey: [...paginatedRunsKeys.all, orgId, spaceId],
       });
-      for (const [, page] of pages) {
-        const row = page?.data?.find((candidate) => candidate.id === runId);
-        if (row && !row.package_ephemeral) return row;
+      for (const [, list] of lists) {
+        for (const page of list?.pages ?? []) {
+          const row = page.data.find((candidate) => candidate.id === runId);
+          if (row && !row.package_ephemeral) return row;
+        }
       }
       return undefined;
     },

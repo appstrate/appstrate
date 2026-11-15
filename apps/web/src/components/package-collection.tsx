@@ -130,8 +130,8 @@ export function PackageCollection({
 }: PackageCollectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Client-side on purpose, and honestly so: this catalogue arrives whole, so
-  // the box searches the whole list rather than the page on screen — which is
-  // exactly why the run list, paginated server-side, has no box.
+  // the box searches the whole list rather than the page on screen. A list
+  // paged server-side (runs, files) searches through its `q` parameter instead.
   const query = list.search;
   const origins = list.values("origin", PACKAGE_ORIGINS);
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];

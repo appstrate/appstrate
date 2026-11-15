@@ -4,15 +4,12 @@ import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
-  agentModelKeys,
-  agentProxyKeys,
   agentsKeys,
   packageKeys,
   paginatedRunsKeys,
   persistenceKeys,
   runKeys,
   scheduleKeys,
-  versionKeys,
 } from "../lib/query-keys";
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
@@ -32,17 +29,12 @@ const SPACE_SCOPED_KEYS = new Set<string>(
     packageKeys.all,
     agentsKeys.all,
     persistenceKeys.all,
-    agentModelKeys.all,
-    agentProxyKeys.all,
     runKeys.all,
     runKeys.logsAll,
     paginatedRunsKeys.all,
     scheduleKeys.listAll,
     scheduleKeys.detailAll,
     scheduleKeys.runsAll,
-    versionKeys.detailAll,
-    versionKeys.listAll,
-    versionKeys.infoAll,
   ].map(([root]) => root),
 );
 

@@ -87,7 +87,7 @@ Import from the dashboard (Agents > Import Package) or via the API.
 
 ## Further Reading
 
-- Real skill/mcp-server/integration manifests: `scripts/system-packages/*/manifest.json`
+- Real skill and integration manifests: `scripts/system-packages/*/manifest.json`
 - AFPS specification: <https://github.com/appstrate/afps-spec/blob/main/spec.md>
 - Manifest validation source of truth: `packages/core/src/validation.ts`
 - Pi Coding Agent SDK: `@earendil-works/pi-coding-agent`

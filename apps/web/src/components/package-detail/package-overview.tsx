@@ -1,36 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { BookOpen, FileCode, FolderOpen, Layers, Server, Tags } from "lucide-react";
+import { FileCode, FolderOpen, Layers } from "lucide-react";
 import { DetailSectionCard } from "../detail-section-card";
-import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Markdown } from "../markdown";
-import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { skillBody } from "../../lib/skill-frontmatter";
 import { SkeletonLine } from "../skeleton-line";
 
-const roleFallbackKeys = {
-  skill: "packageOverview.roleFallback.skill",
-  integration: "packageOverview.roleFallback.integration",
-} as const;
-
-/** A package summary uses its substance and usage, not optional metadata alone. */
+/**
+ * What a package does here: its instructions, usage, files and tools. What it IS (description,
+ * version, origin, manifest metadata) is the catalogue sheet's and the header's, not repeated here.
+ */
 export function PackageOverview({
   type,
-  description,
   content,
-  manifest,
-  version,
   historical,
   agentCount,
   onOpenFiles,
   onOpenUsage,
 }: {
   type: "skill" | "integration";
-  description: string;
   content?: string | null;
-  manifest: unknown;
-  version?: string | null;
   historical: boolean;
   agentCount: number;
   onOpenFiles: () => void;
@@ -41,20 +31,6 @@ export function PackageOverview({
   return (
     <div className="flex flex-col gap-6" data-testid="package-overview">
       <div className="grid items-start gap-6 lg:grid-cols-2">
-        <DetailSectionCard
-          title={t("packageOverview.role")}
-          icon={type === "skill" ? BookOpen : Server}
-        >
-          <p className="text-sm">{description || t(roleFallbackKeys[type])}</p>
-        </DetailSectionCard>
-        <DetailSectionCard title={t("packageOverview.package")} icon={Tags}>
-          <FactGrid columns={2}>
-            <Fact label={t("run.infoVersion")}>{version || t("version.draft")}</Fact>
-            <Fact label={t("packageOverview.view")}>
-              {t(historical ? "packageOverview.published" : "packageOverview.current")}
-            </Fact>
-          </FactGrid>
-        </DetailSectionCard>
         {type === "skill" && (
           <DetailSectionCard
             title={t("packageOverview.instructions")}
@@ -104,7 +80,6 @@ export function PackageOverview({
           </p>
         </DetailSectionCard>
       </div>
-      <ManifestOverview manifest={manifest} />
     </div>
   );
 }
@@ -112,30 +87,13 @@ export function PackageOverview({
 /**
  * `PackageOverview` while the package loads: the same cards, titles and labels,
  * drawn by the same components — only what the package says waits, in its
- * own line boxes. The manifest summary under the cards has no fixed shape and
- * is left out.
+ * own line boxes.
  */
 export function PackageOverviewSkeleton({ type }: { type: "skill" | "integration" }) {
   const { t } = useTranslation("agents");
   return (
     <div className="flex flex-col gap-6">
       <div className="grid items-start gap-6 lg:grid-cols-2">
-        <DetailSectionCard
-          title={t("packageOverview.role")}
-          icon={type === "skill" ? BookOpen : Server}
-        >
-          <SkeletonLine className="w-3/4 text-sm" />
-        </DetailSectionCard>
-        <DetailSectionCard title={t("packageOverview.package")} icon={Tags}>
-          <FactGrid columns={2}>
-            <Fact label={t("run.infoVersion")}>
-              <SkeletonLine className="w-12" />
-            </Fact>
-            <Fact label={t("packageOverview.view")}>
-              <SkeletonLine className="w-24" />
-            </Fact>
-          </FactGrid>
-        </DetailSectionCard>
         {type === "skill" && (
           <DetailSectionCard title={t("packageOverview.instructions")} icon={FileCode}>
             {/* A real SKILL.md fills the clipped `max-h-52` box. */}

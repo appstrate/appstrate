@@ -328,16 +328,19 @@ describe("listGlobalRuns", () => {
 
     const page1 = await listGlobalRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { limit: 2, offset: 0 },
+      { limit: 2 },
     );
     expect(page1.data).toHaveLength(2);
     expect(page1.total).toBe(5);
+    expect(page1.hasMore).toBe(true);
 
     const page2 = await listGlobalRuns(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { limit: 2, offset: 2 },
+      { limit: 2, startingAfter: page1.data[1]!.id },
     );
     expect(page2.data).toHaveLength(2);
-    expect(page2.data[0]?.id).not.toBe(page1.data[0]?.id);
+    expect(page2.total).toBe(5);
+    const ids = [...page1.data, ...page2.data].map((r) => r.id);
+    expect(new Set(ids).size).toBe(4);
   });
 });

@@ -24,7 +24,6 @@ describe("readManifestOverview", () => {
     expect(overview.facts).toEqual([]);
     expect(overview.links).toEqual([]);
     expect(overview.keywords).toEqual([]);
-    expect(overview.dependencies).toEqual([]);
     expect(overview.longDescription).toBeUndefined();
     expect(overview.isEmpty).toBe(true);
   });
@@ -115,24 +114,6 @@ describe("readManifestOverview", () => {
       expect(repo).toEqual({ labelKey: "manifest.repository", value: "javascript:alert(1)" });
       expect(repo).not.toHaveProperty("href");
     }
-  });
-
-  it("groups dependencies by kind and drops the empty groups", () => {
-    const overview = readManifestOverview({
-      ...MINIMAL,
-      dependencies: {
-        skills: { "@acme/lint": "^1.0.0" },
-        integrations: { "@acme/github": "~2.1.0" },
-      },
-    });
-
-    expect(overview.dependencies).toEqual([
-      { labelKey: "manifest.depSkills", entries: [{ id: "@acme/lint", range: "^1.0.0" }] },
-      {
-        labelKey: "manifest.depIntegrations",
-        entries: [{ id: "@acme/github", range: "~2.1.0" }],
-      },
-    ]);
   });
 
   it("survives a manifest that is not an object at all", () => {

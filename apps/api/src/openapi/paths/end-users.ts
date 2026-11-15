@@ -131,11 +131,7 @@ export const endUsersPaths = {
       tags: ["End Users"],
       summary: "List end-users",
       description:
-        "List end-users with cursor-based pagination. Filter by spaceId, externalId, or email.\n\n" +
-        "**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most " +
-        "one. Encoded via the `x-mutually-exclusive` extension below for client generators that " +
-        "honour it; the server enforces the constraint at runtime regardless.",
-      "x-mutually-exclusive": ["startingAfter", "endingBefore"],
+        "List end-users with cursor-based pagination (`startingAfter` + `limit`). Filter by externalId or email, or search with `q`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -152,7 +148,7 @@ export const endUsersPaths = {
           description: "Filter by email address (exact match)",
         },
         {
-          name: "search",
+          name: "q",
           in: "query",
           schema: { type: "string" },
           description: "Case-insensitive substring match across name, email, and external ID",
@@ -168,12 +164,6 @@ export const endUsersPaths = {
           in: "query",
           schema: { type: "string" },
           description: "Cursor for forward pagination (end-user ID to start after)",
-        },
-        {
-          name: "endingBefore",
-          in: "query",
-          schema: { type: "string" },
-          description: "Cursor for backward pagination (end-user ID to end before)",
         },
       ],
       responses: {
@@ -199,10 +189,6 @@ export const endUsersPaths = {
                     type: "boolean",
                     description: "Whether more results exist beyond this page",
                   },
-                  limit: {
-                    type: "integer",
-                    description: "The limit that was applied to this query",
-                  },
                 },
               },
               example: {
@@ -221,7 +207,6 @@ export const endUsersPaths = {
                   },
                 ],
                 hasMore: false,
-                limit: 20,
               },
             },
           },

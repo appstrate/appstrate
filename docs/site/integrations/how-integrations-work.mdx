@@ -68,7 +68,7 @@ An admin does this once per integration. Members then connect their own accounts
 
 ### Activate the integration in the space
 
-Activation uses the same call as every other package type: `POST /api/spaces/{spaceId}/packages`, and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` to deactivate. Deactivating keeps the settings and the existing connections. An operator can make integrations active by default for every organization with the `SYSTEM_INTEGRATIONS` environment variable (see [Environment Variables](/self-hosting/environment-variables)).
+Activation uses the same call as every other package type: `POST /api/spaces/{id}/packages`, and `DELETE /api/spaces/{id}/packages/{scope}/{name}` to deactivate. Deactivating keeps the settings and the existing connections. An operator can make integrations active by default for every organization with the `SYSTEM_INTEGRATIONS` environment variable (see [Environment Variables](/self-hosting/environment-variables)).
 
 </Step>
 <Step>

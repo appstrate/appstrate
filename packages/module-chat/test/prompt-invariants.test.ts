@@ -144,7 +144,7 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
     expect(FULL).toContain("`activatePackage`");
-    expect(FULL).toContain("`POST /api/spaces/{spaceId}/packages`");
+    expect(FULL).toContain("`POST /api/spaces/{id}/packages`");
     expect(FULL).toContain('{ "packageId": "<that integration id>" }');
     expect(FULL).not.toContain("activateIntegration");
     expect(FULL).toMatch(/report the refusal with its error and stop/);

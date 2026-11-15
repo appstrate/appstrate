@@ -41,8 +41,8 @@ type Verdict = "allowed" | "not_shareable" | "forbidden";
 function renderAlert(verdict: Verdict): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
-    $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-      params: { path: { spaceId: SPACE_ID }, header: { "X-Org-Id": ORG_ID } },
+    $api.queryOptions("get", "/api/spaces/{id}/library", {
+      params: { path: { id: SPACE_ID }, header: { "X-Org-Id": ORG_ID } },
     }).queryKey,
     {
       object: "library",

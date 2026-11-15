@@ -2,8 +2,6 @@
 
 import { useMemo } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -40,8 +38,8 @@ function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
-    "/api/spaces/{spaceId}/library",
-    { params: { path: { spaceId: spaceId ?? "" }, header: scope.header } },
+    "/api/spaces/{id}/library",
+    { params: { path: { id: spaceId ?? "" }, header: scope.header } },
     {
       enabled: scope.enabled && !!spaceId && (options.enabled ?? true),
       staleTime: 0,
@@ -149,7 +147,7 @@ export function activationStateOf(
 
 /** Invalidates both library forms (organization's and current space's); one alone leaves the other stale. */
 export function invalidateLibraries(qc: QueryClient) {
-  return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);
+  return invalidatePaths(qc, ["/api/library", "/api/spaces/{id}/library"]);
 }
 
 /** Activation changes affect the library and every space's package/agent cache. */
@@ -182,15 +180,11 @@ export function useSetChatEnforced() {
     }) => {
       const parsed = parseScopedName(packageId);
       if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
-      await client.PATCH("/api/spaces/{spaceId}/packages/{scope}/{name}", {
-        params: { path: { spaceId, scope: `@${parsed.scope}`, name: parsed.name } },
+      await client.PATCH("/api/spaces/{id}/packages/{scope}/{name}", {
+        params: { path: { id: spaceId, scope: `@${parsed.scope}`, name: parsed.name } },
         body: { chat_enforced: enforced },
       });
     },
-    onSuccess: (_data, { enforced }) =>
-      toast.success(
-        i18n.t(enforced ? "settings:packages.chatEnforced" : "settings:packages.chatUnenforced"),
-      ),
     onSettled: () => invalidateLibraries(qc),
   });
 }
@@ -209,8 +203,8 @@ export function useSetPackageActive() {
   const libraryKey = $api.queryOptions("get", "/api/library", {
     params: { header: scope.header },
   }).queryKey;
-  const spaceLibraryKey = $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-    params: { path: { spaceId: currentSpaceId ?? "" }, header: scope.header },
+  const spaceLibraryKey = $api.queryOptions("get", "/api/spaces/{id}/library", {
+    params: { path: { id: currentSpaceId ?? "" }, header: scope.header },
   }).queryKey;
 
   return useMutation({
@@ -227,15 +221,15 @@ export function useSetPackageActive() {
         // Two path params, so the typed client never percent-encodes the scope/name `/`.
         const parsed = parseScopedName(packageId);
         if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
-        await client.DELETE("/api/spaces/{spaceId}/packages/{scope}/{name}", {
+        await client.DELETE("/api/spaces/{id}/packages/{scope}/{name}", {
           params: {
-            path: { spaceId, scope: `@${parsed.scope}`, name: parsed.name },
+            path: { id: spaceId, scope: `@${parsed.scope}`, name: parsed.name },
           },
         });
         return;
       }
-      await client.POST("/api/spaces/{spaceId}/packages", {
-        params: { path: { spaceId } },
+      await client.POST("/api/spaces/{id}/packages", {
+        params: { path: { id: spaceId } },
         body: { packageId },
       });
     },
@@ -260,11 +254,6 @@ export function useSetPackageActive() {
         if (snapshot) qc.setQueryData(key, snapshot);
       }
     },
-    // Said here, once, for every surface that flips the switch.
-    onSuccess: (_data, { active }) =>
-      toast.success(
-        i18n.t(active ? "settings:packages.activated" : "settings:packages.deactivated"),
-      ),
     onSettled: invalidate,
   });
 }

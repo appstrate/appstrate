@@ -85,7 +85,7 @@ describe("dashboard reuses its own runs", () => {
   });
 
   it("keeps exactly one run query on the page", () => {
-    expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
+    expect([...DASHBOARD.matchAll(/useFirstRunsPage\(/g)]).toHaveLength(1);
   });
 
   it("keeps the table free of queries, and the fetching list exported", () => {
@@ -96,14 +96,14 @@ describe("dashboard reuses its own runs", () => {
     expect(RUN_LIST).toContain("export function RunList(");
     expect(RUNS_TABLE).toContain("export function RunsTable(");
     expect(code(RUNS_TABLE)).not.toContain("useQuery");
-    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
+    expect(code(RUNS_TABLE)).not.toContain("useRuns");
   });
 });
 
 describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
-    expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
-    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
+    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
     expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
   });
 

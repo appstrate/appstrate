@@ -285,7 +285,7 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 **Rule**: event envelopes and payloads are camelCase — `BaseEnvelope`: `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
 
-The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{runId}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
+The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{id}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
 
 **Why**: CloudEvents spec uses camelCase for context attributes; consistent producer/consumer across the runtime, the sidecar and the platform.
 
@@ -350,7 +350,7 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 - API key surface: `keyPrefix`
 - Proxy surface: `urlPrefix`
 - Space / end-user surface: `externalId`, `isDefault`, `allowedRedirectDomains`
-- List envelope: `hasMore` — every list goes through `listResponse` (`{ object: "list", data, hasMore }`), `GET /api/notifications` and `GET /api/files` included; cursor params `startingAfter` / `endingBefore`
+- List envelope: `hasMore` — every list goes through `listResponse` (`{ object: "list", data, hasMore }`), `GET /api/notifications` and `GET /api/files` included; cursor param `startingAfter`
 - Webhook CRUD surface: `payloadMode`, `eventId`, `eventType`, `statusCode`; secret rotation (`POST /api/webhooks/{id}/rotate`): `windowSeconds`, `secretPrevious`, `rotationWindowEndsAt`
 
 **Why**: developer-platform surfaces modelled on the Stripe headless API convention (camelCase for developer-platform CRUD). End-to-end coherent; flipping is a breaking change for external API consumers with zero user-visible benefit. For any new endpoint family, snake_case wire per the Zone 1 default.
@@ -438,8 +438,8 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 - `GET`/`PATCH /api/agents/{scope}/{name}/model` (`modelId`) and `GET`/`PUT /api/agents/{scope}/{name}/proxy` (`proxyId`)
 - the org model surface `/api/models*`: `credentialId`; `PUT /api/models/default` takes `modelId`
 - `PUT /api/proxies/default` (`proxyId`)
-- the space package (`space_package` on `/api/spaces/{spaceId}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
-- `ResolvedRunConfig` (`GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
+- the space package (`space_package` on `/api/spaces/{id}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
+- `ResolvedRunConfig` (`GET /api/spaces/{id}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
 - the run-launch bodies (`POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline` and `/inline/validate`): `modelId`, `proxyId`; the chat body (`POST /api/chat`): `modelId`
 - the model-provider family (4e table): `credentialId` on the inline-test, discover and pairing bodies, the pairing status and the redeem response
 
@@ -465,7 +465,7 @@ The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the C
 Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
 
 - **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`), `?spaceId=` (`GET /api/webhooks`).
-- **Pagination-envelope params** (Carve-out 4n): the cursor params `startingAfter` / `endingBefore` pair with the camelCase `hasMore` body field.
+- **Pagination-envelope params** (Carve-out 4n): the cursor param `startingAfter` pairs with the camelCase `hasMore` body field.
 - **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users`.
 
 Conforming snake_case examples: `?actor_type=&actor_id=` on the persistence route (`routes/agents.ts`); `?chat_session_id=` on `GET /api/files`; OAuth 2.0 wire params `?client_id=`, `?post_logout_redirect_uri=` (RFC 6749, Zone 1). Single bare tokens (`limit`, `kind`, `status`, `q`, `since`, `purpose`) are trivially conforming.
@@ -476,13 +476,13 @@ A new camelCase domain query param is a bug, same as a camelCase domain wire fie
 
 ### Pagination styles (which one to use)
 
-Three pagination idioms exist; choose by collection shape, never mix styles on one endpoint. All three emit RFC 5988 `Link` headers via `apps/api/src/lib/pagination-link.ts`:
+Three pagination idioms exist; choose by collection shape, never mix styles on one endpoint. All three emit RFC 5988 `Link` headers via `apps/api/src/lib/pagination-link.ts`. A collection with no natural bound is keyset-paged; a bounded collection (schedules, agents, skills, settings lists) is not paginated at all; `offset` exists only to slice an in-memory catalogue:
 
-| Style                 | Params                                            | Use for                                                           | Example                                                                                                                           |
-| --------------------- | ------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Cursor (Stripe-style) | `startingAfter` / `endingBefore` + `hasMore` body | Unbounded user-facing collections                                 | `GET /api/end-users`, `GET /api/notifications`, `GET /api/files`, `GET /api/webhooks/{id}/deliveries`, the two call-journal reads |
-| Offset                | `limit` + `offset`                                | Bounded admin lists                                               | `GET /api/runs` (`routes/runs.ts`); also schedules and the integration list                                                       |
-| Sequence cursor       | `since` (monotonic id)                            | Append-only log streams ONLY — doubles as the polling-tail cursor | `GET /api/runs/{id}/logs` (`routes/runs.ts`)                                                                                      |
+| Style                 | Params                                                       | Use for                                                           | Example                                                                                                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor (Stripe-style) | `startingAfter` + `limit`, `hasMore` body (`total` optional) | Unbounded collections                                             | `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs`, `GET /api/schedules/{id}/runs`, `GET /api/end-users`, `GET /api/notifications`, `GET /api/files`, `GET /api/webhooks/{id}/deliveries`, the two call-journal reads |
+| Offset                | `limit` + `offset`                                           | In-memory catalogues sliced in process                            | `GET /api/integrations`, the model-provider registry                                                                                                                                                                      |
+| Sequence cursor       | `since` (monotonic id)                                       | Append-only log streams ONLY — doubles as the polling-tail cursor | `GET /api/runs/{id}/logs` (`routes/runs.ts`)                                                                                                                                                                              |
 
 ---
 

@@ -165,7 +165,7 @@ function ThreadWelcome({
               >
                 <button
                   type="button"
-                  className="bg-card hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                  className="bg-card hover:bg-muted/50 rounded-lg border px-3 py-2 text-left text-sm transition-colors"
                 >
                   {t(key)}
                 </button>
@@ -416,7 +416,7 @@ function UserMessage() {
   if (resume) {
     return (
       <MessagePrimitive.Root className="flex w-full max-w-(--thread-max-width) justify-center py-1.5">
-        <span className="bg-muted/50 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+        <span className="bg-muted/40 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
           <IntegrationIcon src={resume.icon} className="size-3.5" />
           <span>
             {sentenceWithName(

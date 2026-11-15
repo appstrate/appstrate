@@ -16,10 +16,7 @@ function render(props: Partial<ComponentProps<typeof PackageOverview>> = {}) {
     <I18nextProvider i18n={i18n}>
       <PackageOverview
         type="skill"
-        description="Méthode de rapprochement"
         content="Vérifiez les pièces sources."
-        manifest={{}}
-        version="1.4.0"
         historical={false}
         agentCount={2}
         onOpenFiles={noop}
@@ -31,13 +28,13 @@ function render(props: Partial<ComponentProps<typeof PackageOverview>> = {}) {
 }
 
 describe("package overview", () => {
-  it("keeps the substance and usage visible when metadata is empty", () => {
+  it("shows what the package does here, not what the catalogue sheet says it is", () => {
     const html = render();
-    expect(html).toContain("Méthode de rapprochement");
     expect(html).toContain("Vérifiez les pièces sources.");
     expect(html).toContain("2");
-    expect(html).toContain("1.4.0");
-    expect(html).not.toContain("Ce manifest ne déclare aucune métadonnée.");
+    expect(html).not.toContain("Méthode de rapprochement");
+    expect(html).not.toContain("1.4.0");
+    expect(html).not.toContain("MIT");
   });
   it("previews the instructions, not the frontmatter that names the skill", () => {
     const html = render({
@@ -69,13 +66,5 @@ describe("package overview", () => {
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("https://");
-  });
-  it("shows manifest metadata without duplicating auths and capabilities", () => {
-    const html = render({
-      type: "integration",
-      manifest: { license: "MIT", auths: { secret_method: { type: "oauth2" } } },
-    });
-    expect(html).toContain("MIT");
-    expect(html).not.toContain("secret_method");
   });
 });

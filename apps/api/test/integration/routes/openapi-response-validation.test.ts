@@ -153,7 +153,7 @@ describe("OpenAPI response validation", () => {
   // emits `hasMore`. The spec previously omitted it (the same drift fixed for
   // GET /api/spaces), so `extraFields` would flag the undocumented field.
 
-  describe("GET /api/spaces/{spaceId}/packages -> 200", () => {
+  describe("GET /api/spaces/{id}/packages -> 200", () => {
     it("response body conforms to OpenAPI schema (incl. hasMore envelope field)", async () => {
       const pkg = await seedAgent({
         id: "@openapi-test/installed-agent",
@@ -163,7 +163,7 @@ describe("OpenAPI response validation", () => {
       await seedPackageShare(ctx.defaultSpaceId, pkg.id);
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
-      const schema = getResponseSchema("/api/spaces/{spaceId}/packages", "GET", "200");
+      const schema = getResponseSchema("/api/spaces/{id}/packages", "GET", "200");
       expect(schema).not.toBeNull();
 
       const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {

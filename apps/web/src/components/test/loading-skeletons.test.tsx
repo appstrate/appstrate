@@ -6,8 +6,11 @@ import {
   ChatConversationSkeleton,
   ChatPanelSkeleton,
   DashboardBodySkeleton,
+  DashboardSkeleton,
   DetailPageSkeleton,
   ListPageSkeleton,
+  OverlayPanelSkeleton,
+  ScheduleDetailSkeleton,
   SettingsSkeleton,
   SettingsTableSkeleton,
   TextSkeleton,
@@ -50,6 +53,12 @@ describe("loading skeletons", () => {
     expect(render(<ListPageSkeleton />)).toContain("data-page-header");
   });
 
+  it("draws the action placeholder only for a page that has actions", () => {
+    const placeholder = "h-8 w-24 shrink-0";
+    expect(render(<ListPageSkeleton />)).toContain(placeholder);
+    expect(render(<ListPageSkeleton actions={false} />)).not.toContain(placeholder);
+  });
+
   it("waits as cards for a collection its reader sees as cards, as a table otherwise", () => {
     // Integrations default to cards; agents to a table.
     const cardGrid = "grid-cols-[repeat(auto-fill";
@@ -62,6 +71,40 @@ describe("loading skeletons", () => {
     expect(html).not.toContain("bg-card");
     expect(html).toContain("border-y");
     expect(render(<SettingsTableSkeleton toolbar />)).toContain("sm:max-w-[280px]");
+  });
+
+  it("draws what leads and ends a collection's bar only where the page has it", () => {
+    const tabs = "h-8 w-44";
+    const views = "h-9 w-[4.5rem]";
+    expect(render(<ListPageSkeleton list="integrations" tabs views />)).toContain(tabs);
+    expect(render(<ListPageSkeleton list="integrations" tabs views />)).toContain(views);
+    expect(render(<ListPageSkeleton />)).not.toContain(tabs);
+    expect(render(<ListPageSkeleton />)).not.toContain(views);
+  });
+
+  it("waits as file tiles for the gallery shown as cards", () => {
+    expect(render(<ListPageSkeleton list="documents" views actions={false} />)).toContain(
+      "aspect-square",
+    );
+  });
+
+  it("draws a settings table's intro and search-only bar", () => {
+    const html = render(<SettingsTableSkeleton toolbar intro="hint" />);
+    expect(html).toContain("sm:max-w-[280px]");
+    expect(html).toContain("max-w-2xl");
+    expect(html).not.toContain("w-[5.5rem]");
+    expect(render(<SettingsTableSkeleton toolbar columns />)).toContain("w-[6.5rem]");
+  });
+
+  it("draws an overlay's table frameless and a page's in its card", () => {
+    expect(render(<OverlayPanelSkeleton list />)).not.toContain("bg-card");
+    expect(render(<ListPageSkeleton />)).toContain("bg-card");
+  });
+
+  it("draws the dashboard's title row with the line under it", () => {
+    const html = render(<DashboardSkeleton />);
+    expect(html).toContain("data-page-header");
+    expect(html).toContain("mt-1 w-56");
   });
 
   it("holds a reader's read-only note, not a composer and its suggestions, in the chat", () => {
@@ -101,5 +144,19 @@ describe("loading skeletons", () => {
 
   it("keeps the thread's 42rem column for a stored conversation", () => {
     expect(render(<ChatConversationSkeleton />)).toContain("max-w-2xl");
+  });
+});
+
+describe("detail page skeleton", () => {
+  // The rail split's grid, which only a framed settings tab draws.
+  const rail = "grid-cols-[14rem_minmax(0,1fr)]";
+
+  it("draws the tab the address opens on, not always the first one", () => {
+    const at = (hash: string) =>
+      render(<ScheduleDetailSkeleton />, { initialEntries: [`/schedules/sched_1${hash}`] });
+    expect(at("#settings")).toContain(rail);
+    expect(at("#runs")).toContain("sm:max-w-[280px]");
+    expect(at("")).not.toContain(rail);
+    expect(at("")).not.toContain("sm:max-w-[280px]");
   });
 });

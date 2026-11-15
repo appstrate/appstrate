@@ -131,7 +131,7 @@ test.describe("Leaving an organization", () => {
     await page
       // A confirmation is an alert dialog, apart from the settings dialog behind it.
       .getByRole("alertdialog")
-      .getByRole("button", { name: /^(Confirmer|Confirm)$/ })
+      .getByRole("button", { name: /^(Supprimer|Delete)$/ })
       .click();
     expect((await deleted).status()).toBe(204);
 

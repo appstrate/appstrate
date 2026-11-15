@@ -11,6 +11,8 @@ interface ProxyFormModalProps {
   onClose: () => void;
   proxy: OrgProxyInfo | null;
   isPending: boolean;
+  /** The submission's refusal, shown under the fields. */
+  error?: string | null;
   onSubmit: (data: { label: string; url: string }) => void;
 }
 
@@ -20,7 +22,13 @@ type ProxyFormData = {
 };
 
 /** Mounted by the caller while open, one per proxy (`key`): closing abandons the input. */
-export function ProxyFormModal({ onClose, proxy, isPending, onSubmit }: ProxyFormModalProps) {
+export function ProxyFormModal({
+  onClose,
+  proxy,
+  isPending,
+  error,
+  onSubmit,
+}: ProxyFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
 
   const {
@@ -45,6 +53,7 @@ export function ProxyFormModal({ onClose, proxy, isPending, onSubmit }: ProxyFor
       title={proxy ? t("proxies.modal.editTitle") : t("proxies.add")}
       onSubmit={handleSubmit(onFormSubmit)}
       isPending={isPending}
+      error={error}
     >
       <FormItem
         id="px-label"

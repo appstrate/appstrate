@@ -79,7 +79,7 @@ export function IntegrationsPage() {
   const allColumns = useIntegrationListColumns(connectionCounts);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
-    <NoMatchState message={t("integrations.empty.filtered")} />
+    <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
   ) : (
     <EmptyState
       icon={Boxes}
@@ -99,28 +99,25 @@ export function IntegrationsPage() {
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
         actions={
-          // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate) && (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse"),
-                  icon: LibraryBig,
-                  to: catalogueHref("integration"),
-                  hidden: !canBrowse,
-                },
-                {
-                  id: "import",
-                  label: t("nav.import", { ns: "common" }),
-                  icon: Upload,
-                  onSelect: () => setImporting(true),
-                  hidden: !canCreate,
-                },
-                createAction,
-              ]}
-            />
-          )
+          <PageActionsMenu
+            actions={[
+              {
+                id: "catalogue",
+                label: t("catalogue.browse"),
+                icon: LibraryBig,
+                to: catalogueHref("integration"),
+                hidden: !canBrowse,
+              },
+              {
+                id: "import",
+                label: t("nav.import", { ns: "common" }),
+                icon: Upload,
+                onSelect: () => setImporting(true),
+                hidden: !canCreate,
+              },
+              createAction,
+            ]}
+          />
         }
       />
 

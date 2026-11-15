@@ -198,7 +198,7 @@ export function FileTree({
                   else setCollapsed(node.path, row.expanded);
                 }}
                 className={cn(
-                  "hover:bg-muted/60 focus-visible:ring-ring group flex h-[26px] cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-1 text-left text-sm outline-none focus-visible:ring-2",
+                  "hover:bg-muted/50 focus-visible:ring-ring group flex h-[26px] cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-1 text-left text-sm outline-none focus-visible:ring-2",
                   isSelected ? "bg-muted text-foreground font-medium" : "text-muted-foreground",
                 )}
                 // Indent from the row's own start so the whole row stays clickable.

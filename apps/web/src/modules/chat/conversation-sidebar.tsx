@@ -11,7 +11,7 @@ import { FileArtifact } from "../../components/file-artifact";
 import { RunRow } from "../../components/run-row";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
-import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
+import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { canReadRuns } from "@appstrate/core/permissions";
@@ -234,7 +234,7 @@ function ConversationInfo({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const scope = useOrgOnlyScope();
+  const scope = useOrgScope();
   const query = $api.useQuery(
     "get",
     "/api/chat/sessions/{id}",

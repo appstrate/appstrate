@@ -53,7 +53,7 @@ export function PackageOwnershipNotice({
         </Alert>
       )}
       {isOwned && origin && (
-        <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
+        <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           {origin}
         </div>
       )}

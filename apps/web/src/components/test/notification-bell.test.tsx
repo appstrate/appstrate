@@ -138,4 +138,32 @@ describe("NotificationContent", () => {
     expect(denied).toContain(`Bob vous a partagé ${PACKAGE_ID}`);
     expect(denied).not.toContain("href=");
   });
+
+  it("offers the next page only when the feed has one", () => {
+    const row: Notifications = [
+      {
+        id: "n6",
+        type: "run_failed",
+        runId: "run_3",
+        payload: { packageId: PACKAGE_ID, agent_name: null, status: "failed" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ];
+    const list = (hasMore: boolean) =>
+      render(
+        <NotificationContent
+          unread={1}
+          notifications={row}
+          agentName={() => "Worker"}
+          canReach={() => true}
+          onItemClick={() => {}}
+          markAllRead={() => {}}
+          hasMore={hasMore}
+          onLoadMore={() => {}}
+        />,
+      );
+    expect(list(true)).toContain("Afficher plus");
+    expect(list(false)).not.toContain("Afficher plus");
+  });
 });

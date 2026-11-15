@@ -42,7 +42,7 @@ export function RunRow({
     <Link
       to={runDetailPath(run.packageId, run.id)}
       state={{ runNumber: run.runNumber }}
-      className={cn(rowClass, "hover:bg-muted/40 transition-colors")}
+      className={cn(rowClass, "hover:bg-muted/50 transition-colors")}
     >
       {content}
     </Link>

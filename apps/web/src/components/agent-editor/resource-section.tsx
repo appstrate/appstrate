@@ -8,6 +8,7 @@ import { ActivateIntegrationButton } from "../activate-integration-button";
 import { PackageVersionSelect } from "../package-version-select";
 import { packageDetailPath } from "../../lib/package-paths";
 import { matchesSearch } from "../../lib/strings";
+import { useLocalListParams } from "../../lib/list-params";
 import { usePackageList, type PackageType } from "../../hooks/use-packages";
 import type { ImportedPackage } from "../../hooks/use-mutations";
 import { ImportModal } from "../import-modal";
@@ -373,10 +374,10 @@ function ResourcePicker({
   onAdd: (ids: string[]) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [search, setSearch] = useState("");
+  const list = useLocalListParams();
   const [picked, setPicked] = useState<string[]>([]);
   const shown = items.filter((item) =>
-    matchesSearch(search, [item.id, item.name, item.description]),
+    matchesSearch(list.search, [item.id, item.name, item.description]),
   );
 
   return (
@@ -391,16 +392,20 @@ function ResourcePicker({
       }
     >
       <ListToolbar
-        search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: t("editor.resourceSearch"),
+        }}
       />
       <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
         {shown.length === 0 ? (
-          <NoMatchState message={t("editor.resourceNoMatch")} />
+          <NoMatchState message={t("editor.resourceNoMatch")} onReset={list.reset} />
         ) : (
           shown.map((item) => (
             <label
               key={item.id}
-              className="hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3"
+              className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 px-4 py-3"
             >
               <Checkbox
                 checked={picked.includes(item.id)}

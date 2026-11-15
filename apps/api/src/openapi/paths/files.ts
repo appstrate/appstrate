@@ -256,7 +256,6 @@ export const filesPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: fileSchema },
                   hasMore: { type: "boolean" },
-                  limit: { type: "integer" },
                 },
               },
             },

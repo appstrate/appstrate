@@ -2,7 +2,8 @@
 import { useTranslation } from "react-i18next";
 import { isSecretField } from "@appstrate/core/form";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { cn } from "@appstrate/ui/cn";
+import { FormItem } from "../app-ui/form-item";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
 import { deriveFieldNames, fieldSchemas } from "./credential-schema";
@@ -35,16 +36,21 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
         // Defaults reach the input through `initialCredentialValues`, which also submits them.
         const value = values[field] ?? "";
         return (
-          <div key={field} className="flex flex-col gap-1">
-            <Label
-              htmlFor={`field-${field}`}
-              className={labelText === field ? "mb-0 font-mono text-xs" : "mb-0 text-xs"}
-            >
-              {labelText}
-            </Label>
+          <FormItem
+            key={field}
+            id={`field-${field}`}
+            className={cn("gap-1 [&_label]:text-xs", labelText === field && "[&_label]:font-mono")}
+            label={labelText}
+            hint={
+              description ? (
+                <span className="leading-snug" data-testid={`field-description-${field}`}>
+                  {description}
+                </span>
+              ) : undefined
+            }
+          >
             {isMultiline ? (
               <Textarea
-                id={`field-${field}`}
                 value={value}
                 onChange={(e) => onChange({ ...values, [field]: e.target.value })}
                 autoComplete="off"
@@ -54,7 +60,6 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
               />
             ) : (
               <Input
-                id={`field-${field}`}
                 type={schema && isSecretField(schema) ? "password" : "text"}
                 value={value}
                 onChange={(e) => onChange({ ...values, [field]: e.target.value })}
@@ -62,15 +67,7 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
                 data-testid={`field-input-${field}`}
               />
             )}
-            {description && (
-              <p
-                className="text-muted-foreground text-xs leading-snug"
-                data-testid={`field-description-${field}`}
-              >
-                {description}
-              </p>
-            )}
-          </div>
+          </FormItem>
         );
       })}
     </>

@@ -16,7 +16,7 @@
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, ExternalLink, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -64,6 +64,7 @@ import {
 import { useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
 import { INTEGRATION_SOURCES } from "../lib/integration-collection";
+import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
 import { PackageCardSkeleton } from "./package-card";
 import { CataloguePreview } from "./catalogue-preview";
@@ -454,28 +455,12 @@ export function OrgCatalogueModal({
     { id: "spaces", label: t("catalogue.viewSpaces") },
   ];
   const viewSwitcher = (
-    <div
-      role="tablist"
-      aria-label={t("catalogue.viewLabel")}
-      className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
-    >
-      {views.map((option) => (
-        <Link
-          key={option.id}
-          to={catalogueListAddress(active, option.id, location.search)}
-          role="tab"
-          aria-selected={view === option.id}
-          className={cn(
-            "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-            view === option.id
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {option.label}
-        </Link>
-      ))}
-    </div>
+    <CollectionTabs
+      value={view}
+      label={t("catalogue.viewLabel")}
+      hrefOf={(id) => catalogueListAddress(active, id, location.search)}
+      options={views.map(({ id, label }) => ({ value: id, label }))}
+    />
   );
   const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink

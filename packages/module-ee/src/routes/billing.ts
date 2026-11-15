@@ -40,6 +40,7 @@ import {
 } from "../http-errors.ts";
 import { ApiError, internalError, invalidRequest } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { listResponse } from "@appstrate/core/list-query";
 import type { AuditPayload } from "@appstrate/core/module";
 import {
   ORG_ROLES_WITH_FULL_ACCESS,
@@ -169,7 +170,7 @@ function managerDetail(m: BillingManager) {
 }
 
 function managerList(managers: BillingManager[]) {
-  return { object: "list" as const, data: managers.map(managerDetail), hasMore: false };
+  return listResponse(managers.map(managerDetail));
 }
 
 /**

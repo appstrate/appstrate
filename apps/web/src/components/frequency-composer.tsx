@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@/components/app-ui/option-select";
@@ -182,10 +183,8 @@ export function FrequencyComposer({
 
   return (
     <FieldGroup className="gap-5">
-      <Field>
-        <Label htmlFor="frequency-kind">{t("schedule.frequency.repeat")}</Label>
+      <FormItem id="frequency-kind" label={t("schedule.frequency.repeat")}>
         <OptionSelect
-          id="frequency-kind"
           value={frequency.kind}
           onValueChange={(kind) => update(switchKind(frequency, kind as FrequencyKind))}
           options={Object.entries(KIND_LABELS).map(([kind, label]) => ({
@@ -193,7 +192,7 @@ export function FrequencyComposer({
             label: t(label),
           }))}
         />
-      </Field>
+      </FormItem>
 
       {(frequency.kind === "minutes" || frequency.kind === "hours") && (
         <Field>
@@ -297,10 +296,9 @@ export function FrequencyComposer({
         </Field>
       )}
 
-      <Field>
-        <Label htmlFor="frequency-timezone">{t("schedule.timezone")}</Label>
-        <TimezoneSelect id="frequency-timezone" value={timezone} onChange={onTimezoneChange} />
-      </Field>
+      <FormItem id="frequency-timezone" label={t("schedule.timezone")}>
+        <TimezoneSelect value={timezone} onChange={onTimezoneChange} />
+      </FormItem>
 
       {/* What was composed, read back. */}
       <div

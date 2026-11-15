@@ -214,13 +214,13 @@ export const rateLimitByIp = createRateLimitMiddleware({
 
 /**
  * Per-run rate limiter for the unified-runner event ingestion routes
- * (`POST /api/runs/:runId/events` + `/finalize`). The runId path param IS
+ * (`POST /api/runs/:id/events` + `/finalize`). The runId path param IS
  * the identity — a misbehaving sink cannot evade the limit by rotating
  * API keys, and a single run's traffic cannot affect another run's budget.
  */
 export const rateLimitByRunId = createRateLimitMiddleware({
   category: "run-event",
-  extractKey: (c) => `run-event:${c.req.param("runId") ?? "unknown"}`,
+  extractKey: (c) => `run-event:${c.req.param("id") ?? "unknown"}`,
   emitHeaders: false,
 });
 
@@ -228,7 +228,7 @@ export const rateLimitByRunId = createRateLimitMiddleware({
  * Coarse, per-IP budget for REJECTED run-sink authentications, consumed by
  * `middleware/verify-run-signature.ts` before it trusts anything.
  *
- * The run-HMAC routes take their identity from the `:runId` path param, so the
+ * The run-HMAC routes take their identity from the `:id` path param, so the
  * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` limiters can only
  * be applied AFTER the signature proves the caller is that run — applying them
  * first lets anyone who knows a runId burn a legitimate run's ingestion budget
@@ -305,7 +305,7 @@ export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void
 }
 
 /**
- * Per-run rate limiter for file uploads (`POST /api/runs/:runId/files`),
+ * Per-run rate limiter for file uploads (`POST /api/runs/:id/files`),
  * kept SEPARATE from `rateLimitByRunId` (event ingestion): the end-of-run
  * `outputs/` sweep can burst many small file uploads at once and must neither
  * consume the run's event-stream budget nor be throttled by it (a shared
@@ -313,6 +313,6 @@ export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void
  */
 export const rateLimitRunFiles = createRateLimitMiddleware({
   category: "run-file",
-  extractKey: (c) => `run-file:${c.req.param("runId") ?? "unknown"}`,
+  extractKey: (c) => `run-file:${c.req.param("id") ?? "unknown"}`,
   emitHeaders: false,
 });

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Conversation list + active-conversation title. Plain React Query over the
- * session REST API (no assistant-ui thread-list runtime): the URL is the single
- * source of truth, selection just navigates. Mutations (rename/delete) invalidate
- * the list; the active conversation's first message invalidates it too (see
- * index.tsx) so a new conversation appears here with its server-derived title.
+ * Conversation list + the conversation's settings dialog. Plain React Query over
+ * the session REST API (no assistant-ui thread-list runtime): the URL is the
+ * single source of truth, selection just navigates. Mutations (rename/delete)
+ * invalidate the list; the active conversation's first message invalidates it too
+ * (see index.tsx) so a new conversation appears here with its server-derived title.
  *
  * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
- * the title is where-you-are (it sits in the shell breadcrumb). They read the
- * same two contexts `ChatPage` publishes, so the host renders both below its own
- * `ChatHeadersProvider` / `SelectConversationProvider` — the title is portalled
- * into the breadcrumb from there — and they share the thread's React Query key,
- * so one request feeds all of it.
+ * the settings button sits in the shell header's actions. They read the same two
+ * contexts `ChatPage` publishes, so the host renders both below its own
+ * `ChatTransportProvider` / `SelectConversationProvider`, and they share the
+ * thread's React Query key, so one request feeds all of it. Renaming happens in
+ * the settings dialog only: the header's trail shows the name, it does not edit it.
  *
  * The list renders into the host's sidebar (a `SidebarProvider` must be above
  * it): it IS the chat's navigation, so it uses the same rows, groups and active
@@ -22,11 +22,12 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { PlusIcon, Settings2Icon, Trash2Icon } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,15 @@ import {
   DialogTitle,
 } from "@appstrate/ui/components/dialog";
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@appstrate/ui/components/alert-dialog";
+import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
@@ -44,7 +54,7 @@ import {
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
 import {
-  useChatHeaders,
+  useChatTransport,
   useSelectConversation,
   type ChatCan,
   type ChatTranslate,
@@ -204,22 +214,6 @@ export function ChatConversationList({
   );
 }
 
-/**
- * Inline-rename state + commit, shared by the list row and the header title.
- * Holds the editing toggle and the rename→invalidate mutation in one place so
- * both call sites stay byte-identical.
- */
-function useInlineRename(sessionId: string) {
-  const getHeaders = useChatHeaders();
-  const queryClient = useQueryClient();
-  const [editing, setEditing] = useState(false);
-  const save = async (title: string) => {
-    await renameSession(getHeaders, sessionId, title);
-    await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
-  };
-  return { editing, setEditing, save };
-}
-
 function ConversationRow({
   session,
   active,
@@ -235,39 +229,41 @@ function ConversationRow({
   t: ChatTranslate;
   canWrite: boolean;
 }) {
-  const getHeaders = useChatHeaders();
+  const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
-  const { editing, setEditing, save } = useInlineRename(session.id);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
 
+  // The dialog stays open while the delete is in flight and on failure (it says
+  // so); it closes only once the row is gone.
   const onDelete = async () => {
+    if (!transport) return;
+    setDeleting(true);
+    setDeleteFailed(false);
+    try {
+      await deleteSession(transport.request, session.id);
+    } catch {
+      // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
+      setDeleteFailed(true);
+      setDeleting(false);
+      return;
+    }
     setConfirmingDelete(false);
-    await deleteSession(getHeaders, session.id);
+    setDeleting(false);
     // Reflect the delete in the cached list. Cancel any in-flight poll first so
     // its stale (pre-delete) response can't land afterwards and resurrect the
     // row; then drop the row. The server is already updated and the periodic
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
     queryClient.setQueryData<SessionsCache>(
-      sessionsQueryKey(spaceIdFromHeaders(getHeaders)),
+      sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)),
       (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);
   };
-
-  if (editing) {
-    return (
-      <SidebarMenuItem className="px-2">
-        <RenameInput
-          t={t}
-          current={session.title ?? ""}
-          onDone={() => setEditing(false)}
-          onSave={save}
-        />
-      </SidebarMenuItem>
-    );
-  }
 
   return (
     <SidebarMenuItem>
@@ -314,18 +310,23 @@ function ConversationRow({
           <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
             <button
               type="button"
-              aria-label={t("common:btn.rename")}
-              title={t("common:btn.rename")}
-              onClick={() => setEditing(true)}
+              aria-label={t("threads.settings.openFor", {
+                title: session.title ?? t("threads.new"),
+              })}
+              title={t("threads.settings.title")}
+              onClick={() => setSettingsOpen(true)}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
             >
-              <PencilIcon className="size-3.5" />
+              <Settings2Icon className="size-3.5" />
             </button>
             <button
               type="button"
               aria-label={t("common:btn.delete")}
               title={t("common:btn.delete")}
-              onClick={() => setConfirmingDelete(true)}
+              onClick={() => {
+                setDeleteFailed(false);
+                setConfirmingDelete(true);
+              }}
               className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
             >
               <Trash2Icon className="size-3.5" />
@@ -333,43 +334,60 @@ function ConversationRow({
           </div>
         )}
       </div>
-      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
-        <DialogContent data-testid="chat-delete-confirm">
-          <DialogHeader>
-            <DialogTitle>{t("threads.delete.title")}</DialogTitle>
-            <DialogDescription>
+      <AlertDialog
+        open={confirmingDelete}
+        onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
+      >
+        <AlertDialogContent data-testid="chat-delete-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
               {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmingDelete(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteFailed && (
+            <p role="alert" className="text-destructive text-sm">
+              {t("threads.delete.error")}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t("common:btn.cancel")}</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void onDelete()}
+            >
+              {deleting && <Spinner className="mr-1.5 size-3.5" />}
               {t("common:btn.delete")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {settingsOpen && (
+        <ConversationSettingsDialog
+          session={session}
+          t={t}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </SidebarMenuItem>
   );
 }
 
 /**
- * Active-conversation title + rename, for the host's breadcrumb. Renders
- * nothing until the conversation is known — the host publishes the trail
- * segment on the same condition, so an unknown conversation costs no segment
- * rather than a segment with a made-up name.
+ * The open conversation's settings button, for the host's header actions. Renders
+ * nothing until the conversation is known, or for a reader (settings are writes).
  */
-export function ChatConversationTitle(props: {
+export function ChatConversationSettingsButton(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  return <ConversationTitle key={props.activeId} {...props} />;
+  return <ConversationSettingsButton key={props.activeId} {...props} />;
 }
 
-function ConversationTitle({
+function ConversationSettingsButton({
   activeId,
   t,
   can,
@@ -378,104 +396,107 @@ function ConversationTitle({
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  const { editing, setEditing, save } = useInlineRename(activeId ?? "");
+  const [open, setOpen] = useState(false);
   const { data: sessions } = useSessions();
-  if (!activeId) return null;
-  const session = sessions?.find((s) => s.id === activeId);
-  if (!session) return null;
-  const title = session.title ?? t("threads.new");
-
-  // `font-semibold`, like every other last breadcrumb segment: this is where
-  // you are, and it carries the same weight in both products. Renaming is a
-  // write, so a reader gets the name alone.
-  if (!can("chat:write")) {
-    return <span className="min-w-0 truncate px-1.5 text-sm font-semibold">{title}</span>;
-  }
-
-  if (editing) {
-    return (
-      <RenameInput
-        t={t}
-        current={session.title ?? ""}
-        onDone={() => setEditing(false)}
-        onSave={save}
-      />
-    );
-  }
+  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
+  if (!session || !can("chat:write")) return null;
   return (
-    <button
-      type="button"
-      onClick={() => setEditing(true)}
-      className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
-      title={t("common:btn.rename")}
-    >
-      <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{title}</span>
-      <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />
-    </button>
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        aria-label={t("threads.settings.title")}
+        title={t("threads.settings.title")}
+        onClick={() => setOpen(true)}
+      >
+        <Settings2Icon className="size-4" />
+      </Button>
+      {open && (
+        <ConversationSettingsDialog session={session} t={t} onClose={() => setOpen(false)} />
+      )}
+    </>
   );
 }
 
-/** Inline title editor: explicit Save/Enter, Cancel/Escape; blur never writes. */
-function RenameInput({
-  current,
-  onDone,
-  onSave,
+/**
+ * The conversation's settings: its name, saved explicitly (Enregistrer or Enter),
+ * never on blur. The dialog stays open on a refusal and says so: the chat's own
+ * fetch is not toasted by the app's mutation cache.
+ */
+function ConversationSettingsDialog({
+  session,
   t,
+  onClose,
 }: {
-  current: string;
-  onDone: () => void;
-  onSave: (title: string) => Promise<void>;
+  session: SessionSummary;
   t: ChatTranslate;
+  onClose: () => void;
 }) {
+  const transport = useChatTransport();
+  const queryClient = useQueryClient();
+  const current = session.title ?? "";
   const [value, setValue] = useState(current);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const next = value.trim();
-  const finish = async () => {
-    if (saving || !next || next === current) return;
+  const dirty = next !== "" && next !== current;
+
+  const save = async () => {
+    if (!transport || saving || !dirty) return;
     setSaving(true);
     setFailed(false);
     try {
-      await onSave(next);
-      onDone();
+      await renameSession(transport.request, session.id, next);
+      await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      onClose();
     } catch {
-      // The chat's own fetch is not toasted by the app's mutation cache: say it here.
       setFailed(true);
-    } finally {
       setSaving(false);
     }
   };
+
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-      <Input
-        autoFocus
-        value={value}
-        disabled={saving}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
+    <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("threads.settings.title")}</DialogTitle>
+          <DialogDescription>{t("threads.settings.description")}</DialogDescription>
+        </DialogHeader>
+        <form
+          id="chat-conversation-settings"
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
             event.preventDefault();
-            void finish();
-          } else if (event.key === "Escape" && !saving) onDone();
-        }}
-        className="h-7 min-w-0 flex-1 px-1.5 py-0.5"
-      />
-      <Button
-        type="button"
-        size="sm"
-        disabled={saving || !next || next === current}
-        onClick={() => void finish()}
-      >
-        {t("common:btn.save")}
-      </Button>
-      <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onDone}>
-        {t("common:btn.cancel")}
-      </Button>
-      {failed && (
-        <p role="alert" className="text-destructive w-full text-xs">
-          {t("common:saveFeedback.error")}
-        </p>
-      )}
-    </div>
+            void save();
+          }}
+        >
+          <Label htmlFor="chat-conversation-name">{t("threads.settings.name")}</Label>
+          <Input
+            id="chat-conversation-name"
+            autoFocus
+            value={value}
+            placeholder={t("threads.new")}
+            disabled={saving}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          {failed && (
+            <p role="alert" className="text-destructive text-sm">
+              {t("common:saveFeedback.error")}
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
+            {t("common:btn.cancel")}
+          </Button>
+          <Button type="submit" form="chat-conversation-settings" disabled={saving || !dirty}>
+            {saving && <Spinner className="mr-1.5 size-3.5" />}
+            {t("common:btn.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

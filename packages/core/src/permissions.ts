@@ -736,7 +736,7 @@ export function requireModulePermission<R extends ModuleResource>(
  * import { requireCorePermission } from "@appstrate/core/permissions";
  *
  * router.post(
- *   "/api/tasks/runs/:runId/cancel",
+ *   "/api/tasks/runs/:id/cancel",
  *   requireCorePermission("agents", "run"), // ← typechecked
  *   handler,
  * );

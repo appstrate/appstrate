@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
@@ -21,7 +20,8 @@ import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";
-import { ListToolbar } from "../components/list-toolbar";
+import { KeysetListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import type { MenuAction } from "../lib/menu-action";
 import { useColumnVisibility } from "../stores/column-visibility-store";
@@ -29,6 +29,8 @@ import { endUserLabel } from "../lib/members";
 import { useEndUserColumns } from "./end-user-columns";
 
 const END_USER_PARAM = "endUser";
+/** The search is the page's only list parameter; `?endUser=` is the open detail, not a filter. */
+const NO_FILTERS: readonly string[] = [];
 
 export function EndUsersPage() {
   // Remount on space switch so the loaded pages (and the rest of the page state)
@@ -43,13 +45,14 @@ function EndUsersPageContent() {
   const canWrite = can("end-users:write");
   const spaceId = useCurrentSpaceId();
 
-  const [search, setSearch] = useState("");
+  const list = useListParams(NO_FILTERS);
+  const search = list.search;
   const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
   const query = useDebouncedValue(search).trim();
 
-  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useEndUsersPaged({ search: query });
+  const endUsersQuery = useEndUsersPaged({ search: query });
+  const { data, isLoading, error } = endUsersQuery;
   const endUsers = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
   // The detail has an address (`?endUser=<id>`); the edition is a state of the page, and
   // switching hands one over to the other.
@@ -97,7 +100,7 @@ function EndUsersPageContent() {
       <ListToolbar
         search={{
           value: search,
-          onChange: setSearch,
+          onChange: list.setSearch,
           placeholder: t("spaces.searchEndUsers"),
         }}
         columns={menu}
@@ -119,7 +122,7 @@ function EndUsersPageContent() {
         failure={error}
         empty={
           query ? (
-            <NoMatchState message={t("spaces.noMatchingEndUsers")} />
+            <NoMatchState message={t("spaces.noMatchingEndUsers")} onReset={list.reset} />
           ) : (
             <EmptyState
               message={t("spaces.noEndUsers")}
@@ -133,16 +136,11 @@ function EndUsersPageContent() {
         }
       />
 
-      {hasNextPage && !isLoading && !error && (
-        <PendingButton
-          variant="outline"
-          pending={isFetchingNextPage}
-          onClick={() => void fetchNextPage()}
-          className="mt-3 w-full"
-        >
-          {t("spaces.loadMore")}
-        </PendingButton>
-      )}
+      <KeysetListFooter
+        query={endUsersQuery}
+        loaded={endUsers.length}
+        ready={!isLoading && !error}
+      />
 
       {canWrite && creating && <EndUserCreateModal onClose={() => setCreating(false)} />}
 

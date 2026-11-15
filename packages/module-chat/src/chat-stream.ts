@@ -21,7 +21,8 @@
 import type { Context } from "hono";
 import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody, invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
@@ -247,7 +248,7 @@ export async function handleChatStream(
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
-  const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
+  const body = await readJsonBody(c, chatStreamSchema);
   // Only the new message is validated: earlier turns are the server's own rows.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {

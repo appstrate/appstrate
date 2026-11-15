@@ -43,7 +43,6 @@ import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
-import { AgentIdentity } from "../components/agent-detail/agent-identity";
 import { AgentDetailBar } from "../components/agent-detail/agent-detail-bar";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
@@ -251,10 +250,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // The manifest the page is looking at — the archived one when a version is
-  // pinned, the live draft otherwise. Same rule the file explorer follows.
-  const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
-
   // A pinned version shows its OWN parameter schema; one it does not declare
   // is an empty wrapper, never the draft's.
   const historicalInputWrapper = isHistoricalVersion
@@ -412,11 +407,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
           <>
             <DetailTabPanel value="overview">
               <div className="flex flex-col gap-8">
-                <AgentIdentity
-                  description={unifiedForHeader.description}
-                  source={unifiedForHeader.source}
-                  homeSpaceName={homeSpaceName}
-                />
                 {fullRead ? (
                   <AgentOverviewTab
                     packageId={packageId}
@@ -478,10 +468,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
               {pkgDetail && (
                 <PackageOverview
                   type={type}
-                  description={unifiedForHeader.description}
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
-                  manifest={effectiveManifest}
-                  version={unifiedForHeader.version}
                   historical={isHistoricalVersion}
                   agentCount={pkgDetail.agents.length}
                   onOpenFiles={() => setTab("settings")}

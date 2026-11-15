@@ -57,7 +57,7 @@ import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { likeContains } from "../lib/like-pattern.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
@@ -1559,7 +1559,7 @@ export async function listFilesForActor(
     });
     return toFileDto(row, actor, capabilities);
   });
-  return { ...listResponse(data, { hasMore }), limit };
+  return listResponse(data, { hasMore });
 }
 
 // ---------------------------------------------------------------------------

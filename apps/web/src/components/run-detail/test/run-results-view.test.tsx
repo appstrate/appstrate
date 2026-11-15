@@ -11,6 +11,7 @@
 import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../../locales/fr/agents.json";
+import commonFr from "../../../locales/fr/common.json";
 import filesFr from "../../../locales/fr/files.json";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import type { FileDto } from "../../../hooks/use-files.ts";
@@ -72,19 +73,17 @@ describe("the produced files without `files:read`", () => {
   });
 });
 
-describe("the produced list says when it was cut", () => {
+describe("the produced list offers the rest when it was cut", () => {
   const two = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
 
-  it("shows the notice when produced files fell off the page", () => {
+  it("offers to load more when produced files are still on the next page", () => {
     expect(results(two, { hasMore: true, producedCount: 4 })).toContain(
-      agentsFr["run.producedFilesTruncated"],
+      commonFr["pagination.loadMore"],
     );
   });
 
-  it("says nothing when the page held the whole container", () => {
-    expect(results(two, { producedCount: 4 })).not.toContain(
-      agentsFr["run.producedFilesTruncated"],
-    );
+  it("offers nothing when the page held the whole container", () => {
+    expect(results(two, { producedCount: 4 })).not.toContain(commonFr["pagination.loadMore"]);
   });
 
   it("stays silent when the page was cut but every produced file is on screen", () => {
@@ -94,7 +93,7 @@ describe("the produced list says when it was cut", () => {
     );
     const html = results([...two, ...inputs], { hasMore: true, producedCount: 2 });
     expect(html).toContain("rapport.md");
-    expect(html).not.toContain(agentsFr["run.producedFilesTruncated"]);
+    expect(html).not.toContain(commonFr["pagination.loadMore"]);
   });
 });
 
