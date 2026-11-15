@@ -50,6 +50,45 @@ describe("LogViewer — an empty journal", () => {
   });
 });
 
+describe("LogEntryInspector — an entry's type", () => {
+  const tool = (status: "running" | "success"): ExecutionEntry => ({
+    id: `tool_${status}`,
+    kind: "tool",
+    tool: "acme_docs__search",
+    status,
+  });
+  const cases: [string, ExecutionEntry, string][] = [
+    ["an agent message", message, agentsFr["log.type.message"]],
+    ["a running tool", tool("running"), agentsFr["log.type.tool"]],
+    ["a settled tool", tool("success"), agentsFr["log.type.tool"]],
+    [
+      "a line the agent wrote",
+      { id: "log_2", kind: "log", level: "info", message: "Trois factures trouvées." },
+      agentsFr["log.type.journal"],
+    ],
+    [
+      "a runner event",
+      { id: "log_3", kind: "runtime", level: "debug", message: "running", sourceType: "progress" },
+      agentsFr["log.type.system"],
+    ],
+  ];
+
+  for (const [name, entry, label] of cases) {
+    it(`reads ${name} as ${label}`, () => {
+      const html = render(<LogEntryInspector entry={entry} onClose={() => {}} />);
+      const type = html.match(
+        new RegExp(`${agentsFr["log.filterType"]}</dt><dd[^>]*>([^<]*)</dd>`),
+      );
+      expect(type?.[1]).toBe(label);
+    });
+  }
+
+  it("names a tool's state in its status, not in its type", () => {
+    const html = render(<LogEntryInspector entry={tool("running")} onClose={() => {}} />);
+    expect(html).toContain(agentsFr["log.toolStatus.running"]);
+  });
+});
+
 describe("LogEntryInspector — a platform tool's result", () => {
   const result = { content: [{ type: "text", text: '{"memories":[]}' }] };
   const recall = (tool: string): ExecutionEntry => ({

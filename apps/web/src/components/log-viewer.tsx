@@ -242,19 +242,24 @@ interface LogViewerProps {
 
 export type JournalOverviewFilter = "tools" | "warnings" | "errors";
 type JournalLevelFilter = ReturnType<typeof journalLevel>;
-type JournalTypeFilter = "message" | "tool_call" | "tool_result" | "diagnostic";
+const JOURNAL_TYPES = {
+  agent: "message",
+  tool: "tool",
+  log: "journal",
+  runtime: "system",
+} as const satisfies Record<ExecutionEntry["kind"], string>;
+type JournalTypeFilter = (typeof JOURNAL_TYPES)[ExecutionEntry["kind"]];
 
+/** A tool row keeps one type while it runs and once it settles: its status icon tells which. */
 function journalType(entry: ExecutionEntry): JournalTypeFilter {
-  if (entry.kind === "agent") return "message";
-  if (entry.kind === "tool") return entry.status === "running" ? "tool_call" : "tool_result";
-  return "diagnostic";
+  return JOURNAL_TYPES[entry.kind];
 }
 
 const FOCUS_FILTERS: Record<
   JournalOverviewFilter,
   { levels: JournalLevelFilter[]; types: JournalTypeFilter[] }
 > = {
-  tools: { levels: [], types: ["tool_call", "tool_result"] },
+  tools: { levels: [], types: ["tool"] },
   warnings: { levels: ["warn"], types: [] },
   errors: { levels: ["error"], types: [] },
 };
@@ -324,8 +329,8 @@ export function LogViewer({
   const availableLevels = (["info", "warn", "error"] as const).filter((value) =>
     entries.some((entry) => journalLevel(entry) === value),
   );
-  const availableTypes = (["message", "tool_call", "tool_result", "diagnostic"] as const).filter(
-    (value) => entries.some((entry) => journalType(entry) === value),
+  const availableTypes = Object.values(JOURNAL_TYPES).filter((value) =>
+    entries.some((entry) => journalType(entry) === value),
   );
   const activeFilterCount = levelFilters.length + typeFilters.length + display.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;
