@@ -138,7 +138,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
         response.request().method() === "POST" && response.url().includes("/shares") === true,
     );
     await adminPage.getByRole("button", { name: /^(Partager|Share)$/ }).click();
-    expect((await shared).status()).toBe(200);
+    expect((await shared).status()).toBe(201);
   } finally {
     await adminPage.context().close();
   }
@@ -288,7 +288,7 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
   const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
     target: { kind: "user", userId: member.userId },
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
 
   // Landed OFF: a row in the member's space, switched off.
   const memberClient = createApiClient(request, {
@@ -372,7 +372,7 @@ test("a guest finds a placement shared OFF in the catalogue and switches it on",
   const shared = await apiClient.post(`/packages/${scope}/${name}/shares`, {
     target: { kind: "user", userId: guest.userId },
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
 
   const page = await (await createAuthedContext(browser, guest, orgId, guestSpaceId)).newPage();
   try {
@@ -475,11 +475,11 @@ test("a draft-only agent is published from the share dialog itself, then offered
       (response) =>
         response.request().method() === "POST" &&
         response.url().includes("/shares") &&
-        response.status() === 200,
+        response.status() === 201,
     );
     await page.getByRole("button", { name: /Publier et partager|Publish and share/ }).click();
     expect((await published).status()).toBe(201);
-    expect((await offered).status()).toBe(200);
+    expect((await offered).status()).toBe(201);
     await expect(page.getByTestId("share-needs-version")).toHaveCount(0);
   } finally {
     await page.context().close();
@@ -535,7 +535,7 @@ test("a non-admin builder switches a team placement off and on from the space pa
         target: { kind: "space", spaceId },
       })
     ).status(),
-  ).toBe(200);
+  ).toBe(201);
   const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
   try {
     await page.goto("/catalogue/agent?view=spaces");
