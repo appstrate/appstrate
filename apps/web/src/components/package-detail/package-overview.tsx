@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { BookOpen, FileCode, FolderOpen, Layers, Server, Tags, Wrench } from "lucide-react";
+import { BookOpen, FileCode, FolderOpen, Layers, Server, Tags } from "lucide-react";
 import { DetailSectionCard } from "../detail-section-card";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { Markdown } from "../markdown";
 import { ManifestOverview } from "../package-manifest/manifest-overview";
-import { McpServerDetails } from "../package-manifest/mcp-server-details";
-import { readMcpServerDetails } from "../../lib/package-manifest";
 import { skillBody } from "../../lib/skill-frontmatter";
 import { SkeletonLine } from "../skeleton-line";
 
 const roleFallbackKeys = {
   skill: "packageOverview.roleFallback.skill",
-  "mcp-server": "packageOverview.roleFallback.mcp-server",
   integration: "packageOverview.roleFallback.integration",
 } as const;
 
@@ -29,7 +26,7 @@ export function PackageOverview({
   onOpenFiles,
   onOpenUsage,
 }: {
-  type: "skill" | "mcp-server" | "integration";
+  type: "skill" | "integration";
   description: string;
   content?: string | null;
   manifest: unknown;
@@ -40,7 +37,6 @@ export function PackageOverview({
   onOpenUsage: () => void;
 }) {
   const { t } = useTranslation("agents");
-  const server = readMcpServerDetails(manifest);
   const instructions = type === "skill" && content ? skillBody(content) : "";
   return (
     <div className="flex flex-col gap-6" data-testid="package-overview">
@@ -107,12 +103,6 @@ export function PackageOverview({
             {t(type === "skill" ? "packageOverview.skillFiles" : "packageOverview.serverFiles")}
           </p>
         </DetailSectionCard>
-        {type === "mcp-server" && <McpServerDetails details={server} />}
-        {type === "mcp-server" && server.tools.length === 0 && (
-          <DetailSectionCard title={t("manifest.tools")} icon={Wrench}>
-            <p className="text-sm">{t("packageOverview.noDeclaredTools")}</p>
-          </DetailSectionCard>
-        )}
       </div>
       <ManifestOverview manifest={manifest} />
     </div>
@@ -125,11 +115,7 @@ export function PackageOverview({
  * own line boxes. The manifest summary under the cards has no fixed shape and
  * is left out.
  */
-export function PackageOverviewSkeleton({
-  type,
-}: {
-  type: "skill" | "mcp-server" | "integration";
-}) {
+export function PackageOverviewSkeleton({ type }: { type: "skill" | "integration" }) {
   const { t } = useTranslation("agents");
   return (
     <div className="flex flex-col gap-6">

@@ -321,8 +321,6 @@ export function useCreatePackage<T extends PackageType>(type: T) {
       body: CreatePackageBody<T>,
     ): Promise<{ id: string; version_count?: number }> => {
       switch (type) {
-        case "mcp-server":
-          throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
           const agentBody = body as CreatePackageBody<"agent">;
           const { data } = await client.POST("/api/packages/agents", {

@@ -89,7 +89,6 @@ import { SettingsHeading } from "./settings/settings-heading";
 const TITLE_KEY: Record<PackageType, string> = {
   agent: "packages.type.agents",
   skill: "packages.type.skills",
-  "mcp-server": "packages.type.mcp-servers",
   integration: "packages.type.integrations",
 };
 

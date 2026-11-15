@@ -3,12 +3,7 @@
 import { PendingButton } from "@/components/app-ui/pending-button";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  agentSchema,
-  skillSchema,
-  integrationSchema,
-  mcpServerSchema,
-} from "@appstrate/core/schemas";
+import { agentSchema, skillSchema, integrationSchema } from "@appstrate/core/schemas";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -18,13 +13,12 @@ import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import type { PackageEditor, PackageEditorTab } from "./use-package-editor";
 
 /** Every type is edited in its Package AFPS. */
-export type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
+export type EditablePackageType = "agent" | "skill" | "integration";
 
 const PACKAGE_SCHEMAS: Record<EditablePackageType, object> = {
   agent: agentSchema,
   skill: skillSchema,
   integration: integrationSchema,
-  "mcp-server": mcpServerSchema,
 };
 
 /** What every package editor draws around its sections: the open section's heading, the raw manifest under it, the save bar when something changed, and the unsaved-changes guard. */

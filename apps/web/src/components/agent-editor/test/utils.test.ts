@@ -958,7 +958,7 @@ describe("withNormalizedManifest", () => {
     const m = {
       type: "agent",
       name: "@o/a",
-      dependencies: { skills: {}, mcp_servers: {}, integrations: {}, _meta: { "dev.x/y": 1 } },
+      dependencies: { skills: {}, integrations: {}, _meta: { "dev.x/y": 1 } },
     };
     expect(withNormalizedManifest(m)).toBe(m);
   });

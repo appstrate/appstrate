@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { PackageOverview } from "../package-detail/package-overview";
 import { Markdown } from "../markdown-impl";
-import agentsFr from "../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../i18n";
 
 await i18nReady;
@@ -39,12 +38,6 @@ describe("package overview", () => {
     expect(html).toContain("2");
     expect(html).toContain("1.4.0");
     expect(html).not.toContain("Ce manifest ne déclare aucune métadonnée.");
-  });
-  it("provides a useful MCP summary without inventing a tool count", () => {
-    const html = render({ type: "mcp-server", content: null });
-    expect(html).toContain("Le manifeste ne fournit pas de catalogue");
-    expect(html).not.toContain("Lire les instructions complètes");
-    expect(html).toContain("Parcourir les fichiers");
   });
   it("previews the instructions, not the frontmatter that names the skill", () => {
     const html = render({
@@ -84,61 +77,5 @@ describe("package overview", () => {
     });
     expect(html).toContain("MIT");
     expect(html).not.toContain("secret_method");
-  });
-});
-
-describe("mcp-server overview", () => {
-  function mcpServer(manifest: Record<string, unknown>) {
-    return render({
-      type: "mcp-server",
-      content: null,
-      manifest: { name: "@acme/gh-mcp", version: "1.0.0", type: "mcp-server", ...manifest },
-    });
-  }
-
-  it("renders the launch line as the one command the runner executes", () => {
-    const html = mcpServer({
-      server: {
-        type: "node",
-        entry_point: "dist/index.js",
-        mcp_config: { command: "node", args: ["dist/index.js"] },
-      },
-    });
-    expect(html).toContain(agentsFr["manifest.server"]);
-    expect(html).toContain("node dist/index.js");
-  });
-
-  it("flags the user config the installer has to supply", () => {
-    const html = mcpServer({
-      user_config: { token: { type: "string", required: true, sensitive: true } },
-    });
-    expect(html).toContain("token");
-    expect(html).toContain(agentsFr["manifest.required"]);
-    expect(html).toContain(agentsFr["manifest.sensitive"]);
-  });
-
-  it("reproduces a repeated flag instead of collapsing it", () => {
-    const html = mcpServer({
-      server: {
-        type: "uv",
-        mcp_config: {
-          command: "uv",
-          args: ["run", "--with", "pkgA", "--with", "pkgB", "server.py"],
-        },
-      },
-    });
-    expect(html).toContain("uv run --with pkgA --with pkgB server.py");
-  });
-
-  it("names the runtime the platform would actually start", () => {
-    // `server.type` is MCPB vocabulary and has no `bun`; `_meta` carries the
-    // Appstrate override the runner reads.
-    const html = mcpServer({
-      _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
-      server: { type: "node", mcp_config: { command: "bun", args: ["src/index.ts"] } },
-    });
-    expect(html).toContain(agentsFr["manifest.serverRuntime"]);
-    expect(html).toContain(">bun<");
-    expect(html).not.toContain(">node<");
   });
 });

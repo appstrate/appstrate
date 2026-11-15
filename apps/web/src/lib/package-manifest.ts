@@ -7,7 +7,6 @@
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { effectiveMcpServerType, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
 type ManifestObject = Record<string, unknown>;
@@ -115,7 +114,6 @@ function readDependencies(value: unknown): ManifestDependencyGroup[] {
   if (!deps) return [];
   const groups: Array<[field: string, labelKey: string]> = [
     ["skills", "manifest.depSkills"],
-    ["mcp_servers", "manifest.depMcpServers"],
     ["integrations", "manifest.depIntegrations"],
   ];
   return present(
@@ -180,8 +178,13 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
 
 // ─── Integration source ───────────────────────────────────────────────
 
+export interface LocalServerTool {
+  name: string;
+  description?: string;
+}
+
 type IntegrationSourceView =
-  | { kind: "local"; serverName: string; serverVersion: string }
+  | { kind: "local"; serverType: string; entryPoint: string; tools: LocalServerTool[] }
   | { kind: "remote"; url: string; transport: string }
   | { kind: "none" };
 
@@ -191,10 +194,22 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
   const kind = str(source?.kind);
   if (kind === "local") {
     const server = obj(source?.server);
-    const serverName = str(server?.name);
-    const serverVersion = str(server?.version);
-    if (!serverName || !serverVersion) return undefined;
-    return { kind: "local", serverName, serverVersion };
+    const serverType = str(server?.type);
+    const entryPoint = str(server?.entry_point);
+    if (!serverType || !entryPoint) return undefined;
+    // `tools` is a raw jsonb array, so `name` may repeat and the view keys rows by name: first declaration wins.
+    const seen = new Set<string>();
+    const tools = present(
+      (Array.isArray(server?.tools) ? server.tools : []).map((raw): LocalServerTool | undefined => {
+        const tool = obj(raw);
+        const name = str(tool?.name);
+        if (!name || seen.has(name)) return undefined;
+        seen.add(name);
+        const description = str(tool?.description);
+        return description ? { name, description } : { name };
+      }),
+    );
+    return { kind: "local", serverType, entryPoint, tools };
   }
   if (kind === "remote") {
     const remote = obj(source?.remote);
@@ -205,100 +220,4 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
   }
   if (kind === "none") return { kind: "none" };
   return undefined;
-}
-
-// ─── MCP server tail ────────────────────────────────────────────────
-
-interface McpServerView {
-  /** The runtime the PLATFORM would run this on: `_meta` override, else MCPB `server.type` ({@link readMcpServer}). */
-  runtime?: string;
-  entryPoint?: string;
-  command?: string;
-  args: string[];
-}
-
-interface McpToolView {
-  name: string;
-  description?: string;
-}
-
-interface McpUserConfigView {
-  key: string;
-  title?: string;
-  description?: string;
-  type?: string;
-  required: boolean;
-  sensitive: boolean;
-}
-
-export interface McpServerManifestDetails {
-  manifestVersion?: string;
-  server?: McpServerView;
-  tools: McpToolView[];
-  userConfig: McpUserConfigView[];
-}
-
-/**
- * Takes the WHOLE manifest because the runtime is not a property of `server`: core's
- * `effectiveMcpServerType` (the function every spawn path calls) reads
- * `_meta["dev.appstrate/mcp-server"].runtime` at the ROOT, falling back to `server.type`. They
- * disagree by design: MCPB's enum has no `bun`, so a bun server keeps `server.type: "node"`.
- */
-function readMcpServer(manifest: ManifestObject): McpServerView | undefined {
-  const server = obj(manifest.server);
-  if (!server) return undefined;
-  const config = obj(server.mcp_config);
-  // The override half narrows `_meta` itself; the `server.type` fallback is verbatim so a draft typo shows as written.
-  const runtime = effectiveMcpServerType(manifest as unknown as McpServerManifest);
-  const view: McpServerView = {
-    ...(runtime ? { runtime } : {}),
-    ...(str(server.entry_point) ? { entryPoint: str(server.entry_point) } : {}),
-    ...(str(config?.command) ? { command: str(config?.command) } : {}),
-    args: strArray(config?.args),
-  };
-  const hasAnything =
-    view.runtime !== undefined ||
-    view.entryPoint !== undefined ||
-    view.command !== undefined ||
-    view.args.length > 0;
-  return hasAnything ? view : undefined;
-}
-
-export function readMcpServerDetails(manifest: unknown): McpServerManifestDetails {
-  const m = obj(manifest) ?? {};
-  const manifestVersion = str(m.manifest_version);
-  const server = readMcpServer(m);
-  // `tools` is a raw jsonb array, so `name` may repeat and the view keys rows by name: first declaration wins.
-  const seenTools = new Set<string>();
-  const tools = present(
-    (Array.isArray(m.tools) ? m.tools : []).map((raw) => {
-      const tool = obj(raw);
-      const name = str(tool?.name);
-      if (!name || seenTools.has(name)) return undefined;
-      seenTools.add(name);
-      const description = str(tool?.description);
-      return { name, ...(description ? { description } : {}) };
-    }),
-  );
-  const userConfig = Object.entries(obj(m.user_config) ?? {}).map(([key, raw]) => {
-    const entry = obj(raw);
-    const title = str(entry?.title);
-    const description = str(entry?.description);
-    const type = str(entry?.type);
-    return {
-      key,
-      ...(title ? { title } : {}),
-      ...(description ? { description } : {}),
-      ...(type ? { type } : {}),
-      required: entry?.required === true,
-      sensitive: entry?.sensitive === true,
-    };
-  });
-
-  return {
-    ...(manifestVersion ? { manifestVersion } : {}),
-    ...(server ? { server } : {}),
-    tools,
-    userConfig,
-  };
 }

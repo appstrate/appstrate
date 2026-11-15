@@ -97,7 +97,6 @@ const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReader
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
-const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -279,9 +278,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/integrations": <IntegrationsPage />,
   "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
-  "/mcp-servers": <McpServersPage />,
-  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
-  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   "/catalogue": <CatalogueIndexRedirect />,
   "/catalogue/:type": <CataloguePage />,
   "/preferences": <Outlet />,
@@ -335,7 +331,6 @@ const flatPaths = (overlay: boolean) =>
 const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
   ["/agents/", "agent"],
   ["/skills/", "skill"],
-  ["/mcp-servers/", "mcp-server"],
   ["/integrations/", "integration"],
 ];
 
@@ -344,7 +339,6 @@ const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
 const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
   "/agents": "agent",
   "/skills": "skill",
-  "/mcp-servers": "mcp-server",
   "/integrations": "integrations",
 };
 

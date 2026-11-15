@@ -12,7 +12,6 @@ import { searchOf } from "./url-search";
 export const CATALOGUE_KINDS = [
   "agent",
   "skill",
-  "mcp-server",
   "integration",
 ] as const satisfies readonly PackageType[];
 
@@ -25,7 +24,6 @@ export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
   agent: "integration.admin.pinManagement.colAgent",
   skill: "catalogue.sheet.type.skill",
   integration: "connections.kindIntegration",
-  "mcp-server": "catalogue.sheet.type.mcp-server",
 };
 
 /** The sheet's package, and the published version it is read at (`?package=…&version=…`). */

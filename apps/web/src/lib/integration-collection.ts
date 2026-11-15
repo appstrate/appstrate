@@ -7,7 +7,7 @@ export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
  * `source.kind`, read straight off the index row's `source_kind` (or a manifest's own), not a
  * choice anyone makes: `none` (the platform calls the API itself), `remote` (a hosted MCP
- * server) or `local` (an MCP server package run in the sandbox).
+ * server) or `local` (an MCP server the integration ships, run in the sandbox).
  */
 export const INTEGRATION_SOURCES = ["none", "remote", "local"] as const;
 

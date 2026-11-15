@@ -31,12 +31,19 @@ export type SourceKind = "remote" | "local" | "none";
  */
 type RemoteTransport = "streamable-http" | "sse";
 
-interface SourceState {
+/** AFPS `source.server.type`: how the integration's own MCP server is started. */
+export const LOCAL_SERVER_TYPES = ["node", "python", "binary", "uv"] as const;
+export type LocalServerType = (typeof LOCAL_SERVER_TYPES)[number];
+
+export interface SourceState {
   kind: SourceKind;
   remoteUrl: string;
   remoteTransport: RemoteTransport;
-  serverName: string;
-  serverVersion: string;
+  /** The local run declaration (`source.server`); `mcp_config.env` and `tools` are not surfaced here, only preserved. */
+  serverType: LocalServerType;
+  entryPoint: string;
+  command: string;
+  args: string[];
 }
 
 export function getSource(manifest: Rec): SourceState {
@@ -44,13 +51,25 @@ export function getSource(manifest: Rec): SourceState {
   const kind = (source.kind as SourceKind) ?? "remote";
   const remote = asRec(source.remote);
   const server = asRec(source.server);
+  const config = asRec(server.mcp_config);
   return {
     kind: kind === "local" || kind === "none" ? kind : "remote",
     remoteUrl: typeof remote.url === "string" ? remote.url : "",
     remoteTransport: remote.transport === "sse" ? "sse" : "streamable-http",
-    serverName: typeof server.name === "string" ? server.name : "",
-    serverVersion: typeof server.version === "string" ? server.version : "",
+    serverType: LOCAL_SERVER_TYPES.find((type) => type === server.type) ?? "node",
+    entryPoint: typeof server.entry_point === "string" ? server.entry_point : "",
+    command: typeof config.command === "string" ? config.command : "",
+    args: asStringArray(config.args),
   };
+}
+
+/** Whether `entryPoint` names a file the package does not hold (`./` prefix and leading `/` ignored); a blank one is not judged. */
+export function entryPointMissing(entryPoint: string, files: readonly string[]): boolean {
+  const path = entryPoint
+    .trim()
+    .replace(/^(\.\/)+/, "")
+    .replace(/^\/+/, "");
+  return path !== "" && !files.includes(path);
 }
 
 /** Whether `url` is an absolute URL or an AFPS §7.12 URL template. */
@@ -83,7 +102,17 @@ export function setSource(manifest: Rec, s: SourceState): Rec {
     source.remote = { ...asRec(base.remote), url: s.remoteUrl, transport: s.remoteTransport };
     delete source.server;
   } else if (s.kind === "local") {
-    source.server = { ...asRec(base.server), name: s.serverName, version: s.serverVersion };
+    // Merge onto the stored declaration: `mcp_config.env`, `platform_overrides`, `tools` and any
+    // key the form does not own survive an edit of the fields it does.
+    const server = asRec(base.server);
+    const config = { ...asRec(server.mcp_config) };
+    delete config.args;
+    source.server = {
+      ...server,
+      type: s.serverType,
+      entry_point: s.entryPoint,
+      mcp_config: { ...config, command: s.command, ...(s.args.length > 0 ? { args: s.args } : {}) },
+    };
     delete source.remote;
   } else {
     delete source.remote;

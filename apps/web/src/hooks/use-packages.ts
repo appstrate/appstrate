@@ -61,7 +61,6 @@ export type Versioned<T> = T & { etag: string | null };
 type PackageDetailMap = {
   agent: Versioned<AgentDetail>;
   skill: Versioned<OrgPackageItemDetail>;
-  "mcp-server": Versioned<OrgPackageItemDetail>;
   integration: Versioned<OrgPackageItemDetail>;
 };
 

@@ -2,15 +2,17 @@
 
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-import { LocalServerField } from "./local-server-field";
+import { LocalServerFields } from "./local-server-fields";
 import { getSource, setSource, type SourceKind } from "./utils";
 
 interface SourceSectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
+  /** Paths of the package's draft files, to check the local entry point against. */
+  serverFiles?: readonly string[];
 }
 
-export function SourceSection({ manifest, onChange }: SourceSectionProps) {
+export function SourceSection({ manifest, onChange, serverFiles }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const source = getSource(manifest);
   const update = (patch: Partial<typeof source>) =>
@@ -57,11 +59,7 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
       )}
 
       {source.kind === "local" && (
-        <LocalServerField
-          name={source.serverName}
-          version={source.serverVersion}
-          onChange={update}
-        />
+        <LocalServerFields source={source} onChange={update} serverFiles={serverFiles} />
       )}
 
       {source.kind === "none" && (

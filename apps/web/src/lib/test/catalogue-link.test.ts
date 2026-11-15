@@ -22,8 +22,8 @@ describe("catalogueHref", () => {
     );
   });
 
-  it("opens an MCP server on its own kind", () => {
-    expect(catalogueHref("mcp-server")).toBe("/catalogue/mcp-server");
+  it("opens an integration on its own kind", () => {
+    expect(catalogueHref("integration")).toBe("/catalogue/integration");
   });
 
   it("opens the sheet at a published version when it names one", () => {
@@ -114,13 +114,14 @@ describe("catalogueListAddress", () => {
   });
 
   it("writes Découvrir as no view at all", () => {
-    expect(catalogueListAddress("mcp-server", "discover", "")).toBe("/catalogue/mcp-server");
+    expect(catalogueListAddress("integration", "discover", "")).toBe("/catalogue/integration");
   });
 });
 
 describe("catalogue addresses", () => {
   it("name a kind, and a view in the query", () => {
-    expect(isCatalogueKind("mcp-server")).toBe(true);
+    expect(isCatalogueKind("integration")).toBe(true);
+    expect(isCatalogueKind("mcp-server")).toBe(false);
     expect(catalogueViewOf("")).toBe("discover");
     expect(catalogueViewOf("?q=radar")).toBe("discover");
     expect(catalogueViewOf("?view=spaces&q=radar")).toBe("spaces");

@@ -53,7 +53,7 @@ function integration(
     home_deletable: false,
     home_shareable: false,
     source_kind: sourceKind,
-    server: sourceKind === "local" ? { name: `${id}-server`, version: "^1.0.0" } : null,
+    server: sourceKind === "local" ? { type: "node", entry_point: "server/index.js" } : null,
   };
 }
 

@@ -34,7 +34,7 @@ import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
-type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
+type IndexType = Extract<PackageType, "agent" | "skill">;
 
 /** The page's words for its type. */
 function presentation(type: IndexType, t: TFunction) {
@@ -170,7 +170,7 @@ function PackageIndexBody({
         onViewChange={setView}
       />
       {importing && canCreate && <ImportModal type={type} onClose={() => setImporting(false)} />}
-      {creating !== null && canCreate && type !== "mcp-server" && (
+      {creating !== null && canCreate && (
         <CreatePackageModal
           type={type}
           integrationId={creating.integrationId ?? undefined}
@@ -181,14 +181,10 @@ function PackageIndexBody({
         <CreationHandoffModal
           resource={type}
           onClose={creation.close}
-          onManual={
-            type === "mcp-server"
-              ? undefined
-              : () => {
-                  creation.close();
-                  setCreating({ integrationId: creation.integrationId });
-                }
-          }
+          onManual={() => {
+            creation.close();
+            setCreating({ integrationId: creation.integrationId });
+          }}
           onImport={() => {
             creation.close();
             setImporting(true);

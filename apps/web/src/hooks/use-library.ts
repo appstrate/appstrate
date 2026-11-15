@@ -100,7 +100,6 @@ function applyActivation(
     packages: {
       agent: mapGroup(prev.packages.agent),
       skill: mapGroup(prev.packages.skill),
-      "mcp-server": mapGroup(prev.packages["mcp-server"]),
       integration: mapGroup(prev.packages.integration),
     },
   };

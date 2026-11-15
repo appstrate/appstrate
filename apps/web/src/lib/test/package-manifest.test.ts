@@ -10,11 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  readIntegrationSource,
-  readManifestOverview,
-  readMcpServerDetails,
-} from "../package-manifest.ts";
+import { readIntegrationSource, readManifestOverview } from "../package-manifest.ts";
 
 /** The narrowest manifest the AFPS skill schema accepts. */
 const MINIMAL = { name: "@acme/tidy", version: "1.0.0", type: "skill" };
@@ -126,7 +122,6 @@ describe("readManifestOverview", () => {
       ...MINIMAL,
       dependencies: {
         skills: { "@acme/lint": "^1.0.0" },
-        mcp_servers: {},
         integrations: { "@acme/github": "~2.1.0" },
       },
     });
@@ -153,12 +148,31 @@ describe("readIntegrationSource", () => {
     expect(
       readIntegrationSource({
         kind: "local",
-        server: { name: "@acme/gh-mcp", version: "1.2.3" },
+        server: { type: "node", entry_point: "server/index.js" },
       }),
-    ).toEqual({
+    ).toEqual({ kind: "local", serverType: "node", entryPoint: "server/index.js", tools: [] });
+  });
+
+  it("reads the advisory tool catalog, first declaration of a name winning", () => {
+    const source = readIntegrationSource({
       kind: "local",
-      serverName: "@acme/gh-mcp",
-      serverVersion: "1.2.3",
+      server: {
+        type: "python",
+        entry_point: "server.py",
+        tools: [
+          { name: "list_repos", description: "first" },
+          { name: "list_repos", description: "second" },
+          { name: "whoami" },
+          { description: "nameless" },
+          "not an object",
+        ],
+      },
+    });
+    expect(source).toEqual({
+      kind: "local",
+      serverType: "python",
+      entryPoint: "server.py",
+      tools: [{ name: "list_repos", description: "first" }, { name: "whoami" }],
     });
   });
 
@@ -184,144 +198,8 @@ describe("readIntegrationSource", () => {
     expect(
       readIntegrationSource({ kind: "remote", remote: { url: "https://x.test" } }),
     ).toBeUndefined();
-    expect(readIntegrationSource({ kind: "local", server: { name: "@a/b" } })).toBeUndefined();
+    expect(readIntegrationSource({ kind: "local", server: { type: "node" } })).toBeUndefined();
     expect(readIntegrationSource({ kind: "smtp" })).toBeUndefined();
     expect(readIntegrationSource(undefined)).toBeUndefined();
-  });
-});
-
-describe("readMcpServerDetails", () => {
-  it("reads the launch facts and the declared surface", () => {
-    const details = readMcpServerDetails({
-      name: "@acme/gh-mcp",
-      version: "1.0.0",
-      type: "mcp-server",
-      manifest_version: "0.4",
-      server: {
-        type: "node",
-        entry_point: "dist/index.js",
-        mcp_config: { command: "node", args: ["dist/index.js", "--stdio"] },
-      },
-      tools: [{ name: "list_repos", description: "List repositories" }, { name: "whoami" }, {}],
-      user_config: { token: { type: "string", title: "Token", required: true, sensitive: true } },
-    });
-
-    expect(details.manifestVersion).toBe("0.4");
-    expect(details.server).toEqual({
-      runtime: "node",
-      entryPoint: "dist/index.js",
-      command: "node",
-      args: ["dist/index.js", "--stdio"],
-    });
-    // The nameless third entry is dropped rather than rendered as a blank row.
-    expect(details.tools).toEqual([
-      { name: "list_repos", description: "List repositories" },
-      { name: "whoami" },
-    ]);
-    expect(details.userConfig).toEqual([
-      { key: "token", title: "Token", type: "string", required: true, sensitive: true },
-    ]);
-  });
-
-  it("reads no server from a manifest that declares none", () => {
-    expect(readMcpServerDetails(MINIMAL)).toEqual({ tools: [], userConfig: [] });
-    expect(readMcpServerDetails({ server: {} }).server).toBeUndefined();
-  });
-
-  it("reports the runtime the platform would resolve, not the MCPB vocabulary", () => {
-    // The case core's own docstring records: MCPB's `server.type` enum has no
-    // `bun`, so a bun-native server keeps `server.type: "node"` and declares
-    // `bun` under `_meta`. The runner reads `_meta` first
-    // (`effectiveMcpServerType`, the same core reader called here); reading
-    // `server.type` alone labelled this server "node", which is not how it runs.
-    const details = readMcpServerDetails({
-      ...MINIMAL,
-      type: "mcp-server",
-      _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
-      server: { type: "node", mcp_config: { command: "bun", args: ["src/index.ts"] } },
-    });
-
-    expect(details.server?.runtime).toBe("bun");
-  });
-
-  it("falls back to server.type when _meta declares nothing usable", () => {
-    // Same order the resolver uses, including its narrowing: `_meta` is
-    // author-controlled jsonb, so an unrecognised runtime is not a runtime.
-    for (const meta of [
-      undefined,
-      {},
-      { "dev.appstrate/mcp-server": {} },
-      { "dev.appstrate/mcp-server": { runtime: "deno" } },
-      { "dev.appstrate/mcp-server": "bun" },
-    ]) {
-      const details = readMcpServerDetails({
-        ...MINIMAL,
-        type: "mcp-server",
-        ...(meta ? { _meta: meta } : {}),
-        server: { type: "python", entry_point: "main.py" },
-      });
-
-      expect(details.server?.runtime).toBe("python");
-    }
-  });
-});
-
-describe("author-controlled arrays are reproduced verbatim", () => {
-  it("keeps repeated keywords, platforms and privacy policies", () => {
-    // These used to be deduped through a `Set` so the keyed lists that render
-    // them could not emit duplicate React keys. That is the renderer's problem
-    // (every keyed site now includes the index) — editing the author's array on
-    // the way to the screen is not a rendering concern, and the same helper
-    // reads `mcp_config.args`, where dropping a repeat changes a command line.
-    const overview = readManifestOverview({
-      ...MINIMAL,
-      keywords: ["tidy", "tidy", " ", "cli"],
-      privacy_policies: ["https://acme.test/privacy", "https://acme.test/privacy"],
-      compatibility: { platforms: ["linux", "linux", "darwin"] },
-    });
-
-    // The blank is still dropped — that rule is about a row with no value.
-    expect(overview.keywords).toEqual(["tidy", "tidy", "cli"]);
-    expect(overview.links.filter((l) => l.labelKey === "manifest.privacyPolicy")).toHaveLength(2);
-    expect(overview.facts.find((f) => f.labelKey === "manifest.platforms")?.value).toBe(
-      "linux, linux, darwin",
-    );
-  });
-
-  it("round-trips a repeated launch flag in mcp_config.args", () => {
-    // The defect the `Set` caused, on the one call site where the array is an
-    // ORDERED MULTISET: `uv run --with pkgA --with pkgB server.py` is how the
-    // runner starts this server, and `McpServerDetails` renders
-    // `[command, ...args].join(" ")` as exactly that line. Deduping produced
-    // `uv run --with pkgA pkgB server.py` — a command the author never wrote,
-    // and one that installs a single package instead of two.
-    const args = ["run", "--with", "pkgA", "--with", "pkgB", "server.py"];
-    const details = readMcpServerDetails({
-      ...MINIMAL,
-      type: "mcp-server",
-      server: { type: "uv", mcp_config: { command: "uv", args } },
-    });
-
-    expect(details.server?.args).toEqual(args);
-    expect([details.server!.command, ...details.server!.args].join(" ")).toBe(
-      "uv run --with pkgA --with pkgB server.py",
-    );
-  });
-
-  it("dedupes an mcp-server's tools by name, keeping the first declaration", () => {
-    const details = readMcpServerDetails({
-      ...MINIMAL,
-      type: "mcp-server",
-      tools: [
-        { name: "list_repos", description: "first" },
-        { name: "list_repos", description: "second" },
-        { name: "whoami" },
-      ],
-    });
-
-    expect(details.tools).toEqual([
-      { name: "list_repos", description: "first" },
-      { name: "whoami" },
-    ]);
   });
 });

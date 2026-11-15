@@ -46,7 +46,7 @@ function agent(over: Partial<AgentDetail> = {}): Versioned<AgentDetail> {
     icon: null,
     color: null,
     source: "local",
-    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+    dependencies: { skills: [], integrations: [] },
     input: {
       schema: { type: "object", properties: { current_field: { type: "string" } } },
       values: {},

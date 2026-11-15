@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Paramètres for packages with nothing set per space (skills, local MCP servers): Explorer (tree,
+ * Paramètres for packages with nothing set per space (skills): Explorer (tree,
  * versions) and, for writers, Identité. The raw manifest is a modal reached from Identité, not a
  * section.
  */
@@ -29,7 +29,7 @@ export function PackageSettingsView({
   versions,
 }: {
   versions: PackageVersionsProps;
-  type: "skill" | "mcp-server";
+  type: "skill";
   packageId: string;
   detail: Versioned<OrgPackageItemDetail> | undefined;
   /** A pinned version being read; the definition is only edited on the draft. */

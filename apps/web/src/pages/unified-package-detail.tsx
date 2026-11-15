@@ -490,7 +490,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
               )}
             </DetailTabPanel>
 
-            {(type === "skill" || type === "mcp-server") && (
+            {type === "skill" && (
               <DetailTabPanel value="settings" framed>
                 <PackageSettingsView
                   versions={versionsProps}
