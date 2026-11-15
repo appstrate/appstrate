@@ -1083,7 +1083,7 @@ export function createIntegrationsRouter() {
       ...(body.connection_id ? { connectionId: body.connection_id } : {}),
       proxyReach: () => {
         assertPermission(c, "credential-proxy", "call-own");
-        return reachOutsideRun(callerPermissions(c));
+        return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
       caller: {
         apiKeyId: c.get("apiKeyId") || null,
@@ -1109,7 +1109,7 @@ export function createIntegrationsRouter() {
       scope,
       packageId,
       ...spaceListCaller(c),
-      reachOutsideRunIfPermitted(callerPermissions(c)),
+      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
     );
     return c.json(status);
   });
@@ -1472,19 +1472,7 @@ export function createIntegrationsRouter() {
    */
   function endConnectSession(c: Context<AppEnv>, err: ApiError): ApiError {
     clearConnectPageCookie(c);
-    return new ApiError({
-      status: err.status,
-      code: err.code,
-      title: err.title,
-      detail: err.message,
-      param: err.param,
-      retryAfter: err.retryAfter,
-      errors: err.fieldErrors,
-      headers: err.headers,
-      extensions: { ...err.extensions, connect_session_ended: true },
-      // Only the original cause: the error handler logs any cause at error level.
-      cause: err.cause,
-    });
+    return err.with({ extensions: { ...err.extensions, connect_session_ended: true } });
   }
 
   // POST /connect/submit — hosted-form credential submit. Context + actor come
@@ -1681,7 +1669,7 @@ export function createIntegrationsRouter() {
         scope,
         packageId,
         ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c)),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
       );
       return c.json(detail);
     },

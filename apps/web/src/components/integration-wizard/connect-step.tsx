@@ -22,6 +22,7 @@ const BLOCKER_KEY: Record<Exclude<ConnectBlocker, "none">, string> = {
   defaultUnavailable: "integrationWizard.connect.blocker.defaultUnavailable",
   unusable: "integrationWizard.connect.blocker.unusable",
   unusableImposed: "integrationWizard.connect.blocker.unusableImposed",
+  proxyClosed: "integrationWizard.connect.blocker.proxyClosed",
 };
 
 /**

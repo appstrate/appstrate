@@ -4,7 +4,11 @@ import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { APPEARANCE_COLORS, ICON_MAX_LENGTH } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { EMOJI_ICON_WRITE_RULE, SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
+import {
+  CREDENTIAL_PROXY_OPEN_DESCRIPTION,
+  EMOJI_ICON_WRITE_RULE,
+  SPACE_ROLE_ID_PATTERN,
+} from "../schemas.ts";
 
 export const spacesPaths = {
   "/api/spaces": {
@@ -70,6 +74,7 @@ export const spacesPaths = {
                 },
                 visibility: "open",
                 default_role: "operator",
+                credential_proxy_open: true,
                 personal: false,
                 access: "member",
                 role: { kind: "preset", key: "admin", name: "admin" },
@@ -131,6 +136,7 @@ export const spacesPaths = {
                     settings: { allowedRedirectDomains: [] },
                     visibility: "open",
                     default_role: "operator",
+                    credential_proxy_open: true,
                     personal: false,
                     access: "member",
                     role: { kind: "preset", key: "operator", name: "operator" },
@@ -150,6 +156,7 @@ export const spacesPaths = {
                     settings: { allowedRedirectDomains: ["myapp.com"] },
                     visibility: "closed",
                     default_role: "operator",
+                    credential_proxy_open: true,
                     personal: false,
                     access: "none",
                     role: null,
@@ -203,7 +210,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Update a space",
       description:
-        "Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.",
+        "Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -256,6 +263,10 @@ export const spacesPaths = {
                   type: "string",
                   enum: [...SPACE_ROLE_PRESETS],
                   description: "Preset the implicit members of an `open` space hold",
+                },
+                credential_proxy_open: {
+                  type: "boolean",
+                  description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
                 },
               },
               additionalProperties: false,

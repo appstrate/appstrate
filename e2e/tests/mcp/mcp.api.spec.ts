@@ -140,16 +140,16 @@ test.describe("MCP over an API key (full stack)", () => {
     // keeping them cost a permanent second dispatch path. See
     // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
-      "api_call",
+      "call_integration_tool",
       "describe_operation",
       "get_me",
       "get_runtime_capabilities",
       "import_package_file",
       "invoke_operation",
-      "list_connections",
       "list_files",
       "read_file",
       "run_and_wait",
+      "search_integration_tools",
       "search_operations",
       "validate_package_file",
     ]);

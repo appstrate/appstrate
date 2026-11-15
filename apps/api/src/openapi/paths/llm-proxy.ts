@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { problemContent } from "../responses.ts";
+import { PROXY_STATUS_HEADER } from "../headers.ts";
 import {
   LLM_PROXY_MOUNT,
   RUN_LLM_PROXY_MOUNT,
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "@appstrate/runner-pi";
-import { PROXY_STATUS_HEADER } from "./credential-proxy.ts";
 
 /**
  * LLM proxy endpoints — server-side model injection and per-call metering for

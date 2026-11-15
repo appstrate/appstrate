@@ -173,6 +173,7 @@ describe("integrationWizardStep — governed connection", () => {
       "not_permitted",
       "default_unavailable",
       "unusable",
+      "proxy_closed",
     ] as const) {
       expect(integrationWizardStep({ ...facts, connection })).toBe("connect");
     }
@@ -214,6 +215,15 @@ describe("connectBlocker", () => {
       blocker: "unusableImposed",
       offerConnect: false,
     });
+  });
+
+  it("offers no connection in a space that closes the credential proxy, imposed or not", () => {
+    for (const imposed of [false, true]) {
+      expect(connectBlocker({ status: "proxy_closed", imposed })).toEqual({
+        blocker: "proxyClosed",
+        offerConnect: false,
+      });
+    }
   });
 });
 

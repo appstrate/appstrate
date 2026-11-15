@@ -32,7 +32,7 @@
  *     that's a registry-boundary concern, enforced at publish time.
  */
 
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { API_CALL_TOOL_META_KEY, API_UPLOAD_TOOL_META_KEY } from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
@@ -217,4 +217,49 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
   }
   return out;
+}
+
+/** The labels whose place in a `_meta` prefix reserves it for MCP. */
+const MCP_RESERVED_LABELS: ReadonlySet<string> = new Set(["mcp", "modelcontextprotocol"]);
+
+/**
+ * Whether a `_meta` key belongs to a namespace a third-party result has no claim to, its prefix
+ * (the part before the first `/`, compared case-insensitively) being:
+ *   - the platform's own, `dev.appstrate`;
+ *   - reserved for MCP: its second label is `modelcontextprotocol` or `mcp` (MCP's rule:
+ *     `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`), or its first
+ *     label is (AFPS §10.1: `mcp/`, `modelcontextprotocol.io/`).
+ * A key with no `/` has no prefix and is never reserved.
+ */
+function isReservedMetaKey(key: string): boolean {
+  const slash = key.indexOf("/");
+  if (slash < 0) return false;
+  const prefix = key.slice(0, slash).toLowerCase();
+  if (prefix === "dev.appstrate") return true;
+  const labels = prefix.split(".");
+  return MCP_RESERVED_LABELS.has(labels[0]!) || MCP_RESERVED_LABELS.has(labels[1] ?? "");
+}
+
+/** `holder` without the reserved keys of its `_meta`, which goes when nothing else is left in it. */
+function withoutReservedMeta<T extends { _meta?: Record<string, unknown> }>(holder: T): T {
+  const meta = holder._meta;
+  if (!meta || typeof meta !== "object") return holder;
+  const kept = Object.entries(meta).filter(([key]) => !isReservedMetaKey(key));
+  if (kept.length === Object.keys(meta).length) return holder;
+  const { _meta: _dropped, ...rest } = holder;
+  return (kept.length > 0 ? { ...rest, _meta: Object.fromEntries(kept) } : rest) as T;
+}
+
+/**
+ * A third-party tool result relayed outside a run, without the reserved `_meta` keys
+ * ({@link isReservedMetaKey}) of the result and of each of its content blocks: the platform's
+ * runtime events included, and any marker the platform or the protocol would read as its own.
+ */
+export function stripReservedResultMeta(result: CallToolResult): CallToolResult {
+  const stripped = withoutReservedMeta(result);
+  if (!Array.isArray(result.content)) return stripped;
+  const content = result.content.map((block) => withoutReservedMeta(block));
+  return content.every((block, index) => block === result.content[index])
+    ? stripped
+    : { ...stripped, content };
 }
