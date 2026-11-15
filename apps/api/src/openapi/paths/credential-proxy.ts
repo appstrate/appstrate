@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { problemContent } from "../responses.ts";
 import { proxyConnectionVerdictProperties } from "./integrations.ts";
 
@@ -72,17 +72,6 @@ const proxySharedDescription =
   "`WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), " +
   "`appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` " +
   "names the cause.";
-
-/** RFC 9209 `Proxy-Status` — shared with the LLM proxy paths. */
-export const PROXY_STATUS_HEADER = {
-  "Proxy-Status": {
-    description:
-      "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. " +
-      "`appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. " +
-      "Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
-    schema: { type: "string", example: "appstrate; received-status=401" },
-  },
-} as const;
 
 const proxyParameters = [
   {
@@ -642,8 +631,15 @@ const integrationToolSchema = {
         "the integration expose one) or `{ns}__{tool}` for a typed tool. `{ns}` is the package " +
         "id normalised (cut at 20 characters, without a trailing `_`), followed by `_` and a " +
         "hash of the package id while it equals the namespace of another integration active in " +
-        "the space. No two tools of a space share a name, and a name depends on the space's " +
-        "active integrations and the tool alone, never on the caller's connections.",
+        "the space. An `api_call` name over 56 characters keeps `{ns}__api_call__`, its auth " +
+        "part cut to fit and followed by a hash of the tool name. A typed tool's `{tool}` is a " +
+        "function of its `remote_name` alone: that name when `{ns}__{remote_name}` is a valid " +
+        "tool name (56 characters at most, `[A-Za-z0-9_-]` after `__`) and it is not `api_call`, " +
+        "`api_upload` or a `…__{auth}` form of either; otherwise that name with every other " +
+        "character made `_`, `_` runs collapsed, cut to fit and always followed by `_` and 8 hex " +
+        "digits of its hash. No two tools of a space share a name, and a name depends on the " +
+        "space's active integrations and the tool alone, never on the caller's connections, the " +
+        "order the server lists its tools in, or its other tools.",
     },
     kind: {
       type: "string",
@@ -789,7 +785,7 @@ export const credentialProxyPaths = {
         "journaled as one call of the connection when the listing reaches the server, its " +
         "handshake refused included. Reaching a server sends the connection's credential: a " +
         "401 goes through the proxy's forced refresh, and a server refusing the credential " +
-        "counts toward flagging the connection `needs_reconnection`, as a call does. A catalog " +
+        "can flag the connection `needs_reconnection`, as a call does. A catalog " +
         "keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s " +
         "for the servers in all (5 s when it resolves a `name`), and no longer than the " +
         "request: a catalog not read by then is listed as one whose server could not be " +
@@ -802,7 +798,11 @@ export const credentialProxyPaths = {
         "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
         "whose server the proxy refused to list (connection selection, permission, " +
         "`authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's " +
-        "credential (`upstream_credential_rejected`), each with that refusal. Read with the access " +
+        "credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` " +
+        "only the unread catalog could map (under `allow_undeclared_tools`, neither a declared " +
+        "tool's nor an upstream name exposed as itself, one ending in `_` and 8 hex digits " +
+        "excluded) adds the integration with `503 tool_catalog_unavailable`: retry, nothing " +
+        "was sent. Read with the access " +
         "rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's " +
         "latest published version. Requires `credential-proxy:call-own` or " +
         "`credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers " +
@@ -1069,9 +1069,9 @@ export const credentialProxyPaths = {
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
             "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
             "variables and they do not render it; `upstream_invalid_params` — the server answered " +
-            "JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name " +
-            "(`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status` error " +
-            "`http_request_error`).",
+            "the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or " +
+            "the tool name (`mcp_error: { code, message }`, its message untrusted text; " +
+            "`Proxy-Status: appstrate; received-status=<status>`, the HTTP status it came in).",
           headers: PROXY_STATUS_HEADER,
           content: { "application/problem+json": { schema: upstreamMcpProblemSchema } },
         },
@@ -1087,8 +1087,10 @@ export const credentialProxyPaths = {
             "forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on " +
             "`/proxy`: `needs_reconnection` — the connection is now flagged and its owner must " +
             "reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a " +
-            "JSON-RPC error other than -32602 (`mcp_error: { code, message }`, its message " +
-            "untrusted text; `http_protocol_error`); `upstream_response_too_large` — the tool " +
+            "JSON-RPC error other than a -32602 to the `tools/call` (a -32602 to the handshake " +
+            "included: MCP's answer to an unsupported protocol version; `mcp_error: { code, " +
+            "message }`, its message untrusted text; `received-status=<status>`, the HTTP status " +
+            "it came in); `upstream_response_too_large` — the tool " +
             "ran, but its answer exceeds the exchange bound (at most 2 MiB, lower when the " +
             "proxy's `max_response_bytes` is), answered as JSON or as an event stream " +
             "(`http_response_body_size`); the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), " +

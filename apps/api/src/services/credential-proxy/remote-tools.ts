@@ -96,6 +96,9 @@ function remoteCatalogKey(entry: {
   return `${entry.orgId}:${entry.connectionId}:${entry.integrationId}@${entry.version}:${entry.url}`;
 }
 
+/** @internal Test-only: a variable heads a rendered host, which no loopback test server can be. */
+export const _remoteCatalogKeyForTesting = remoteCatalogKey;
+
 export interface RemoteToolsCaller {
   scope: SpaceScope;
   actor: Actor;
@@ -198,6 +201,9 @@ export function offeredRemoteToolNames(
   return new Set(catalog.map((entry) => entry.name).filter((name) => !synthetic.has(name)));
 }
 
+/** A failed operation, with the HTTP status of the last exchange its server answered. */
+type OperationFailure = (err: unknown, receivedStatus: number | undefined) => unknown;
+
 async function withClient<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
     connectionId: string;
@@ -206,6 +212,7 @@ async function withClient<T>(
   },
   url: string,
   use: (client: AppstrateMcpClient, signal: AbortSignal) => Promise<T>,
+  failure: OperationFailure = (err) => err,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
   const operation = proxiedMcpOperation({
@@ -233,6 +240,8 @@ async function withClient<T>(
         return use(client, operation.signal);
       })(),
     );
+  } catch (err) {
+    throw failure(err, operation.receivedStatus());
   } finally {
     // Before the session's close, which is no exchange of the operation.
     operation.settle();
@@ -375,20 +384,24 @@ export async function callRemoteTool(
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
   const { connectionId, url } = await remoteConnection(input, manifest, input.name);
-  try {
-    const result = await withClient(
-      { ...input, connectionId, timeoutMs: timeouts.callMs },
-      url,
-      (client, signal) =>
-        client.callTool({ name: input.name, arguments: input.arguments }, { signal }),
-    );
-    return stripReservedResultMeta(result);
-  } catch (err) {
-    throw mcpServerFailure(err, {
-      integrationId: input.integrationId,
-      url,
-      failed: "did not answer the tool call",
-      tooLarge: "the tool ran, but its result is too large to relay; ask it for less",
-    });
-  }
+  // Set once the session is open: a failure after it is the `tools/call` exchange's.
+  let calling = false;
+  const result = await withClient(
+    { ...input, connectionId, timeoutMs: timeouts.callMs },
+    url,
+    (client, signal) => {
+      calling = true;
+      return client.callTool({ name: input.name, arguments: input.arguments }, { signal });
+    },
+    (err, receivedStatus) =>
+      mcpServerFailure(err, {
+        integrationId: input.integrationId,
+        url,
+        failed: "did not answer the tool call",
+        tooLarge: "the tool ran, but its result is too large to relay; ask it for less",
+        toolCall: calling,
+        ...(receivedStatus !== undefined ? { receivedStatus } : {}),
+      }),
+  );
+  return stripReservedResultMeta(result);
 }

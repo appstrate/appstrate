@@ -119,19 +119,41 @@ interface JournalEntry {
   ended(): void;
 }
 
+/** The methods whose exchange is the operation itself, not its session's handshake or upkeep. */
+const OPERATION_METHODS: ReadonlySet<unknown> = new Set(["tools/call", "tools/list"]);
+
+/** Whether a request body is a JSON-RPC request of {@link OPERATION_METHODS}. */
+function isOperationExchange(body: RequestInit["body"]): boolean {
+  if (typeof body !== "string") return false;
+  try {
+    const message: unknown = JSON.parse(body);
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      OPERATION_METHODS.has((message as { method?: unknown }).method)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The journal row of one operation: the last exchange it dispatched that reached a connection,
- * whatever its outcome (a timeout included); none when nothing reached one (a catalog served from
- * cache, a refusal before dispatch). Registered with the audit drain at its first exchange, so a
- * shutdown waits for an operation outliving its request; written once every exchange has ended.
+ * The journal row of one operation: the last exchange of the operation itself (the `tools/call`,
+ * a `tools/list` page) that reached a connection, else the last exchange that did, whatever its
+ * outcome (a timeout included); none when nothing reached one (a catalog served from cache, a
+ * refusal before dispatch). Registered with the audit drain at its first exchange, so a shutdown
+ * waits for an operation outliving its request; written once every exchange has ended.
  */
 function operationJournal(input: ProxiedMcpOperationInput) {
-  const entries: { reached?: JournaledExchange; done: Promise<void> }[] = [];
+  const entries: { reached?: JournaledExchange; operation: boolean; done: Promise<void> }[] = [];
   let release: (() => void) | undefined;
   let settled = false;
   const write = async () => {
     await Promise.all(entries.map((entry) => entry.done));
-    const row = entries.findLast((entry) => entry.reached)?.reached;
+    const row = (
+      entries.findLast((entry) => entry.reached && entry.operation) ??
+      entries.findLast((entry) => entry.reached)
+    )?.reached;
     if (!row) return;
     await recordConnectionCall({
       ...input.caller,
@@ -145,7 +167,7 @@ function operationJournal(input: ProxiedMcpOperationInput) {
   };
   return {
     /** `null` once settled: an exchange then (the session's close) is none of the operation's. */
-    dispatch(method: string, target: string): JournalEntry | null {
+    dispatch(method: string, target: string, operation: boolean): JournalEntry | null {
       if (settled) return null;
       if (!release) {
         const released = new Promise<void>((resolve) => (release = resolve));
@@ -153,7 +175,10 @@ function operationJournal(input: ProxiedMcpOperationInput) {
       }
       const started = Date.now();
       let end!: () => void;
-      const entry: (typeof entries)[number] = { done: new Promise((resolve) => (end = resolve)) };
+      const entry: (typeof entries)[number] = {
+        operation,
+        done: new Promise((resolve) => (end = resolve)),
+      };
       entries.push(entry);
       return {
         reached: (connectionId, outcome) => {
@@ -186,6 +211,8 @@ export interface ProxiedMcpOperation {
    */
   guard<T>(work: Promise<T>): Promise<T>;
   settle(): void;
+  /** The HTTP status of the last exchange the server answered, if any did. */
+  receivedStatus(): number | undefined;
 }
 
 /**
@@ -199,6 +226,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
   const signal = AbortSignal.any([input.deadline, failed.signal]);
   const fail = (err: Error) => failed.abort(err);
   const journal = operationJournal(input);
+  let receivedStatus: number | undefined;
 
   const fetchImpl = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // The standalone GET stream carries server-initiated messages, which a bounded exchange never reads.
@@ -206,11 +234,12 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
     signal.throwIfAborted();
     const method = init?.method ?? "POST";
     const href = target instanceof Request ? target.url : String(target);
-    const entry = journal.dispatch(method, href);
     const maxResponseBytes = Math.min(
       MAX_EXCHANGE_BYTES,
       getCredentialProxyLimits().max_response_bytes,
     );
+    // Nothing between the entry's registration and the `finally` that ends it can throw.
+    const entry = journal.dispatch(method, href, isOperationExchange(init?.body));
     let result;
     try {
       result = await proxyCall({
@@ -239,6 +268,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
       entry?.ended();
     }
     entry?.reached(result.connectionId, String(result.status));
+    receivedStatus = result.status;
     if (result.status === 401 || result.status === 403) {
       fail(new McpCredentialRejectedError(result.status, result.credential));
     }
@@ -269,6 +299,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
       }
     },
     settle: journal.settle,
+    receivedStatus: () => receivedStatus,
   };
 }
 
@@ -290,17 +321,26 @@ export function untrustedText(text: string): string {
   return text.slice(0, MAX_UNTRUSTED_CHARS);
 }
 
-/** A log record's fields that may carry server-authored text, each string bounded. */
-export function untrustedFields(
-  data: Record<string, unknown> | undefined,
-): Record<string, unknown> {
+/**
+ * A log record's fields that may carry server-authored values, each bounded whole: a string cut,
+ * any other value serialised then cut.
+ */
+export function untrustedFields(data: Record<string, unknown> | undefined): Record<string, string> {
   if (!data) return {};
   return Object.fromEntries(
     Object.entries(data).map(([key, value]) => [
       key,
-      typeof value === "string" ? untrustedText(value) : value,
+      untrustedText(typeof value === "string" ? value : serialised(value)),
     ]),
   );
+}
+
+function serialised(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export function isCredentialRejection(err: unknown): boolean {
@@ -308,13 +348,15 @@ export function isCredentialRejection(err: unknown): boolean {
   return status === 401 || status === 403;
 }
 
-/** JSON-RPC "Invalid params": the server refused the call's arguments or tool name. */
+/** JSON-RPC "Invalid params": to a `tools/call`, the server refused its arguments or tool name. */
 const JSON_RPC_INVALID_PARAMS = -32602;
 
 /**
  * The error a failed MCP operation answers: the proxy's own refusal as it is, a server fault as a
  * problem naming the server's origin only, with its `Proxy-Status`. A 401 or 403 of a server whose
- * integration declares no auth is the server asking for one: `bad_gateway`.
+ * integration declares no auth is the server asking for one: `bad_gateway`. A JSON-RPC error is
+ * `upstream_mcp_error`, but Invalid params answered to the `tools/call` itself, which refuses the
+ * caller's own request: `upstream_invalid_params`.
  */
 export function mcpServerFailure(
   err: unknown,
@@ -325,6 +367,10 @@ export function mcpServerFailure(
     failed?: string;
     /** Completes the detail of an answer over the exchange bound. */
     tooLarge?: string;
+    /** The failure came from the `tools/call` exchange, the session already open. */
+    toolCall?: boolean;
+    /** The HTTP status of the last exchange the server answered. */
+    receivedStatus?: number;
   },
 ): Error {
   if (err instanceof ApiError) return err;
@@ -379,14 +425,19 @@ export function mcpServerFailure(
   if (rpc) {
     const mcpError = { code: rpc.code, message: untrustedText(rpc.message) };
     const detail = `${server} answered JSON-RPC error ${rpc.code}; \`mcp_error.message\` is its own text.`;
-    return rpc.code === JSON_RPC_INVALID_PARAMS
+    // The server answered valid HTTP; what it carried is a JSON-RPC error.
+    const headers =
+      input.receivedStatus !== undefined
+        ? upstreamProxyStatus({ receivedStatus: input.receivedStatus })
+        : protocolError;
+    return rpc.code === JSON_RPC_INVALID_PARAMS && input.toolCall
       ? new ApiError({
           status: 422,
           code: "upstream_invalid_params",
           title: "Upstream Invalid Params",
           detail: `${detail} The server refused the arguments or the tool name.`,
           extensions: { mcp_error: mcpError },
-          headers: upstreamProxyStatus({ error: "http_request_error" }),
+          headers,
         })
       : new ApiError({
           status: 502,
@@ -394,7 +445,7 @@ export function mcpServerFailure(
           title: "Upstream MCP Error",
           detail,
           extensions: { mcp_error: mcpError },
-          headers: protocolError,
+          headers,
         });
   }
   return gatewayFault(`${server} ${input.failed ?? "did not answer"}.`, protocolError);

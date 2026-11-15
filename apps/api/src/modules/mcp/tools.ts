@@ -2005,7 +2005,9 @@ function withSpaceArgument(
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
-      // The space's setting, not the caller's role, withholds the proxy there.
+      // In the proxy route's order: its permission first (`not_granted` below), then the space's
+      // barrier, met only by a caller the permission admits. The credential kind never reaches
+      // here: the proxy refuses it for every space of the request, so neither tool is declared.
       if (need === "proxies" && current.surface.proxiesClosed) {
         return refusalResult({
           code: "credential_proxy_closed",

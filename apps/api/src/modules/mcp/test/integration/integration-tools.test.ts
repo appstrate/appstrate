@@ -482,6 +482,35 @@ describe("mcp integration tools", () => {
       expect(error).not.toContain("role");
       expect(upstreamCalls).toHaveLength(0);
     });
+
+    for (const open of [true, false]) {
+      it(`answers not_granted where the role grants neither, in a space ${open ? "open" : "closed"} to the proxy`, async () => {
+        // The route checks its permission before the space's barrier: a closed space says
+        // `credential_proxy_closed` only to a caller its permission admits.
+        const operator = await memberContext(owner, "member", "operator");
+        const other = await seedSpace({ orgId: owner.orgId, name: "Autre" });
+        await seedSpaceMember({
+          spaceId: other.id,
+          userId: operator.user.id,
+          presetRole: "runner",
+        });
+        await db.update(spaces).set({ credentialProxyOpen: open }).where(eq(spaces.id, other.id));
+        const caller: Caller = {
+          path: `/api/mcp/o/${owner.orgId}`,
+          headers: { Authorization: `Bearer ${await mintInstanceToken(operator)}` },
+        };
+
+        const refused = await callApi(caller, { space_id: other.id, requests: [get("/contacts")] });
+        expect(refused.isError).toBe(true);
+        expect(refused.data).toMatchObject({
+          code: "not_granted",
+          space: { id: other.id, name: "Autre" },
+          granted_in: [owner.defaultSpaceId],
+        });
+        expect(String(refused.data.error)).toContain("Your role in");
+        expect(upstreamCalls).toHaveLength(0);
+      });
+    }
   });
 
   describe("with a space admin's instance token", () => {

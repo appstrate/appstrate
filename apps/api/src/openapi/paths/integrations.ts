@@ -2,7 +2,7 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
@@ -1371,14 +1371,14 @@ export const integrationsPaths = {
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
           description:
-            "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed.",
-          headers: STD_RESPONSE_HEADERS,
+            "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`, on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` for a credential asked of an integration declaring none; `error=http_protocol_error` on any other `bad_gateway`, `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code.",
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },
         "504": {
           description:
             "`upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`).",
-          headers: STD_RESPONSE_HEADERS,
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },
       },

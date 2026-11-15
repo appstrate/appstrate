@@ -9,7 +9,8 @@
  * among them, a typed tool with the scopes its `tools_policy` entry requires that one lacks.
  *
  * Tool names are unique in a space ({@link integrationNamespaces}): a name resolves to one tool of
- * one integration, whatever connections the caller holds.
+ * one integration, whatever connections the caller holds. Within an integration, a typed tool's
+ * name is a function of its upstream name alone ({@link remoteToolName}).
  */
 
 import {
@@ -20,8 +21,14 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { allocateMcpToolName, normaliseMcpToolNamespace } from "@appstrate/core/naming";
-import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
+import { normaliseMcpToolNamespace } from "@appstrate/core/naming";
+import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/afps-shared/api-tool-naming";
+import {
+  fnv1a64Hex,
+  isValidMcpToolName,
+  MCP_TOOL_NAME_MAX_LENGTH,
+  normaliseMcpToolBody,
+} from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -160,16 +167,129 @@ export function integrationNamespaces(ids: readonly string[]): Map<string, strin
   return new Map(ids.map((id) => [id, namespaceOf(id)]));
 }
 
-/** Every `api_call` tool name of the catalog, connected or not: a typed tool never takes one. */
-function apiCallToolNames(namespace: string, manifest: IntegrationManifest): Set<string> {
+/** Hex digits of the upstream name's hash a transformed tool name ends with. */
+const TOOL_NAME_HASH_LENGTH = 8;
+
+/**
+ * The bodies the platform's own tools of an integration take: `api_call`, `api_upload` and their
+ * per-auth `__{auth}` forms. No typed tool's name has one.
+ */
+function isReservedBody(body: string): boolean {
+  return [API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME].some(
+    (name) => body === name || body.startsWith(`${name}__`),
+  );
+}
+
+/**
+ * `{namespace}__{prefix}{head}_{hash}` within {@link MCP_TOOL_NAME_MAX_LENGTH}: `head` cut to
+ * what is left, dropped (with its `_`) when nothing is, the hash of `seed` shortened only when
+ * the prefix leaves it less room.
+ */
+function hashedToolName(namespace: string, prefix: string, head: string, seed: string): string {
+  const room = MCP_TOOL_NAME_MAX_LENGTH - namespace.length - 2 - prefix.length;
+  const hash = fnv1a64Hex(seed).slice(0, Math.min(TOOL_NAME_HASH_LENGTH, room));
+  const kept = head.slice(0, Math.max(0, room - hash.length - 1));
+  return `${namespace}__${prefix}${kept ? `${kept}_` : ""}${hash}`;
+}
+
+/**
+ * The name a typed tool of the integration of `namespace` is exposed by, a function of its
+ * upstream name alone: `{namespace}__{upstream}` when that is a valid tool name and the upstream
+ * name is no reserved body ({@link isReservedBody}); otherwise the upstream name mapped onto the
+ * body alphabet, its `_` runs collapsed (so it never starts with a reserved `…__` form), cut to
+ * fit and always followed by `_` and a hash of the upstream name.
+ */
+export function remoteToolName(namespace: string, upstreamName: string): string {
+  const plain = `${namespace}__${upstreamName}`;
+  if (!isReservedBody(upstreamName) && isValidMcpToolName(plain)) return plain;
+  const head = normaliseMcpToolBody(upstreamName).replace(/_+/g, "_");
+  return hashedToolName(namespace, "", head, upstreamName);
+}
+
+/** A body that may be a transformed name's: ending in `_` and a hash, or a hash alone. */
+const HASHED_BODY = new RegExp(`(?:^|_)[0-9a-f]{${TOOL_NAME_HASH_LENGTH}}$`);
+
+/**
+ * The upstream name `name` calls without a catalog to prove it: its body, when `name` is that
+ * body's own exposed name and could be no other's. A transformed name, or one shaped like it, needs
+ * the catalog.
+ */
+function selfNamedUpstream(namespace: string, name: string): string | undefined {
+  if (!name.startsWith(`${namespace}__`)) return undefined;
+  const body = name.slice(namespace.length + 2);
+  return remoteToolName(namespace, body) === name && !HASHED_BODY.test(body) ? body : undefined;
+}
+
+/**
+ * Each exposed name of `upstreamNames`, mapped to the one upstream name it calls. Two names
+ * exposed alike (a hash collision) keep the one exposed by its own name, else neither; the
+ * dropped ones are logged, as `McpHost` logs a collision in a run.
+ */
+function exposeRemoteTools(
+  integrationId: string,
+  namespace: string,
+  upstreamNames: Iterable<string>,
+): Map<string, string> {
+  const holders = new Map<string, string[]>();
+  for (const upstream of new Set(upstreamNames)) {
+    const name = remoteToolName(namespace, upstream);
+    holders.set(name, [...(holders.get(name) ?? []), upstream]);
+  }
+  const exposed = new Map<string, string>();
+  for (const [name, group] of holders) {
+    const kept = group.length === 1 ? group[0] : group.find((u) => `${namespace}__${u}` === name);
+    if (kept !== undefined) exposed.set(name, kept);
+    for (const dropped of group.filter((u) => u !== kept)) {
+      logger.warn("credential-proxy: MCP tool name collides, tool dropped", {
+        integrationId,
+        name,
+        originalName: dropped.slice(0, 128),
+      });
+    }
+  }
+  return exposed;
+}
+
+/**
+ * The exposed name of an `api_call` tool (`api_call`, `api_call__{auth}`): `{namespace}__{tool}`
+ * when valid, else the auth part cut to fit behind `api_call__` and a hash of the tool name.
+ */
+function apiCallToolName(namespace: string, toolName: string): string {
+  const plain = `${namespace}__${toolName}`;
+  if (isValidMcpToolName(plain)) return plain;
+  const prefix = `${API_CALL_TOOL_NAME}__`;
+  const auth = normaliseMcpToolBody(toolName.slice(prefix.length));
+  return hashedToolName(namespace, prefix, auth, toolName);
+}
+
+/**
+ * Every `api_call` tool of the catalog, connected or not, by exposed name: a name two auths would
+ * share is dropped.
+ */
+function apiCallToolNames(
+  integrationId: string,
+  namespace: string,
+  manifest: IntegrationManifest,
+): Map<string, string> {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
   );
-  return new Set(
-    getApiCallConfigs(manifest)
-      .filter((config) => catalog.has(config.toolName))
-      .map((config) => `${namespace}__${config.toolName}`),
-  );
+  const holders = new Map<string, string[]>();
+  for (const config of getApiCallConfigs(manifest)) {
+    if (!catalog.has(config.toolName)) continue;
+    const name = apiCallToolName(namespace, config.toolName);
+    holders.set(name, [...(holders.get(name) ?? []), config.toolName]);
+  }
+  const names = new Map<string, string>();
+  for (const [name, group] of holders) {
+    if (group.length === 1) names.set(name, group[0]!);
+    else
+      logger.warn("credential-proxy: api_call tool name collides, tools dropped", {
+        integrationId,
+        name,
+      });
+  }
+  return names;
 }
 
 interface ListedIntegration {
@@ -177,7 +297,8 @@ interface ListedIntegration {
   namespace: string;
   manifest: IntegrationManifest;
   connections: readonly ConnectionOutsideRun[];
-  apiCallNames: ReadonlySet<string>;
+  /** Exposed name → `api_call` tool name. */
+  apiCallNames: ReadonlyMap<string, string>;
 }
 
 function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
@@ -187,9 +308,9 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
     typeof manifest.description === "string" ? ` ${manifest.description}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
-    const name = `${namespace}__${config.toolName}`;
+    const name = apiCallToolName(namespace, config.toolName);
     const reached = connections.filter((c) => c.auth_key === config.authKey);
-    if (!entry.apiCallNames.has(name) || reached.length === 0) return [];
+    if (entry.apiCallNames.get(name) !== config.toolName || reached.length === 0) return [];
     return [
       {
         kind: "api_call",
@@ -250,13 +371,22 @@ type RemoteListing =
 function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
   if (!name.startsWith(`${entry.namespace}__`)) return false;
   if (allowsUndeclaredTools(entry.manifest)) return true;
-  return [...offeredRemoteToolNames(entry.manifest, undefined)].some((declared) => {
-    const taken = new Set(entry.apiCallNames);
-    const plain = allocateMcpToolName(entry.namespace, declared, (n) => taken.has(n));
-    taken.add(plain);
-    return (
-      name === plain || name === allocateMcpToolName(entry.namespace, declared, (n) => taken.has(n))
-    );
+  return exposeRemoteTools(
+    entry.id,
+    entry.namespace,
+    offeredRemoteToolNames(entry.manifest, undefined),
+  ).has(name);
+}
+
+/** The catalog was not read in time to prove what `name` calls: retry. */
+function catalogUnavailable(integrationId: string, name: string): ApiError {
+  return new ApiError({
+    status: 503,
+    code: "tool_catalog_unavailable",
+    title: "Tool Catalog Unavailable",
+    detail:
+      `The catalog of ${integrationId}'s MCP server could not be read in time, and only it can ` +
+      `say which of its tools '${name}' names; nothing was sent. Retry.`,
   });
 }
 
@@ -316,21 +446,16 @@ async function remoteTools(
       ...(Object.keys(missing).length > 0 ? { missing_scopes: missing } : {}),
     };
   };
-  const taken = new Set(entry.apiCallNames);
+  const exposed = exposeRemoteTools(
+    integrationId,
+    namespace,
+    catalog.tools.map((upstream) => upstream.name),
+  );
+  const shown = new Set<string>();
   const tools = catalog.tools.flatMap((upstream): RemoteTool[] => {
-    let name: string;
-    try {
-      name = allocateMcpToolName(namespace, upstream.name, (n) => taken.has(n));
-    } catch {
-      // An unresolvable collision costs that one tool, as in a run (`McpHost`).
-      logger.warn("credential-proxy: MCP tool name collides after re-hashing, tool dropped", {
-        integrationId,
-        namespace,
-        originalName: upstream.name.slice(0, 128),
-      });
-      return [];
-    }
-    taken.add(name);
+    const name = remoteToolName(namespace, upstream.name);
+    if (exposed.get(name) !== upstream.name || shown.has(name)) return [];
+    shown.add(name);
     return [remoteTool(name, upstream, !catalog.listed)];
   });
   const named = query.name;
@@ -339,11 +464,22 @@ async function remoteTools(
     !catalog.listed &&
     allowsUndeclaredTools(manifest) &&
     named.startsWith(`${namespace}__`) &&
-    !taken.has(named)
+    !exposed.has(named)
   ) {
-    // Its server unread, an undeclared tool is called by the name it was given.
-    const remoteName = named.slice(namespace.length + 2);
-    tools.push(remoteTool(named, { name: remoteName, input_schema: { type: "object" } }, true));
+    // Its server unread, an undeclared tool is called by the name it was given, when that name
+    // is its own; any other name needs the catalog.
+    const upstream = selfNamedUpstream(namespace, named);
+    if (upstream === undefined) {
+      return {
+        unlisted: {
+          integration_package_id: integrationId,
+          refusal: catalogUnavailable(integrationId, named).toProblemDetail(
+            caller.caller.requestId,
+          ),
+        },
+      };
+    }
+    tools.push(remoteTool(named, { name: upstream, input_schema: { type: "object" } }, true));
   }
   return { tools, truncatedAt: catalog.truncatedAt };
 }
@@ -390,7 +526,7 @@ export async function listIntegrationTools(
         namespace,
         manifest,
         connections,
-        apiCallNames: apiCallToolNames(namespace, manifest),
+        apiCallNames: apiCallToolNames(id, namespace, manifest),
       };
     });
 

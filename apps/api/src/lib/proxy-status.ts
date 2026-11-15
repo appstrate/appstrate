@@ -25,7 +25,6 @@ type ProxyErrorType =
   | "proxy_internal_error"
   | "proxy_configuration_error"
   | "http_protocol_error"
-  | "http_request_error"
   | "http_response_body_size";
 
 export function relayedProxyStatus(receivedStatus: number): string {

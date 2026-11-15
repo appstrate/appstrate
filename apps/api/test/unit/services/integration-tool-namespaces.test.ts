@@ -1,27 +1,63 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The namespaces of the integration tools callable outside a run: distinct namespaces never yield
- * the same `{ns}__{body}` name, and a namespace depends on the space's integrations alone.
+ * The names of the integration tools callable outside a run: distinct namespaces never yield the
+ * same `{ns}__{body}` name, a namespace depends on the space's integrations alone, and a typed
+ * tool's body on its upstream name alone.
  */
 import { describe, it, expect } from "bun:test";
-import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
-import { allocateMcpToolName } from "@appstrate/core/naming";
-import { integrationNamespaces } from "../../../src/services/credential-proxy/integration-tools.ts";
+import { fnv1a64Hex, isValidMcpToolName } from "@appstrate/afps-shared/mcp-naming";
+import {
+  integrationNamespaces,
+  remoteToolName,
+} from "../../../src/services/credential-proxy/integration-tools.ts";
 
 const hash = (id: string, length = 6) => fnv1a64Hex(id).slice(0, length);
 
-/** Every tool name of `tools` (integration id → upstream names), allocated as a listing does. */
+/** Every tool name of `tools` (integration id → upstream names), as a listing names them. */
 function toolNames(tools: Record<string, string[]>): string[] {
   const namespaces = integrationNamespaces(Object.keys(tools));
-  return Object.entries(tools).flatMap(([id, upstream]) => {
-    const taken = new Set<string>();
-    return upstream.map((name) => {
-      const allocated = allocateMcpToolName(namespaces.get(id)!, name, (n) => taken.has(n));
-      taken.add(allocated);
-      return allocated;
-    });
-  });
+  return Object.entries(tools).flatMap(([id, upstream]) =>
+    upstream.map((name) => remoteToolName(namespaces.get(id)!, name)),
+  );
 }
+
+describe("remoteToolName", () => {
+  it("keeps an upstream name that is already a valid body as it is", () => {
+    expect(remoteToolName("acme_docs", "files_read")).toBe("acme_docs__files_read");
+    expect(remoteToolName("acme_docs", "_tool")).toBe("acme_docs___tool");
+    expect(remoteToolName("acme_docs", "Get-Item")).toBe("acme_docs__Get-Item");
+  });
+
+  it("always hashes a transformed name, so it never takes another's plain form", () => {
+    expect(remoteToolName("acme_docs", "files.read")).toBe(
+      `acme_docs__files_read_${hash("files.read", 8)}`,
+    );
+    expect(remoteToolName("acme_docs", "files.read")).not.toBe(
+      remoteToolName("acme_docs", "files_read"),
+    );
+  });
+
+  it("never names an upstream tool as the platform's own `api_call` / `api_upload` tools", () => {
+    for (const upstream of ["api_call", "api_upload", "api_call__oauth", "api_upload__key"]) {
+      const name = remoteToolName("acme_docs", upstream);
+      const body = name.slice("acme_docs__".length);
+      expect(body).not.toBe("api_call");
+      expect(body).not.toBe("api_upload");
+      expect(body.startsWith("api_call__")).toBe(false);
+      expect(body.startsWith("api_upload__")).toBe(false);
+      expect(body.endsWith(hash(upstream, 8))).toBe(true);
+    }
+  });
+
+  it("bounds every name to the grammar and its length, the hash kept whole", () => {
+    const namespace = `acme_abcdefghijklmno_${hash("x", 16)}`;
+    for (const upstream of ["x".repeat(120), "a.b".repeat(40), "é".repeat(30), ""]) {
+      const name = remoteToolName(namespace, upstream);
+      expect(isValidMcpToolName(name)).toBe(true);
+      expect(name.endsWith(hash(upstream, 8))).toBe(true);
+    }
+  });
+});
 
 describe("integrationNamespaces", () => {
   it("hashes apart a namespace the length cut leaves equal to another, its trailing `_` dropped", () => {

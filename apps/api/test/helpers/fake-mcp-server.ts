@@ -65,6 +65,8 @@ export interface FakeMcpServer {
   methods: string[];
   /** Every request's headers and body text, in order. */
   requests: { headers: Headers; body: string }[];
+  /** Lists the tools in the reverse order from now on (stateless eras: the next request). */
+  reverseTools(): void;
   stop(): void;
 }
 
@@ -128,6 +130,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     authorizations,
     methods,
     requests,
+    reverseTools: () => void tools.reverse(),
     stop: () => http.stop(true),
   };
 }

@@ -77,7 +77,7 @@ const CONNECTIONS_USAGE =
 const REMOTE_TOOL_USAGE =
   "Pass the tool's own arguments in `arguments`, following its `input_schema`: the platform " +
   "checks only that the required ones are present, the server validates the rest (a refusal " +
-  "of the server answers `upstream_invalid_params` for its arguments or tool name, else " +
+  "of the call by the server answers `upstream_invalid_params` for its arguments or tool name, else " +
   "`upstream_mcp_error`, either with its `mcp_error.code` and `message`). When " +
   "it has an `output_schema`, its `structuredContent` follows it. The `connection_id` of " +
   "call_integration_tool names the connection; without it the proxy chooses as for an " +

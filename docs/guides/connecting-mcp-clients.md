@@ -402,9 +402,11 @@ role. Runs keep their connections there:
   integration expose it, `{ns}` being the package id in snake case, cut at 20
   characters and without a trailing `_`; while it equals the namespace of
   another integration active in the space, it takes `_` and a 6-hex suffix
-  hashed from its own package id (longer if that still collides). No two tools
-  of a space share a name, and a name never depends on which connections you
-  hold. A run suffixes `_2`, `_3`… instead, so on such a collision the
+  hashed from its own package id (longer if that still collides). An
+  `{ns}__api_call__{auth}` name past the 56-character bound keeps
+  `{ns}__api_call__`, its auth part cut to fit and followed by a hash of the
+  tool name. No two tools of a space share a name, and a name never depends on
+  which connections you hold. A run suffixes `_2`, `_3`… instead, so on such a collision the
   names differ from a run's. An integration lists the `api_call` tools its
   catalog exposes (every tool, less `hidden_tools` and its connect tools; not
   its `default_tools`, which only matter to an agent) whose auth has a
@@ -455,7 +457,7 @@ role. Runs keep their connections there:
   name two tools shared would be refused (`ambiguous_tool`) rather than guessed. For `{ns}__api_call`, `arguments.requests` holds 1 to 50
   requests to its integration, each naming a `method` and a `target`, with
   optional `headers`, `body`, `substitute_body` and `connection_id` (one of the
-  tool's `connections`: which one, when several are callable, or to use a
+  tool's `connection_ids`: which one, when several are callable, or to use a
   shared one; required when the tool lists several and the integration also
   has connections of another auth). A batch therefore never mixes two
   integrations. The platform injects the credential: a
@@ -472,8 +474,16 @@ role. Runs keep their connections there:
   `/api/credential-proxy/proxy` still serves it.
 - **Typed tools of a remote MCP server.** An integration backed by a remote
   MCP server (`source.kind: "remote"`, Streamable HTTP) also lists the tools
-  that server offers, named
-  `{ns}__{tool}`: its catalog's selection (the `tools_policy` keys,
+  that server offers, each named by its upstream name alone, whatever the order
+  the server lists it in, the connection it is listed with or the server's other
+  tools: `{ns}__{tool}` when that is a valid name (56 characters at most, the
+  tool part in `[A-Za-z0-9_-]`) and the tool is not named `api_call`,
+  `api_upload` or a `…__{auth}` form of either; otherwise its name with every
+  other character made `_`, `_` runs collapsed, cut to fit and always followed
+  by `_` and 8 hex digits of its hash (two names still equal after that keep the
+  one exposed by its own name, else neither; a run keeps a transformed name's
+  plain form while it is free, so that name differs from a run's). Those are
+  its catalog's selection (the `tools_policy` keys,
   or every tool the server lists when `allow_undeclared_tools` is `true`), less
   `hidden_tools` and its connect tool. Descriptions and input schemas come from
   the server's `tools/list`, read with the connection the proxy selects for
@@ -490,9 +500,13 @@ role. Runs keep their connections there:
   (5 s when a call resolves its tool by name, so that resolution and the
   call's 45 s stay under a client's 60 s), leaves the tool names alone, each
   marked `catalog_unreadable: true`; once that wait is over, the search
-  contacts no further server. Listing a server sends the connection's
-  credential: a server refusing it counts toward flagging the connection
-  `needs_reconnection`, as a call does, so a search is not idempotent. A call is one `tools/call`
+  contacts no further server. A call naming a tool its catalog is not there to
+  prove — under `allow_undeclared_tools`, neither declared nor an upstream name
+  exposed as itself (one ending in `_` and 8 hex digits could be a transformed
+  name) — is refused, retryably, with `503 tool_catalog_unavailable`, and
+  nothing is sent. Listing a server sends the connection's credential: a server
+  refusing it can flag the connection `needs_reconnection`, as a call does, so a
+  search is annotated not read-only (and idempotent). A call is one `tools/call`
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
   connection named by the `connection_id` argument of `call_integration_tool`
   (one of the tool's `connection_ids`) or, without it, the one the proxy selects
@@ -519,8 +533,9 @@ role. Runs keep their connections there:
   other block that does not fit is replaced by a note while one fits, a closing
   note counts what was cut or dropped, and `_meta["dev.appstrate/truncated"]`
   is `true`. The server's JSON-RPC error -32602 (Invalid params: your
-  arguments or the tool name) is `422 upstream_invalid_params`, any other
-  `upstream_mcp_error`, both with its `mcp_error.code` and `message` (the
+  arguments or the tool name) answered to the `tools/call` is
+  `422 upstream_invalid_params`; any other, the same code answered to the
+  handshake included, is `upstream_mcp_error`, both with its `mcp_error.code` and `message` (the
   server's own text, cut at 512 characters), an answer over the exchange bound
   (2 MiB, or the proxy's `max_response_bytes` when lower)
   `upstream_response_too_large` (as JSON or as an event stream), no answer

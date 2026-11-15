@@ -487,6 +487,40 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(body.detail).toContain("refused the connection's credential");
   });
 
+  it("answers a JSON-RPC Invalid params as the server's fault: the sync sends no arguments", async () => {
+    // Every request answered -32602, `initialize` included (MCP: an unsupported protocol version).
+    const refusing = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const message = (await req.json().catch(() => ({}))) as { id?: unknown };
+        if (message.id === undefined) return new Response(null, { status: 202 });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32602, message: "Unsupported protocol version" },
+        });
+      },
+    });
+    try {
+      const origin = `http://127.0.0.1:${refusing.port}`;
+      await seedProxyIntegration(
+        ctx,
+        remote({ url: `${origin}/mcp`, authorizedUris: [`${origin}/**`] }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await sync(ctx, {});
+      expect(res.status).toBe(502);
+      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
+      const body = (await res.json()) as { code: string; mcp_error: { code: number } };
+      expect(body.code).toBe("upstream_mcp_error");
+      expect(body.mcp_error.code).toBe(-32602);
+    } finally {
+      refusing.stop(true);
+    }
+  });
+
   it("journals one row when the server refuses the handshake, no listing ever sent", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });

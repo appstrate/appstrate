@@ -596,6 +596,16 @@ describe("call_integration_tool — arguments", () => {
     });
   });
 
+  it("names an absent field and an invalid one together, rather than hiding either", async () => {
+    const payload = await refused({ requests: [{ method: "FETCH" }] });
+    expect(payload).toMatchObject({ code: "invalid_argument" });
+    expect([...(payload.arguments as string[])].sort()).toEqual([
+      "arguments.requests[0].method",
+      "arguments.requests[0].target",
+    ]);
+    expect(payload.error).toContain("arguments.requests[0].target: required");
+  });
+
   it("refuses a request field it does not declare instead of dropping it", async () => {
     // The sidecar's camelCase spelling: silently ignored, the body would go out unsubstituted.
     expect(await refused({ requests: [get({ substituteBody: true })] })).toMatchObject({

@@ -58,7 +58,8 @@ function valueAt(value: unknown, path: readonly PropertyKey[]): unknown {
 
 /**
  * The refusal of a parse of `input`; `prefix` places the parsed object among the tool's
- * arguments. A required argument absent is `missing_argument`.
+ * arguments. Required arguments absent and nothing else is `missing_argument`; any other issue is
+ * `invalid_argument`, naming the absent ones beside it.
  */
 function argumentsRefusal(error: z.ZodError, input: unknown, prefix: PropertyKey[] = []): Refusal {
   const path = (issuePath: PropertyKey[]) => renderFieldPath([...prefix, ...issuePath]);
@@ -72,20 +73,24 @@ function argumentsRefusal(error: z.ZodError, input: unknown, prefix: PropertyKey
       arguments: unknown,
     };
   }
-  const missing = error.issues
-    .filter((issue) => issue.code === "invalid_type" && valueAt(input, issue.path) === undefined)
-    .map((issue) => path(issue.path));
-  if (missing.length > 0) {
+  const absent = (issue: (typeof error.issues)[number]) =>
+    issue.code === "invalid_type" && valueAt(input, issue.path) === undefined;
+  const issues = error.issues.slice(0, MAX_REPORTED_ISSUES);
+  const missing = issues.filter(absent).map((issue) => path(issue.path));
+  if (missing.length === issues.length) {
     return {
       code: "missing_argument",
       error: missing.map((name) => `${name} is required.`).join(" "),
       arguments: missing,
     };
   }
-  const issues = error.issues.slice(0, MAX_REPORTED_ISSUES);
   return {
     code: "invalid_argument",
-    error: issues.map((issue) => `${path(issue.path)}: ${issue.message}`).join("; "),
+    error: issues
+      .map((issue) =>
+        absent(issue) ? `${path(issue.path)}: required` : `${path(issue.path)}: ${issue.message}`,
+      )
+      .join("; "),
     arguments: [...new Set(issues.map((issue) => path(issue.path)))],
   };
 }
@@ -135,7 +140,7 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "`connection_id` to pass; `catalog_unreadable: true` marks a typed " +
       "tool whose server could not be listed, named without description or schema. " +
       "Listing a cold server's catalog sends the connection's credential, and a server refusing " +
-      "it counts toward flagging the connection for reconnection. " +
+      "it can flag the connection for reconnection: the one change a search can make. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
       "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
       "`not_ready`, the integrations active here you have no usable connection of, each with " +
@@ -152,9 +157,11 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "connections' fields mean.",
     annotations: {
       title: "Search integration tools",
-      readOnlyHint: true,
-      // Not idempotent: a server refusing the credential moves the connection's health.
-      idempotentHint: false,
+      // Not read-only: a server refusing the credential can flag the connection for
+      // reconnection. That change is neither destructive nor repeated by the same search again.
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
       // It queries third-party servers and relays their text.
       openWorldHint: true,
     },
@@ -283,7 +290,9 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       "following its `input_schema`; its `usage` (in `best_match`, which a search by the " +
       "tool's exact name returns) says how to read the result. A missing required argument is " +
       "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
-      "not declare the same way, while a typed tool's server validates the rest itself. Call " +
+      "not declare the same way, while a typed tool's server validates the rest itself. " +
+      "`tool_catalog_unavailable` means the server of a typed tool could not be listed in time " +
+      "to say which of its tools the name is: nothing was sent, retry. Call " +
       "directly for deterministic or bulk reads and writes" +
       (ctx.runs
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +

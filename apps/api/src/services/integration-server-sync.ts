@@ -131,9 +131,11 @@ export async function syncIntegrationFromServer(input: {
   const timeout = AbortSignal.timeout(SYNC_TIMEOUT_MS);
   const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const egressFetch = fetchWithin(egressFetchImpl(), deadline);
+  let directStatus: number | undefined;
   const direct = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     if (init?.method === "GET") return new Response(null, { status: 405 });
     const res = await egressFetch(target, init);
+    directStatus = res.status;
     const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
     if (body === null) throw new McpExchangeTooLargeError(MAX_EXCHANGE_BYTES);
     return new Response(body, { status: res.status, headers: res.headers });
@@ -177,7 +179,13 @@ export async function syncIntegrationFromServer(input: {
   try {
     exchanged = await (proxied ? proxied.guard(exchange()) : exchange());
   } catch (err) {
-    throw syncFailure(err, packageId, url, unauthenticated);
+    throw syncFailure(
+      err,
+      packageId,
+      url,
+      unauthenticated,
+      proxied?.receivedStatus() ?? directStatus,
+    );
   } finally {
     // Before the session's close, which is no exchange of the listing.
     proxied?.settle();
@@ -304,6 +312,7 @@ function syncFailure(
   packageId: string,
   url: string,
   unauthenticated: boolean,
+  receivedStatus: number | undefined,
 ): Error {
   if (err instanceof ProxyCallError && err.code === "credential_not_found") {
     return notConnected(err.message);
@@ -315,5 +324,6 @@ function syncFailure(
     url,
     unauthenticated,
     failed: "could not be synchronized",
+    ...(receivedStatus !== undefined ? { receivedStatus } : {}),
   });
 }

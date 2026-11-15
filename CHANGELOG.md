@@ -144,9 +144,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **BREAKING (MCP): `search_integration_tools` and `call_integration_tool` replace
   `list_connections` and `api_call`** (#2205, #2206). `search_integration_tools` lists the
-  tools of the integrations the caller holds a connection of in the space, each with the
-  connections it reaches (every field `list_connections` returned, plus `missing_scopes`
-  on a typed tool): `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths
+  tools of the integrations the caller holds a connection of in the space, each naming by
+  `connection_ids` the connections it reaches, which the result lists once in `connections`
+  (every field `list_connections` returned; a typed tool adds `missing_scopes` per
+  connection): `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths
   expose one, for each `api_call` an integration's catalog exposes (every tool less
   `hidden_tools`, not `default_tools`), and the typed tools of a remote MCP server (see
   Added). A search by `query` or `integration` carries the first result's input schema
@@ -156,12 +157,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integration_package_id`, so a batch targets one integration. **An integration that
   declares no `api_call` is no longer callable through the MCP** (the old generic
   `api_call` took any integration); `/api/credential-proxy/proxy` is unchanged and still
-  serves it. A namespace is the normalised package id; two integrations active
-  in the space that normalise alike each take a 6-hex suffix hashed from their own id, where a
-  run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. Refusal
-  codes: an unknown tool name passed to `call_integration_tool` is the tool result
-  `unknown_tool`; an `{ns}__api_call` batch has 45 s, past which an entry is `not_sent`
-  or `no_answer_before_deadline`. The old names answer `-32602 Unknown tool`, with no
+  serves it. A namespace is the normalised package id, cut at 20 characters without a
+  trailing `_`; two integrations active in the space whose namespaces are equal each take
+  `_` and a hash of their own id, 6 hex digits, 2 more while one still equals another,
+  where a run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. An
+  `{ns}__api_call__{auth}` name too long for the 56-character tool-name bound keeps
+  `{ns}__api_call__` and ends with its auth part cut to fit and a hash of the tool name.
+  Refusal codes: an unknown tool name passed to `call_integration_tool` is the tool result
+  `unknown_tool`, a name two tools would share `ambiguous_tool` (neither is called); an
+  `{ns}__api_call` batch has 45 s, past which an entry is `not_sent` or
+  `no_answer_before_deadline`. The old names answer `-32602 Unknown tool`, with no
   alias: re-list the tools in the client. Each request still re-enters the proxy route
   under its guard, rate limit and access rule.
 
@@ -530,11 +535,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   remote MCP server, the tools its catalog selects (the `tools_policy` keys, or
   everything the server lists under `allow_undeclared_tools`, less
   `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
-  the server's `tools/list`, read through the credential proxy with the
-  connection the proxy selects (when several qualify, the first of the caller's
+  the server's `tools/list`. The name is a function of the upstream name alone,
+  whatever the listing order, the connection listed with or the other tools:
+  `{ns}__{tool}` when that is a valid tool name (56 characters at most, the body
+  in `[A-Za-z0-9_-]`) and the tool is not named `api_call`, `api_upload` or a
+  `…__{auth}` form of either; otherwise the upstream name with each other
+  character made `_`, `_` runs collapsed, cut to fit and always followed by `_`
+  and 8 hex digits of its hash (two names still equal after that keep the one
+  exposed by its own name, else neither; a run keeps a transformed name's plain
+  form while it is free, so there the name differs from a run's). The catalog
+  is read through the credential proxy with the connection the proxy selects (when several qualify, the first of the caller's
   own connections it accepts, never a colleague's shared one the caller did not
-  name; sanitised; cached 5 minutes per connection and
-  integration version, read only after that selection, at most 128 catalogs
+  name; sanitised; cached 5 minutes per connection, integration version and
+  rendered server URL, read only after that selection, at most 128 catalogs
   per replica; at most 500 tools of names up to 128 characters and 512 KiB of
   descriptors, a longer catalog reported by a `note` and, on the listing route,
   in `truncated_catalogs` with the number of tools read, `listed_tools`; a
@@ -547,17 +560,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
   `remedy`, or `must_choose_connection` with the candidates, both before
   anything is sent (every auth of the integration serves a typed tool). A
-  JSON-RPC error -32602 of the server (Invalid params) is
+  JSON-RPC error -32602 (Invalid params) the server answers to the `tools/call` is
   `422 upstream_invalid_params`, any other `502 upstream_mcp_error`
   (`mcp_error: { code, message }`, the message bounded), an answer over the
   exchange bound (2 MiB, or the proxy's `max_response_bytes` when lower)
   `502 upstream_response_too_large` (at once, as JSON or as an event stream),
+  -32602 answered to anything but the `tools/call` itself (the handshake, which
+  MCP uses for an unsupported protocol version) `502 upstream_mcp_error`,
   a 401 or 403 of the server `502 upstream_credential_rejected`
   (`upstream_status`, and the proxy's `credential` verdict when its forced
   refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
-  each with its `Proxy-Status` (`received-status` on a credential rejection);
-  the server sync of `POST /api/integrations/{packageId}/discover` answers the
-  same codes (its timeout 20 s) where it answered `bad_gateway`. The result
+  each with its `Proxy-Status` (`received-status` on a credential rejection and
+  on a JSON-RPC error, the status the error came in); the server sync of
+  `POST /api/integrations/{packageId}/discover` answers the same codes (its
+  timeout 20 s, never `upstream_invalid_params`: it sends no arguments) where it
+  answered `bad_gateway`. The result
   keeps no reserved `_meta` key, on the result or on any content block: a key
   whose prefix (before its first `/`, in any case) is `dev.appstrate`, or has
   `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`,
@@ -566,15 +583,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   block that does not fit is cut on a character boundary, any other is
   replaced by a note while one fits, a closing note counts what was cut or
   dropped, and `_meta["dev.appstrate/truncated"]` is set.
-  The call journal records one row per `tools/call`, a timeout included, and
-  one per listing that reached the server, a refused or unanswered handshake
+  The call journal records one row per `tools/call` (that exchange, not a later
+  one of its session), a timeout included, and one per listing that reached the
+  server, a refused or unanswered handshake
   included (one row for the sync as well), and a listing reaching a server
-  counts a credential refusal toward flagging the connection, as a call does. A
+  can flag the connection on a credential refusal, as a call does. A
   listing waits 20 s for all its servers (5 s when `call_integration_tool`
   resolves its tool by name, keeping resolution and call under a client's
   60 s), and no longer than its request: a catalog not read by then is listed
   `catalog_unreadable` and read on for the next listing, and no further server
-  is contacted. Tool names are unique in a space: a namespace equal to another
+  is contacted. Resolving a name its catalog is not there to prove — not
+  declared, under `allow_undeclared_tools`, and not an upstream name exposed as
+  itself that no transformed name could be (one ending in `_` and 8 hex digits) —
+  answers, in `unlisted`, `503 tool_catalog_unavailable` (retry) and sends
+  nothing. Tool names are unique in a space: a namespace equal to another
   active integration's after normalisation (cut at 20 characters, without a
   trailing `_`) takes a hash of its package id, and a name never depends on the
   caller's connections. The listing gives the connections the tools reach

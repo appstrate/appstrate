@@ -18,7 +18,7 @@ import {
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
-import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
+import { fnv1a64Hex, isValidMcpToolName } from "@appstrate/afps-shared/mcp-naming";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -30,7 +30,14 @@ import {
   type IntegrationTool,
   type IntegrationToolListing,
 } from "../../../src/services/credential-proxy/integration-tools.ts";
-import { _setRemoteToolTimeoutsForTesting } from "../../../src/services/credential-proxy/remote-tools.ts";
+import {
+  _remoteCatalogKeyForTesting,
+  _setRemoteToolTimeoutsForTesting,
+} from "../../../src/services/credential-proxy/remote-tools.ts";
+import {
+  proxiedMcpOperation,
+  untrustedFields,
+} from "../../../src/services/credential-proxy/mcp-over-proxy.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -329,6 +336,38 @@ describe("the typed tools of a remote MCP integration", () => {
     return rows.map((row) => row.outcome);
   };
 
+  it("journals the operation's own exchange over a later one of its session", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const operation = proxiedMcpOperation({
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: ID,
+      connectionId,
+      reach: "own",
+      caller: { apiKeyId: null, authMethod: "api_key", requestId: "req_journal" },
+      deadline: AbortSignal.timeout(5_000),
+    });
+    const post = (message: Record<string, unknown>) =>
+      operation.fetch(server.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", ...message }),
+      });
+    expect(
+      (await post({ id: 1, method: "tools/call", params: { name: "search", arguments: {} } }))
+        .status,
+    ).toBe(200);
+    // A notification sent afterwards, before the operation settles: answered 202.
+    const late = await post({ method: "notifications/cancelled", params: { requestId: 1 } });
+    expect(late.status).toBe(202);
+    operation.settle();
+    expect(await journaled(connectionId)).toEqual(["200"]);
+  });
+
   it("lists a server refusing the credential in `unlisted`, journaling its handshake once", async () => {
     await withServer({ tools: ["search"], bearer: "another-token" }, async (other) => {
       await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
@@ -558,6 +597,21 @@ describe("the typed tools of a remote MCP integration", () => {
         expect(problem.detail).toContain("127.0.0.1");
       }
       expect(server.requests).toEqual([]);
+    });
+
+    it("keys a cached catalog by the rendered URL as well as the connection", () => {
+      // A variable heads the host, which the egress guard refuses on loopback: no server can be
+      // reached end to end with two renderings, so the key itself is checked.
+      const entry = {
+        orgId: ctx.orgId,
+        connectionId: "c-1",
+        integrationId: ID,
+        version: "1.0.0",
+        url: "https://a.example.com/mcp",
+      };
+      expect(_remoteCatalogKeyForTesting(entry)).not.toBe(
+        _remoteCatalogKeyForTesting({ ...entry, url: "https://b.example.com/mcp" }),
+      );
     });
 
     it("answers 422 remote_url_unrenderable when the connection's variables do not render it", async () => {
@@ -902,6 +956,136 @@ describe("the typed tools of a remote MCP integration", () => {
     });
   });
 
+  describe("a typed tool's name, a function of its upstream name alone", () => {
+    const hash = (upstream: string) => fnv1a64Hex(upstream).slice(0, 8);
+    const pairs = (tools: ListedTool[]) =>
+      tools.map((tool) => [tool.name, tool.remote_name]).sort(([a], [b]) => a!.localeCompare(b!));
+
+    it("is the same whatever the listing order or the connection listed with", async () => {
+      await withServer({ tools: ["files.read", "files_read", "api_call"] }, async (other) => {
+        await seedProxyIntegration(ctx, on(other, { allow_undeclared_tools: true }));
+        const first = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN }, "acct-1");
+        const expected = pairs([
+          { name: `acme_docs__files_read_${hash("files.read")}`, remote_name: "files.read" },
+          { name: "acme_docs__files_read", remote_name: "files_read" },
+          // `api_call` is the platform's own tool name: an upstream tool never takes it.
+          { name: `acme_docs__api_call_${hash("api_call")}`, remote_name: "api_call" },
+        ] as ListedTool[]);
+
+        expect(pairs((await list({ connection_id: first })).remote)).toEqual(expected);
+        // Another connection, its catalog listed in the reverse order.
+        other.reverseTools();
+        const second = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN }, "acct-2");
+        expect(pairs((await list({ connection_id: second })).remote)).toEqual(expected);
+        for (const [name, upstream] of expected) {
+          const resolved = await list({ name: name!, connection_id: second });
+          expect(pairs(resolved.remote)).toEqual([[name!, upstream!]]);
+        }
+      });
+    });
+
+    it("never gives an upstream `api_call` the name of the integration's own `api_call` tool", async () => {
+      await withServer({ tools: ["api_call", "search"] }, async (other) => {
+        await seedProxyIntegration(ctx, {
+          ...on(other, { allow_undeclared_tools: true }),
+          _meta: { "dev.appstrate/api": { auths: { api_key: {} } } },
+        } as IntegrationManifest);
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+        const { body } = await list();
+        expect(body.tools.filter((tool) => tool.name === "acme_docs__api_call")).toEqual([
+          expect.objectContaining({ kind: "api_call" }),
+        ]);
+      });
+    });
+
+    it("names a declared tool alike from the declared names when its server is cold", async () => {
+      _setRemoteToolTimeoutsForTesting({ resolveMs: 50 });
+      try {
+        await withServer(
+          { tools: ["files.read"], delayMs: 250, delayedMethod: "tools/list" },
+          async (other) => {
+            await seedProxyIntegration(ctx, on(other, { tools_policy: { "files.read": {} } }));
+            await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+            const name = `acme_docs__files_read_${hash("files.read")}`;
+            const { body } = await list({ name });
+            expect(
+              body.tools.map((tool) => [tool.name, tool.remote_name, tool.catalog_unreadable]),
+            ).toEqual([[name, "files.read", true]]);
+            await Bun.sleep(250);
+          },
+        );
+      } finally {
+        _setRemoteToolTimeoutsForTesting();
+      }
+    });
+
+    it("refuses, retryably, a transformed undeclared name its cold catalog cannot prove, sending no call", async () => {
+      _setRemoteToolTimeoutsForTesting({ resolveMs: 50 });
+      try {
+        await withServer(
+          { tools: ["files.read"], delayMs: 250, delayedMethod: "tools/list" },
+          async (other) => {
+            await seedProxyIntegration(ctx, on(other, { allow_undeclared_tools: true }));
+            await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+            const { status, body } = await list({
+              name: `acme_docs__files_read_${hash("files.read")}`,
+            });
+            expect(status).toBe(200);
+            expect(body.tools).toEqual([]);
+            expect(
+              body.unlisted.map((entry) => [entry.refusal.status, entry.refusal.code]),
+            ).toEqual([[503, "tool_catalog_unavailable"]]);
+            // Its own name needs no catalog.
+            const own = await list({ name: "acme_docs__files_read" });
+            expect(pairs(own.remote)).toEqual([["acme_docs__files_read", "files_read"]]);
+            await Bun.sleep(250);
+            expect(other.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+          },
+        );
+      } finally {
+        _setRemoteToolTimeoutsForTesting();
+      }
+    });
+
+    it("bounds an `api_call__{auth}` name to the name grammar under a hashed namespace", async () => {
+      // Two ids cut to one namespace: each takes a hash, 27 characters.
+      const ids = ["@acme/abcdefghijklmnopq-x", "@acme/abcdefghijklmnopq-y"];
+      const keys = ["a_rather_long_auth_key_one", "a_rather_long_auth_key_two"];
+      for (const id of ids) {
+        await seedProxyIntegration(ctx, {
+          ...remoteIntegrationManifest({
+            name: id,
+            url: server.url,
+            auths: Object.fromEntries(
+              keys.map((key) => [key, bearerApiKeyAuth([`${server.origin}/**`])]),
+            ),
+          }),
+          _meta: {
+            "dev.appstrate/api": { auths: Object.fromEntries(keys.map((key) => [key, {}])) },
+          },
+        } as IntegrationManifest);
+        for (const key of keys) await seedProxyConnection(ctx, id, key, { token: TOKEN }, key);
+      }
+
+      const { body } = await list();
+      const apiCalls = body.tools.filter((tool) => (tool.kind as string) === "api_call");
+      expect(apiCalls).toHaveLength(4);
+      const namespaces = integrationNamespaces(ids);
+      for (const tool of apiCalls) {
+        expect(isValidMcpToolName(tool.name)).toBe(true);
+        expect(tool.name).toStartWith(`${namespaces.get(tool.integration_package_id)}__api_call__`);
+        const resolved = await list({ name: tool.name });
+        expect(
+          resolved.body.tools.map((t) => [t.name, t.kind, (t as { auth_key?: string }).auth_key]),
+        ).toEqual([[tool.name, "api_call", (tool as { auth_key?: string }).auth_key]]);
+      }
+      expect(new Set(apiCalls.map((tool) => tool.name)).size).toBe(4);
+    });
+  });
+
   describe("a name resolved while its server cannot be listed", () => {
     const closed = "http://127.0.0.1:9/mcp";
     const unreachable = (extra: Record<string, unknown> = {}) =>
@@ -967,6 +1151,7 @@ describe("the typed tools of a remote MCP integration", () => {
 
         const res = await post("call", { integration_package_id: ID, name: "search" });
         expect(res.status).toBe(502);
+        expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_response_body_size");
         const problem = (await res.json()) as { code: string; detail: string };
         expect(problem.code).toBe("upstream_response_too_large");
         expect(problem.detail).toContain("the tool ran");
@@ -980,9 +1165,10 @@ describe("the typed tools of a remote MCP integration", () => {
       await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
 
       const res = await post("call", { integration_package_id: ID, name: "missing" });
-      // -32602 refuses the caller's tool name or arguments: a 4xx, the server's text relayed.
+      // -32602 to the tools/call refuses the caller's tool name or arguments: a 4xx, the
+      // server's text relayed, and the HTTP status it came in.
       expect(res.status).toBe(422);
-      expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_request_error");
+      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
       const problem = (await res.json()) as {
         code: string;
         mcp_error: { code: number; message: string };
@@ -991,6 +1177,48 @@ describe("the typed tools of a remote MCP integration", () => {
       expect(problem.mcp_error.code).toBe(-32602);
       expect(problem.mcp_error.message).toContain("Unknown tool");
     });
+  });
+
+  it("answers a JSON-RPC Invalid params to the handshake as the server's fault, never the caller's", async () => {
+    // Every request answered -32602, `initialize` included (MCP: an unsupported protocol version).
+    const refusing = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const message = (await req.json().catch(() => ({}))) as { id?: unknown };
+        if (message.id === undefined) return new Response(null, { status: 202 });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32602, message: "Unsupported protocol version" },
+        });
+      },
+    });
+    try {
+      const origin = `http://127.0.0.1:${refusing.port}`;
+      await seedProxyIntegration(
+        ctx,
+        remote({ url: `${origin}/mcp`, authorizedUris: [`${origin}/**`] }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await post("call", { integration_package_id: ID, name: "search" });
+      expect(res.status).toBe(502);
+      expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=200");
+      const problem = (await res.json()) as { code: string; mcp_error: { code: number } };
+      expect(problem.code).toBe("upstream_mcp_error");
+      expect(problem.mcp_error.code).toBe(-32602);
+    } finally {
+      refusing.stop(true);
+    }
+  });
+
+  it("bounds every server-authored value it logs whole, a nested one included", () => {
+    const long = "x".repeat(2_000);
+    const fields = untrustedFields({ tool: long, reason: { nested: [long, { deeper: long }] } });
+    expect(fields.tool).toHaveLength(512);
+    expect(fields.reason).toHaveLength(512);
+    expect(fields.reason).toStartWith('{"nested":["x');
   });
 
   it("lists a server whose redirect the egress guard refuses after dispatch in `unlisted`", async () => {
