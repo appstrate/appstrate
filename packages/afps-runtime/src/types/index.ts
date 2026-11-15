@@ -8,4 +8,3 @@ export * from "./execution-context.ts";
 // own `bundle/validate-bundle.ts`, imports `@afps-spec/schema` directly.
 export type { RunEvent } from "@afps-spec/types";
 export * from "./run-result.ts";
-export * from "./canonical-events.ts";

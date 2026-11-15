@@ -3,8 +3,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
-import { RuntimeEventJournal } from "./runtime-event-journal.ts";
+import { mountMcp } from "./mcp.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -123,22 +122,17 @@ export interface AppDeps {
    */
   runId?: string;
   /**
-   * Lazy provider for additional MCP tool definitions. Called on every
+   * Lazy provider for the MCP tool definitions `/mcp` serves. Called on every
    * `/mcp` request so integrations that finish booting after the
    * sidecar's HTTP listener comes up still appear on the next call.
    * The integration runtime wires `McpHost.buildTools` here.
    */
-  additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
+  mcpToolsProvider?: () => AppstrateToolDefinition[];
   /**
-   * Pre-built run-scoped runtime deps (blob store, token budget,
-   * concurrency limiter, credential-proxy base deps). Production wires
-   * these in `server.ts` and shares the SAME instances with
-   * `bootIntegrations` so the in-process `api_call` MCP server and the
-   * outer `/mcp` server's resource provider read the same blob store
-   * (resource_link spillover resolves across the McpHost boundary).
-   * Omitted by tests → `createApp` builds its own.
+   * The run's blob store (`SidecarRuntimeDeps.blobStore`): `/mcp` serves its `resources/read`, so
+   * a `resource_link` the in-process `api_call` server spilled resolves. Absent: no resources.
    */
-  runtimeDeps?: SidecarRuntimeDeps;
+  blobStore?: BlobStore;
   /**
    * Promise that resolves once `bootIntegrations` has finished its
    * initial pass. Only `GET /integrations/boot-report` awaits it; `/mcp`
@@ -154,14 +148,6 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
-  /**
-   * Per-run runtime-event journal. The runtime-tool defs (`server.ts`) are
-   * wrapped to journal their canonical events on a single handler execution;
-   * the `GET /runtime-events` endpoint serves them to whichever runner is
-   * draining. Omitted by tests / sidecars without runtime tools → the endpoint
-   * answers an empty batch.
-   */
-  runtimeEventJournal?: RuntimeEventJournal;
 }
 
 /**
@@ -548,31 +534,9 @@ function platformLlmUpstream(
 }
 
 /**
- * Build the sidecar's HTTP surface.
- *
- *   - `GET  /health`     — readiness probe.
- *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
- *                          platform's metered LLM proxy, or the OAuth
- *                          subscription provider). The Pi SDK (in-container)
- *                          calls `${MODEL_BASE_URL}/v1/chat/completions` (or
- *                          equivalent) over HTTP — MCP `tools/call` is
- *                          unsuitable for a streamed completion the SDK
- *                          consumes natively. The sidecar replaces the
- *                          placeholder in the SDK's auth header with its own
- *                          upstream auth, then streams the upstream response
- *                          back to the agent without buffering. The agent
- *                          never sees a credential.
- *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
- *                          Exposes `{ns}__api_call`, `run_history`, and
- *                          `recall_memory` as MCP tools backed by the
- *                          credential-proxy core in `credential-proxy.ts`.
- */
-/**
- * Run-scoped runtime singletons shared between the HTTP `/mcp` surface
- * (`createApp` → `mountMcp`) and the integration boot pipeline
- * (`bootIntegrations`). Building them once and threading the SAME
- * instances is what lets the in-process `api_call` MCP server and the
- * outer server agree on one blob store / token budget / concurrency cap.
+ * Run-scoped singletons of the in-process `api_call` MCP server, built once
+ * and handed to `bootIntegrations`. Its blob store also goes to `createApp`,
+ * whose `/mcp` reads back what that server spilled.
  */
 export interface SidecarRuntimeDeps {
   blobStore: BlobStore;
@@ -581,18 +545,12 @@ export interface SidecarRuntimeDeps {
   /**
    * Run-scoped credential-proxy deps WITHOUT the credential pair — each
    * integration's `fetchCredentials` / `refreshCredentials` are layered on
-   * per tool by `mountMcp` / `createApiCallToolDefs` from the integration's
-   * live credentials source.
+   * per tool by `createApiCallToolDefs` from the integration's live
+   * credentials source.
    */
   proxyDeps: ApiCallBaseDeps;
 }
 
-/**
- * Build the run-scoped runtime deps from {@link AppDeps}. Pure
- * construction (no I/O beyond reading env vars + one info log). Called
- * once in `server.ts` (shared with boot) and as a fallback inside
- * `createApp` for tests that don't pre-build them.
- */
 /**
  * Blob-store cap for production sidecars. MUST stay well below the
  * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
@@ -605,6 +563,11 @@ export interface SidecarRuntimeDeps {
  */
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 
+/**
+ * Build the run-scoped runtime deps from {@link AppDeps}. Pure
+ * construction (no I/O beyond reading env vars + one info log). Called
+ * once in `server.ts`.
+ */
 export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const blobStore = new BlobStore(deps.runId ?? "unknown", {
     maxTotalBytes: RUN_BLOB_STORE_MAX_BYTES,
@@ -646,6 +609,26 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   return { blobStore, tokenBudget, apiCallLimit, proxyDeps };
 }
 
+/**
+ * Build the sidecar's HTTP surface.
+ *
+ *   - `GET  /health`     — readiness probe.
+ *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
+ *                          platform's metered LLM proxy, or the OAuth
+ *                          subscription provider). The Pi SDK (in-container)
+ *                          calls `${MODEL_BASE_URL}/v1/chat/completions` (or
+ *                          equivalent) over HTTP — MCP `tools/call` is
+ *                          unsuitable for a streamed completion the SDK
+ *                          consumes natively. The sidecar replaces the
+ *                          placeholder in the SDK's auth header with its own
+ *                          upstream auth, then streams the upstream response
+ *                          back to the agent without buffering. The agent
+ *                          never sees a credential.
+ *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
+ *                          Exposes `{ns}__api_call` (backed by the
+ *                          credential-proxy core in `credential-proxy.ts`)
+ *                          and every integration tool as MCP tools.
+ */
 export function createApp(deps: AppDeps): Hono {
   const { config } = deps;
   const platformUpstream =
@@ -659,8 +642,8 @@ export function createApp(deps: AppDeps): Hono {
   //
   // DENY BY DEFAULT, with `/health` as the single exemption: a route added to
   // this app later is protected without anyone remembering to say so, which is
-  // the opposite of how `/llm/*`, `/mcp`, `/integrations/boot-report` and
-  // `/runtime-events` each ended up open one at a time.
+  // the opposite of how `/llm/*`, `/mcp` and `/integrations/boot-report` each
+  // ended up open one at a time.
   //
   // `/health` is exempt because it is the container health gate — the
   // orchestrator probes it before the run exists and it discloses one bit
@@ -995,39 +978,12 @@ export function createApp(deps: AppDeps): Hono {
     );
   }
 
-  // MCP exposure — the agent-facing surface for the first-party tools
-  // (`run_history`, `recall_memory`) plus every integration tool the
+  // MCP exposure — the agent-facing surface for every integration tool the
   // McpHost aggregates (spawned/remote MCP servers AND the in-process
-  // `api_call` server). Run-scoped deps are built once and shared with
-  // `bootIntegrations` (when `server.ts` pre-builds them) so the
-  // in-process api_call server and the outer resource provider use the
-  // same blob store.
-  // Runtime-event drain surface — the Pi runner pulls the
-  // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same posture as `/mcp`: the
-  // agent-auth middleware gates it, and the `Host` check on top is the
-  // DNS-rebinding defence. An empty journal (no runtime tools selected)
-  // answers an empty batch.
-  app.get("/runtime-events", (c) => {
-    const denied = validateMcpHostHeader(c.req.raw);
-    if (denied) return denied;
-    const journal = deps.runtimeEventJournal;
-    if (!journal) return c.json({ events: [], cursor: 0, firstSeq: 1 });
-    const after = Number.parseInt(c.req.query("after") ?? "0", 10);
-    const cursor = Number.isFinite(after) && after >= 0 ? after : 0;
-    return c.json(journal.after(cursor));
-  });
-
-  const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
-    deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
+  // `api_call` server).
   mountMcp(app, {
-    blobStore,
-    tokenBudget,
-    apiCallLimit,
-    proxyDeps,
-    ...(deps.additionalMcpToolsProvider
-      ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
-      : {}),
+    ...(deps.blobStore ? { blobStore: deps.blobStore } : {}),
+    ...(deps.mcpToolsProvider ? { toolsProvider: deps.mcpToolsProvider } : {}),
   });
 
   return app;

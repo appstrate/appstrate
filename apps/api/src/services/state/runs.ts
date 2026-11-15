@@ -86,6 +86,9 @@ import type {
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
+export const RUN_HISTORY_LIMIT_DEFAULT = 10;
+/** Most past runs one `run_history` call returns. */
+export const RUN_HISTORY_LIMIT_MAX = 50;
 
 /**
  * The `@scope/name` a run's agent is known by, recovered for the case where the
@@ -902,6 +905,23 @@ export async function updateRun(
 }
 
 /**
+ * Record the run's checkpoint snapshot (`runs.checkpoint`) — the per-run copy
+ * `getRecentRuns` serves to the next run, scoped to the run's org and space.
+ */
+export async function setRunCheckpoint(
+  scope: SpaceScope,
+  id: string,
+  checkpoint: Record<string, unknown>,
+): Promise<void> {
+  await db
+    .update(runs)
+    .set({ checkpoint: toPgSafe(checkpoint) })
+    .where(
+      scopedWhere(runs, { orgId: scope.orgId, spaceId: scope.spaceId, extra: [eq(runs.id, id)] }),
+    );
+}
+
+/**
  * Append an integration id to `runs.metadata.degraded_integrations[]` — the
  * record that a tool/api_call on that integration hit a terminal auth failure
  * (401/403 that survived the proxy's refresh+retry) during this run. Surfaced
@@ -1136,7 +1156,7 @@ export async function getRecentRuns(
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
-  const limit = options.limit ?? 10;
+  const limit = options.limit ?? RUN_HISTORY_LIMIT_DEFAULT;
   const fields = options.fields ?? ["checkpoint"];
 
   const conditions = [

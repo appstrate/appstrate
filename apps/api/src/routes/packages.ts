@@ -174,9 +174,8 @@ import { parsePathMessages } from "../lib/field-errors.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 /**
- * The 400 items of an invalid manifest: one per structured issue, carrying the rule's own code
- * when it has one (`output_tool_required`), else `invalid_manifest`. A dispatcher-level failure
- * comes as strings only.
+ * The 400 items of an invalid manifest, each coded `invalid_manifest`: one per structured
+ * issue. A dispatcher-level failure comes as strings only.
  */
 function manifestErrorsToFieldErrors(result: {
   errors: string[];
@@ -191,7 +190,7 @@ function manifestErrorsToFieldErrors(result: {
   }
   return result.issues.map((issue) => ({
     field: issue.path ? `manifest.${issue.path}` : "manifest",
-    code: issue.code ?? "invalid_manifest",
+    code: "invalid_manifest",
     title: "Invalid Manifest",
     message: issue.message,
   }));
@@ -246,14 +245,13 @@ async function assertLocalDefaultToolsExposed(
  *   type while `validateManifest` dispatches purely on the manifest's own root
  *   `type`, so without it a wrong-type manifest validates against ITS OWN
  *   schema and then has `type` rewritten to the route's downstream —
- *   persisting a manifest no schema ever accepted. Retired
- *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
- *   of silently stripped.
+ *   persisting a manifest no schema ever accepted. A retired `dependencies`
+ *   key rejects.
  * - `"stored"` — the manifest is already persisted (PATCH content-only
  *   carry-forward; publishing an existing draft). NO `type` gate: stored
  *   artifacts are tolerated on read, and gating here would make a
- *   legacy drifted draft permanently un-publishable. Retired ids drop so such
- *   a draft stays editable and publishable.
+ *   legacy drifted draft permanently un-publishable. A retired `dependencies`
+ *   key is tolerated so such a draft stays editable and publishable.
  *
  * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
  * bytes came from, not whether they are being frozen. Publishing a draft is
@@ -269,7 +267,7 @@ async function validateManifestForRoute(
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
-    direction === "stored" ? { retiredRuntimeTools: "drop" } : undefined,
+    direction === "stored" ? { retiredDependencyKeys: "tolerate" } : undefined,
   );
   if (!result.valid) {
     throw validationFailed(manifestErrorsToFieldErrors(result));
@@ -1066,7 +1064,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
     // already-stored draft — and the direction decides both the `type` gate and
-    // how a retired `runtime_tools` id is treated (see
+    // how a retired `dependencies` key is treated (see
     // `validateManifestForRoute`). Concretely, a content-only save must not 400
     // on fields the request never mentioned.
     const authoredManifest = body.manifest;
@@ -2426,23 +2424,18 @@ export function createPackagesRouter() {
    * original bytes), while the skill-only fallback must rebuild the archive
    * because it synthesizes the `manifest.json` the upload lacks.
    *
-   * WRITE direction — retired/unknown `runtime_tools` ids REJECT, passed
-   * explicitly so the choice reads as deliberate at the call site. Both routes
-   * are author input, not content the platform already holds: `/import-github`
-   * fetches hand-written source files from a repository, and the two routes
-   * share this helper.
-   *
-   * The policy is binary — it cannot tell a retired id from a typo — so `drop`
-   * here would silently swallow `"lgo"` on the primary hand-authoring route and
-   * ship an agent missing a tool with no signal. `POST /import-bundle` is the
-   * sanctioned path for re-ingesting platform-produced artifacts, and it DOES
-   * drop; a single rejected upload is locally repairable, since the error names
-   * the offending field and value.
+   * WRITE direction — a retired `dependencies` key REJECTS, passed explicitly
+   * so the choice reads as deliberate at the call site. Both routes are author
+   * input, not content the platform already holds: `/import-github` fetches
+   * hand-written source files from a repository, and the two routes share this
+   * helper. `POST /import-bundle` is the sanctioned path for re-ingesting
+   * platform-produced artifacts, and it tolerates the key; a single rejected
+   * upload is locally repairable, since the error names the offending key.
    */
   async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
     const zipBytes = new Uint8Array(upload);
     try {
-      const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      const parsed = parsePackageZip(zipBytes, { retiredDependencyKeys: "reject" });
       // `parsePackageZip` applies the lenient loader rule (it also reads
       // already-published artifacts); an import is author input.
       assertArchiveContentConforms(parsed.type, parsed.files, "file");

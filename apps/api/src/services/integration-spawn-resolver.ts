@@ -33,6 +33,9 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
+  getIntegrationSourceKind,
+  getRemoteSource,
+  isRuntimeBoundIntegration,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
   selectedApiCallConfigs,
@@ -70,9 +73,7 @@ import {
   type IntegrationManifestCache,
 } from "./integration-service.ts";
 import {
-  getIntegrationSourceKind,
   getLocalServerRef,
-  getRemoteSource,
   renderRemoteSource,
   getAppstrateConnectMeta,
   renderCredentialTemplate,
@@ -405,6 +406,7 @@ async function resolveOne(
         type?: string;
         entry_point?: string;
         url?: string;
+        platformEndpoint?: true;
         transport?: "streamable-http" | "sse";
         packageId?: string;
         version?: string;
@@ -412,7 +414,12 @@ async function resolveOne(
     | undefined;
   let referencedMcpServer: McpServerManifest | null = null;
   let perConnectionRemoteUrl = false;
-  if (isRemoteHttp) {
+  if (isRemoteHttp && isRuntimeBoundIntegration(manifest)) {
+    // Served by the platform's run MCP server (Streamable HTTP): the spec
+    // carries the marker in place of the declared URL, and the sidecar resolves
+    // the endpoint against the platform API it already trusts.
+    serverSpec = { platformEndpoint: true, transport: "streamable-http" };
+  } else if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
       // One reason covers both halves because `getRemoteSource` validates both
@@ -658,6 +665,7 @@ function serverWire(
     ...(server.packageId ? { packageId: server.packageId } : {}),
     ...(server.version ? { version: server.version } : {}),
     ...(server.url ? { url: server.url } : {}),
+    ...(server.platformEndpoint ? { platformEndpoint: true } : {}),
     ...(server.transport ? { transport: server.transport } : {}),
   };
 }

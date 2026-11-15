@@ -30,15 +30,11 @@ import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
-import {
-  assertIntegrationActive,
-  selectAccessibleConnection,
-  type ProxyReach,
-} from "../integration-connections.ts";
+import { selectAccessibleConnection, type ProxyReach } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
 import { ProxyCallError } from "./core.ts";
-import { noConnectionMessage } from "./integration-resolver.ts";
+import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
 import {
   isCredentialRejection,
   listToolPages,
@@ -383,7 +379,7 @@ export async function callRemoteTool(
     arguments: Record<string, unknown>;
   },
 ): Promise<CallToolResult> {
-  await assertIntegrationActive(input.integrationId, input.scope.spaceId);
+  await assertActiveOutsideRun(input.scope, input.integrationId);
   const loaded = await readIntegrationManifestForProxy(
     input.integrationId,
     input.scope.orgId,

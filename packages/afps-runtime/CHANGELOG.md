@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the stdout bridge (#2199)
+
+- **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`
+  module are removed. Nothing writes a canonical event to stdout: the runner emits every
+  event, `output.emitted` and `file.published` included, into the run's sink, and reduces
+  them itself.
+
+### Removed — memories, pinned slots and logs leave `RunResult` (#2199)
+
+- **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
+  are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
+  aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
+  called.
+- **BREAKING:** `RunResult.logs`, `LogEntry` and `LogLevel` are removed: the server that serves
+  the `log` tool writes the log line when the tool is called.
+- **BREAKING:** the canonical-events module is removed, with `CanonicalRunEvent`,
+  `CANONICAL_EVENT_TYPES`, `CANONICAL_CONSTRAINTS`, `isCanonicalRunEvent` and the per-event types
+  (`MemoryAddedEvent`, `PinnedSetEvent`, `LogWrittenEvent`, `AppstrateProgressEvent`,
+  `AppstrateErrorEvent`, `AppstrateMetricEvent`, …). It validated events read from a process's
+  stdout; every event the reducer folds is emitted by the runner itself, and `foldEvent` reads
+  `output.emitted` only. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
+  L4.3 checks `output` only.
+
+### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
+
+- `buildPlatformPromptInputs` derives `outputSchema` with `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`): an empty `output.schema` (`{}`) yields none, the
+  same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
+  `## Output Format` for every `outputSchema` it receives.
+
 ### Changed — `fetchApiCall` refuses a target carrying userinfo (#2222)
 
 - A URL whose authority carries userinfo (`https://user:pass@host/…`, even an empty

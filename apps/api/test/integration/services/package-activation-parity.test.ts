@@ -28,6 +28,7 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
 getTestApp();
@@ -122,6 +123,25 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: true })).toBe(
       true,
     );
+  });
+
+  it("switches a runtime-bound system integration on without a row, and keeps a row saying false", async () => {
+    // The integration serves the run's own tools, so it is offered without a
+    // `SYSTEM_INTEGRATIONS` entry; the space's explicit opt-out still wins.
+    const id = "@appstrate/platform";
+    const restore = await installRuntimeBoundSystemPackages();
+    try {
+      expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
+      expect(isActiveHere({ id, type: "integration", source: "system" }, null)).toBe(true);
+
+      await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
+      expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
+      expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: false })).toBe(
+        false,
+      );
+    } finally {
+      restore();
+    }
   });
 
   it("asks the space, not the table: another space's row decides nothing here", async () => {

@@ -43,7 +43,7 @@ export interface FakeSession extends BridgeableSession, PromptableSession, ToolW
   reset(): void;
   /** Every message passed to `prompt()`, in order. */
   prompts: string[];
-  /** Times the bridge's early-stop `onTerminalTool` fired (stands in for `session.abort()`). */
+  /** Times the bridge's early-stop `onOutputSettled` fired (stands in for `session.abort()`). */
   aborts: number;
   /** Test hook: drives what the session does during a `prompt()` turn. */
   onPrompt?: (message: string) => void | Promise<void>;
@@ -63,8 +63,8 @@ export interface FakeSession extends BridgeableSession, PromptableSession, ToolW
 
 /**
  * @param opts.toolRegistry names the SDK tool registry resolves. Mirrors
- *   production: the four Pi built-ins plus the `output` runtime tool that
- *   `runtime-pi/mcp/direct.ts` registers verbatim under `tool.name`. Drop
+ *   production: the four Pi built-ins plus the `output` harness tool that
+ *   {@link PiRunner} registers when the agent declares an `output.schema`. Drop
  *   `"output"` (or `"read"`) from it to reproduce the defended cases where a
  *   name the corrective turn asks for is one the SDK never resolved.
  * @param opts.activeTools names active BEFORE the test acts, defaulting to the
@@ -226,8 +226,8 @@ export function makeTestBundle(root: BundlePackage, deps: BundlePackage[] = []):
  * `installSessionBridge`, avoiding the Pi SDK entirely.
  *
  * The override mirrors the production tail of `executeSession`: the bridge is
- * installed with the runner's `terminalTools` + early-stop callback, and the
- * real `maybeRepromptForOutput` runs once the script's "agent loop" settles.
+ * installed with the `output` requirement the runner's `outputSchema` implies
+ * + early-stop callback, and the real `maybeRepromptForOutput` runs once the script's "agent loop" settles.
  * A script that never emits a successful `output` therefore exercises the
  * missing-`output` re-prompt end to end through `run()`.
  */
@@ -268,10 +268,10 @@ export class ScriptedPiRunner extends PiRunner {
   ): Promise<void> {
     const session = createFakeSession();
     const { installSessionBridge, maybeRepromptForOutput } = await import("../src/pi-runner.ts");
-    const terminalTools = this.opts.terminalTools ?? [];
+    const outputRequired = this.opts.outputSchema !== undefined;
     const bridge = installSessionBridge(session, internalSink, context.runId, {
-      terminalTools,
-      onTerminalTool: () => {
+      outputRequired,
+      onOutputSettled: () => {
         session.aborts += 1;
       },
     });
@@ -280,7 +280,7 @@ export class ScriptedPiRunner extends PiRunner {
     await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools,
+      outputRequired,
       sink: internalSink,
       runId: context.runId,
       signal,
@@ -362,4 +362,16 @@ export async function runAgainstStub(opts: {
     await server.stop(true);
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/** Names of the tools the first model request offered. */
+export async function offeredTools(
+  runner: Partial<Omit<PiRunnerOptions, "model">> = {},
+): Promise<string[]> {
+  const { requests } = await runAgainstStub({
+    model: stubGatewayModel("openai-completions"),
+    runner: { modelRetry: false, ...runner },
+  });
+  const body = JSON.parse(requests[0]!.body) as { tools?: Array<{ function?: { name?: string } }> };
+  return (body.tools ?? []).map((t) => t.function?.name ?? "");
 }

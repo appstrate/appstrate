@@ -9,54 +9,11 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-
-const jsonRpcRequestBody = {
-  required: true,
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        description: "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
-        properties: {
-          jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { type: ["string", "number", "null"] },
-          method: { type: "string" },
-          params: { type: "object", additionalProperties: true },
-        },
-        required: ["jsonrpc", "method"],
-      },
-    },
-  },
-} as const;
-
-/** A refusal the SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
-function jsonRpcTransportError(description: string) {
-  return {
-    description,
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          description: "A JSON-RPC 2.0 error envelope.",
-          properties: {
-            jsonrpc: { type: "string", enum: ["2.0"] },
-            id: { type: "null" },
-            error: {
-              type: "object",
-              properties: {
-                code: { type: "integer" },
-                message: { type: "string" },
-                data: {},
-              },
-              required: ["code", "message"],
-            },
-          },
-          required: ["jsonrpc", "id", "error"],
-        },
-      },
-    },
-  } as const;
-}
+import {
+  jsonRpcErrorContent,
+  jsonRpcRequestBody,
+  mcpTransportResponses,
+} from "../../../openapi/responses.ts";
 
 const orgPathParameter = {
   name: "org",
@@ -161,24 +118,13 @@ const orgEndpoint = {
           "`invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; " +
           "pin a space with `/api/mcp/o/{org}/s/{space}` instead.",
         content: {
-          ...jsonRpcTransportError("").content,
+          ...jsonRpcErrorContent,
           "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
         },
       },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
-      "406": jsonRpcTransportError(
-        "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
-      ),
-      "413": {
-        description:
-          "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
-          "(enforced by the body-limit middleware, before the MCP transport).",
-        content: {
-          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-        },
-      },
-      "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
+      ...mcpTransportResponses,
     },
   },
   get: {

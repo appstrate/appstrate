@@ -304,7 +304,7 @@ Two consequences worth stating, because they are where this gets uncomfortable:
   one boot line; its namespace rule and limits are in `docs/ENV.md` § Unread keys.
 - **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
   it breaks something that works today, it was never transitional and §4 does
-  not reach it. The AFPS retired-key handling is the live example: its "drop"
+  not reach it. The AFPS retired-key handling is the live example: its "tolerate"
   mode is what keeps a published, content-addressed artifact installable, so
   removing it would brick existing packages with no repair path. Name that case
   and leave it; do not delete on the strength of a legacy-sounding identifier.

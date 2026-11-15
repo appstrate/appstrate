@@ -156,6 +156,17 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.outputSchema).toBeUndefined();
   });
 
+  it("renders no output section for an empty `output.schema`", () => {
+    const root = pkg(
+      "@acme/agent@1.0.0",
+      { type: "agent", output: { schema: {} } },
+      { "prompt.md": "Do the thing." },
+    );
+    const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
+    expect(inputs.outputSchema).toBeUndefined();
+    expect(renderPlatformPrompt(inputs)).not.toContain("## Output Format");
+  });
+
   it("overrides never leak context — caller-supplied context always wins", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const myCtx = ctx({ checkpoint: { a: 1 } });

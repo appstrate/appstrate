@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isJSONRPCRequest } from "@modelcontextprotocol/sdk/types.js";
 
 export interface McpPost {
@@ -102,4 +102,43 @@ export async function serveStatelessPost(
   if (isSseResponse(response)) return releaseWhenSettled(response, release);
   await release();
   return response;
+}
+
+/**
+ * A fresh stateless transport for one request: no session, a JSON answer
+ * unless a request of `post` asks for progress, and the SDK's Host-header
+ * allowlist off — it would reject reverse-proxied hosts, so each caller
+ * authenticates the request or checks its host itself.
+ */
+export function createStatelessTransport(
+  post: McpPost | null,
+): WebStandardStreamableHTTPServerTransport {
+  return new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: !post?.requestsProgress,
+    enableDnsRebindingProtection: false,
+  });
+}
+
+/**
+ * Answer one POST of an authenticated endpoint with `server` on a
+ * {@link createStatelessTransport}: the DNS-rebinding attack the Host
+ * allowlist guards against (a browser driving a localhost server) needs an
+ * endpoint that answers without the caller's credential. `body` holds the
+ * request's bytes, already read by the caller, and `post` their
+ * {@link parseMcpPost} parse; the SDK reads the bytes itself only when they
+ * did not parse.
+ */
+export function serveAuthenticatedStatelessPost(
+  server: Server,
+  request: Request,
+  body: ArrayBuffer,
+  post: McpPost | null,
+): Promise<Response> {
+  const forwarded = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body,
+  });
+  return serveStatelessPost(server, createStatelessTransport(post), forwarded, post);
 }

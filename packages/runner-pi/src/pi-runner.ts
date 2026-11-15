@@ -38,6 +38,13 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import {
+  buildOutputExtension,
+  buildPublishFileExtension,
+  OUTPUT_TOOL_NAME,
+  type FileUploader,
+  type HarnessToolEvent,
+} from "./harness-tools.ts";
 import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
@@ -266,16 +273,24 @@ export interface PiRunnerOptions {
    */
   transport?: Transport;
   /**
-   * Tool names whose first successful execution ends the run. When one of
-   * these tools completes without error the runner aborts the Pi session
-   * instead of paying one more LLM round-trip for a trailing text-only turn
-   * whose content is never delivered (the platform's communication contract
-   * routes everything through tools). Appstrate passes `["output"]` when the
-   * agent declares the `output` runtime tool. The abort raced here is
-   * recognised by the bridge and does NOT count as a terminal failure.
-   * Default: none (external consumers keep the SDK's natural stop).
+   * The agent's declared output schema (`output.schema`). When set, the runner
+   * registers the `output` tool (validating `data` against this schema and
+   * emitting `output.emitted` into the run's sink), and that tool's first
+   * successful call ends the run: the runner aborts the Pi session instead of
+   * paying one more LLM round-trip for a trailing text-only turn whose content
+   * is never delivered (the platform's communication contract routes
+   * everything through tools). The abort is recognised by the bridge and does
+   * NOT count as a terminal failure. A run that ends without calling it gets
+   * one corrective re-prompt. Omitted: no `output` tool, and the SDK's natural
+   * stop.
    */
-  terminalTools?: string[];
+  outputSchema?: Record<string, unknown>;
+  /**
+   * Uploads a workspace file as a durable file of the run. When set, the
+   * runner registers the `publish_file` tool around it, emitting
+   * `file.published` into the run's sink. Omitted: no `publish_file` tool.
+   */
+  fileUploader?: FileUploader;
   /** Pi SDK retry on transient 429/5xx. Default `true`; off when an outer layer retries. */
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
@@ -489,7 +504,7 @@ export class PiRunner {
           runId,
           now: Date.now,
           emit,
-          drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+          settlePending: () => bridge?.settlePending() ?? Promise.resolve(),
           eventSink,
           usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
           terminalStatus: "timeout",
@@ -550,12 +565,11 @@ export class PiRunner {
         return;
       }
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
-      // best-effort drain → reduce → stamp status/usage/cost → finalize). Usage
+      // best-effort settle → reduce → stamp status/usage/cost → finalize). Usage
       // + cost come from the session bridge when captured; a very early throw
-      // stamps explicit zero usage. The "drain" here converges the bridge's pending fire-and-forget emits
-      // (`drainPending`) before finalize closes the sink, not a runtime-event
-      // journal; it emits nothing new, so reducing before vs after it is
-      // equivalent.
+      // stamps explicit zero usage. `settlePending` waits for the bridge's
+      // fire-and-forget emits before finalize closes the sink; it emits nothing
+      // new, so reducing before vs after it is equivalent.
       const bridge = bridgeRef.current;
       await finalizeThrownFailure({
         events,
@@ -564,7 +578,7 @@ export class PiRunner {
         runId,
         now: Date.now,
         emit,
-        drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+        settlePending: () => bridge?.settlePending() ?? Promise.resolve(),
         eventSink,
         usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
         stamp: (result) => {
@@ -598,7 +612,7 @@ export class PiRunner {
     // server-side sink via CAS — any POST in flight after that lands
     // gets a 410 and is silently dropped in the bridge's catch handler.
     if (bridgeRef.current) {
-      await bridgeRef.current.drainPending();
+      await bridgeRef.current.settlePending();
     }
     await eventSink.finalize(result);
   }
@@ -668,6 +682,28 @@ export class PiRunner {
       enabled: this.opts.modelCompaction ?? true,
     });
 
+    // Harness tool events (`output`, `publish_file`) go into the run's sink
+    // stamped here, like every event the bridge emits. A sink failure is logged,
+    // not thrown: the event is already recorded for the reducer, which `run()`
+    // reads at finalize. The tool awaits the write, so no harness emit is still
+    // in flight when the session settles.
+    const emitHarnessEvent = (event: HarnessToolEvent): Promise<void> =>
+      internalSink
+        .emit({ ...event, runId: context.runId, timestamp: Date.now() } as RunEvent)
+        .catch((err: unknown) => {
+          process.stderr.write(
+            formatLogLine("warn", "[pi-runner] harness event not written to the sink", {
+              type: event.type,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
+    const { outputSchema, fileUploader } = this.opts;
+    const outputRequired = outputSchema !== undefined;
+    const harnessExtensions: ExtensionFactory[] = [
+      ...(outputRequired ? [buildOutputExtension(outputSchema, emitHarnessEvent)] : []),
+      ...(fileUploader ? [buildPublishFileExtension(fileUploader, emitHarnessEvent)] : []),
+    ];
     const temperatureExtension: ExtensionFactory[] =
       this.opts.temperature === undefined
         ? []
@@ -685,7 +721,11 @@ export class PiRunner {
       cwd,
       agentDir,
       systemPrompt,
-      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
+      extensionFactories: [
+        ...(this.opts.extensionFactories ?? []),
+        ...harnessExtensions,
+        ...temperatureExtension,
+      ],
       skillPaths: [piSkillsDir(cwd)],
     });
 
@@ -716,19 +756,18 @@ export class PiRunner {
     // for why this placement is the cheap one.
     enableSearchTools(session);
 
-    const terminalTools = this.opts.terminalTools ?? [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
-      terminalTools,
+      outputRequired,
       contextWindow: budget.contextWindow,
       cost: sessionModel.cost,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
       ...(this.opts.toolResultByteLimit !== undefined
         ? { toolResultByteLimit: this.opts.toolResultByteLimit }
         : {}),
-      // Abort the SDK loop as soon as a terminal tool has settled the run
+      // Abort the SDK loop as soon as `output` has settled the run
       // (delivered, or refused too often). `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
-      onTerminalTool: () => {
+      onOutputSettled: () => {
         void session.abort().catch(() => {});
       },
     });
@@ -786,7 +825,7 @@ export class PiRunner {
     await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools,
+      outputRequired,
       sink: internalSink,
       runId: context.runId,
       signal,
@@ -805,14 +844,6 @@ export class PiRunner {
 }
 
 // ─── Missing-`output` re-prompt ────────────────────────────────────
-
-/**
- * The terminal tool whose absence is worth one extra turn. Only `output`
- * qualifies: it is the ONLY tool whose omission makes the platform fail an
- * otherwise-successful run at finalize (`services/run-event-ingestion.ts` —
- * "Agent finished without calling the required `output` tool").
- */
-const OUTPUT_TERMINAL_TOOL = "output";
 
 /**
  * `run_logs` event name carried in the re-prompt breadcrumb's `data`, so
@@ -836,7 +867,7 @@ const OUTPUT_REPROMPT_EVENT = "output_reprompt";
  * Everything else stays out: no `bash`, no `edit`/`write`, no
  * `publish_file`, no memory write, no integration tool.
  */
-const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TERMINAL_TOOL, "read"];
+const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TOOL_NAME, "read"];
 
 /** Model-facing text for the corrective turn — must match {@link OUTPUT_REPROMPT_TOOLS}. */
 const OUTPUT_REPROMPT_INSTRUCTION =
@@ -904,11 +935,16 @@ export interface PromptableSession {
  * Intentional behaviour change: everything that constant excludes becomes
  * uncallable for this turn.
  *
+ * Only `output` is worth this extra turn: it is the ONLY tool whose omission
+ * makes the platform fail an otherwise-successful run at finalize
+ * (`services/run-event-ingestion.ts` — "Agent finished without calling the
+ * required `output` tool").
+ *
  * Guards (the first four decide the turn; the fifth only shapes the narrowing):
- *  1. `output` is wired as a terminal tool — mirrors `runtime-pi/entrypoint.ts`,
- *     which passes it only when the agent declared the `output` runtime tool.
- *     Without it there is no output contract to enforce.
- *  2. no terminal tool completed — a successful `output` means the run is
+ *  1. the run owes an `output` (`outputRequired`: the agent declared an
+ *     `output.schema`, so {@link PiRunner} registered the tool). Without it
+ *     there is no output contract to enforce.
+ *  2. `output` has not completed — a successful call means the run is
  *     already semantically done (and the SDK loop was aborted early).
  *  3. the run was not cancelled / timed out — `signal` is the runner's combined
  *     controller (user cancel + watchdog); a dead run is not resurrected.
@@ -936,7 +972,8 @@ export interface PromptableSession {
 export async function maybeRepromptForOutput(opts: {
   session: PromptableSession;
   bridge: SessionBridgeHandle;
-  terminalTools: string[];
+  /** The agent declared an `output.schema`: the run owes one `output` call. */
+  outputRequired: boolean;
   sink: InternalSink;
   runId: string;
   signal?: AbortSignal;
@@ -945,9 +982,9 @@ export async function maybeRepromptForOutput(opts: {
   /** Clock override for tests. */
   now?: () => number;
 }): Promise<boolean> {
-  const { session, bridge, terminalTools, sink, runId, signal } = opts;
-  if (!terminalTools.includes(OUTPUT_TERMINAL_TOOL)) return false;
-  if (bridge.terminalToolCompleted) return false;
+  const { session, bridge, outputRequired, sink, runId, signal } = opts;
+  if (!outputRequired) return false;
+  if (bridge.outputCompleted) return false;
   if (signal?.aborted) return false;
   if (bridge.getTerminalError() !== undefined) return false;
 
@@ -965,9 +1002,9 @@ export async function maybeRepromptForOutput(opts: {
 
   // Make the "call `output`, nothing else" contract mechanical — prompt text
   // alone left the whole tool surface live. Filtered through the registry
-  // probe, never `terminalTools` (runner config, not SDK truth).
+  // probe, never `outputRequired` (runner config, not SDK truth).
   const resolvable = new Set(session.getActiveToolNames());
-  if (resolvable.has(OUTPUT_TERMINAL_TOOL)) {
+  if (resolvable.has(OUTPUT_TOOL_NAME)) {
     session.setActiveToolsByName(OUTPUT_REPROMPT_TOOLS.filter((name) => resolvable.has(name)));
   }
 
@@ -1020,7 +1057,7 @@ export interface ToolWideningSession {
  * Two consequences of the {@link PromptableSession.setActiveToolsByName}
  * contract shape this function:
  *  - it REPLACES the active set, so the currently-active names (where the
- *    extension / MCP / runtime tools live) must be carried over verbatim. The
+ *    extension / MCP / harness tools live) must be carried over verbatim. The
  *    post-condition is a superset, never a smaller surface.
  *  - unresolvable names are silently dropped, so each search tool is admitted
  *    only if the registry actually exposes it (`getAllTools()`). A registry
@@ -1113,7 +1150,7 @@ export interface InternalSink {
  */
 export interface SessionBridgeHandle {
   /**
-   * True once one of the configured {@link SessionBridgeOptions.terminalTools}
+   * True once `output` ({@link SessionBridgeOptions.outputRequired})
    * has executed successfully — i.e. the run is semantically complete. Read-only
    * live view (a getter, not a snapshot copied at handle-creation time).
    *
@@ -1121,7 +1158,7 @@ export interface SessionBridgeHandle {
    * whether the agent still owes an `output` call
    * ({@link maybeRepromptForOutput}).
    */
-  readonly terminalToolCompleted: boolean;
+  readonly outputCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
   /**
@@ -1133,13 +1170,13 @@ export interface SessionBridgeHandle {
    * Wait until every fire-and-forget `sink.emit(event)` dispatched from
    * the Pi SDK subscribe callback has settled. The Pi SDK callback runs
    * synchronously and cannot be awaited, so the bridge dispatches each
-   * sink write as a detached promise — `drainPending()` is the only
+   * sink write as a detached promise — `settlePending()` is the only
    * supported way to converge them. Callers MUST invoke this before
    * `sink.finalize()` because finalize closes the server-side sink, and
    * any POST still in flight after that lands on a closed sink (410)
    * and is silently dropped by the bridge's catch handler.
    */
-  drainPending(): Promise<void>;
+  settlePending(): Promise<void>;
   /**
    * Terminal run verdict, derived from the LAST assistant turn the bridge
    * observed. Returns a {@link RunError} when that turn ended with
@@ -1200,9 +1237,8 @@ export interface BridgeableSession {
  * Runs here are autonomous (fire-and-forget) so token-level live feedback
  * is speculative UX; the message-level granularity suffices.
  *
- * Structured canonical events (memory.added, pinned.set, output.emitted,
- * log.written) are produced by tool extensions that
- * call an EventSink directly — this bridge handles only the Pi SDK
+ * Structured canonical events (output.emitted, file.published) are produced
+ * by the harness tool extensions, which call an EventSink directly — this bridge handles only the Pi SDK
  * framing, not payload emission.
  */
 interface PiUsage {
@@ -1337,7 +1373,7 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
 /**
  * Some provider adapters normalize an AbortError into stopReason "error"
  * instead of "aborted". Keep this deliberately narrow: it is only consulted
- * after a terminal tool completed successfully.
+ * after `output` completed successfully.
  */
 function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   if (typeof errorMessage !== "string") return false;
@@ -1350,7 +1386,7 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 
 /**
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
- * runner's OWN stop rather than a provider failure: a terminal tool succeeded
+ * runner's OWN stop rather than a provider failure: `output` succeeded
  * or ran out of attempts, and the runner aborted the SDK loop to stop paying
  * for turns nobody will read. Extracted so all three readers — the live
  * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
@@ -1360,30 +1396,31 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 function isRunnerEarlyStopAbort(
   stopReason: string | undefined,
   errorMessage: string | undefined,
-  runnerStoppedLoop: boolean,
+  outputSettled: boolean,
 ): boolean {
-  return runnerStoppedLoop && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
+  return outputSettled && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
 }
 
 /**
- * How many calls a terminal tool may refuse before the run is failed. A refusal
+ * How many calls `output` may refuse before the run is failed. A refusal
  * invites a retry, which never ends for a payload the model cannot fix (an
  * output schema no value satisfies).
  */
-export const MAX_TERMINAL_TOOL_REJECTIONS = 5;
+export const MAX_OUTPUT_REJECTIONS = 5;
 
 interface SessionBridgeOptions {
   /**
-   * Tool names whose first successful `tool_execution_end` marks the run
-   * as complete. See {@link PiRunnerOptions.terminalTools}.
+   * The run owes an `output` call ({@link PiRunnerOptions.outputSchema} is
+   * set): the first successful `output` `tool_execution_end` marks the run as
+   * complete.
    */
-  terminalTools?: string[];
+  outputRequired?: boolean;
   /**
-   * Invoked once, synchronously, when a terminal tool settles the run: its
-   * first success, or {@link MAX_TERMINAL_TOOL_REJECTIONS} refusals (the run
+   * Invoked once, synchronously, when `output` settles the run: its
+   * first success, or {@link MAX_OUTPUT_REJECTIONS} refusals (the run
    * then fails). The runner uses this to abort the SDK loop.
    */
-  onTerminalTool?: () => void;
+  onOutputSettled?: () => void;
   /**
    * Context window (tokens) the session actually runs against, straight off
    * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
@@ -1406,18 +1443,17 @@ export function installSessionBridge(
   runId: string,
   options: SessionBridgeOptions = {},
 ): SessionBridgeHandle {
-  const terminalTools = options.terminalTools ?? [];
-  // Set once a terminal tool (e.g. `output`) has executed successfully.
+  const outputRequired = options.outputRequired === true;
+  // Set once `output` has executed successfully.
   // From that point the run is semantically complete: the early-stop abort
   // the runner fires may surface as a trailing `stopReason: "aborted"`
   // assistant turn, which must NOT be read as a terminal failure. Exposed
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
-  let terminalToolCompleted = false;
-  let terminalToolRejections = 0;
-  let terminalToolExhausted: RunError | undefined;
-  const runnerStoppedLoop = (): boolean =>
-    terminalToolCompleted || terminalToolExhausted !== undefined;
+  let outputCompleted = false;
+  let outputRejections = 0;
+  let outputExhausted: RunError | undefined;
+  const outputSettled = (): boolean => outputCompleted || outputExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
   let totalUsage: TokenUsage = zeroTokenUsage();
@@ -1457,7 +1493,7 @@ export function installSessionBridge(
 
   // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
   // call without awaiting (the Pi SDK callback is synchronous), and
-  // pushes the resulting promise here so `drainPending()` can await
+  // pushes the resulting promise here so `settlePending()` can await
   // them as a group before the runner reaches finalize. The Set is
   // self-pruning: each promise removes itself on settle.
   const pendingFires = new Set<Promise<void>>();
@@ -1529,14 +1565,14 @@ export function installSessionBridge(
         // turn leaves it standing instead of blanking it.
         // Also skips the runner's own early-stop abort, mirroring
         // `getTerminalError()`: that turn is a success artefact, and latching
-        // it would make a watchdog firing afterwards (a terminal tool ran, then
+        // it would make a watchdog firing afterwards (`output` ran, then
         // the output re-prompt hung) blame a provider that never failed. The
         // suppression is applied HERE, at latch time, not at read time: a
         // benign abort must not be recorded, but neither may it ERASE a real
         // 503 latched earlier in the run — which a read-time guard would do.
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, outputSettled())
         ) {
           lastUpstreamStopReason = last.stopReason;
           lastUpstreamErrorMessage = last.errorMessage;
@@ -1596,12 +1632,12 @@ export function installSessionBridge(
         // recovers from also logs here (harmless — the trail does not
         // drive status).
         // Suppress the verdict for the abort we raced ourselves after a
-        // terminal tool completed — the run is already semantically done
+        // `output` completed — the run is already semantically done
         // (mirrored in `getTerminalError()` so log trail and stamped
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, outputSettled())
         ) {
           // The classification rides the event's `data`, which the platform
           // writes to `run_logs.data` (jsonb) — the same route the watchdog's
@@ -1726,22 +1762,22 @@ export function installSessionBridge(
         );
         // The first verdict stands: calls of the same batch still settle
         // after the abort.
-        if (runnerStoppedLoop() || !terminalTools.includes(tool)) break;
+        if (outputSettled() || !outputRequired || tool !== OUTPUT_TOOL_NAME) break;
         if (e.isError !== true) {
-          terminalToolCompleted = true;
-          options.onTerminalTool?.();
+          outputCompleted = true;
+          options.onOutputSettled?.();
           break;
         }
-        terminalToolRejections += 1;
-        if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
-          terminalToolExhausted = {
+        outputRejections += 1;
+        if (outputRejections >= MAX_OUTPUT_REJECTIONS) {
+          outputExhausted = {
             code: "terminal_tool_rejected",
             message:
-              `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
+              `The \`${tool}\` tool refused ${outputRejections} calls from the agent, so the ` +
               "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
           };
-          fire(buildError({ runId, timestamp: Date.now() }, terminalToolExhausted.message));
-          options.onTerminalTool?.();
+          fire(buildError({ runId, timestamp: Date.now() }, outputExhausted.message));
+          options.onOutputSettled?.();
         }
         break;
       }
@@ -1757,8 +1793,8 @@ export function installSessionBridge(
   });
 
   return {
-    get terminalToolCompleted(): boolean {
-      return terminalToolCompleted;
+    get outputCompleted(): boolean {
+      return outputCompleted;
     },
     getUsage(): TokenUsage {
       return { ...totalUsage };
@@ -1767,19 +1803,15 @@ export function installSessionBridge(
       return reportedCost();
     },
     getTerminalError(): RunError | undefined {
-      if (terminalToolExhausted) return terminalToolExhausted;
+      if (outputExhausted) return outputExhausted;
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
       // `terminalErrorMessage` are shared with the live `appstrate.error`
       // emit above, so the stamped status and the `run_logs` trail can
       // never disagree on what counts as a terminal failure.
-      // A trailing "aborted" turn AFTER a successful terminal tool is the
+      // A trailing "aborted" turn AFTER a successful `output` is the
       // runner's own early-stop, not a failure.
       if (
-        isRunnerEarlyStopAbort(
-          lastAssistantStopReason,
-          lastAssistantErrorMessage,
-          terminalToolCompleted,
-        )
+        isRunnerEarlyStopAbort(lastAssistantStopReason, lastAssistantErrorMessage, outputCompleted)
       ) {
         return undefined;
       }
@@ -1806,8 +1838,8 @@ export function installSessionBridge(
         message: terminalErrorMessage(lastUpstreamErrorMessage),
       };
     },
-    async drainPending(): Promise<void> {
-      // Snapshot the current pending set: events fired AFTER drainPending
+    async settlePending(): Promise<void> {
+      // Snapshot the current pending set: events fired AFTER settlePending
       // is called are not part of this drain window. In practice the
       // caller (pi-runner.run, just before finalize) runs after the
       // SDK's session.prompt() has resolved, so no fresh events should

@@ -10,7 +10,7 @@
  * spawn.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
@@ -24,6 +24,7 @@ import {
   httpHeaderDelivery,
   mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 
 const INTEG = "@orga/remote-mcp";
 
@@ -321,6 +322,53 @@ describe("resolveIntegrationSpawns — unauthenticated integration (AFPS §7.2)"
         },
         spawnEnv: {},
         toolAllowlist: ["search"],
+      },
+    ]);
+  });
+});
+
+describe("resolveIntegrationSpawns — integration bound to the runtime", () => {
+  const PLATFORM = "@appstrate/platform";
+  let ctx: TestContext;
+  let restore: () => void;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+    restore = await installRuntimeBoundSystemPackages();
+  });
+
+  afterEach(() => restore());
+
+  it("emits the platform-endpoint marker in place of the declared URL, active without a space row", async () => {
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [PLATFORM]: "^1.0.0" } },
+        integrations_configuration: { [PLATFORM]: { tools: ["log"] } },
+      },
+      resolvedConnections: {},
+    });
+    expect(dropped).toEqual([]);
+    expect(specs).toEqual([
+      {
+        integrationId: PLATFORM,
+        namespace: PLATFORM,
+        sourceKind: "remote",
+        manifest: {
+          name: PLATFORM,
+          version: "1.0.0",
+          server: { platformEndpoint: true, transport: "streamable-http" },
+        },
+        spawnEnv: {},
+        toolAllowlist: ["log"],
       },
     ]);
   });

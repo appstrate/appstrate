@@ -144,10 +144,7 @@ describe("cross-path prompt parity", () => {
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
       availableIntegrationIds,
-      // Platform-specific: DB-backed uploads. Run history used to be
-      // rendered as a `## Run History` section here; it is now surfaced
-      // via the runtime-wired `run_history` tool instead so the prompt
-      // never mentions the sidecar URL.
+      // Platform-specific: DB-backed uploads.
       uploads: [
         { name: "brief.pdf", path: "./files/brief.pdf", size: 12345, type: "application/pdf" },
       ],

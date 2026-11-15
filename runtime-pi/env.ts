@@ -82,12 +82,12 @@ interface RuntimeEnv {
   agentInput: Record<string, unknown>;
   /** Sink credentials (HTTP-signed CloudEvents transport to the platform). */
   sink: { url: string; finalizeUrl: string; secret: string };
-  /** The run's sidecar (`/mcp`, `/llm`, `/runtime-events`, boot report). */
+  /** The run's sidecar (`/mcp`, `/llm`, boot report). */
   sidecarUrl: string;
   /**
    * Per-run secret this container presents on `SIDECAR_AUTH_HEADER` for every
    * request to the sidecar's control surface (`/llm/*`, `/mcp`,
-   * `/integrations/boot-report`, `/runtime-events`). The platform mints and
+   * `/integrations/boot-report`). The platform mints and
    * emits it together with {@link sidecarUrl}.
    *
    * Never in the runtime's environment (`@appstrate/runner-pi/secret-env`):

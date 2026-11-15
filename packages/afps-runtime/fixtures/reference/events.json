@@ -1,27 +1,5 @@
 [
   {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "level": "info",
-    "message": "starting reference run"
-  },
-  {
-    "type": "memory.added",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "content": "Reference agents are useful for contract tests."
-  },
-  {
-    "type": "pinned.set",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "key": "checkpoint",
-    "content": {
-      "iteration": 1
-    }
-  },
-  {
     "type": "output.emitted",
     "timestamp": 0,
     "runId": "ref_run_001",

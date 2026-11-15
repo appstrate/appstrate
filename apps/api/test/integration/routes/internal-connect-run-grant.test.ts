@@ -490,12 +490,12 @@ describe("/internal/* — connect-run grant authorization", () => {
     // else on `/internal/*` still runs `verifyRunToken` alone, which finds no
     // `runs` row for a connect id. Catches: hoisting the connect branch into a
     // router-wide middleware, or teaching `verifyRunToken` about connect ids.
-    for (const path of [
-      "/internal/run-history",
-      "/internal/memories",
-      "/internal/oauth-token/some-credential-id",
-    ]) {
+    for (const [method, path] of [
+      ["POST", "/internal/mcp"],
+      ["GET", "/internal/oauth-token/some-credential-id"],
+    ] as const) {
       const res = await app.request(path, {
+        method,
         headers: { Authorization: `Bearer ${connectToken}` },
       });
       expect({ path, status: res.status }).toEqual({ path, status: 404 });

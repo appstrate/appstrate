@@ -36,12 +36,12 @@ Memory and CPU of the agent default to 1536 MiB and 2 vCPU and can be requested 
 
 ## What the agent can and cannot do
 
-| Can                                                                                   | Cannot                                                                         |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Use its file and shell tools in its own workspace                                     | Read a credential: they live in the sidecar                                    |
-| Call the tools the sidecar exposes (integrations, memory, run history, runtime tools) | Authenticate to the sidecar without the per-run token it was handed            |
-| Reach public hosts through the sidecar's forward proxy                                | Reach the host network, a private address or another run (Docker, Firecracker) |
-| Write deliverables under `./outputs/`                                                 | Keep anything after the run: the container is ephemeral                        |
+| Can                                                                                 | Cannot                                                                         |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Use its file and shell tools in its own workspace                                   | Read a credential: they live in the sidecar                                    |
+| Call the tools the sidecar exposes (integrations, `@appstrate/platform` among them) | Authenticate to the sidecar without the per-run token it was handed            |
+| Reach public hosts through the sidecar's forward proxy                              | Reach the host network, a private address or another run (Docker, Firecracker) |
+| Write deliverables under `./outputs/`                                               | Keep anything after the run: the container is ephemeral                        |
 
 The secrets of a run (the sidecar address and token, the keys that sign its events) are passed to the agent runtime over stdin and are never in its environment. The runtime process is made non-dumpable, so nothing the agent spawns can read them from `/proc`. The platform's own run token never enters the agent container.
 
@@ -49,7 +49,7 @@ The secrets of a run (the sidecar address and token, the keys that sign its even
 
 The sidecar is a small server in front of everything the agent reaches.
 
-- **A single MCP endpoint.** Everything beyond the sandbox is an MCP tool served at `/mcp`: the `{namespace}__api_call` and MCP tools of each integration, `run_history`, `recall_memory`, and the [runtime tools](/features/tools) the agent selected. Every request must carry the run's sidecar token.
+- **A single MCP endpoint.** Everything beyond the sandbox is an MCP tool served at `/mcp`: the `{namespace}__api_call` and MCP tools of each integration, among them the [platform tools](/features/tools#platform-tools) of `@appstrate/platform` (memory, run history, logs, notifications). The harness tools `output` and `publish_file` are registered by the runner itself. Every request must carry the run's sidecar token.
 - **Credential injection.** For an integration call the sidecar fetches the connection's credentials from the platform at request time, substitutes them into the request, checks the target against the integration's `authorized_uris`, and sends it. The response comes back without any credential. A call that would carry a credential to a host the integration did not name is refused.
 - **Model relay.** Inference goes through `/llm`. The sidecar holds, or fetches, the provider credential. API-key models are served through the platform's LLM proxy, which meters usage (see [Run cost](/features/run-cost)).
 - **Network policy.** All outbound traffic leaves through its forward proxy, through the [proxy](/features/proxies) that resolved for the run, if any.

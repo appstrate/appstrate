@@ -3,7 +3,8 @@
 /**
  * The bell lists the notification feed by KIND: a share names the sharer and
  * the package and links to the package's sheet; a run that needs attention (it
- * failed or timed out) names its agent and status and links to the run.
+ * failed or timed out) names its agent and status and links to the run; an
+ * `agent_message` reads as the message its agent wrote, linked to the run.
  *
  * Same no-DOM harness as the other component suites — `renderToStaticMarkup`
  * through the SPA's own i18n singleton, so the assertions read the bundle
@@ -110,6 +111,46 @@ describe("NotificationContent", () => {
 
     expect(html).toContain("Hello World");
     expect(html).not.toContain("@acme/switched-off<");
+  });
+
+  it("renders an `agent_message` row as the agent's title and message, linked to its run", () => {
+    const html = renderList([
+      {
+        id: "n7",
+        type: "agent_message",
+        runId: "run_4",
+        payload: {
+          packageId: PACKAGE_ID,
+          title: "Factures prêtes",
+          message: "12 factures attendent votre relecture.",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Factures prêtes");
+    expect(html).toContain("12 factures attendent votre relecture.");
+    // The sender is named by the agent's display name, and the row opens the run.
+    expect(html).toContain("Message de Worker");
+    expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
+  });
+
+  it("titles an `agent_message` row without a payload by its agent's label", () => {
+    const html = renderList([
+      {
+        id: "n8",
+        type: "agent_message",
+        runId: "run_5",
+        payload: null,
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    const label = i18n.t("runs.deletedAgent", { ns: "agents" });
+    // The title, then the sender line.
+    expect(html.split(label)).toHaveLength(3);
   });
 
   // Notifications follow the session's ceiling: a caller can hold a share of a

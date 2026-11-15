@@ -255,7 +255,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "settings:creation.chat.draft.", // lib/creation-handoff.ts — buildChatCreationDraft(), one per package type
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type
-  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
   "agents:integrationEditor.discover.warning.", // components/integration-editor/discovery-warnings.tsx — one key per warning code
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx

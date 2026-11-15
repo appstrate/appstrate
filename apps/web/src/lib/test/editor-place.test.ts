@@ -32,7 +32,7 @@ describe("leavesEditor on an agent's Paramètres", () => {
   });
 
   it("lets the definition editor move between its own sections", () => {
-    expect(leaves(definition, agentSettingsHref(AGENT, "tools"))).toBe(false);
+    expect(leaves(definition, agentSettingsHref(AGENT, "skills"))).toBe(false);
   });
 
   it("lets a modal open and close over the editor", () => {

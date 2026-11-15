@@ -793,7 +793,7 @@ export function createAgentsRouter() {
           // `?version` keeps its own 404: there the spec really does name a
           // version that does not resolve.
           try {
-            versionLabel = await resolveExportVersion(agent.id, versionSpec);
+            versionLabel = (await resolveExportVersion(agent.id, versionSpec)).version;
           } catch (err) {
             if (!versionSpec && err instanceof ApiError && err.status === 404) {
               throw new ApiError({

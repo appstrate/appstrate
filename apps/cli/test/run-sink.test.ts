@@ -74,9 +74,7 @@ function progressEvent(message: string, data?: unknown): RunEvent {
 
 function emptyResult(): TerminalRunResult {
   return {
-    memories: [],
     output: null,
-    logs: [],
     status: "success",
   };
 }
@@ -472,16 +470,8 @@ describe("createConsoleSink — human mode", () => {
 });
 
 // ---------------------------------------------------------------------------
-// writeStdout injection — bridge anti-recursion contract
+// writeStdout injection
 // ---------------------------------------------------------------------------
-//
-// The CLI's `run.ts` installs an `attachStdoutBridge` around the runner's
-// sink. The bridge intercepts `process.stdout.write` to capture canonical
-// events emitted by system tools as JSONL. Without `writeStdout`, the
-// console sink would write `--json` envelopes directly to stdout and the
-// bridge would re-aspirate them, dispatching every event twice. The
-// `writeStdout` injection lets `run.ts` route console output through
-// `bridge.writeRaw`, bypassing the interceptor.
 //
 // These three tests wire the two writers by hand rather than through
 // `memoryStreams()` — the injection itself is the subject here, so it has to
@@ -505,8 +495,7 @@ describe("createConsoleSink — writeStdout injection", () => {
     });
     await sink.handle(progressEvent("hello"));
     await sink.finalize(emptyResult());
-    // Exactly two writes, both on the injected stdout writer: a third
-    // (or a missing) chunk is what a re-aspirating bridge would produce.
+    // Exactly two writes, both on the injected stdout writer.
     expect(captured).toHaveLength(2);
     expect(captured[0]!.includes('"hello"')).toBe(true);
     expect(captured[1]!.includes("appstrate.finalize")).toBe(true);

@@ -35,7 +35,7 @@ import {
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { packages, runs, schedules } from "@appstrate/db/schema";
-import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
+import { addMemory, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
 import { type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
 import { updateJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
@@ -1235,22 +1235,20 @@ describe("Agents API", () => {
         userId: ctx.user.id,
         status: "success",
       });
-      await addMemories(
-        "@myorg/persist-runid",
-        ctx.defaultSpaceId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["from-r1-a", "from-r1-b"],
-        r1.id,
-      );
-      await addMemories(
-        "@myorg/persist-runid",
-        ctx.defaultSpaceId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["from-r2"],
-        r2.id,
-      );
+      for (const [content, runId] of [
+        ["from-r1-a", r1.id],
+        ["from-r1-b", r1.id],
+        ["from-r2", r2.id],
+      ] as const) {
+        await addMemory(
+          "@myorg/persist-runid",
+          ctx.defaultSpaceId,
+          ctx.orgId,
+          { type: "user", id: ctx.user.id },
+          content,
+          runId,
+        );
+      }
 
       const res = await app.request(
         `/api/agents/@myorg/persist-runid/persistence?kind=memory&runId=${r1.id}`,
@@ -1297,18 +1295,25 @@ describe("Agents API", () => {
         "colleague",
         run.id,
       );
-      await addMemories(
+      await addMemory(
         agentId,
         ctx.defaultSpaceId,
         ctx.orgId,
         colleagueActor,
-        ["colleague-memory"],
+        "colleague-memory",
         run.id,
       );
       // And one row of each kind under the caller's own actor, outside the run.
       const ownActor = { type: "user" as const, id: ctx.user.id };
       await upsertPinned(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, "goals", "own", null);
-      await addMemories(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, ["own-memory"], null);
+      const ownRun = await seedRun({
+        packageId: agentId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await addMemory(agentId, ctx.defaultSpaceId, ctx.orgId, ownActor, "own-memory", ownRun.id);
 
       type Body = {
         pinned: Array<{ actor_id: string | null }>;

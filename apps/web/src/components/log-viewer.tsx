@@ -40,7 +40,12 @@ import { EmptyState } from "./page-states";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { RunStatusBadge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
-import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
+import {
+  RECALL_MEMORY_TOOL,
+  RUN_HISTORY_TOOL,
+  historyRuns,
+  recalledMemories,
+} from "../lib/platform-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -150,15 +155,16 @@ function InspectorSection({ label, children }: { label: string; children: ReactN
 }
 
 /**
- * A tool's result. The two first-party memory tools read as the items they
- * returned (a memory's text, a past run's status and date); anything else, and
- * the raw payload of those two, is the JSON as the runner logged it.
+ * A tool's result. The `@appstrate/platform` tools `recall_memory` and
+ * `run_history` read as the items they returned (a memory's text, a past run's
+ * status and date); anything else, and the raw payload of those two, is the JSON
+ * as the runner logged it.
  */
 function ToolResult({ tool, result }: { tool: string; result: unknown }) {
   const { t } = useTranslation("agents");
   const [showJson, setShowJson] = useState(false);
-  const memories = tool === "recall_memory" ? recalledMemories(result) : null;
-  const runs = tool === "run_history" ? historyRuns(result) : null;
+  const memories = tool === RECALL_MEMORY_TOOL ? recalledMemories(result) : null;
+  const runs = tool === RUN_HISTORY_TOOL ? historyRuns(result) : null;
   const raw = <JsonBlock value={result} />;
   if (!memories && !runs) return raw;
   let items = raw;
