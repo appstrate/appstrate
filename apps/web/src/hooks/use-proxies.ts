@@ -25,12 +25,19 @@ export function useProxies(enabled = true) {
 
 export function useCreateProxy() {
   const invalidate = useInvalidatePaths("/api/proxies");
-  return $api.useMutation("post", "/api/proxies", { onSuccess: invalidate });
+  // The proxy form shows a refusal under its fields.
+  return $api.useMutation("post", "/api/proxies", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateProxy() {
   const invalidate = useInvalidatePaths("/api/proxies");
-  return $api.useMutation("patch", "/api/proxies/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/proxies/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useDeleteProxy() {

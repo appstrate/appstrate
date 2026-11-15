@@ -101,7 +101,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const [previewing, setPreviewing] = useState(false);
   const canPreview = useCanPreviewRole();
 
-  const assignRole = useAssignSpaceRole(roleOptions);
+  const assignRole = useAssignSpaceRole();
   const removeMember = useRemoveSpaceMember();
 
   const canInvite = can("space-members:invite");
@@ -122,14 +122,15 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       {
         onSuccess: (result) => {
           setMemberToRemove(null);
-          toast.success(
-            result.access_after === "implicit"
-              ? t("spaceMembers.removedImplicit", {
-                  name: memberLabel(member),
-                  role: defaultRoleName,
-                })
-              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
-          );
+          // The row leaving the table says it all, except when the member keeps a seat.
+          if (result.access_after === "implicit") {
+            toast.success(
+              t("spaceMembers.removedImplicit", {
+                name: memberLabel(member),
+                role: defaultRoleName,
+              }),
+            );
+          }
         },
       },
     );
@@ -148,8 +149,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     roles,
     roleOptions,
     isChangingRole: assignRole.isPending,
-    onChangeRole: (member, value) =>
-      assignRole.assign({ spaceId, member, name: memberLabel(member) }, value),
+    onChangeRole: (member, value) => assignRole.assign({ spaceId, member }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -389,7 +389,6 @@ function AddSpaceMemberModal({
         {
           onSuccess: (invitation) => {
             setInvitationToken(invitation.token);
-            toast.success(t("spaceMembers.invited", { email: email.trim() }));
           },
           onError: (err) => {
             if (err instanceof ApiError && err.code === "invitation_already_pending") {
@@ -415,13 +414,6 @@ function AddSpaceMemberModal({
       },
       {
         onSuccess: () => {
-          const candidate = candidates.find((member) => member.userId === userId);
-          toast.success(
-            t("spaceMembers.added", {
-              name: canReadDirectory ? (candidate ? memberLabel(candidate) : userId) : email.trim(),
-              role: roleOptions.find((option) => option.value === effectiveRole)?.label,
-            }),
-          );
           onClose();
         },
         onError: (err) =>

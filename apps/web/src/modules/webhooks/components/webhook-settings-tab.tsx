@@ -106,6 +106,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       { params: { path: { id: webhook.id } } },
       {
         onSuccess: () => {
+          toast.success(t("settings:webhooks.deleted"));
           navigate("/workspace-settings/webhooks");
         },
       },

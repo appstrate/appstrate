@@ -12,8 +12,6 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
 import type {
   ConsumingAgentSummary,
   IntegrationConnection,
@@ -335,11 +333,9 @@ type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
 /** Refreshes both lists (an org change re-badges the space list). No toast when the table already shows the effect. */
-function useClientMutationSuccess(messageKey?: string) {
-  const { t } = useTranslation("settings");
+function useClientMutationSuccess() {
   const qc = useQueryClient();
   return () => {
-    if (messageKey) toast.success(t(messageKey));
     void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
@@ -379,8 +375,10 @@ export function useIntegrationClients(
 
 /** Register a custom (BYO-app) client; only a tier's first becomes its default. */
 export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  const onSuccess = useClientMutationSuccess();
   return useMutation({
+    // The client form shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: { params: AuthPath; body: CreateOAuthClientBody }) => {
       const { data } =
         tier === "space"
@@ -400,8 +398,9 @@ export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
 
 /** Update one custom client in place, by its id (its `client_id` is immutable). */
 export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  const onSuccess = useClientMutationSuccess();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: { params: ClientPath; body: UpdateOAuthClientBody }) => {
       const { data } =
         tier === "space"
@@ -439,7 +438,7 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
 
 /** Move a space client to the org tier. Its id is unchanged, so existing connections keep working. */
 export function usePromoteIntegrationOAuthClient() {
-  const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
+  const onSuccess = useClientMutationSuccess();
   return $api.useMutation(
     "post",
     "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
@@ -507,24 +506,22 @@ export function useAgentsConsumingIntegration(packageId: string | undefined) {
 }
 
 export function useUpdateIntegrationSettings() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("patch", "/api/integrations/{packageId}/settings", {
     onSuccess: () => {
-      toast.success(t("integration.admin.blockUserConnections.updated"));
       void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }
 
 export function useUpsertIntegrationPin() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   // The body is the WHOLE pin, its set and its additions flag (built by `pinDraftVerdict`): this write
   // replaces both, an absent flag closing the pin.
   return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
+    // The pin form shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
-      toast.success(t("integration.admin.pin.upserted"));
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
@@ -532,12 +529,10 @@ export function useUpsertIntegrationPin() {
 }
 
 export function useDeleteIntegrationPin() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
-      else toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -562,14 +557,12 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
 }
 
 export function useUpsertIntegrationOrgDefault() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   // The body is the WHOLE default set — this write replaces it.
   return $api.useMutation("put", "/api/integrations/{packageId}/default", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       // An enforced default turned soft disables the schedules whose overrides only narrowed it.
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
-      else toast.success(t("integration.admin.orgDefault.updated"));
       // Agent-page picker verdicts depend on the org default.
       void invalidateIntegrationQueries(qc);
     },
@@ -577,12 +570,10 @@ export function useUpsertIntegrationOrgDefault() {
 }
 
 export function useDeleteIntegrationOrgDefault() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/integrations/{packageId}/default", {
     onSuccess: ({ schedules_disabled_count: disabledCount }) => {
       if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
-      else toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });

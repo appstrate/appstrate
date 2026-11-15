@@ -50,10 +50,7 @@ export function OrgSettingsSpacesPage() {
     const params = { params: { path: { id: pending.id } } };
     if (pending.action === "convert") {
       convert.mutate(params, {
-        onSuccess: () => {
-          setPending(null);
-          toast.success(t("spaces.personal.converted"));
-        },
+        onSuccess: () => setPending(null),
       });
       return;
     }

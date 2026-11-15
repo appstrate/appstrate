@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge } from "@appstrate/ui/components/badge";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { Plus, UserCog } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
@@ -32,6 +30,8 @@ import {
   type BillingManagerStatus,
 } from "../lib/billing-managers";
 import { memberLabel } from "../lib/members";
+import { ManualSave } from "./settings/manual-save";
+import { useSettingDraft } from "../hooks/use-setting-draft";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
@@ -54,46 +54,48 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
  * the org as it is, and Save cleans it up instead of 400ing on it.
  */
 export function BillingManagersSection() {
-  const { t } = useTranslation(["settings", "common"]);
-  const queryClient = useQueryClient();
   const managersQuery = useBillingManagers();
-  const managersKey = useBillingManagersKey();
-  const replace = useReplaceBillingManagers();
-  const [pickerOpen, setPickerOpen] = useState(false);
-
   const orgQuery = useOrgDetail();
-
-  // `null` while the section shows exactly what the server holds; an array as
-  // soon as the operator has edited the list. Derived rather than mirrored into
-  // an effect, so a refetch cannot silently overwrite an unsaved edit.
-  const [draft, setDraft] = useState<string[] | null>(null);
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <SettingsSkeleton rows={1} />;
   if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
 
-  const saved = (managersQuery.data?.data ?? []).map((m) => m.userId);
-  const selected = draft ?? saved;
-  const members = orgQuery.data?.members ?? [];
+  return (
+    <BillingManagersForm
+      saved={(managersQuery.data?.data ?? []).map((m) => m.userId)}
+      members={orgQuery.data?.members ?? []}
+    />
+  );
+}
+
+type OrgMembers = NonNullable<NonNullable<ReturnType<typeof useOrgDetail>["data"]>["members"]>;
+
+function BillingManagersForm({ saved, members }: { saved: string[]; members: OrgMembers }) {
+  const { t } = useTranslation(["settings", "common"]);
+  const queryClient = useQueryClient();
+  const managersKey = useBillingManagersKey();
+  const replace = useReplaceBillingManagers();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const draft = useSettingDraft(saved);
+  const selected = draft.value;
   const rows = billingManagerRows(selected, members);
   const candidates = billingManagerCandidates(members).filter((m) => !selected.includes(m.userId));
   // Compared against what the server holds, not against `selected`: a list that
   // only differs by rows the body drops is still a list worth saving.
   const dirty = !sameBillingManagers(eligibleBillingManagers(selected, members), saved);
 
-  const handleSave = () => {
-    replace.mutate(
-      { body: billingManagersBody(selected, members) },
-      {
-        onSuccess: (data) => {
-          queryClient.setQueryData(managersKey, data);
-          setDraft(null);
-          void queryClient.invalidateQueries({ queryKey: managersKey });
-          toast.success(t("billingManagers.saveSuccess"));
-        },
-      },
+  const save = async () => {
+    const sent = selected;
+    const data = await replace.mutateAsync({ body: billingManagersBody(sent, members) });
+    queryClient.setQueryData(managersKey, data);
+    draft.accept(
+      sent,
+      data.data.map((m) => m.userId),
     );
+    void queryClient.invalidateQueries({ queryKey: managersKey });
   };
 
   return (
@@ -132,7 +134,7 @@ export function BillingManagersSection() {
                     size="sm"
                     aria-label={t("billingManagers.removeAriaLabel", { name: row.label })}
                     disabled={replace.isPending}
-                    onClick={() => setDraft(selected.filter((id) => id !== row.userId))}
+                    onClick={() => draft.set(selected.filter((id) => id !== row.userId))}
                   >
                     {t("btn.remove", { ns: "common" })}
                   </Button>
@@ -165,7 +167,7 @@ export function BillingManagersSection() {
                     disabled={replace.isPending}
                     value={`${memberLabel(member)} ${member.email ?? ""} ${member.userId}`}
                     onSelect={() => {
-                      setDraft([...selected, member.userId]);
+                      draft.set([...selected, member.userId]);
                       setPickerOpen(false);
                     }}
                   >
@@ -179,21 +181,7 @@ export function BillingManagersSection() {
         </Popover>
       </div>
 
-      <div className="flex justify-end gap-2">
-        {draft !== null && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={replace.isPending}
-            onClick={() => setDraft(null)}
-          >
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-        )}
-        <PendingButton size="sm" pending={replace.isPending} disabled={!dirty} onClick={handleSave}>
-          {t("btn.save", { ns: "common" })}
-        </PendingButton>
-      </div>
+      <ManualSave dirty={dirty} onSave={save} onDiscard={draft.reset} />
     </SectionCard>
   );
 }

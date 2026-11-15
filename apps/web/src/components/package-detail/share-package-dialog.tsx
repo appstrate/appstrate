@@ -140,7 +140,6 @@ export function SharePackageDialog({
       { params: { path: splitPackageRef(packageId) }, body: { target: subject } },
       {
         onSuccess: () => {
-          toast.success(t("packages.shareDone"));
           setTarget("");
           setNeedsVersion(null);
         },

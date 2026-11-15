@@ -2,8 +2,6 @@
 
 import { useMemo } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import i18n from "../i18n";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -188,10 +186,6 @@ export function useSetChatEnforced() {
         body: { chat_enforced: enforced },
       });
     },
-    onSuccess: (_data, { enforced }) =>
-      toast.success(
-        i18n.t(enforced ? "settings:packages.chatEnforced" : "settings:packages.chatUnenforced"),
-      ),
     onSettled: () => invalidateLibraries(qc),
   });
 }
@@ -261,11 +255,6 @@ export function useSetPackageActive() {
         if (snapshot) qc.setQueryData(key, snapshot);
       }
     },
-    // Said here, once, for every surface that flips the switch.
-    onSuccess: (_data, { active }) =>
-      toast.success(
-        i18n.t(active ? "settings:packages.activated" : "settings:packages.deactivated"),
-      ),
     onSettled: invalidate,
   });
 }

@@ -12,6 +12,7 @@ import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
+import { errorMessage } from "../../lib/mutation-error";
 
 /** `PUT /api/packages/{scope}/{name}/home`; the only way out of the 409 a space deletion answers while it homes packages. */
 export function MoveHomeSpaceDialog({
@@ -40,6 +41,7 @@ export function MoveHomeSpaceDialog({
   const close = () => {
     setTarget("");
     setKeepInPreviousHome(true);
+    move.reset();
     onClose();
   };
 
@@ -64,6 +66,7 @@ export function MoveHomeSpaceDialog({
       onSubmit={submit}
       title={t("packages.moveHomeTitle")}
       isPending={move.isPending}
+      error={move.error ? errorMessage(move.error) : null}
       submitLabel={t("packages.moveHomeSubmit")}
       submitDisabled={!target}
     >

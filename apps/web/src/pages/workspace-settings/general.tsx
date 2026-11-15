@@ -8,6 +8,7 @@ import { useLatestWrite } from "../../hooks/use-latest-write";
 import { usePermissions } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { Input } from "@appstrate/ui/components/input";
 import { useSpace, useSpaces, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
@@ -56,7 +57,8 @@ export function WorkspaceSettingsGeneralPage() {
       <SettingsSkeleton />
     );
   if (error) return <ErrorState error={error} />;
-  if (!space) return <ErrorState />;
+  // Settled with neither a row nor a refusal: the space is not readable from here.
+  if (!space) return <ErrorState message={t("error.resourceUnavailable", { ns: "common" })} />;
 
   return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;
 }
@@ -366,13 +368,13 @@ function GeneralForm({
             label={t("spaces.deleteTitle")}
             description={t("spaces.deleteDesc")}
           >
-            <Button
+            <PendingButton
               variant="destructive"
-              disabled={deleteMutation.isPending}
+              pending={deleteMutation.isPending}
               onClick={() => setConfirmOpen(true)}
             >
-              {deleteMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
-            </Button>
+              {t("btn.delete")}
+            </PendingButton>
           </SettingRow>
         </SettingsGroup>
       )}

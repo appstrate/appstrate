@@ -11,7 +11,6 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState, NoMatchState } from "./page-states";
@@ -75,15 +74,7 @@ export function DocumentListPanel({
   const onDelete = (doc: FileDto) => setPendingDelete(doc);
 
   // Keep ("pin") — clears the document's expiry.
-  const onKeep = (doc: FileDto) =>
-    keepDoc.mutate(
-      { params: { path: { id: doc.id } } },
-      {
-        onSuccess: () => {
-          toast.success(t("keep.success"));
-        },
-      },
-    );
+  const onKeep = (doc: FileDto) => keepDoc.mutate({ params: { path: { id: doc.id } } });
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
@@ -91,10 +82,7 @@ export function DocumentListPanel({
     deleteDoc.mutate(
       { params: { path: { id } } },
       {
-        onSuccess: () => {
-          toast.success(t("delete.success"));
-          setPendingDelete(null);
-        },
+        onSuccess: () => setPendingDelete(null),
       },
     );
   };

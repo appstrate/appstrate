@@ -242,6 +242,8 @@ function useDeletePackage(type: PackageType) {
 function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
+    // The move dialog shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       id,
       homeSpaceId,
