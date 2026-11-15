@@ -21,7 +21,7 @@
  * | any                                        | another organization                          | never; its path → 403                 |
  *
  * The MCP door (`invoke_operation` with a minted instance token) is covered in
- * `modules/mcp/test/integration/org-runs.test.ts`.
+ * `modules/mcp/test/integration/org-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";

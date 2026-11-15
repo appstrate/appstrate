@@ -3183,6 +3183,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List files across the organization's spaces
+         * @description Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`, plus `spaceId`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         */
+        get: operations["listOrgFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/invitations/{invitationId}": {
         parameters: {
             query?: never;
@@ -3283,6 +3303,26 @@ export interface paths {
          * @description Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`, plus `spaceId`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.
          */
         get: operations["listOrgRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List schedules across the organization's spaces
+         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An end-user is refused with `403`.
+         */
+        get: operations["listOrgSchedules"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7924,6 +7964,8 @@ export interface components {
         Offset: number;
         /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
         RunStatusFilter: ("pending" | "running" | "success" | "failed" | "timeout" | "cancelled")[];
+        /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+        OrgSpaceFilter: string;
         /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
         RunSearch: string;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
@@ -20232,6 +20274,115 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    listOrgFiles: {
+        parameters: {
+            query?: {
+                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                spaceId?: components["parameters"]["OrgSpaceFilter"];
+                /** @description Filter by file purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to files anchored to this run. */
+                runId?: string;
+                /** @description Filter to files produced by this agent package. */
+                packageId?: string;
+                /** @description Filter to files anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
+                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
+                q?: string;
+                /** @description Keyset cursor — file id to page after (newest-first order). */
+                startingAfter?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of files. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "file";
+                            /** @description Opaque file id (`file_…`). */
+                            id: string;
+                            /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            spaceId: string;
+                            /** @description Run container, or null. */
+                            runId: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                            name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                            downloadable: boolean;
+                            /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this file at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the file. */
+                                delete: boolean;
+                            };
+                            /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expiresAt: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        hasMore: boolean;
+                        limit?: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     cancelInvitation: {
         parameters: {
             query?: never;
@@ -20498,8 +20649,8 @@ export interface operations {
     listOrgRuns: {
         parameters: {
             query?: {
-                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. */
-                spaceId?: string;
+                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                spaceId?: components["parameters"]["OrgSpaceFilter"];
                 /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
@@ -20553,6 +20704,41 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listOrgSchedules: {
+        parameters: {
+            query?: {
+                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                spaceId?: components["parameters"]["OrgSpaceFilter"];
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schedule list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["Schedule"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

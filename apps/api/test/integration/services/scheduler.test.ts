@@ -55,6 +55,7 @@ import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifes
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
+import { runReadGrant } from "../../../src/lib/run-visibility.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
@@ -144,6 +145,15 @@ async function renameBumpingStamp(scheduleId: string): Promise<void> {
     .update(schedules)
     .set({ name: "renamed", updatedAt: sql`${schedules.updatedAt} + interval '1 second'` })
     .where(eq(schedules.id, scheduleId));
+}
+
+/** The one-space list, as `GET /api/schedules` calls it for a caller reading every run. */
+function listSchedulesIn(scope: SpaceScope, actor: Actor) {
+  return listSchedules(
+    scope.orgId,
+    [runReadGrant(scope.spaceId, new Set(["runs:read-all"]))],
+    actor,
+  );
 }
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -318,11 +328,7 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedules(
-        { orgId: orgId, spaceId: defaultSpaceId },
-        actor,
-        undefined,
-      );
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -363,29 +369,20 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const schedules = await listSchedules(
-        { orgId: orgId, spaceId: defaultSpaceId },
-        actor,
-        undefined,
-      );
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
-      const otherSchedules = await listSchedules(
+      const otherSchedules = await listSchedulesIn(
         { orgId: otherOrg.id, spaceId: otherDefaultSpaceId },
         actor,
-        undefined,
       );
       expect(otherSchedules).toHaveLength(1);
       expect(otherSchedules[0]!.name).toBe("Other Schedule");
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedules(
-        { orgId: orgId, spaceId: defaultSpaceId },
-        actor,
-        undefined,
-      );
+      const schedules = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -733,11 +730,7 @@ describeRequiresRedis("scheduler service", () => {
 
       await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, schedule2.id);
 
-      const remaining = await listSchedules(
-        { orgId: orgId, spaceId: defaultSpaceId },
-        actor,
-        undefined,
-      );
+      const remaining = await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor);
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
@@ -1153,13 +1146,11 @@ describeRequiresRedis("scheduler service", () => {
     });
 
     it("does not list a schedule belonging to another space", async () => {
-      expect(
-        await listSchedules({ orgId: orgId, spaceId: spaceBId }, actor, undefined),
-      ).toHaveLength(0);
+      expect(await listSchedulesIn({ orgId: orgId, spaceId: spaceBId }, actor)).toHaveLength(0);
       // Control: the same org, the owning space — still there.
-      expect(
-        await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor, undefined),
-      ).toHaveLength(1);
+      expect(await listSchedulesIn({ orgId: orgId, spaceId: defaultSpaceId }, actor)).toHaveLength(
+        1,
+      );
     });
 
     it("does not list a package's schedules from another space", async () => {

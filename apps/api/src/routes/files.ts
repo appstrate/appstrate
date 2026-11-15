@@ -44,6 +44,7 @@ import { zFilePurposeEnum } from "@appstrate/db/schema";
 import {
   getFileForActor,
   listFilesForActor,
+  fileReadGrant,
   deleteFile,
   clearFileExpiry,
   toFileDto,
@@ -69,7 +70,7 @@ import {
  * this router passes it, so the DTO's `capabilities` and the two enforcement
  * points below can never disagree.
  */
-function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
+export function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
   // Ownership is not a role grant, so `permissions` cannot cap it — the
   // credential's own scope ceiling does (RBAC spec §7.1).
   return { creatorCanManage: ceilingAllows(c, "files:delete") };
@@ -89,38 +90,51 @@ const listFilesQuerySchema = z
   })
   .strict();
 
+/** The gallery query across spaces: the one above, plus the `spaceId` filter. */
+export const orgListFilesQuerySchema = listFilesQuerySchema.extend({
+  spaceId: z.string().optional(),
+});
+
+/**
+ * The query of `GET /api/files` and `GET /api/orgs/{orgId}/files`. Query-param
+ * casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `runId`,
+ * `packageId` and the `startingAfter` pagination param are camelCase;
+ * `chat_session_id` is a snake_case domain field. Strict: an unknown or
+ * misspelled filter is a 400, never a silently widened listing.
+ */
+export function parseListFilesQuery(
+  c: Context<AppEnv>,
+  schema: typeof listFilesQuerySchema | typeof orgListFilesQuerySchema = listFilesQuerySchema,
+): ListFilesFilters {
+  const query = parseBody(schema, c.req.query());
+  const filters: ListFilesFilters = {};
+  if (query.purpose) filters.purpose = query.purpose;
+  if (query.runId) filters.runId = query.runId;
+  if (query.packageId) filters.packageId = query.packageId;
+  if (query.chat_session_id) filters.chatSessionId = query.chat_session_id;
+  if (query.context_chat_session_id) {
+    filters.contextChatSessionId = query.context_chat_session_id;
+  }
+  if (query.q) filters.search = query.q;
+  if (query.startingAfter) filters.startingAfter = query.startingAfter;
+  filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
+  return filters;
+}
+
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/files — gallery list. Filters: purpose, runId, packageId,
   // chat_session_id, context_chat_session_id; keyset pagination via
-  // startingAfter + limit. Query-param
-  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `runId`,
-  // `packageId` and the `startingAfter` pagination param are camelCase;
-  // `chat_session_id` is a snake_case domain field. Strict: an unknown or
-  // misspelled filter is a 400, never a silently widened listing.
+  // startingAfter + limit (`parseListFilesQuery`, shared with
+  // `GET /api/orgs/{orgId}/files`).
   router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
-    const actor = getActor(c);
-
-    const query = parseBody(listFilesQuerySchema, c.req.query());
-    const filters: ListFilesFilters = {};
-    if (query.purpose) filters.purpose = query.purpose;
-    if (query.runId) filters.runId = query.runId;
-    if (query.packageId) filters.packageId = query.packageId;
-    if (query.chat_session_id) filters.chatSessionId = query.chat_session_id;
-    if (query.context_chat_session_id) {
-      filters.contextChatSessionId = query.context_chat_session_id;
-    }
-    if (query.q) filters.search = query.q;
-    if (query.startingAfter) filters.startingAfter = query.startingAfter;
-    filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
-
     const page = await listFilesForActor(
-      scope,
-      actor,
-      filters,
-      callerPermissions(c),
+      scope.orgId,
+      [fileReadGrant(scope.spaceId, callerPermissions(c))],
+      getActor(c),
+      parseListFilesQuery(c),
       fileLifecycleCeiling(c),
     );
     return c.json(page);

@@ -35,6 +35,8 @@ import {
   createFileFromStream,
   getFileForActor,
   listFilesForActor,
+  fileReadGrant,
+  type ListFilesFilters,
   deleteFile,
   setOrgFileStorageLimit,
   streamFileContent,
@@ -128,6 +130,21 @@ function publishStream(scope: Scope, runId: string, name: string, content: strin
   });
 }
 
+/** The one-space gallery, as `GET /api/files` calls it. */
+function listFilesIn(
+  scope: { orgId: string; spaceId: string },
+  actor: Actor,
+  filters: ListFilesFilters,
+  permissions: ReadonlySet<string>,
+) {
+  return listFilesForActor(
+    scope.orgId,
+    [fileReadGrant(scope.spaceId, permissions)],
+    actor,
+    filters,
+  );
+}
+
 /** A member holding no grant beyond the resource itself — reads its own runs. */
 const NO_GRANTS: ReadonlySet<string> = new Set();
 
@@ -215,7 +232,7 @@ describe("files hardening — cross-phase interactions", () => {
     const [doc1] = await db.select().from(files).where(eq(files.name, "keep-1.txt"));
 
     // Existing content stays fully readable (list, resolve, download) over-limit.
-    const listed = await listFilesForActor(scope, userActor, { runId }, NO_GRANTS);
+    const listed = await listFilesIn(scope, userActor, { runId }, NO_GRANTS);
     expect(listed.data).toHaveLength(2);
     const resolved = await getFileForActor(scope, userActor, doc1!.id, NO_GRANTS);
     expect(resolved?.capabilities.download).toBe(true);

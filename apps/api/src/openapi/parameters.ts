@@ -28,6 +28,14 @@ export const parameters = {
       example: ["failed", "timeout"],
     },
   },
+  OrgSpaceFilter: {
+    name: "spaceId",
+    in: "query" as const,
+    required: false,
+    description:
+      "Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing.",
+    schema: { type: "string" },
+  },
   RunSearch: {
     name: "q",
     in: "query" as const,

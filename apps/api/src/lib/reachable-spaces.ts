@@ -5,6 +5,7 @@ import type { AppEnv } from "../types/index.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission } from "./permissions.ts";
 import type { SpaceRoleRef } from "./space-role.ts";
+import { forbidden, invalidRequest } from "./errors.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -14,7 +15,7 @@ import {
 } from "./view-as.ts";
 
 /** A space the caller holds a role in, with their effective set there. */
-export interface ReachableSpace {
+interface ReachableSpace {
   id: string;
   name: string;
   role: SpaceRoleRef;
@@ -46,5 +47,34 @@ export async function callerReachableSpaces(
     role && (!pinned || space.id === pinned)
       ? [{ id: space.id, name: space.name, role, permissions: effectiveInSpace(c, role) }]
       : [],
+  );
+}
+
+/**
+ * The preamble of every list spanning the spaces of `orgId`: the caller's
+ * reach, narrowed by `?spaceId=` (comma-separated), kept where the effective
+ * set `admits` the list. A space reached but not admitting it contributes no
+ * row; an id outside the reach is a 400, one answer for a space that does not
+ * exist and one not reached, so it discloses nothing. An empty value reads as
+ * absent, as on every closed-set filter. An end-user acts in its own space
+ * only (RBAC spec §7.2), so it is refused.
+ */
+export async function readableSpacesAcross(
+  c: Context<AppEnv>,
+  orgId: string,
+  admits: (permissions: ReadonlySet<Permission>) => boolean,
+): Promise<ReachableSpace[]> {
+  if (c.get("principalKind") === "end_user") {
+    throw forbidden("An end-user cannot list across spaces");
+  }
+  const reachable = await callerReachableSpaces(c, orgId);
+  const raw = c.req.query("spaceId");
+  const requested = raw ? raw.split(",").map((id) => id.trim()) : undefined;
+  const unknown = requested?.find((id) => !reachable.some((space) => space.id === id));
+  if (unknown !== undefined) {
+    throw invalidRequest(`spaceId names a space you do not reach: ${unknown}`, "spaceId");
+  }
+  return reachable.filter(
+    (space) => (!requested || requested.includes(space.id)) && admits(space.permissions),
   );
 }

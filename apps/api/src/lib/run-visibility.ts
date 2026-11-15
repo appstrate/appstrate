@@ -25,7 +25,7 @@
  */
 
 import type { Context } from "hono";
-import type { SQL } from "drizzle-orm";
+import { and, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { Actor } from "@appstrate/connect";
 import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { runs } from "@appstrate/db/schema";
@@ -85,6 +85,27 @@ export function ownsRun(
  */
 export function ownRunsFilter(actor: Actor): SQL {
   return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
+}
+
+/**
+ * WHERE fragment for the runs `grants` open: every run of a space read in full,
+ * the actor's own elsewhere — or everywhere when `ownOnly` (`?user=me`). No
+ * grant (or no actor where one is needed), no row. The many-space twin of
+ * {@link runVisibilityFilter}: every query spanning spaces narrows through it.
+ */
+export function runReadCondition(
+  grants: readonly RunReadGrant[],
+  actor: Actor | null,
+  ownOnly = false,
+): SQL {
+  const everyRun = grants.filter((g) => g.readAll && !ownOnly).map((g) => g.spaceId);
+  const ownRuns = grants.filter((g) => !g.readAll || ownOnly).map((g) => g.spaceId);
+  const reach: SQL[] = [];
+  if (everyRun.length) reach.push(inArray(runs.spaceId, everyRun));
+  if (ownRuns.length && actor) {
+    reach.push(and(inArray(runs.spaceId, ownRuns), ownRunsFilter(actor))!);
+  }
+  return or(...reach) ?? sql`false`;
 }
 
 /** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */

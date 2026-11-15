@@ -81,7 +81,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "../../src/routes/org-integrations.ts";
-import { createOrgRunsRouter } from "../../src/routes/org-runs.ts";
+import { createCrossSpaceReadsRouter } from "../../src/routes/cross-space-reads.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
@@ -274,7 +274,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
   app.route("/api/orgs", orgsRouter);
-  app.route("/api/orgs", createOrgRunsRouter());
+  app.route("/api/orgs", createCrossSpaceReadsRouter());
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
   app.route("/api/org-roles", createOrgRolesRouter());

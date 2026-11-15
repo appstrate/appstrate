@@ -51,7 +51,7 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import { ownRunsFilter, type RunReadGrant } from "../../lib/run-visibility.ts";
+import { runReadCondition, type RunReadGrant } from "../../lib/run-visibility.ts";
 import { recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
@@ -1761,7 +1761,7 @@ export interface GlobalRunListFilters {
  * kind / status / date / chat-session filters. Powers `GET /api/runs` (one
  * grant, the request's space) and `GET /api/orgs/{orgId}/runs` (one per space
  * the caller reaches): a space where the caller reads every run contributes
- * all of them, any other its actor's own (`ownRunsFilter`). No grant, no row.
+ * all of them, any other its actor's own (`runReadCondition`). No grant, no row.
  * Joins `packages.ephemeral` so the response carries the inline flag.
  */
 export async function listGlobalRuns(
@@ -1783,14 +1783,7 @@ export async function listGlobalRuns(
     actor = null,
   } = options;
 
-  const everyRun = grants.filter((g) => g.readAll && !ownOnly).map((g) => g.spaceId);
-  const ownRuns = grants.filter((g) => !g.readAll || ownOnly).map((g) => g.spaceId);
-  const reach: SQL[] = [];
-  if (everyRun.length) reach.push(inArray(runs.spaceId, everyRun));
-  if (ownRuns.length && actor) {
-    reach.push(and(inArray(runs.spaceId, ownRuns), ownRunsFilter(actor))!);
-  }
-  const conditions = [eq(runs.orgId, orgId), or(...reach) ?? sql`false`];
+  const conditions = [eq(runs.orgId, orgId), runReadCondition(grants, actor, ownOnly)];
   conditions.push(...runListConditions({ status, search }));
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));

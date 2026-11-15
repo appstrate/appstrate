@@ -41,6 +41,7 @@ import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { runReadCondition, type RunReadGrant } from "../lib/run-visibility.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -712,17 +713,33 @@ export async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Schedules of `orgId` across the spaces of `grants` — one per space where the
+ * caller holds `schedules:read` — oldest first. Powers `GET /api/schedules`
+ * (one grant, the request's space) and `GET /api/orgs/{orgId}/schedules`. The
+ * run counters of each schedule follow its own space's grant
+ * (`runReadCondition`): a schedule's runs live in its space.
+ */
 export async function listSchedules(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly RunReadGrant[],
   viewer: Actor | null,
-  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
+  if (grants.length === 0) return [];
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId: scope.orgId, spaceId: scope.spaceId }))
-    .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
+    .where(
+      and(
+        eq(schedules.orgId, orgId),
+        inArray(
+          schedules.spaceId,
+          grants.map((g) => g.spaceId),
+        ),
+      ),
+    )
+    .orderBy(asc(schedules.createdAt), asc(schedules.id));
+  return enrichSchedules(rows.map(toSchedule), orgId, viewer, runReadCondition(grants, viewer));
 }
 
 export async function listPackageSchedules(

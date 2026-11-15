@@ -253,6 +253,14 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ...rowDecided("the run-read grant of each space the caller reaches, read in the handler", [
     [["GET"], "/api/orgs/{orgId}/runs"],
   ]),
+  ...rowDecided(
+    "`schedules:read` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/schedules"]],
+  ),
+  ...rowDecided(
+    "`files:read` in each space the caller reaches, and its run-read and `files:delete` grants there per row, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/files"]],
+  ),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
     [["POST"], "/api/spaces/{spaceId}/packages"],
     [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],

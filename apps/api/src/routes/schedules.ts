@@ -70,7 +70,8 @@ import {
   assertDependencyDraftOverridesAllowed,
 } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
-import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
+import { requireRunsRead, runReadGrant, runVisibilityFilter } from "../lib/run-visibility.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
@@ -454,7 +455,11 @@ export function createSchedulesRouter() {
     const scope = getSpaceScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
-    const schedules = await listSchedules(scope, getActor(c), runVisibilityFilter(c));
+    const schedules = await listSchedules(
+      scope.orgId,
+      [runReadGrant(scope.spaceId, callerPermissions(c))],
+      getActor(c),
+    );
     return c.json(listResponse(schedules));
   });
 
