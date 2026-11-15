@@ -175,12 +175,14 @@ function formatToolArgs(args: unknown): string {
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
 }
 
-/** An `api_call` reads as the request it sent; any other tool as its flattened arguments. */
+/**
+ * An `api_call` reads as the request it sent; any other tool, or a call missing the method or
+ * target its schema requires (so never sent), as its flattened arguments.
+ */
 function toolDetail(args: unknown, integration: ToolIntegration | undefined): string {
   const request = integration && isApiCallToolName(integration.tool) ? asRecordOrNull(args) : null;
-  if (request && typeof request.target === "string") {
-    const method = typeof request.method === "string" ? request.method : "GET";
-    return `${method} ${request.target}`;
+  if (request && typeof request.method === "string" && typeof request.target === "string") {
+    return `${request.method} ${request.target}`;
   }
   return formatToolArgs(args);
 }
@@ -421,6 +423,72 @@ export function journalIntegrationIds(entries: readonly ExecutionEntry[]): strin
   for (const entry of entries)
     if (entry.kind === "tool" && entry.integration) ids.add(entry.integration.id);
   return [...ids];
+}
+
+export interface IntegrationLook {
+  name: string;
+  icon?: string | null;
+  /** Its row is still being read: the name and icon are not known yet. */
+  pending: boolean;
+}
+
+/** An integration's display name and icon; its id stands in for a name the read does not know. */
+export type JournalIntegrations = (integrationId: string) => IntegrationLook;
+
+const JOURNAL_TYPES = {
+  agent: "message",
+  tool: "tool",
+  log: "journal",
+  runtime: "system",
+} as const satisfies Record<ExecutionEntry["kind"], string>;
+export type JournalTypeFilter = (typeof JOURNAL_TYPES)[ExecutionEntry["kind"]];
+export const JOURNAL_TYPE_VALUES = Object.values(JOURNAL_TYPES);
+
+/** A tool row keeps one type while it runs and once it settles: its status icon tells which. */
+export function journalType(entry: ExecutionEntry): JournalTypeFilter {
+  return JOURNAL_TYPES[entry.kind];
+}
+
+/** What the journal shows: an empty list of values does not filter on its dimension. */
+export interface JournalFilters {
+  levels: readonly string[];
+  types: readonly string[];
+  integrations: readonly string[];
+  showTools: boolean;
+  /** Trimmed and lower-cased in `locale`; empty matches every entry. */
+  query: string;
+  locale: string;
+}
+
+/** The entries the journal's filters and search keep, in order. */
+export function filterJournal(
+  entries: readonly ExecutionEntry[],
+  filters: JournalFilters,
+  t: (key: string) => string,
+  integrations: JournalIntegrations,
+): ExecutionEntry[] {
+  const { levels, types, query, locale } = filters;
+  return entries.filter((entry) => {
+    if (!filters.showTools && entry.kind === "tool") return false;
+    if (levels.length > 0 && !levels.includes(journalLevel(entry))) return false;
+    if (types.length > 0 && !types.includes(journalType(entry))) return false;
+    if (
+      filters.integrations.length > 0 &&
+      !(
+        entry.kind === "tool" &&
+        entry.integration &&
+        filters.integrations.includes(entry.integration.id)
+      )
+    ) {
+      return false;
+    }
+    return (
+      !query ||
+      journalSearchText(entry, t, (id) => integrations(id).name)
+        .toLocaleLowerCase(locale)
+        .includes(query)
+    );
+  });
 }
 
 /** The tools the runner itself offers the model (`@appstrate/runner-pi` harness tools). */

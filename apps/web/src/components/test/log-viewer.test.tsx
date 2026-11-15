@@ -9,8 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import type { ExecutionEntry, ToolExecutionEntry } from "../log-utils.ts";
-import type { JournalIntegrations } from "../run-detail/journal-integrations.ts";
+import type { ExecutionEntry, JournalIntegrations, ToolExecutionEntry } from "../log-utils.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },

@@ -4,11 +4,13 @@ import { describe, it, expect } from "bun:test";
 import {
   buildLogEntries,
   buildTurnRows,
+  filterJournal,
   journalIntegrationIds,
   journalLevel,
   journalSearchText,
   toolLabel,
   type ExecutionEntry,
+  type JournalFilters,
   type RawLog,
   type ToolExecutionEntry,
 } from "../log-utils";
@@ -587,11 +589,18 @@ describe("buildLogEntries — an api_call reads as its request", () => {
     },
   });
 
-  it("reads GET when the call names no method", () => {
+  it("reads the request's method and target", () => {
+    const { entries } = buildLogEntries([
+      apiCall("api_call", { method: "GET", target: "https://api.github.com/repos" }),
+    ]);
+    expect(toolEntry(entries).detail).toBe("GET https://api.github.com/repos");
+  });
+
+  it("flattens the arguments of a call missing the method its schema requires", () => {
     const { entries } = buildLogEntries([
       apiCall("api_call", { target: "https://api.github.com/repos" }),
     ]);
-    expect(toolEntry(entries).detail).toBe("GET https://api.github.com/repos");
+    expect(toolEntry(entries).detail).toBe("target: https://api.github.com/repos");
   });
 
   it("reads the method and a templated target of an auth-scoped api_call", () => {
@@ -715,5 +724,73 @@ describe("toolLabel and journalSearchText — the names a tool call goes by", ()
     ]) {
       expect(text).toContain(term);
     }
+  });
+});
+
+describe("filterJournal — what the journal shows", () => {
+  const t = (key: string) => key;
+  const integrations = (id: string) => ({
+    name: id === "@acme/github" ? "GitHub" : id,
+    pending: false,
+  });
+  const tool = (id: string, integrationId?: string, level?: string): ToolExecutionEntry => ({
+    id,
+    kind: "tool",
+    tool: `${id}_exposed`,
+    status: "success",
+    ...(level ? { level } : {}),
+    ...(integrationId ? { integration: { id: integrationId, tool: id } } : {}),
+  });
+  const entries: ExecutionEntry[] = [
+    { id: "m", kind: "agent", level: "debug", message: "Je lis les tickets." },
+    tool("list_issues", "@acme/github"),
+    tool("get_me", "@acme/github"),
+    tool("note", "@appstrate/platform"),
+    tool("output"),
+    { id: "j", kind: "log", level: "info", message: "Trois tickets trouvés" },
+  ];
+  const none: JournalFilters = {
+    levels: [],
+    types: [],
+    integrations: [],
+    showTools: true,
+    query: "",
+    locale: "fr",
+  };
+  const ids = (filters: Partial<JournalFilters>) =>
+    filterJournal(entries, { ...none, ...filters }, t, integrations).map((entry) => entry.id);
+
+  it("keeps every entry when nothing filters", () => {
+    expect(ids({})).toEqual(["m", "list_issues", "get_me", "note", "output", "j"]);
+  });
+
+  it("keeps only the tool calls of the chosen integration", () => {
+    expect(ids({ integrations: ["@acme/github"] })).toEqual(["list_issues", "get_me"]);
+    expect(ids({ integrations: ["@acme/github", "@appstrate/platform"] })).toEqual([
+      "list_issues",
+      "get_me",
+      "note",
+    ]);
+  });
+
+  it("combines the integration filter with the type and the search", () => {
+    expect(ids({ integrations: ["@acme/github"], types: ["journal"] })).toEqual([]);
+    expect(ids({ integrations: ["@acme/github"], types: ["tool"] })).toEqual([
+      "list_issues",
+      "get_me",
+    ]);
+    expect(ids({ integrations: ["@acme/github"], query: "get_me" })).toEqual(["get_me"]);
+  });
+
+  it("finds a call by its integration's display name", () => {
+    expect(ids({ query: "github" })).toEqual(["list_issues", "get_me"]);
+  });
+
+  it("hides every tool call when tools are hidden", () => {
+    expect(ids({ showTools: false })).toEqual(["m", "j"]);
+  });
+
+  it("keeps the entries of the chosen levels", () => {
+    expect(ids({ levels: ["info"], types: ["journal"] })).toEqual(["j"]);
   });
 });

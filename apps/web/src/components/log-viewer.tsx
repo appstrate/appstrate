@@ -32,14 +32,17 @@ import {
   formatTimestamp,
   journalLevel,
   levelColors,
+  filterJournal,
   journalIntegrationIds,
-  journalSearchText,
+  journalType,
   toolLabel,
+  JOURNAL_TYPE_VALUES,
   type ExecutionEntry,
+  type JournalIntegrations,
+  type JournalTypeFilter,
   type ToolExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
-import type { JournalIntegrations } from "./run-detail/journal-integrations";
 import { PackageIcon } from "./package-icon";
 import { ItemList } from "./item-list";
 import { Waiting } from "./loading-skeletons";
@@ -309,19 +312,6 @@ interface LogViewerProps {
 
 export type JournalOverviewFilter = "tools" | "warnings" | "errors";
 type JournalLevelFilter = ReturnType<typeof journalLevel>;
-const JOURNAL_TYPES = {
-  agent: "message",
-  tool: "tool",
-  log: "journal",
-  runtime: "system",
-} as const satisfies Record<ExecutionEntry["kind"], string>;
-type JournalTypeFilter = (typeof JOURNAL_TYPES)[ExecutionEntry["kind"]];
-
-/** A tool row keeps one type while it runs and once it settles: its status icon tells which. */
-function journalType(entry: ExecutionEntry): JournalTypeFilter {
-  return JOURNAL_TYPES[entry.kind];
-}
-
 const FOCUS_FILTERS: Record<
   JournalOverviewFilter,
   { levels: JournalLevelFilter[]; types: JournalTypeFilter[] }
@@ -372,49 +362,40 @@ export function LogViewer({
   const [integrationFilters, setIntegrationFilters] = useState<string[]>([]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
-  const visibleEntries = useMemo(() => {
-    return entries.filter((entry) => {
-      if (!showTools && entry.kind === "tool") return false;
-      if (levelFilters.length > 0 && !levelFilters.includes(journalLevel(entry))) return false;
-      if (typeFilters.length > 0 && !typeFilters.includes(journalType(entry))) return false;
-      if (
-        integrationFilters.length > 0 &&
-        !(
-          entry.kind === "tool" &&
-          entry.integration &&
-          integrationFilters.includes(entry.integration.id)
-        )
-      ) {
-        return false;
-      }
-      if (
-        normalizedQuery &&
-        !journalSearchText(entry, t, (id) => integrations(id).name)
-          .toLocaleLowerCase(i18n.language)
-          .includes(normalizedQuery)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [
-    entries,
-    i18n.language,
-    integrationFilters,
-    integrations,
-    levelFilters,
-    normalizedQuery,
-    showTools,
-    t,
-    typeFilters,
-  ]);
+  const visibleEntries = useMemo(
+    () =>
+      filterJournal(
+        entries,
+        {
+          levels: levelFilters,
+          types: typeFilters,
+          integrations: integrationFilters,
+          showTools,
+          query: normalizedQuery,
+          locale: i18n.language,
+        },
+        t,
+        integrations,
+      ),
+    [
+      entries,
+      i18n.language,
+      integrationFilters,
+      integrations,
+      levelFilters,
+      normalizedQuery,
+      showTools,
+      t,
+      typeFilters,
+    ],
+  );
   const availableLevels = (["info", "warn", "error"] as const).filter((value) =>
     entries.some((entry) => journalLevel(entry) === value),
   );
-  const availableTypes = Object.values(JOURNAL_TYPES).filter((value) =>
+  const availableTypes = JOURNAL_TYPE_VALUES.filter((value) =>
     entries.some((entry) => journalType(entry) === value),
   );
-  const availableIntegrations = journalIntegrationIds(entries);
+  const availableIntegrations = useMemo(() => journalIntegrationIds(entries), [entries]);
   const activeFilterCount =
     levelFilters.length + typeFilters.length + integrationFilters.length + display.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;

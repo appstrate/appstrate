@@ -100,6 +100,8 @@ function errorResult(text: string): CallToolResult {
  */
 function defineTool<S extends z.ZodObject>(spec: {
   name: string;
+  /** The display name a person reads (MCP `title`); the run journal names the call by it. */
+  title: string;
   description: string;
   args: S;
   run: (args: z.output<S>, ctx: ToolContext) => Promise<CallToolResult>;
@@ -107,6 +109,7 @@ function defineTool<S extends z.ZodObject>(spec: {
   const { $schema: _dialect, ...inputSchema } = z.toJSONSchema(spec.args);
   const descriptor = {
     name: spec.name,
+    title: spec.title,
     description: spec.description,
     inputSchema: inputSchema as AppstrateToolDefinition["descriptor"]["inputSchema"],
   };
@@ -156,6 +159,7 @@ const NOTIFY_MESSAGE_MAX = 500;
 const RUN_TOOLS: RunTool[] = [
   defineTool({
     name: "log",
+    title: "Log progress",
     description:
       "Send a progress message to the user. Write naturally — the user reads these in real time.",
     args: z.object({
@@ -176,6 +180,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "note",
+    title: "Save a memory",
     description:
       "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
       "Archive memories are NOT injected into the system prompt; retrieve them on demand with this integration's `recall_memory` tool. " +
@@ -213,6 +218,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "pin",
+    title: "Pin a slot",
     description:
       "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). " +
       'Use key="checkpoint" for the carry-over checkpoint; other keys (e.g. "persona", "goals") create additional pinned blocks. ' +
@@ -253,6 +259,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "recall_memory",
+    title: "Recall memories",
     description:
       "Search the agent's archive memories — durable facts and learnings from past runs that " +
       "are NOT visible in the system prompt by default. Pass an optional `q` to filter by " +
@@ -299,6 +306,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "run_history",
+    title: "Read past runs",
     description:
       "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
       'most recent past runs (current run excluded). Returns JSON `{ object: "list", data: [...], hasMore }`. ' +
@@ -337,6 +345,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "notify",
+    title: "Send a notification",
     description:
       "Send an in-app notification about this run — it appears in the notification bell and links to the run. " +
       "It reaches the run's recipients: the member or end-user who triggered the run, or the " +
@@ -378,6 +387,10 @@ const RUN_TOOLS: RunTool[] = [
   }),
 ];
 
+const RUN_TOOL_DESCRIPTIONS = new Map(
+  RUN_TOOLS.map(({ descriptor }) => [descriptor.name, descriptor.description]),
+);
+
 /**
  * An integration resource with each tool of the runtime-bound integration described: its server
  * is this module, which lists the tools only to a run, so its catalog has no description of them.
@@ -386,14 +399,11 @@ export function withRunToolDescriptions<
   T extends { manifest: unknown; tool_catalog: IntegrationToolCatalogEntry[] },
 >(detail: T): T {
   if (!isRuntimeBoundIntegration(detail.manifest)) return detail;
-  const descriptions = new Map(
-    RUN_TOOLS.map(({ descriptor }) => [descriptor.name, descriptor.description]),
-  );
   return {
     ...detail,
     tool_catalog: detail.tool_catalog.map((entry) => ({
       ...entry,
-      description: descriptions.get(entry.name),
+      description: RUN_TOOL_DESCRIPTIONS.get(entry.name) ?? entry.description,
     })),
   };
 }

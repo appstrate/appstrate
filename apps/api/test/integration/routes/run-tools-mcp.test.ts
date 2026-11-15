@@ -163,6 +163,16 @@ describe("run MCP server", () => {
       );
     });
 
+    it("gives each tool a display title, the name the run journal shows", async () => {
+      const run = await seedRunningRun();
+      const { envelope } = await rpc(path, bearer(run.id), "tools/list");
+      const tools = envelope.result!.tools as Array<{ name: string; title?: string }>;
+      for (const tool of tools) {
+        expect(typeof tool.title).toBe("string");
+        expect(tool.title).not.toBe(tool.name);
+      }
+    });
+
     it("`log` appends a progress run log at call time", async () => {
       const run = await seedRunningRun();
       const result = await callTool(path, bearer(run.id), "log", {

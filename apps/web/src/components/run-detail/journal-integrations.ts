@@ -2,17 +2,7 @@
 
 import { useMemo } from "react";
 import { useIntegrationsById } from "../../hooks/use-integrations";
-import { journalIntegrationIds, type ExecutionEntry } from "../log-utils";
-
-export interface IntegrationLook {
-  name: string;
-  icon?: string | null;
-  /** Its row is still being read: the name and icon are not known yet. */
-  pending: boolean;
-}
-
-/** An integration's display name and icon; its id stands in for a name the read does not know. */
-export type JournalIntegrations = (integrationId: string) => IntegrationLook;
+import { journalIntegrationIds, type ExecutionEntry, type JournalIntegrations } from "../log-utils";
 
 /**
  * The integrations a journal's tool calls reached, read in one request for the whole journal
@@ -20,9 +10,8 @@ export type JournalIntegrations = (integrationId: string) => IntegrationLook;
  * integration deleted, not visible here or unreadable without `integrations:read` keeps its id.
  */
 export function useJournalIntegrations(entries: readonly ExecutionEntry[]): JournalIntegrations {
-  const { data, isLoading, isPlaceholderData } = useIntegrationsById(
-    journalIntegrationIds(entries),
-  );
+  const ids = useMemo(() => journalIntegrationIds(entries), [entries]);
+  const { data, isLoading, isPlaceholderData } = useIntegrationsById(ids);
   const reading = isLoading || isPlaceholderData;
   // Stable while the read is: the journal's filtering and scrolling key on it.
   return useMemo(() => {

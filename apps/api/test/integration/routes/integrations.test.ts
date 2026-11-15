@@ -40,6 +40,7 @@ import {
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
+import { withRunToolDescriptions } from "../../../src/services/run-tools-mcp.ts";
 
 const app = getTestApp();
 
@@ -359,6 +360,15 @@ describe("GET /api/integrations/:packageId", () => {
     } finally {
       restore();
     }
+  });
+
+  it("keeps the description of a catalog entry the run tools do not define", () => {
+    const detail = withRunToolDescriptions({
+      manifest: { _meta: { "dev.appstrate/platform": {} } },
+      tool_catalog: [{ name: "log" }, { name: "elsewhere", description: "Kept as written" }],
+    });
+    expect(detail.tool_catalog[0]!.description).toBeTruthy();
+    expect(detail.tool_catalog[1]!.description).toBe("Kept as written");
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
