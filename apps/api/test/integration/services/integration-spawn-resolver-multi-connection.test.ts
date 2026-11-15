@@ -28,22 +28,19 @@ import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   envDelivery,
   twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/ssh";
-const SERVER = "@orga/ssh-server";
 
 function integManifest() {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    serverName: SERVER,
     auths: {
       key: {
         type: "custom",
@@ -72,7 +69,7 @@ function agentManifest(): Record<string, unknown> {
 describe("resolveIntegrationSpawns — one spec per bound connection", () => {
   let ctx: TestContext;
 
-  /** Seed the integration + its referenced mcp-server. */
+  /** Seed the integration. */
   async function seedIntegration() {
     await seedPackage({
       id: INTEG,
@@ -82,20 +79,6 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       draftManifest: integManifest(),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    const serverManifest = mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "python",
-      entryPoint: "./server.py",
-    });
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
   }
 
   /** One SSH connection = one host, as `@appstrate/ssh` models it. */
@@ -129,7 +112,6 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
 
   async function resolve(resolvedConnections: ResolvedConnectionMap) {
     return resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -349,7 +331,6 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
     const onBackup = await seedOn("backup", "spare");
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: {

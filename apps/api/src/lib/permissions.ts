@@ -164,7 +164,6 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "agents:read",
     "agents:run",
     "skills:read",
-    "mcp-servers:read",
     // `runs:read` alone — the runs this member launched. Seeing a colleague's
     // (or an end-user's) run is `runs:read-all`, which `admin` and `builder`
     // derive from the catalog and an operator does not.
@@ -293,10 +292,6 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
-  // MCP servers (AFPS §3.4 — import/delete via API key for headless flows)
-  "mcp-servers:read",
-  "mcp-servers:write",
-  "mcp-servers:delete",
   // Runs. `read-all` is grantable: a headless supervisor key must be able to
   // read the whole space's runs, and the ceiling still caps it at what its
   // creator holds.

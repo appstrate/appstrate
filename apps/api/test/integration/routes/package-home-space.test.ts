@@ -505,36 +505,6 @@ describe("the home is a read grant", () => {
     expect(activated!.after).toEqual({ spaceId: gammaId, via: "move" });
   });
 
-  it("refuses the whole move when the destination could not ACTIVATE the package", async () => {
-    // The activation door refuses an mcp-server whose `latest` archive is
-    // missing or unreadable (422 `bundle_invalid`); going through that door
-    // means the move inherits the refusal instead of landing an executable
-    // nothing can execute. Franc failure, not a silent half-move.
-    const MCP = "@homeorg/unbuildable-mcp";
-    await seedPackage({
-      id: MCP,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      homeSpaceId: alphaId,
-      draftManifest: { name: MCP, version: "0.1.0", type: "mcp-server" },
-    });
-
-    const res = await app.request(`/api/packages/${MCP}/home`, {
-      method: "PUT",
-      headers: { ...owner(), "Content-Type": "application/json" },
-      body: JSON.stringify({ home_space_id: gammaId }),
-    });
-    await expectProblem(res, 422, { code: "bundle_invalid" });
-
-    // Nothing moved and nothing was placed: the transaction never opened.
-    expect((await getDbRow(packages, eq(packages.id, MCP))).homeSpaceId).toBe(alphaId);
-    const rows = await db
-      .select()
-      .from(spacePackages)
-      .where(and(eq(spacePackages.packageId, MCP), eq(spacePackages.spaceId, gammaId))!);
-    expect(rows).toHaveLength(0);
-  });
-
   it("leaves a destination that had deliberately switched the package OFF switched off", async () => {
     // The move transfers AUTHORITY over a package, not a verdict about what any
     // space runs. A destination that answered `false` keeps its answer, and

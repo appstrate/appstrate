@@ -1473,6 +1473,52 @@ finished run (the insert is refused, logged, and the run shows neither unread no
 the same reason, do not serve the previous release beside this one. It also reads read state from
 `notifications` only, so after `0052` every successful run reads as read.
 
+## Detail — `mcp-server` packages folded into their integrations (script `0054`)
+
+**Not a runbook.** A local MCP server is no longer a package of its own: the integration declares it
+inline (`source.server = { type, entry_point, mcp_config, tools }`), its payload (`server/**`) sits in
+the integration's own files and archive, the credential reaches it through the auth's `delivery.env`,
+and `dependencies.mcp_servers` no longer exists (#2220). The `mcp-server` label stays in the
+`package_type` enum for now (Postgres cannot drop a value in place; a follow-up does, as for
+`package_shares`). The release refuses to boot while a `packages` row has `type = 'mcp-server'`
+(`assertMcpServersFolded`, `apps/api/src/lib/boot.ts`). `pg_dump` taken BEFORE the deploy, the app
+stopped:
+
+1. Run the migrations alone (`bun run db:migrate`, or the migrate service); the app stays stopped.
+2. `set -a && . ./.env && set +a && bun scripts/migration/0054-fold-mcp-servers.ts` is the dry run
+   (rolled back, no storage written); read the table and every `unresolved` / `orphan server` line.
+3. `0054 --apply`, app still stopped. Per ORG integration still reading `source.server = { name,
+version }`: its draft takes the referenced server's draft, each version the highest non-yanked
+   server version satisfying its range (same organization first, then system). The manifest receives
+   the server's `server` block and `tools`, and its `dev.appstrate/mcp-server` / `dev.appstrate/workspace`
+   `_meta`; each `mcp_config.env[V] = "${user_config.K}"` becomes `delivery.env[V] = { value, sensitive }`
+   copied from the auth entry whose `user_config_key ?? envKey` is `K`, and `user_config_key` is
+   dropped everywhere. A placeholder matching no entry is printed and dropped: the old substitution read
+   `delivery.env` only, so the server never received it. The server's files (all but `manifest.json`)
+   join the integration's draft files and version archive (a path both hold keeps the integration's and
+   is printed); each rewritten version's `integrity` and `artifact_size` are recomputed. Every
+   org agent, skill and integration draft or version carrying `dependencies.mcp_servers` loses it, with
+   archive and integrity. Then every `mcp-server` package, system ones included, is deleted with its
+   versions, dist tags, `space_packages` rows and `mcp-server` dependency rows; its storage objects
+   are queued on the deletion outbox in the same transaction. An organization server referenced by no
+   integration is printed (id, organization) and deleted: it ran nowhere. A draft or version whose
+   server or archive is missing is printed and left as it is. System integrations are not rewritten:
+   boot re-syncs them from `system-packages/`. But boot never deletes a version and holds no bytes for
+   a superseded one, so every system integration version still on the retired shape (`ssh` 1.0.3,
+   `github-git` 1.0.4) is deleted, printed `<id>@<version>`, with its dist tags, dependency rows and
+   archive (outbox); the `packages` row stays. A `latest` tag that pointed at one is re-pointed to the
+   highest remaining version (none left: boot sync sets it with the new release).
+4. Start the app.
+
+Ordering of the writes: the database changes run in one transaction and the rewritten archives are
+uploaded inside it, just before the commit. A failure before the commit rolls the database back but
+may leave rewritten archives in storage under the same keys; re-running recomputes from the
+unchanged rows and writes byte-identical archives, so a re-run repairs it. A second `--apply` on a
+folded database writes nothing.
+
+Rollback: restore the `pg_dump` (and the storage archives rewritten under it, versions included: an
+integrity mismatch is what a restored row against a rewritten archive reads as).
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1526,3 +1572,4 @@ the same reason, do not serve the previous release beside this one. It also read
 | 0050 | not yet             | READ-ONLY report (#2043): the schedules, enabled or not, whose `connection_overrides` name `[]` or a strict subset of the set an admin pin (else an enforced org default) imposes on the integration — each binds the WHOLE imposed set after the deploy — with the override, the imposed set and the imposing layer — **run before deploying the release where an override can no longer narrow an imposed set**; nothing is rewritten, the schedule owner is told                                                                                                                                                                                                                          | read-only — prints the table and the enabled / disabled totals, or `0 schedules — nothing widens.`; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, after the migrations**                                                                                                                                                                                                                                                                                                                                                                                |

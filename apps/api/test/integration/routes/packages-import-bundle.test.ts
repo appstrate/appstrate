@@ -25,11 +25,9 @@ import {
 import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
-import {
-  localIntegrationManifest,
-  mcpServerManifest,
-} from "../../helpers/integration-manifests.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { downloadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { postInstallPackage } from "../../../src/services/post-install-package.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import {
@@ -539,7 +537,7 @@ describe("POST /api/packages/import-bundle — import", () => {
 
   // ── retired AFPS 1.x dependency keys: import-bundle is the READ direction ──
   //
-  // `dependencies.tools` (now `mcp_servers`) is inert — no reader has ever read
+  // `dependencies.tools` (retired, like `mcp_servers`) is inert — no reader has ever read
   // it — so a package published with it is not broken, just carrying dead
   // vocabulary. Aborting the whole bundle over it would be gratuitous, and the
   // source artifact is immutable so there is nothing to repair upstream. Import
@@ -584,7 +582,7 @@ describe("POST /api/packages/import-bundle — import", () => {
     const warning = body.warnings.find((w) => w.includes("dependencies.tools"));
     expect(warning).toBeDefined();
     expect(warning).toContain(agentId);
-    expect(warning).toContain("dependencies.mcp_servers");
+    expect(warning).toContain("source.server");
 
     // Tolerated means LEFT ALONE — the stored draft keeps the retired key
     // verbatim, so the import never rewrites a published manifest's bytes.
@@ -1467,52 +1465,37 @@ describe("POST /api/packages/import-bundle — §3.3 gates the root, not depende
   });
 
   const LOCAL_ROOT = "@rootgate/local-integration";
-  const LOCAL_SERVER = "@rootgate/local-server";
-
-  /** The mcp-server `LOCAL_ROOT` references: `1.0.0`, declaring `search` and `send`. */
-  const localServerManifest = {
-    ...mcpServerManifest({ name: LOCAL_SERVER, version: "1.0.0" }),
-    tools: [{ name: "search" }, { name: "send" }],
-  };
 
   /**
-   * A `local` integration ROOT defaulting to `defaultTools`, carrying the mcp-server it
-   * references unless `carryServer` is false.
+   * A `local` integration ROOT defaulting to `defaultTools`, carrying its own server payload and
+   * declaring `search` and `send` in `source.server.tools`.
    */
-  async function localIntegrationRootBundle(
-    defaultTools: string[],
-    carryServer = true,
-  ): Promise<Uint8Array> {
+  async function localIntegrationRootBundle(defaultTools: string[]): Promise<Uint8Array> {
     const rootManifest = {
       ...localIntegrationManifest({
         name: LOCAL_ROOT,
-        serverName: LOCAL_SERVER,
+        server: { entryPoint: "main.js", tools: [{ name: "search" }, { name: "send" }] },
         auths: { api: { type: "api_key" } },
       }),
-      ...(carryServer ? { dependencies: { mcp_servers: { [LOCAL_SERVER]: "^1.0.0" } } } : {}),
       default_tools: defaultTools,
     };
-    const afps = zipSync({ "manifest.json": enc(JSON.stringify(rootManifest, null, 2)) });
-    const identity = `${LOCAL_SERVER}@1.0.0` as const;
+    const afps = zipSync({
+      "manifest.json": enc(JSON.stringify(rootManifest, null, 2)),
+      "main.js": enc("// mcp server entry stub\n"),
+    });
     const catalog: PackageCatalog = {
-      resolve: async (name) => (name === LOCAL_SERVER ? { identity } : null),
-      fetch: async () => ({
-        identity,
-        manifest: localServerManifest as never,
-        files: new Map([
-          ["manifest.json", enc(JSON.stringify(localServerManifest, null, 2))],
-          ["main.js", enc("// mcp server entry stub\n")],
-        ]),
-        integrity: "sha256-recomputed-by-the-builder",
-      }),
+      resolve: async () => null,
+      fetch: async () => {
+        throw new Error("nothing is carried");
+      },
     };
     const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
-      depTypes: carryServer ? ["mcp_servers"] : [],
+      depTypes: [],
     });
     return writeBundleToBuffer(bundle);
   }
 
-  it("rejects a local integration ROOT defaulting to a tool its carried mcp-server does not declare", async () => {
+  it("rejects a local integration ROOT defaulting to a tool its server does not declare", async () => {
     const res = await importBundle(await localIntegrationRootBundle(["search", "archive"]));
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
@@ -1524,50 +1507,44 @@ describe("POST /api/packages/import-bundle — §3.3 gates the root, not depende
     expect(body.errors?.[0]?.message).toContain(
       `${LOCAL_ROOT}@1.0.0: default_tools contains "archive"`,
     );
-    // Nothing of the bundle was written: neither the root nor the server it carries.
     await assertDbMissing(packages, eq(packages.id, LOCAL_ROOT));
-    await assertDbMissing(packages, eq(packages.id, LOCAL_SERVER));
   });
 
-  it("imports the same bundle when the default names tools the carried mcp-server declares", async () => {
+  it("imports the same bundle, server payload included, when the default names declared tools", async () => {
     const res = await importBundle(await localIntegrationRootBundle(["search", "send"]));
     expect(res.status, await res.clone().text()).toBe(201);
     const body = (await res.json()) as { imported: Array<{ identity: string }> };
-    expect(body.imported.map((i) => i.identity).sort()).toEqual([
-      `${LOCAL_ROOT}@1.0.0`,
-      `${LOCAL_SERVER}@1.0.0`,
-    ]);
+    expect(body.imported.map((i) => i.identity)).toEqual([`${LOCAL_ROOT}@1.0.0`]);
+    const files = await downloadPackageFiles("integrations", ctx.orgId, LOCAL_ROOT);
+    expect(new TextDecoder().decode(files?.["main.js"])).toBe("// mcp server entry stub\n");
   });
 
-  it("judges a local integration ROOT against the stored mcp-server when the bundle carries none", async () => {
-    await seedPackage({
-      id: LOCAL_SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      draftManifest: localServerManifest,
+  it("warns about a bundle whose ROOT still declares dependencies.mcp_servers (read direction)", async () => {
+    const afps = buildAfps({
+      manifest: {
+        name: "@rootgate/old-agent",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Old agent",
+        dependencies: { mcp_servers: { "@rootgate/old-server": "^1.0.0" } },
+      },
+      content: "Prompt.",
+      type: "agent",
     });
-    await seedPackageVersion({
-      packageId: LOCAL_SERVER,
-      version: "1.0.0",
-      manifest: localServerManifest,
-    });
-
-    const refused = await importBundle(await localIntegrationRootBundle(["archive"], false));
-    expect(refused.status).toBe(400);
-    const body = (await refused.json()) as { errors?: Array<{ field?: string }> };
-    expect(body.errors?.[0]?.field).toBe("manifest.default_tools");
-    await assertDbMissing(packages, eq(packages.id, LOCAL_ROOT));
-
-    const accepted = await importBundle(await localIntegrationRootBundle(["send"], false));
-    expect(accepted.status, await accepted.clone().text()).toBe(201);
+    const res = await importBundle(afps);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as { warnings: string[] };
+    expect(body.warnings.find((w) => w.includes("dependencies.mcp_servers"))).toContain(
+      "source.server",
+    );
   });
 });
 
 describe("import-bundle — references the bundle names but does not carry", () => {
   /**
    * `authorizeBundlePackages` authorizes what the archive BRINGS. A manifest may
-   * also point OUTWARD — a declared dependency, or the `source.server.name` of a
-   * `source.kind: "local"` integration — and `importBundle` writes
+   * also point OUTWARD — a declared dependency — and `importBundle` writes
    * `draftManifest` straight from the archive. An unchecked outward reference is
    * therefore written verbatim and resolved at kickoff by the spawn resolver,
    * which asks the ORGANIZATION boundary and nothing about placement: the
@@ -1587,7 +1564,7 @@ describe("import-bundle — references the bundle names but does not carry", () 
   });
 
   async function agentBundleDeclaring(
-    serverId: string,
+    skillId: string,
     agentId = "@outward-ref/agent",
   ): Promise<Uint8Array> {
     const manifest = {
@@ -1596,8 +1573,8 @@ describe("import-bundle — references the bundle names but does not carry", () 
       type: "agent",
       schema_version: "0.2",
       display_name: "Outward",
-      description: "Declares an mcp-server it does not carry",
-      dependencies: { mcp_servers: { [serverId]: "^0.1.0" } },
+      description: "Declares a skill it does not carry",
+      dependencies: { skills: { [skillId]: "^0.1.0" } },
     };
     const afps = buildAfps({ manifest, content: "Prompt.", type: "agent" });
     const emptyCatalog: PackageCatalog = {
@@ -1622,14 +1599,14 @@ describe("import-bundle — references the bundle names but does not carry", () 
     });
   }
 
-  it("refuses an mcp-server homed in somebody else's personal space", async () => {
-    const SERVER = "@outward-ref/private-server";
+  it("refuses a skill homed in somebody else's personal space", async () => {
+    const SERVER = "@outward-ref/private-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
+      type: "skill",
       homeSpaceId: personalId,
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     const res = await importAs(owner, await agentBundleDeclaring(SERVER));
@@ -1639,13 +1616,13 @@ describe("import-bundle — references the bundle names but does not carry", () 
     ).toBe(true);
   });
 
-  it("takes the same bundle when the server is placed where the importer reaches it", async () => {
-    const SERVER = "@outward-ref/team-server";
+  it("takes the same bundle when the skill is placed where the importer reaches it", async () => {
+    const SERVER = "@outward-ref/team-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      type: "skill",
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     const res = await importAs(owner, await agentBundleDeclaring(SERVER));

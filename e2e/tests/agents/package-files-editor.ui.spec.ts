@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** Shared file editor against the real API. @tags @critical */
-import { zipSync } from "fflate";
-const encoder = new TextEncoder();
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, createSkill, createSpace, registerUser } from "../../helpers/seed.ts";
 import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 import type { ApiClient } from "../../helpers/api-client.ts";
 import { PackageEditorPage } from "../../pages/package-editor-page.ts";
-import {
-  apiIntegrationManifest,
-  mcpServerManifest,
-} from "../../../apps/api/test/helpers/integration-manifests.ts";
+import { apiIntegrationManifest } from "../../../apps/api/test/helpers/integration-manifests.ts";
 
 interface FileEntry {
   path: string;
@@ -32,12 +27,11 @@ async function writeElsewhere(client: ApiClient, id: string, path: string, text:
   expect(response.status()).toBe(200);
 }
 
-for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
+for (const type of ["skills", "agents", "integrations"]) {
   test(`${type}: stages a file and saves manifest and files in one PATCH`, async ({
     authedPage: page,
     apiClient,
     browserCtx,
-    request,
   }) => {
     const scope = `@${browserCtx.org.orgSlug}`;
     const name = `files-${Date.now()}`;
@@ -50,22 +44,6 @@ for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
         content: "",
       });
       expect(response.status()).toBe(201);
-    } else {
-      const zip = zipSync({
-        "manifest.json": encoder.encode(JSON.stringify(mcpServerManifest({ name: id }))),
-        "main.js": encoder.encode("export {};"),
-      });
-      const response = await request.post("/api/packages/import", {
-        headers: {
-          Cookie: browserCtx.auth.cookie,
-          "X-Org-Id": browserCtx.org.orgId,
-          "X-Space-Id": browserCtx.org.defaultSpaceId,
-        },
-        multipart: {
-          file: { name: "server.afps", mimeType: "application/zip", buffer: Buffer.from(zip) },
-        },
-      });
-      expect(response.status(), await response.text()).toBe(201);
     }
     const editor = new PackageEditorPage(page, scope, name, type);
     await editor.goto();
@@ -485,7 +463,7 @@ test("agents: the creation dialog keeps what was typed after a failed create", a
   expect(files.find((file) => file.path === "prompt.md")?.inline).toBe(instructions);
 });
 
-test("a MCP home author edits files while browsing a read-only placement", async ({
+test("a skill home author edits files while browsing a read-only placement", async ({
   request,
   browser,
   browserCtx,
@@ -494,21 +472,11 @@ test("a MCP home author edits files while browsing a read-only placement", async
 }) => {
   const { orgId, orgSlug, defaultSpaceId: homeId } = browserCtx.org;
   const scope = `@${orgSlug}`;
-  const name = `home-mcp-${Date.now()}`;
+  const name = `home-skill-${Date.now()}`;
   const id = `${scope}/${name}`;
   const destination = await createSpace(orgOnlyClient, "Read-only destination");
   const destinationId = destination.id;
-  const zip = zipSync({
-    "manifest.json": encoder.encode(JSON.stringify(mcpServerManifest({ name: id }))),
-    "main.js": encoder.encode("export {};"),
-  });
-  const imported = await request.post("/api/packages/import", {
-    headers: { Cookie: browserCtx.auth.cookie, "X-Org-Id": orgId, "X-Space-Id": homeId },
-    multipart: {
-      file: { name: "server.afps", mimeType: "application/zip", buffer: Buffer.from(zip) },
-    },
-  });
-  expect(imported.status()).toBe(201);
+  await createSkill(apiClient, scope, name);
   expect(
     (await apiClient.post(`/spaces/${destinationId}/packages`, { packageId: id })).status(),
   ).toBe(201);
@@ -532,14 +500,14 @@ test("a MCP home author edits files while browsing a read-only placement", async
   const context = await createAuthedContext(browser, author, orgId, destinationId);
   try {
     const page = await context.newPage();
-    const editor = new PackageEditorPage(page, scope, name, "mcp-servers");
+    const editor = new PackageEditorPage(page, scope, name, "skills");
     await editor.goto();
     await editor.createFile("notes.txt");
     await editor.editFile("notes.txt", "Written by the home author");
     const saved = page.waitForResponse(
       (response) =>
         response.request().method() === "PATCH" &&
-        response.url().includes(`/packages/mcp-servers/${id}`),
+        response.url().includes(`/packages/skills/${id}`),
     );
     await editor.saveButton.click();
     expect((await saved).status()).toBe(200);

@@ -30,9 +30,13 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 import { parseScopedName } from "@appstrate/core/naming";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
-import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
+import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
-import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
+import {
+  checkCompanionFiles,
+  companionFilesFromRecord,
+  decodeSkillMarkdown,
+} from "@appstrate/afps-shared/companion-files";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
@@ -472,7 +476,7 @@ export function versionArtifactUnavailable(
 /**
  * The archive of a published version, or {@link versionArtifactUnavailable} when it is
  * unreadable or lacks its type's REQUIRED content entry (`PACKAGE_CONTENT_ENTRY`).
- * `entry` is that entry's bytes; `undefined` when the type has none or the optional one is absent.
+ * `entry` is that entry's bytes; `undefined` when the optional one is absent.
  */
 export function requirePublishedArchive(
   type: PackageType,
@@ -481,8 +485,8 @@ export function requirePublishedArchive(
 ): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
   if (detail.content === null) throw versionArtifactUnavailable(packageId, detail.version);
   const spec = PACKAGE_CONTENT_ENTRY[type];
-  const entry = spec ? detail.content[spec.path] : undefined;
-  if (spec?.required && !entry) {
+  const entry = detail.content[spec.path];
+  if (spec.required && !entry) {
     throw versionArtifactUnavailable(packageId, detail.version, `'${spec.path}' in its archive`);
   }
   return { files: detail.content, entry };
@@ -519,12 +523,10 @@ export interface PublishedDefinition {
  * The manifest is the `package_versions.manifest` column: authoritative, one
  * DB read, and immune to an archive that will not open. The CONTENT is the
  * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
- * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
- * with no content entry at all (`mcp-server`, whose content IS its manifest)
- * and an `integration` published without its optional `INTEGRATION.md` both
- * store the manifest TEXT in `draft_content`, so the published projection
- * reproduces that rather than handing back a `null` the editor would render as
- * an empty file.
+ * and the fallback below is the exact inverse of `applyDraftOverlay`: an
+ * `integration` published without its optional `INTEGRATION.md` stores the
+ * manifest TEXT in `draft_content`, so the published projection reproduces that
+ * rather than handing back a `null` the editor would render as an empty file.
  *
  * That fallback stands only for an entry missing from an archive that opened:
  * an unreadable archive, or one without a REQUIRED entry, is refused by
@@ -802,7 +804,7 @@ export async function createVersionFromDraft(params: {
   const manifest = { ...baseManifest, version };
 
   // The draft manifest is the single source of truth for dependencies
-  // (skills / integrations / mcp_servers) — the editor maintains them
+  // (skills / integrations) — the editor maintains them
   // directly. Publish preserves the `dependencies` block verbatim, exactly
   // like every other version-creation path (import, fork, system sync). The
   // transitive skill closure and version resolution happen at bundle time
@@ -852,13 +854,12 @@ export async function createVersionFromDraft(params: {
       // Locally-created agents have no stored files — minimal ZIP is correct
       return { zip: buildMinimalZip(frozenManifest, content) };
     }
-    // pkg.type === "skill" | "integration" | "mcp-server" — all three bundle
-    // their stored files (skill content / integration entrypoint+bundle /
-    // MCPB payload) plus the rewritten manifest, from their respective storage
-    // folder. The folder MUST come from `storageFolderForType` — the single
-    // mapping the upload path (`routes/packages.ts`), the deletion outbox and
-    // the orphan scanner all use. A hand-rolled ternary here silently sent
-    // `mcp-server` reads to `skills/`.
+    // pkg.type === "skill" | "integration" — both bundle their stored files
+    // (skill content / integration manifest + server payload) plus the
+    // rewritten manifest, from their respective storage folder. The folder
+    // MUST come from `storageFolderForType` — the single mapping the upload
+    // path (`routes/packages.ts`), the deletion outbox and the orphan scanner
+    // all use.
     if (!storedFiles) {
       throw new Error(
         `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
@@ -874,27 +875,13 @@ export async function createVersionFromDraft(params: {
   // STORAGE, and `packages.draft_content` is a second copy that can drift.
   if (frozenEntries) assertArchiveContentConforms(pkg.type, frozenEntries, "content");
 
-  // A schema-valid mcp-server draft can still point at a companion file that
-  // is absent from the stored payload. Reparse the exact bytes about to become
-  // immutable so publish enforces the same executable-archive invariant as
-  // create and import.
-  //
-  // Keyed on `pkg.type` ALONE. Also requiring
-  // `finalManifest.type === "mcp-server"` would exempt a row whose stored
-  // manifest drifted to another type: the one row shape that cannot be trusted
-  // would skip the check and mint an immutable version + ZIP nothing validated.
-  // Every write direction is closed: create throws
-  // (`package-items/manifest.ts`), the author routes 400
-  // (`validateManifestForRoute`), fork normalizes (`package-fork.ts`). A
-  // surviving drifted row fails publish loudly
-  // with `invalid_bundle` instead of publishing unchecked
-  // (`docs/NO_TRANSITIONAL_CODE.md` §1).
-  if (pkg.type === "mcp-server") {
-    try {
-      parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
-    } catch (err) {
-      return { ok: false, error: "invalid_bundle", detail: getErrorMessage(err) };
-    }
+  // A schema-valid local integration draft can still point at a server payload
+  // file that is absent from the stored tree. Check the exact bytes about to
+  // become immutable, so publish enforces the same executable-archive
+  // invariant as create and import (`LOCAL_SERVER_MISSING_ENTRY_POINT`).
+  if (pkg.type === "integration" && frozenEntries) {
+    const violation = checkCompanionFiles(finalManifest, companionFilesFromRecord(frozenEntries));
+    if (violation) return { ok: false, error: "invalid_bundle", detail: violation.message };
   }
 
   // Check for duplicate content — reject if identical to the latest version.

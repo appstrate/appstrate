@@ -300,7 +300,7 @@ async function coarseSpacePackageGate(
   const ownSpace =
     op !== "configure" && owner !== null && owner === callerPersonalOwnerId(c, orgId);
   if (!ownSpace) {
-    const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
+    const alternatives = (["agent", "skill", "integration"] as const).map((type) =>
       spacePackagePermission(type, op),
     );
     await requireAnyPermission(alternatives)(c, async () => {});

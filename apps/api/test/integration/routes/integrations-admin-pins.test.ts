@@ -61,7 +61,6 @@ const app = getTestApp();
 const AGENT = "@adminorg/agent-a";
 const SECOND_AGENT = "@adminorg/agent-b";
 const INTEGRATION = "@adminorg/svc";
-const MCP_SERVER = "@adminorg/svc-server";
 
 function buildAgentManifest(name: string, required = false): Record<string, unknown> {
   return {
@@ -83,7 +82,6 @@ const REQUIRED_AGENT = "@adminorg/agent-required";
 function buildIntegrationManifest() {
   return localIntegrationManifest({
     name: INTEGRATION,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {

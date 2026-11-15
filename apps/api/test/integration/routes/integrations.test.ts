@@ -24,7 +24,7 @@ import {
 import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {} from "../../helpers/integration-manifests.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
@@ -50,8 +50,15 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
     version: "0.1.0",
     display_name: "Gmail",
     description: "Gmail integration",
-    // AFPS: local server → mcp-server reference (separate package).
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    // AFPS: the local server is declared inline on the integration.
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     // AFPS §4.4 — the tool an agent inherits without an explicit selection.
     // Surfaced by the detail endpoint so an agent-builder sees the default.
     default_tools: ["api_call"],
@@ -320,18 +327,11 @@ describe("GET /api/integrations/:packageId", () => {
     expect(body.default_tools).toEqual(["api_call"]);
   });
 
-  it("builds a local integration's tool catalog from its mcp-server's tools", async () => {
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await seedPackage({
-      id: "@myorg/gmail-server",
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: {
-        ...mcpServerManifest({ name: "@myorg/gmail-server", version: "0.1.0" }),
-        tools: [{ name: "search", description: "Search threads" }, { name: "send" }],
-      },
-    });
+  it("builds a local integration's tool catalog from its own source.server.tools", async () => {
+    const manifest = gmailManifest("@myorg/gmail");
+    const source = manifest.source as { server: Record<string, unknown> };
+    source.server.tools = [{ name: "search", description: "Search threads" }, { name: "send" }];
+    await seedIntegration(ctx.orgId, manifest);
     const res = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
     });
@@ -890,7 +890,14 @@ describe("importConnectionSchema — non-string credential values (R8b)", () => 
       name,
       version: "0.1.0",
       display_name: "Mixed",
-      source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         api: {
           type: "api_key",

@@ -33,6 +33,7 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
+  getLocalServer,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
   selectedApiCallConfigs,
@@ -45,14 +46,12 @@ import type {
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
   effectiveMcpServerType,
-  getMcpServerMcpConfigEnv,
+  getLocalServerEnv,
   getMcpServerWorkspaceMount,
-  renderMcpConfigEnv,
-  type McpServerManifest,
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
-import { BundleError, UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
+import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
@@ -66,12 +65,11 @@ import { displayAccountId } from "../lib/connection-identity.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,
-  resolveMcpServerForSpawn,
   type IntegrationManifestCache,
+  type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
 import {
   getIntegrationSourceKind,
-  getLocalServerRef,
   getRemoteSource,
   renderRemoteSource,
   getAppstrateConnectMeta,
@@ -85,12 +83,6 @@ import {
 } from "./integration-manifest-helpers.ts";
 
 interface ResolveIntegrationsInput {
-  /**
-   * The run's org — required tenant boundary for package resolution
-   * (defense in depth against a cross-tenant reference): a spawn may only
-   * resolve packages the org owns or system packages.
-   */
-  orgId: string;
   spaceId: string;
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
@@ -110,6 +102,12 @@ interface ResolveIntegrationsInput {
    * manifest is SELECTed + Zod-parsed once per run trigger.
    */
   manifestCache?: IntegrationManifestCache;
+  /**
+   * The run's frozen integration versions (`runs.resolved_integration_versions`). A local
+   * integration's spawn spec names the version whose archive the byte route serves; an
+   * integration frozen on its draft, on the boot registry, or absent from the map names none.
+   */
+  integrationVersions?: ResolvedIntegrationVersionMap;
 }
 
 /**
@@ -223,7 +221,7 @@ async function renderConnectionRemoteUrl(
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<ResolveIntegrationSpawnsResult> {
-  const { orgId, spaceId, actor, agentManifest, resolvedConnections } = input;
+  const { spaceId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared
   // (scheduler.ts `isScheduleActorValid`, which disables the schedule and
@@ -244,23 +242,18 @@ export async function resolveIntegrationSpawns(
       try {
         return await resolveOne(
           entry.id,
-          orgId,
           spaceId,
           actor,
           entry.tools,
           resolvedConnections?.[entry.id],
           entry.auth_key,
           input.manifestCache,
+          input.integrationVersions?.[entry.id],
         );
       } catch (err) {
-        // An unsatisfiable referenced-mcp-server pin is a hard failure: the run
-        // must NOT silently spawn without the integration's tools. resolveOne
-        // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
-        // the pipeline maps it to a structured 422, matching the skill
-        // closure. Every other failure (not active / not connected /
-        // missing referenced package) stays a per-integration skip, a
-        // MARKED one: the reason travels back to the caller in `dropped`.
-        if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
+        // Every failure (not active / not connected / unusable manifest) stays a
+        // per-integration skip, a MARKED one: the reason travels back to the caller in
+        // `dropped`.
         // A key missing from the keyring fails the run (503) rather than dropping the integration.
         if (err instanceof EncryptionKeyUnavailableError) throw err;
         // The server-side log stays: it carries `spaceId`, which the
@@ -291,13 +284,13 @@ export async function resolveIntegrationSpawns(
 /** One spec per bound connection; `toolAllowlist: undefined` is the §4.4 wildcard. */
 async function resolveOne(
   integrationId: string,
-  orgId: string,
   spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
   boundConnections: readonly ResolvedConnection[] | undefined,
   requiredAuthKey: string | undefined,
-  manifestCache?: IntegrationManifestCache,
+  manifestCache: IntegrationManifestCache | undefined,
+  frozenVersion: ResolvedIntegrationVersionMap[string] | undefined,
 ): Promise<ResolveOneResult> {
   // (a) Package exists + integration type. The manifest is read through the
   // per-run `manifestCache`, which `resolveRunIntegrationVersions` seeds at
@@ -360,7 +353,7 @@ async function resolveOne(
   // AND httpDeliveryAuths from delivery.http.
   //
   // Note: bundle bytes are NOT inlined into the spec — the sidecar fetches
-  // them via `GET /internal/mcp-server-bundle/...` at boot because base64
+  // them via `GET /internal/integration-bundle/...` at boot because base64
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
@@ -387,17 +380,15 @@ async function resolveOne(
   const apiCallAuthKeys = new Set(selectedApiCalls.map((cfg) => cfg.authKey));
 
   // ── Resolve the sidecar server spec from the AFPS `source`
-  // discriminant (replaces the 1.x inline `manifest.server`). ──
+  // discriminant. ──
   //   - remote → Streamable HTTP MCP (`{ url, transport }`; spawn-mode is
   //              selected by `spec.sourceKind`, not `server.type`).
-  //   - local  → resolve the referenced mcp-server package's MCPB manifest
-  //              and emit `{ type, entry_point }` from `server.{type, entry_point}`.
+  //   - local  → the server is declared inline on the integration itself
+  //              (`source.server`) and its payload ships in the integration's own
+  //              archive: `{ type, entry_point }` plus the integration id (and the
+  //              frozen version, when the run froze a published one) the byte route
+  //              serves.
   //   - none   → serverless (no `server` in the spec; sidecar skips spawn).
-  //
-  // Resolved BEFORE `resolveDeliveries` so the mcp-server's `mcp_config.env`
-  // template is available for AFPS §7.6 `user_config_key` substitution
-  // (CC-4) — local-source integrations can bind a `delivery.env.<var>` to a
-  // `${user_config.<key>}` placeholder in the referenced mcp-server's env map.
   const sourceKind = getIntegrationSourceKind(manifest);
   const isRemoteHttp = sourceKind === "remote";
   let serverSpec:
@@ -410,7 +401,6 @@ async function resolveOne(
         version?: string;
       }
     | undefined;
-  let referencedMcpServer: McpServerManifest | null = null;
   let perConnectionRemoteUrl = false;
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
@@ -452,74 +442,27 @@ async function resolveOne(
       transport: remote.transport,
     };
   } else if (sourceKind === "local") {
-    const ref = getLocalServerRef(manifest);
-    if (!ref) {
-      logger.warn("local-source integration missing source.server; skipping", { integrationId });
-      return drop("local_server_ref_missing");
-    }
-    // Resolve the referenced mcp-server to ONE concrete version, honoring the
-    // `source.server.version` pin, and read THAT version's manifest. The
-    // resolved `version` is forwarded to the byte route (below, via
-    // `server.version`) so the runnable bytes come from the same version — no
-    // manifest/bytes skew, and a `publish` is reflected on the run without a
-    // draft overwrite. An unsatisfiable pin / missing published
-    // version skips the integration LOUDLY rather than silently falling back to
-    // whatever bytes happen to be latest.
-    const resolution = await resolveMcpServerForSpawn(ref.name, orgId, ref.version);
-    if (!resolution.ok) {
-      // A real `source.server.version` pin that cannot be met (unsatisfiable
-      // range / never-published) fails the run LOUDLY — a pinned run
-      // must never silently spawn without the integration. A
-      // missing/wrong/invalid referenced package stays a soft skip: the
-      // integration is mis-declared, not the run's pin, so the run proceeds
-      // without it (the sidecar surfaces the gap from its side too).
-      if (
-        resolution.reason === "unsatisfiable_pin" ||
-        resolution.reason === "no_published_version"
-      ) {
-        throw new BundleError(
-          "DEPENDENCY_UNRESOLVED",
-          `Referenced mcp-server '${ref.name}@${ref.version ?? "latest"}' could not be resolved against published versions (${resolution.reason})`,
-          { missing: [{ name: ref.name, versionSpec: ref.version ?? "latest" }] },
-        );
-      }
-      logger.warn("referenced mcp-server could not be resolved; skipping integration", {
-        integrationId,
-        mcpServerId: ref.name,
-        pin: ref.version,
-        reason: resolution.reason,
-      });
-      return drop(
-        "mcp_server_unresolved",
-        `referenced mcp-server '${ref.name}' (${resolution.reason})`,
-      );
-    }
-    const mcpServer = resolution.manifest;
-    referencedMcpServer = mcpServer;
-    const run = (mcpServer as { server?: { entry_point?: string } }).server;
+    const localServer = getLocalServer(manifest);
     // The runtime this server actually spawns under: the Appstrate `_meta`
-    // override, else the MCPB `server.type`. Decided by core so the
+    // override, else the AFPS `source.server.type`. Decided by core so the
     // connect-login path (`connect/connect-run-launcher.ts`) cannot decide it
-    // differently — it once did, and the same bun-native package spawned under
-    // two interpreters depending on which path reached it.
-    const effectiveType = effectiveMcpServerType(mcpServer);
-    // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
-    // required, so a manifest that parsed (non-null above) always has them.
-    // Kept as a fail-closed guard against a future schema relaxation.
-    if (!effectiveType || !run?.entry_point) {
-      logger.warn("referenced mcp-server has no runnable server config; skipping", {
+    // differently.
+    const effectiveType = localServer ? effectiveMcpServerType(manifest) : undefined;
+    if (!localServer || !effectiveType) {
+      logger.warn("local-source integration has no runnable source.server; skipping", {
         integrationId,
-        mcpServerId: ref.name,
       });
-      return drop("mcp_server_not_runnable", `referenced mcp-server '${ref.name}'`);
+      return drop("local_server_not_runnable");
     }
     serverSpec = {
       type: effectiveType,
-      entry_point: run.entry_point,
-      packageId: ref.name,
-      // The version the byte route must serve. `null` for system mcp-servers
-      // (the boot registry holds a single version, fetched by id alone).
-      ...(resolution.version ? { version: resolution.version } : {}),
+      entry_point: localServer.entry_point,
+      packageId: integrationId,
+      // The version the byte route must serve. Absent for a system integration (boot
+      // registry) and for a draft run (the draft files).
+      ...(frozenVersion?.source === "version" && frozenVersion.version
+        ? { version: frozenVersion.version }
+        : {}),
     };
   }
   // sourceKind === "none" (or unknown) → serverless, serverSpec stays undefined.
@@ -530,11 +473,11 @@ async function resolveOne(
   // wires only the api_call tool(s), if any).
   const specSourceKind: "local" | "remote" | "none" = sourceKind ?? "none";
 
-  // Once for the whole set: a malformed mcp-server `_meta` fails the integration.
+  // Once for the whole set: a malformed `_meta` workspace entry fails the integration.
   const workspaceMount =
-    referencedMcpServer && specSourceKind === "local"
-      ? resolveWorkspaceMount(integrationId, referencedMcpServer)
-      : {};
+    specSourceKind === "local" ? resolveWorkspaceMount(integrationId, manifest) : {};
+  // Literal `source.server.mcp_config.env`, merged under each connection's `delivery.env`.
+  const serverEnv = specSourceKind === "local" ? getLocalServerEnv(manifest) : {};
 
   // What every spec of this integration shares; `server` differs per connection with a templated URL.
   const specBase = (server: typeof serverSpec) => ({
@@ -569,7 +512,7 @@ async function resolveOne(
         {
           ...specBase(serverSpec),
           ...toolSurface(undefined),
-          spawnEnv: {},
+          spawnEnv: { ...serverEnv },
         } satisfies IntegrationSpawnSpec,
       ],
       drops: [],
@@ -592,7 +535,6 @@ async function resolveOne(
         manifest,
         pick.connectionId,
         apiCallAuthKeys,
-        referencedMcpServer,
         requiredAuthKey,
       );
       if (!deliveries) return { reason: "no_delivery", connectionLabel: pick.label };
@@ -616,7 +558,8 @@ async function resolveOne(
         },
         ...(apiCalls.length > 0 ? { apiCalls } : {}),
         ...toolSurface(deliveries.connectLogin?.toolName),
-        spawnEnv: deliveries.spawnEnv,
+        // `delivery.env` wins over the server's literal `mcp_config.env`.
+        spawnEnv: { ...serverEnv, ...deliveries.spawnEnv },
         // Remote HTTP injects its own token.
         ...(deliveries.httpDeliveryAuths && !isRemoteHttp
           ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
@@ -664,7 +607,7 @@ function serverWire(
 
 /**
  * Render the optional `workspaceMount` field on the spawn spec from
- * the referenced mcp-server's `_meta["dev.appstrate/workspace"]`. The
+ * the integration's `_meta["dev.appstrate/workspace"]`. The
  * core parser throws on malformed entries; that error propagates (with
  * integration context) so a bad manifest fails fast at run kickoff —
  * matching the caller's contract — rather than producing a silently
@@ -673,14 +616,14 @@ function serverWire(
  */
 function resolveWorkspaceMount(
   integrationId: string,
-  mcpServer: McpServerManifest,
+  manifest: IntegrationManifest,
 ): { workspaceMount?: NonNullable<IntegrationSpawnSpec["workspaceMount"]> } {
   let mount: ReturnType<typeof getMcpServerWorkspaceMount>;
   try {
-    mount = getMcpServerWorkspaceMount(mcpServer);
+    mount = getMcpServerWorkspaceMount(manifest);
   } catch (err) {
     throw new Error(
-      `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
+      `Integration '${integrationId}': _meta.workspace is malformed — ${
         err instanceof Error ? err.message : String(err)
       }`,
       { cause: err },
@@ -727,7 +670,6 @@ async function resolveDeliveries(
   manifest: IntegrationManifest,
   connectionId: string,
   apiCallAuthKeys: ReadonlySet<string>,
-  referencedMcpServer: McpServerManifest | null,
   requiredAuthKey: string | undefined,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
@@ -867,14 +809,8 @@ async function resolveDeliveries(
   // AFPS: each entry carries a `{$credential.<field>}` value template
   // (was the 1.x `{ from }` field pointer). Render it against the credential bag.
   //
-  // AFPS §7.6 (CC-4): for local-source integrations whose referenced
-  // mcp-server declares `${user_config.<key>}` placeholders in
-  // `server.mcp_config.env`, the entry's `user_config_key` (defaulting to the
-  // env-variable name) names the placeholder we pre-render. The substituted
-  // env then flows to the sidecar exactly as if it had come from a standalone
-  // MCPB host — one package, two environments.
+  // The server's literal `mcp_config.env` is merged under these by the caller.
   const envMap = auth.delivery?.env;
-  const userConfigSubstitutions: Record<string, string> = {};
   if (envMap && Object.keys(envMap).length > 0) {
     for (const [envKey, conf] of Object.entries(envMap)) {
       const value = renderCredentialTemplate(conf.value, fields, variables);
@@ -887,33 +823,7 @@ async function resolveDeliveries(
         continue;
       }
       spawnEnv[envKey] = value;
-      // AFPS §7.6: collect the user_config bridge entries. Default
-      // `user_config_key` to the env-variable name when omitted.
-      const userConfigKey = conf.user_config_key ?? envKey;
-      userConfigSubstitutions[userConfigKey] = value;
       resolvedAtLeastOne = true;
-    }
-  }
-
-  // AFPS §7.6 + §3.4 (CC-4) — bridge into the referenced mcp-server's
-  // `mcp_config.env` template. Each `${user_config.<key>}` placeholder is
-  // replaced with the rendered credential value the integration's
-  // `delivery.env` materialised under that key. Keys without a matching
-  // substitution pass through verbatim (the placeholder reaches the runner
-  // unsubstituted — the runner is responsible for raising a clear error).
-  //
-  // The rendered map is MERGED into `spawnEnv`. The integration's own
-  // `delivery.env` keys win on conflict — the integration is the
-  // authoritative source for what its server sees.
-  if (referencedMcpServer && Object.keys(userConfigSubstitutions).length > 0) {
-    const mcpConfigEnv = getMcpServerMcpConfigEnv(referencedMcpServer);
-    if (mcpConfigEnv && Object.keys(mcpConfigEnv).length > 0) {
-      const rendered = renderMcpConfigEnv(mcpConfigEnv, userConfigSubstitutions);
-      for (const [k, v] of Object.entries(rendered)) {
-        // Integration's direct delivery.env wins — don't shadow it.
-        if (k in spawnEnv) continue;
-        spawnEnv[k] = v;
-      }
     }
   }
 

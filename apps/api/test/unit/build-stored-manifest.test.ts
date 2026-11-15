@@ -29,7 +29,7 @@ import { buildStoredManifest } from "../../src/services/package-items/manifest.t
 import { CONFIG_BY_TYPE } from "../../src/services/package-items/config.ts";
 import { AFPS_SCHEMA_URLS, type PackageType } from "@appstrate/core/validation";
 
-const TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
+const TYPES = ["agent", "skill", "integration"] as const;
 
 /** Minimal manifest of `type`, valid enough for a pure stamping test. */
 function manifestOf(type: PackageType, overrides: Record<string, unknown> = {}) {
@@ -49,10 +49,10 @@ function manifestOf(type: PackageType, overrides: Record<string, unknown> = {}) 
 describe("buildStoredManifest — manifest/config type agreement", () => {
   it("throws when the manifest type disagrees with the package type", () => {
     expect(() =>
-      buildStoredManifest(manifestOf("skill"), CONFIG_BY_TYPE["mcp-server"], {
+      buildStoredManifest(manifestOf("skill"), CONFIG_BY_TYPE.integration, {
         id: "@acme/test",
       }),
-    ).toThrow(/expected "mcp-server", received "skill"/);
+    ).toThrow(/expected "integration", received "skill"/);
   });
 
   it("throws when the manifest carries no type at all", () => {

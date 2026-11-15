@@ -14,7 +14,6 @@ import {
   renderAuthAuthorizedUris,
   runnerEgressFor,
   getIntegrationSourceKind,
-  getLocalServerRef,
   getRemoteSource,
   renderRemoteSource,
   hasPerConnectionAuthServer,
@@ -77,25 +76,6 @@ describe("getIntegrationSourceKind", () => {
   it("returns undefined for an unknown or absent kind", () => {
     expect(getIntegrationSourceKind(manifest({ kind: "weird" }))).toBeUndefined();
     expect(getIntegrationSourceKind(manifest(undefined))).toBeUndefined();
-  });
-});
-
-describe("getLocalServerRef", () => {
-  it("returns the referenced mcp-server name + version", () => {
-    expect(
-      getLocalServerRef(manifest({ kind: "local", server: { name: "@x/srv", version: "^1.0.0" } })),
-    ).toEqual({ name: "@x/srv", version: "^1.0.0" });
-  });
-
-  it("returns null when source is not local", () => {
-    expect(getLocalServerRef(manifest({ kind: "remote", remote: {} }))).toBeNull();
-  });
-
-  it("returns null when server ref is malformed (non-string fields)", () => {
-    expect(
-      getLocalServerRef(manifest({ kind: "local", server: { name: 42, version: "1" } })),
-    ).toBeNull();
-    expect(getLocalServerRef(manifest({ kind: "local" }))).toBeNull();
   });
 });
 

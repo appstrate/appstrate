@@ -46,15 +46,11 @@ import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
-  findUnexposedLocalDefaultTools,
   validateAgentIntegrationSelections,
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
-import {
-  assertArchiveContentConforms,
-  assertNoManifestViolations,
-} from "./package-items/config.ts";
+import { assertArchiveContentConforms } from "./package-items/config.ts";
 import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { assertImportedType } from "../lib/import-type.ts";
 import { assertPackageScopeNotReserved } from "./package-items/crud.ts";
@@ -678,7 +674,7 @@ function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
  * handed to the validator is therefore the post-import
  * `incoming ∪ already-present` catalog: every manifest the bundle carries,
  * keyed by package id, is resolved together with existing versions and
- * dist-tags. Same map covers the mcp-servers a local integration references.
+ * dist-tags.
  */
 async function assertBundleAgentsExposeCallableTools(
   bundle: Bundle,
@@ -721,28 +717,6 @@ function assertBundleRootConforms(bundle: Bundle): void {
 }
 
 /**
- * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
- * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
- */
-async function assertBundleRootDefaultToolsExposed(
-  bundle: Bundle,
-  orgId: string,
-  carried: ReadonlyMap<string, CarriedVersion[]>,
-): Promise<void> {
-  const root = bundle.packages.get(bundle.root);
-  const parsed = parsePackageIdentity(bundle.root);
-  if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
-  assertNoManifestViolations(
-    await findUnexposedLocalDefaultTools(
-      root.manifest as unknown as Record<string, unknown>,
-      orgId,
-      carried,
-    ),
-    `${bundle.root}: `,
-  );
-}
-
-/**
  * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
@@ -777,7 +751,6 @@ export async function preflightBundleImport(
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
-  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

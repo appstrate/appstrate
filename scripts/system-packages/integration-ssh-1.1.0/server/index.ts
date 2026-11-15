@@ -4,7 +4,7 @@
  * SSH — reach one host over SSH (Bun, dependency-free).
  *
  * Shells out to the `ssh` / `sftp` clients baked into the bun runner image
- * (`runtime-pi/runners/bun/Dockerfile`), as `@appstrate/github-git-mcp` shells
+ * (`runtime-pi/runners/bun/Dockerfile`), as the `@appstrate/github-git` integration's server shells
  * out to `git`. The `@appstrate/ssh` integration delivers the private key as a
  * file (`delivery.files`) and the non-secret fields as env (`delivery.env`).
  *
@@ -1247,7 +1247,7 @@ export async function editFileTool(
 
 // ─────────────────────── MCP stdio JSON-RPC loop ─────────────────────
 
-export const SERVER_VERSION = "1.0.3";
+export const SERVER_VERSION = "1.1.0";
 /** Newest first; [0] is answered to a client asking for anything else. */
 export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
 /** A quarter of the MCP SDK's 60 s default request timeout. */

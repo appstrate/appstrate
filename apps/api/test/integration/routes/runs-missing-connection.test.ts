@@ -47,7 +47,6 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedMcpServer,
   seedPackage,
   seedPublishedVersion,
   seedPackageShare,
@@ -79,7 +78,6 @@ const app = getTestApp();
 const AGENT = "@runorg/agent-needing-integ";
 const INTEGRATION = "@runorg/svc";
 const SECOND_INTEGRATION = "@runorg/extra-svc";
-const MCP_SERVER = "@runorg/svc-server";
 
 function buildAgentManifest(
   integrations: string[],
@@ -107,7 +105,6 @@ function buildAgentManifest(
 function buildIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {
@@ -774,15 +771,14 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
   }
 
   /**
-   * Seeds the integration, a PUBLISHED version of it, and its referenced
-   * mcp-server — the whole chain the run kickoff walks. The other suites here
+   * Seeds the integration and a PUBLISHED version of it — the whole chain the run
+   * kickoff walks. The other suites here
    * skip all that because they 409 at readiness first; these tests must be
    * able to get PAST readiness when the fix is absent, otherwise the control
    * fails on an unrelated `422 dependency_unresolved` and proves nothing about
    * the silent auto-pick.
    */
   async function seedDefaultToolsIntegration(id: string) {
-    await seedMcpServer({ id: MCP_SERVER, orgId: ctx.orgId });
     const manifest = buildDefaultToolsIntegrationManifest(id);
     await seedPackage({
       id,
@@ -926,7 +922,6 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         source: "local",
         draftManifest: localIntegrationManifest({
           name: OAUTH_INTEGRATION,
-          serverName: MCP_SERVER,
           version: "1.0.0",
           auths: {
             primary: {

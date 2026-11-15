@@ -170,22 +170,6 @@ export const responses = {
       },
     },
   },
-  UnsupportedMediaType: {
-    description: "The endpoint requires a different request media type",
-    content: {
-      "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
-        example: {
-          type: "https://docs.appstrate.dev/errors/archive-required",
-          title: "Archive Required",
-          status: 415,
-          detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
-          code: "archive_required",
-          request_id: "req_abc123",
-        },
-      },
-    },
-  },
   RateLimited: {
     description: "Too many requests",
     headers: {

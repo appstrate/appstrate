@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { packageTypeValues, runAlertStatusValues } from "@appstrate/db/schema";
+import { PACKAGE_TYPES, runAlertStatusValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -60,7 +60,7 @@ const notificationObject = {
       required: ["packageId", "package_type", "shared_by_name"],
       properties: {
         packageId: { type: "string" },
-        package_type: { type: "string", enum: [...packageTypeValues] },
+        package_type: { type: "string", enum: [...PACKAGE_TYPES] },
         shared_by_name: { type: "string" },
       },
     }),

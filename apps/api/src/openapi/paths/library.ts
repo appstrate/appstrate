@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { packageTypeValues } from "@appstrate/db/schema";
+import { PACKAGE_TYPES } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -39,11 +39,10 @@ const SPACES_SCHEMA = {
 const PACKAGES_SCHEMA = {
   type: "object",
   description: "Packages grouped by type. Every group is always present (possibly empty).",
-  required: [...packageTypeValues],
+  required: [...PACKAGE_TYPES],
   properties: {
     agent: { $ref: "#/components/schemas/LibraryPackageList" },
     skill: { $ref: "#/components/schemas/LibraryPackageList" },
-    "mcp-server": { $ref: "#/components/schemas/LibraryPackageList" },
     integration: { $ref: "#/components/schemas/LibraryPackageList" },
   },
 } as const;
@@ -93,7 +92,6 @@ const PACKAGES_EXAMPLE = {
     },
   ],
   skill: [],
-  "mcp-server": [],
   integration: [
     {
       id: "pkg_gmail",

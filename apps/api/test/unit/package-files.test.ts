@@ -171,25 +171,15 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
     });
   });
 
-  it("mcp-server → nothing (draft_content is only a manifest copy)", () => {
-    const files = overlay(
-      "mcp-server",
-      { draftContent: '{"name":"@t/pkg","type":"mcp-server"}' },
-      { "manifest.json": "{}", "server/index.js": "code" },
-    );
-    expect(files).toEqual({ "manifest.json": "{}", "server/index.js": "code" });
-  });
-
   it("materializes the agent/skill file even with no stored ZIP at all", () => {
     expect(overlay("agent", { draftContent: "p" })).toEqual({ "prompt.md": "p" });
     expect(overlay("skill", { draftContent: "s" })).toEqual({ "SKILL.md": "s" });
-    // The two manifest-backed types must NOT gain a phantom entry.
+    // The manifest-backed type must NOT gain a phantom entry.
     expect(overlay("integration", { draftContent: "x" })).toEqual({});
-    expect(overlay("mcp-server", { draftContent: "x" })).toEqual({});
   });
 
   it("overlays draft_manifest onto manifest.json for every type", () => {
-    for (const type of ["agent", "skill", "integration", "mcp-server"] as const) {
+    for (const type of ["agent", "skill", "integration"] as const) {
       const files = overlay(type, { draftManifest: { type } }, { "manifest.json": "STALE" });
       expect(JSON.parse(files["manifest.json"]!)).toEqual({ type });
     }
@@ -282,10 +272,6 @@ describe("resolveDraftContent — the shape of the WRITE decides, never the stor
     // Including when the stored value is itself JSON-shaped: `required: true`
     // means there is no fallback for it to be confused with.
     expect(resolveDraftContent("agent", MANIFEST, "new prompt")).toBe("new prompt");
-  });
-
-  it("never guards mcp-server — its column is a manifest copy by definition", () => {
-    expect(resolveDraftContent("mcp-server", MANIFEST, "anything")).toBe("anything");
   });
 });
 

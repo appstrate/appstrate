@@ -4,7 +4,7 @@ import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
-  packageTypeValues,
+  PACKAGE_TYPES,
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
@@ -769,7 +769,7 @@ export const schemas = {
       },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      package_type: { type: "string", enum: [...packageTypeValues] },
+      package_type: { type: "string", enum: [...PACKAGE_TYPES] },
       package_source: { type: "string", enum: [...packageSourceValues] },
       draft_manifest: {
         type: ["object", "null"],
@@ -1029,7 +1029,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: [...packageTypeValues],
+        enum: [...PACKAGE_TYPES],
       },
       running_runs: { type: "integer" },
       unread_count: {
@@ -1040,17 +1040,12 @@ export const schemas = {
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
-        // caller; a launcher is the one who connects them. `skills` and
-        // `mcp_servers` are the composition, withheld from a summary read
+        // caller; a launcher is the one who connects them. `skills` is the
+        // composition, withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
           skills: {
-            type: "object",
-            additionalProperties: { type: "string" },
-            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
             type: "object",
             additionalProperties: { type: "string" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
@@ -1178,8 +1173,8 @@ export const schemas = {
       dependencies: {
         type: "object",
         // `integrations` (via parseManifestIntegrations) is emitted to every
-        // caller — a launcher is the one who connects them. `skills` and
-        // `mcp_servers`, the composition, are withheld from a summary read
+        // caller — a launcher is the one who connects them. `skills`, the
+        // composition, is withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
@@ -1187,19 +1182,6 @@ export const schemas = {
             type: "array",
             items: { $ref: "#/components/schemas/AgentSkillRef" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
-            type: "array",
-            items: {
-              type: "object",
-              required: ["id", "version"],
-              properties: {
-                id: { type: "string" },
-                version: { type: "string" },
-              },
-            },
-            description:
-              "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`).",
           },
           integrations: {
             type: "array",
@@ -1983,17 +1965,20 @@ export const schemas = {
         type: "string",
         enum: ["local", "remote", "none"],
         description:
-          "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
+          "The manifest's `source.kind`: `local` runs the MCP server the integration archive carries, in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
       },
       server: {
         type: ["object", "null"],
-        required: ["name", "version"],
+        required: ["type", "entry_point"],
         properties: {
-          name: { type: "string" },
-          version: { type: "string", description: "Semver range" },
+          type: { type: "string", description: "Runtime: `node`, `python`, `binary` or `uv`." },
+          entry_point: {
+            type: "string",
+            description: "Path of the server entry point inside the integration archive.",
+          },
         },
         description:
-          "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source.",
+          "`source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source.",
       },
     },
   },
@@ -2039,7 +2024,7 @@ export const schemas = {
       content: {
         type: ["string", "null"],
         description:
-          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
+          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an integration published without one. Read from the draft or from the published archive according to `definition`.",
       },
       source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
@@ -3055,7 +3040,7 @@ export const schemas = {
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
-        type: { type: "string", enum: [...packageTypeValues] },
+        type: { type: "string", enum: [...PACKAGE_TYPES] },
         source: {
           type: "string",
           description:
@@ -3227,7 +3212,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string", description: "Package id (`@scope/name`)." },
-      type: { type: "string", enum: [...packageTypeValues] },
+      type: { type: "string", enum: [...PACKAGE_TYPES] },
       ...PACKAGE_HOME_PROPERTIES,
       read_space_ids: {
         type: "array",

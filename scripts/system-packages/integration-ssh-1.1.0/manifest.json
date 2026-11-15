@@ -1,0 +1,131 @@
+{
+  "name": "@appstrate/ssh",
+  "version": "1.1.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "SSH",
+  "icon": "mdi:console-network",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key on one Unix account: THAT ACCOUNT is the boundary. What the agent can do is exactly what the account can do, so grant root only if you mean it, and otherwise create a dedicated user and restrict it with the tools the system already gives you (sudoers, groups, a restricted shell). Appstrate does not narrow it further. A read-only agent is expressed by the TOOLS it is granted: give it ssh_probe and ssh_read, and withhold ssh_exec, ssh_write_file and ssh_edit_file. Such an agent reads files up to 8 MiB and cannot search; for log analysis, grant ssh_exec on a dedicated, restricted account instead. The private key lives in the platform keyring and is delivered to this integration's runner as a file; it never reaches the agent container.",
+  "license": "Apache-2.0",
+  "keywords": ["ssh", "sftp", "remote", "server", "ops"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "type": "node",
+      "entry_point": "server/index.ts",
+      "mcp_config": {
+        "command": "bun",
+        "args": ["server/index.ts"]
+      },
+      "tools": [
+        {
+          "name": "ssh_probe",
+          "description": "Connect, verify the pinned host key and authenticate, then report how the host was reached. Executes nothing on the target and returns no remote data. Read-only."
+        },
+        {
+          "name": "ssh_exec",
+          "description": "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later if it is still running; the call returns once SIGTERM is sent, at most 17 s past `timeout_seconds`, with `timed_out: true`, `exit_code: null`, `remote_pid`, and `remote_process`: `stopping` (signalled), `already_exited` or `unknown`. A call cancelled before then stops the command the same way. While a call runs or waits its turn, a caller that requests progress gets a notification every 15 s. A process that leaves the group (`setsid`, a daemon) is not reached. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker."
+        },
+        {
+          "name": "ssh_read",
+          "description": "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Symlinks are followed. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. Read-only."
+        },
+        {
+          "name": "ssh_write_file",
+          "description": "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. A call cancelled before the upload starts writes nothing; an upload already under way completes. WRITES — withhold it from an agent that must not change the target."
+        },
+        {
+          "name": "ssh_edit_file",
+          "description": "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. A call cancelled before the upload starts changes nothing; an upload already under way completes. WRITES — withhold it from an agent that must not change the target."
+        }
+      ]
+    }
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": ["ssh://{$credential.host}:{$credential.port}"],
+      "identity_claims": {
+        "account_id": "$.host"
+      },
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["private_key", "host", "port", "user", "host_key"],
+          "properties": {
+            "private_key": {
+              "type": "string",
+              "writeOnly": true,
+              "title": "Clé privée Appstrate",
+              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner de cette intégration, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent.",
+              "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
+            },
+            "host": {
+              "type": "string",
+              "title": "Hôte",
+              "description": "Nom DNS ou adresse IPv4 publique du serveur (IPv6 non prise en charge). Une adresse privée est refusée : l'egress du runner ne la laisse pas passer. Le runner ne peut joindre que cet hôte, sur ce port.",
+              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"
+            },
+            "port": {
+              "type": "string",
+              "title": "Port SSH",
+              "default": "22",
+              "pattern": "^[0-9]{1,5}$"
+            },
+            "user": {
+              "type": "string",
+              "title": "Compte Unix sur la cible",
+              "description": "Le compte qui portera la clé : c'est LUI la frontière. Ce que l'agent peut faire, c'est exactement ce que ce compte peut faire. Un compte dédié et restreint par défaut (sudoers, groupes, shell restreint) ; root seulement en connaissance de cause. Il lui faut un shell POSIX : SSH passe toute commande par le shell de login, un compte en nologin n'exécuterait rien. Appstrate génère la paire de clés et vous donne ensuite le bloc qui l'installe sur ce compte.",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+            },
+            "host_key": {
+              "type": "string",
+              "title": "Clé publique de l'hôte",
+              "description": "L'identité du SERVEUR, pas la vôtre. Relevez-la sur la machine elle-même : awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub — ed25519 de préférence, ssh_host_rsa_key.pub seulement si le serveur n'a pas de clé ed25519. La cible doit faire tourner OpenSSH 7.2 ou plus récent. Un relevé à distance passerait par une connexion non authentifiée, exactement ce qu'un intercepteur sait falsifier. Elle est épinglée : tout changement refuse la connexion, il n'y a pas d'acceptation à la première connexion.",
+              "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
+            }
+          }
+        }
+      },
+      "delivery": {
+        "files": {
+          "/run/secrets/ssh_key": {
+            "value": "{$credential.private_key}",
+            "mode": "0600"
+          }
+        },
+        "env": {
+          "SSH_PRIVATE_KEY_PATH": {
+            "value": "/run/secrets/ssh_key"
+          },
+          "SSH_HOST": {
+            "value": "{$credential.host}"
+          },
+          "SSH_PORT": {
+            "value": "{$credential.port}"
+          },
+          "SSH_USER": {
+            "value": "{$credential.user}"
+          },
+          "SSH_HOST_KEY": {
+            "value": "{$credential.host_key}"
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "default_tools": ["ssh_probe", "ssh_exec", "ssh_read", "ssh_write_file", "ssh_edit_file"],
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    }
+  }
+}

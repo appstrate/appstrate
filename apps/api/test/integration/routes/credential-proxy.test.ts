@@ -2162,7 +2162,7 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
         schema_version: "0.1",
         author: "tester",
         timeout: 300,
-        dependencies: { skills: {}, mcp_servers: {}, integrations: { [SVC]: "^1.0.0" } },
+        dependencies: { skills: {}, integrations: { [SVC]: "^1.0.0" } },
         integrations_configuration: { [SVC]: { tools: ["search"] } },
       },
       draftContent: "Brief the team.",

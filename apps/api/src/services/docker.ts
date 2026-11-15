@@ -37,7 +37,7 @@ export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
 /**
  * Naming prefix for per-run shared workspace volumes. The orchestrator
  * creates `${WORKSPACE_VOLUME_PREFIX}${runId}` alongside the per-run
- * isolation network so the agent container and any opt-in mcp-server
+ * isolation network so the agent container and any opt-in local-server
  * runner containers can share a filesystem under `/workspace`. Same
  * shape as `EXEC_NETWORK_PREFIX` so the orphan reaper logic stays
  * symmetric across the two resource types.
@@ -760,7 +760,7 @@ export async function removeNetwork(networkId: string): Promise<void> {
 
 /**
  * Create a Docker named volume scoped to a single run. The volume backs
- * `/workspace` on the agent container and (when opt-in via mcp-server
+ * `/workspace` on the agent container and (when opt-in via the integration's
  * `_meta["dev.appstrate/workspace"]`) on per-integration runner
  * containers. Always carries `appstrate.run=<runId>` +
  * `appstrate.managed=true` labels so the orphan reaper can reclaim

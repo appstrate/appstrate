@@ -97,7 +97,6 @@ async function seedAndResolve(
   await seedConnection(ctx);
   return (
     await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(opts.integrationsConfiguration),

@@ -1063,6 +1063,13 @@ export interface IntegrationToolCatalogEntry {
 
 export interface ResolveIntegrationToolCatalogInput {
   integration: IntegrationManifest;
+  /**
+   * The tools the running server listed (`tools/list`), when the caller holds them and the
+   * manifest lets them stand for the catalog (a remote source with `allow_undeclared_tools`).
+   * Omitted, the catalog is the manifest's: `source.server.tools` for a local source, else the
+   * `tools_policy` keys.
+   */
+  listedTools?: ReadonlyArray<{ name: string; description?: string }>;
 }
 
 /**
@@ -1093,13 +1100,13 @@ export function allowsUndeclaredTools(manifest: object): boolean {
 export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
 ): IntegrationToolCatalogEntry[] {
-  const { integration } = input;
+  const { integration, listedTools } = input;
 
   // Step 1 — the integration's own MCP catalog
-  const localTools = getLocalServerTools(integration);
+  const serverTools = listedTools ?? getLocalServerTools(integration);
   let base: IntegrationToolCatalogEntry[];
-  if (localTools !== undefined) {
-    base = localTools.map((t) => ({ name: t.name, description: t.description }));
+  if (serverTools !== undefined) {
+    base = serverTools.map((t) => ({ name: t.name, description: t.description }));
   } else {
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }

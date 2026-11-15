@@ -174,7 +174,6 @@ export async function assembleAgentBundle(
     }),
     {
       ...(opts.metadata ? { metadata: opts.metadata } : {}),
-      // mcp-servers are spawned and fetched by the sidecar, never bundled.
       depTypes: ["skills", "integrations"],
       optionalDepTypes: ["integrations"],
       ...(opts.onWarn ? { onWarn: opts.onWarn } : {}),

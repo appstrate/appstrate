@@ -20,10 +20,9 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   envDelivery,
   filesDelivery,
   httpHeaderDelivery,
@@ -31,7 +30,6 @@ import {
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/session-integ";
-const SERVER = "@orga/session-server";
 
 type Auth = Parameters<typeof localIntegrationManifest>[0]["auths"][string];
 
@@ -39,7 +37,6 @@ function integManifest(auth: Auth): IntegrationManifest {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    serverName: SERVER,
     auths: { main: auth },
     tools_policy: { fetch: {} },
   });
@@ -91,20 +88,6 @@ async function resolveWith(
     draftManifest: manifest,
   });
   await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-  const serverManifest = mcpServerManifest({
-    name: SERVER,
-    version: "0.1.0",
-    serverType: "python",
-    entryPoint: "./server.py",
-  });
-  await seedPackage({
-    id: SERVER,
-    orgId: ctx.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: serverManifest,
-  });
-  await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
     authKey: "main",
@@ -124,7 +107,6 @@ async function resolveWith(
   });
 
   const { specs } = await resolveIntegrationSpawns({
-    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(),

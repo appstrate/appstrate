@@ -21,14 +21,10 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
-import {
-  localIntegrationManifest,
-  mcpServerManifest,
-} from "../../helpers/integration-manifests.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/mtls-integ";
-const SERVER = "@orga/mtls-server";
 
 function manifestWithFiles(opts: {
   mode?: string;
@@ -52,7 +48,6 @@ function manifestWithFiles(opts: {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    serverName: SERVER,
     auths: {
       primary: {
         type: "mtls",
@@ -97,23 +92,6 @@ async function seedConnection(ctx: TestContext, fields: Record<string, string>) 
   });
 }
 
-async function seedServer(ctx: TestContext) {
-  const manifest = mcpServerManifest({
-    name: SERVER,
-    version: "0.1.0",
-    serverType: "node",
-    entryPoint: "./server.js",
-  });
-  await seedPackage({
-    id: SERVER,
-    orgId: ctx.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: manifest,
-  });
-  await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest });
-}
-
 describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
   let ctx: TestContext;
 
@@ -131,14 +109,12 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       draftManifest: manifestWithFiles({ mode: "0600" }),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
       client_key: "-----BEGIN PRIVATE KEY-----\nXYZ\n-----END PRIVATE KEY-----",
     });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -173,14 +149,12 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       draftManifest: manifestWithFiles({}), // no mode → default
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "cert-bytes",
       client_key: "key-bytes",
     });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -201,11 +175,9 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       draftManifest: manifestWithFiles({ withUnsafePath: true }),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedServer(ctx);
     await seedConnection(ctx, { client_cert: "c", client_key: "k" });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -227,7 +199,6 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: localIntegrationManifest({
         name: INTEG,
-        serverName: SERVER,
         version: "0.1.0",
         auths: {
           primary: {
@@ -241,11 +212,9 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       }),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedServer(ctx);
     await seedConnection(ctx, { api_key: "k-1" });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),

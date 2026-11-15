@@ -84,8 +84,6 @@ export const PUBLIC_CLIENT_WITH_SECRET_MESSAGE =
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;
-  /** The mcp-server `${user_config.<key>}` this value fills (AFPS §7.6); defaults to the map key. */
-  user_config_key?: string;
 }
 export interface AfpsDeliveryFilesEntry {
   value: string;
@@ -244,18 +242,6 @@ export function authKeyOnUnauthenticatedIntegration(
   authKey: string | undefined,
 ): authKey is string {
   return authKey !== undefined && isUnauthenticatedIntegration(manifest);
-}
-
-export function getLocalServerRef(
-  manifest: IntegrationManifest,
-): { name: string; version: string } | null {
-  const source = (
-    manifest as { source?: { kind?: string; server?: { name?: unknown; version?: unknown } } }
-  ).source;
-  if (source?.kind !== "local" || !source.server) return null;
-  const { name, version } = source.server;
-  if (typeof name !== "string" || typeof version !== "string") return null;
-  return { name, version };
 }
 
 /**

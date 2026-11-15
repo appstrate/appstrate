@@ -24,7 +24,6 @@ const VALID_MANIFEST = {
   dependencies: {
     integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    mcp_servers: { "@appstrate/web-search": "*" },
   },
   // Declares an output schema below, so the `output` runtime tool must be
   // enabled (enforced by agentManifestSchema's superRefine).

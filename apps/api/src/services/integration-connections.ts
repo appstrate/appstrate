@@ -128,12 +128,10 @@ import {
   sameConnectionVariables,
 } from "../lib/connection-identity.ts";
 import {
-  getLocalServerRef,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   usesAutoProvisionedClient,
 } from "./integration-manifest-helpers.ts";
-import { fetchMcpServerManifest, readMcpServerTools } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   disableSchedules,
@@ -3231,13 +3229,8 @@ export async function getIntegrationAuthStatuses(
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  // Local source: the referenced mcp-server's tools, best-effort (the resolver falls back).
-  const localRef = getLocalServerRef(manifest);
-  const mcpServer = localRef ? await fetchMcpServerManifest(localRef.name) : null;
-  const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
     integration: manifest,
-    mcpServerTools,
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);

@@ -72,7 +72,6 @@ const agentManifest = {
 
 const integrationManifest = localIntegrationManifest({
   name: INTEGRATION,
-  serverName: "@lossorg/svc-server",
   version: "1.0.0",
   auths: {
     primary: {

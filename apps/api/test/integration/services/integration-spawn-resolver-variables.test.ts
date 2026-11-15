@@ -15,7 +15,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   loadAccessibleConnectionById,
   persistCredentialBundle,
@@ -24,13 +24,11 @@ import {
   connectToolBlock,
   httpHeaderDelivery,
   localIntegrationManifest,
-  mcpServerManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const INTEG = "@orga/forge-mcp";
-const SERVER = "@orga/forge-server";
 
 const VARIABLES = {
   schema: {
@@ -122,7 +120,6 @@ async function seedConnection(
 
 async function resolve(ctx: TestContext) {
   return resolveIntegrationSpawns({
-    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(),
@@ -244,7 +241,6 @@ describe("resolveIntegrationSpawns — delivery templates with connection variab
         localIntegrationManifest({
           name: INTEG,
           version: "0.1.0",
-          serverName: SERVER,
           auths: {
             primary: {
               type: "api_key",
@@ -270,20 +266,6 @@ describe("resolveIntegrationSpawns — delivery templates with connection variab
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orga" });
-    const server = mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-    });
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: server,
-    });
-    await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: server });
   });
 
   it("renders delivery.http and authorized_uris from the variables", async () => {

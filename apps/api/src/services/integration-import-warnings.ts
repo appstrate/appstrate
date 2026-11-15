@@ -8,7 +8,7 @@ import { acquiresByConnectLogin } from "@appstrate/core/integration";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
- * retired (`tools` → `mcp_servers`, `providers` → `integrations`).
+ * retired (`tools` / `mcp_servers` → declared inline on a local integration, `providers` → `integrations`).
  *
  * Author input carrying one is REJECTED upstream by `validateManifest` — this
  * channel exists for the other direction: a manifest the platform already holds
@@ -24,8 +24,8 @@ import { acquiresByConnectLogin } from "@appstrate/core/integration";
  */
 export function collectRetiredDependencyKeyWarnings(manifest: unknown): string[] {
   return findRetiredDependencyKeys(manifest).map(
-    ({ key, replacement }) =>
-      `dependencies.${key} is a retired AFPS 1.x key (renamed to dependencies.${replacement}) and is ignored — republish to remove it`,
+    ({ key, guidance }) =>
+      `dependencies.${key} is a retired key (${guidance}) and is ignored — republish to remove it`,
   );
 }
 

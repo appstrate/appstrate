@@ -36,7 +36,7 @@ let ctx: TestContext;
 /** A second space, whose rows must decide nothing in the space under test. */
 let elsewhere: string;
 
-const TYPES: PackageType[] = ["agent", "skill", "mcp-server", "integration"];
+const TYPES: PackageType[] = ["agent", "skill", "integration"];
 const ROWS = [
   { label: "no row", row: null },
   { label: "a row saying false", row: { enabled: false } },

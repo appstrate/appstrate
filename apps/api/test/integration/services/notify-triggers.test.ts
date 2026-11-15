@@ -387,7 +387,6 @@ describe("NOTIFY triggers (regression)", () => {
       source: "local",
       draftManifest: localIntegrationManifest({
         name: INTEG,
-        serverName: "@notifyorg/svc-server",
         version: "1.0.0",
         auths: {
           primary: {

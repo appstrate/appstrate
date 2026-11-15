@@ -33,11 +33,10 @@ import { createVersionFromDraft } from "../../../src/services/package-versions.t
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   apiIntegrationManifest,
-  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const API_KEY_AUTH = {
@@ -111,7 +110,6 @@ async function publishAndResolve(
 
   return (
     await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: stored!.manifest as Record<string, unknown>,
@@ -130,7 +128,6 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
 
   it("resolves an MCP-tool integration from the published version manifest", async () => {
     const INTEG = "@e2eorg/mcp-integ";
-    const SERVER = "@e2eorg/mcp-integ-server";
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -140,29 +137,11 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
       draftManifest: localIntegrationManifest({
         name: INTEG,
         version: "1.0.0",
-        serverName: SERVER,
         auths: API_KEY_AUTH,
         tools_policy: { search: {} },
       }),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: mcpServerManifest({ name: SERVER, version: "1.0.0", serverType: "node" }),
-    });
-    await seedPackageVersion({
-      packageId: SERVER,
-      version: "1.0.0",
-      manifest: mcpServerManifest({
-        name: SERVER,
-        version: "1.0.0",
-        serverType: "node",
-        entryPoint: "./server.js",
-      }),
-    });
     await seedConnection(ctx, INTEG);
 
     const specs = await publishAndResolve(ctx, "@e2eorg/agent-mcp", INTEG, "search");

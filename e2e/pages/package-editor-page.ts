@@ -9,7 +9,6 @@ import { expect, type Locator, type Page } from "@playwright/test";
 const SETTINGS_ADDRESS: Record<string, [param: string, tab: string]> = {
   agents: ["agentSettings", "settings"],
   skills: ["packageSettings", "settings"],
-  "mcp-servers": ["packageSettings", "settings"],
   integrations: ["integrationSettings", "configuration"],
 };
 

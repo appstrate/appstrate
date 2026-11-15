@@ -1186,29 +1186,30 @@ describe("buildMcpTools contextInjected", () => {
       schema_version: AFPS_SCHEMA_VERSION,
       package_archive_max_bytes: 10 * 1024 * 1024,
       runtimes: [
-        { runtime: "node", manifest_version: "0.3", server_type: "node" },
+        { runtime: "node", server_type: "node" },
         {
           runtime: "bun",
-          manifest_version: "0.3",
           server_type: "node",
           manifest_template: {
-            manifest_version: "0.3",
             schema_version: AFPS_SCHEMA_VERSION,
-            type: "mcp-server",
-            server: {
-              type: "node",
-              entry_point: "<archive-relative-entry-point>",
-              mcp_config: {
-                command: "bun",
-                args: ["<archive-relative-entry-point>"],
+            type: "integration",
+            source: {
+              kind: "local",
+              server: {
+                type: "node",
+                entry_point: "<archive-relative-entry-point>",
+                mcp_config: {
+                  command: "bun",
+                  args: ["<archive-relative-entry-point>"],
+                },
               },
             },
             _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
           },
         },
-        { runtime: "python", manifest_version: "0.3", server_type: "python" },
-        { runtime: "uv", manifest_version: "0.4", server_type: "uv" },
-        { runtime: "binary", manifest_version: "0.3", server_type: "binary" },
+        { runtime: "python", server_type: "python" },
+        { runtime: "uv", server_type: "uv" },
+        { runtime: "binary", server_type: "binary" },
       ],
     });
 
@@ -1225,7 +1226,7 @@ describe("buildMcpTools contextInjected", () => {
       const template = structuredClone(runtime.manifest_template) as Record<string, unknown>;
       template.name = "@test/authored-server";
       template.display_name = "Authored server";
-      const server = template.server as {
+      const server = (template.source as { server: Record<string, unknown> }).server as {
         entry_point: string;
         mcp_config: { command: string; args: string[] };
       };

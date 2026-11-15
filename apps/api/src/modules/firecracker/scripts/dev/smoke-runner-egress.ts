@@ -119,9 +119,9 @@ const TAG = "RUNNER_EGRESS_1547";
 const DIRECT_PATH = "/runner-egress-1547/direct";
 /** Stub path the agent dials (it may) — proves the counter and the route work. */
 const CONTROL_PATH = "/runner-egress-1547/control";
-/** The mcp-server package every probe integration references (bundle served by the stub). */
+/** The integration package whose archive carries the probe server (bundle served by the stub). */
 const SERVER_PACKAGE = "@smoke/runner-egress-probe-server";
-const BUNDLE_PATH = `/internal/mcp-server-bundle/${SERVER_PACKAGE}`;
+const BUNDLE_PATH = `/internal/integration-bundle/${SERVER_PACKAGE}`;
 /** The `delivery.http` integration whose credential the stub serves (MITM runner). */
 const MITM_INTEGRATION = "@smoke/runner-egress-mitm";
 /**
@@ -518,7 +518,7 @@ function assertRunnerEgress(log: string, ctx: RunnerEgressContext, udpGuest: num
   //        any control ran.
   if (hits.bundle === 0) {
     fail(
-      "the sidecar never fetched the probe mcp-server bundle — INTEGRATIONS_TO_SPAWN_JSON did " +
+      "the sidecar never fetched the probe integration bundle — INTEGRATIONS_TO_SPAWN_JSON did " +
         "not reach it, or the integration boot failed before the fetch",
     );
   }

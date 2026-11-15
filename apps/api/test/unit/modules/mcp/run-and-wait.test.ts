@@ -397,7 +397,7 @@ describe("run_and_wait", () => {
       expect(without).toContain("validate_package_file");
       expect(withGrant).toContain("runInline");
       expect(withGrant).toContain("validateInlineRun");
-      expect(withGrant).toContain("have one inline run create the manifest");
+      expect(withGrant).toContain("have one inline run create the integration manifest");
     });
   });
 

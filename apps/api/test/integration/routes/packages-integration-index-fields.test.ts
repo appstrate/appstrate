@@ -3,7 +3,7 @@
 /**
  * `GET /api/packages/integrations` carries the two facts of `source` the
  * integration index splits and labels its list by — `source_kind` and the
- * local `server` — so the page draws itself from the index alone. Other types'
+ * local `server` (runtime + entry point) — so the page draws itself from the index alone. Other types'
  * index rows carry neither.
  */
 
@@ -54,7 +54,7 @@ beforeEach(async () => {
     localIntegrationManifest({
       name: LOCAL,
       version: "2.1.0",
-      serverName: "@testorg/local-server",
+      server: { type: "node", entryPoint: "server/index.js" },
       auths,
     }),
   );
@@ -64,11 +64,11 @@ beforeEach(async () => {
 });
 
 describe("GET /api/packages/integrations — source facts", () => {
-  it("names a local integration's kind and the server package it runs", async () => {
+  it("names a local integration's kind and the server it carries", async () => {
     const rows = await listIntegrations();
     expect(rows[LOCAL]).toMatchObject({
       source_kind: "local",
-      server: { name: "@testorg/local-server", version: "^2.1.0" },
+      server: { type: "node", entry_point: "server/index.js" },
     });
   });
 

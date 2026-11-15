@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { packageTypeValues } from "@appstrate/db/schema";
+import { PACKAGE_TYPES } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { APPEARANCE_COLORS, ICON_MAX_LENGTH } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
@@ -415,7 +415,7 @@ export const spacesPaths = {
           name: "type",
           in: "query",
           required: false,
-          schema: { type: "string", enum: [...packageTypeValues] },
+          schema: { type: "string", enum: [...PACKAGE_TYPES] },
           description: "Filter by package type",
         },
       ],
@@ -512,24 +512,6 @@ export const spacesPaths = {
             "The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "422": {
-          description:
-            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
-          headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "about:blank",
-                title: "Invalid MCP Server Bundle",
-                status: 422,
-                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
-                code: "bundle_invalid",
-                request_id: "req_abc123",
-              },
-            },
-          },
-        },
       },
     },
   },

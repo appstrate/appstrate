@@ -673,9 +673,9 @@ const integrationDetailSchema = {
     manifest: { type: "object", additionalProperties: true },
     auths: { type: "array", items: authStatusSchema },
     // Effective agent-facing tool catalog. Resolved server-side from the
-    // referenced mcp-server's MCPB `tools[]` (local source) minus
-    // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
-    // to `manifest.tools_policy` keys when the mcp-server is absent.
+    // `source.server.tools` (local source) minus `hidden_tools` and
+    // auto-hidden connect.tool primitives. Falls back to
+    // `manifest.tools_policy` keys when a local server declares no catalog.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
     // AFPS §4.4 — the tool(s) an agent inherits when it declares this
     // integration without an `integrations_configuration.<id>.tools`

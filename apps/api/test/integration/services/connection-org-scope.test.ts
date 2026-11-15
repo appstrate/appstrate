@@ -41,7 +41,6 @@ const AUTH = "google";
 
 const integrationManifest = localIntegrationManifest({
   name: INTEGRATION,
-  serverName: "@scopeorg/svc-server",
   auths: {
     [AUTH]: {
       type: "oauth2",

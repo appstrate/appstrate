@@ -13,9 +13,7 @@ import {
 } from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
-import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   VERSION_SELECTOR_DRAFT,
   VERSION_SELECTOR_PUBLISHED,
@@ -1025,7 +1023,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
       continue;
     }
     const type = pkg.manifest.type;
-    if (type !== "agent" && type !== "skill" && type !== "integration" && type !== "mcp-server") {
+    if (type !== "agent" && type !== "skill" && type !== "integration") {
       throw invalidRequest(`Unknown package type '${String(type)}'`);
     }
     await makePermissionGuard(packagePermission(type, "write"))(c, async () => {});
@@ -1045,14 +1043,10 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
   // the rule the package routes use ({@link assertPackageDependenciesAccessible}).
   //
   // The loop above authorizes what the bundle brings. A manifest may also point
-  // OUTWARD — a declared dependency, or the `source.server.name` of a
-  // `source.kind: "local"` integration — and `importBundle` writes
+  // OUTWARD — a declared dependency — and `importBundle` writes
   // `draftManifest` straight from the archive, so an unchecked outward
-  // reference is written verbatim and resolved at kickoff by
-  // `integration-spawn-resolver.ts`, which asks the ORGANIZATION boundary and
-  // nothing about placement. Without this pass, an archive was the way to name
-  // a package the importer may not read — an mcp-server homed in somebody
-  // else's personal space included (§3.6).
+  // reference is written verbatim. Without this pass, an archive was the way
+  // to name a package the importer may not read (§3.6).
   //
   // References the bundle carries are excluded: those are the rows the loop
   // above already authorized, and they may not exist in the catalog yet.
@@ -1087,23 +1081,12 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
 type PackageIdString = `@${string}/${string}`;
 
 /**
- * EVERY package this manifest names, as `{ id, type }` — `dependencies.*` AND
- * the one reference that lives outside that block.
- *
- * An integration with `source.kind: "local"` names its mcp-server in
- * `source.server.name` (AFPS §7.1), and `extractDependencies` does not see it:
- * it reads `dependencies.{skills,mcp_servers,integrations}` and nothing else.
- * That reference is not decorative — `integration-spawn-resolver.ts` resolves it
- * at kickoff and spawns THOSE bytes. Leaving it out of the access check made it
- * the one way to name a package the caller may not read: the spawn resolver
- * applies the ORGANIZATION boundary (`resolveMcpServerForSpawn` →
- * `resolvePublishedManifest(…, orgId, …)`) and asks nothing about placement, so
- * an mcp-server homed in somebody else's PERSONAL space — a 404 on every
- * package route, §3.6 — resolved and ran.
+ * EVERY package this manifest names, as `{ id, type }`, read from
+ * `dependencies.{skills,integrations}`. A local MCP server is declared inline
+ * on its integration (`source.server`), so it names no package.
  */
 const DEPENDENCY_GROUPS = [
   ["skills", "skill"],
-  ["mcp_servers", "mcp-server"],
   ["integrations", "integration"],
 ] as const satisfies ReadonlyArray<readonly [string, PackageType]>;
 
@@ -1112,7 +1095,7 @@ function manifestPackageRefs(
 ): Array<{ id: PackageIdString; type: PackageType }> {
   // The NAMES, read tolerantly. `extractDependencies` validates the semver
   // range beside each one and THROWS on a bad one — right for a write path,
-  // wrong here: whether a caller may read `@scope/server` does not depend on
+  // wrong here: whether a caller may read `@scope/skill` does not depend on
   // the range written next to it, and letting a malformed range decide an
   // authorization answer turns a schema question into a 500. A name that
   // matches no catalog row grants nothing, which is the only outcome a
@@ -1124,12 +1107,6 @@ function manifestPackageRefs(
       refs.push({ id: name as PackageIdString, type });
     }
   }
-  const localServer = getLocalServerRef(manifest as unknown as IntegrationManifest);
-  // `source.server.name` is a free-form string in the raw manifest; the schema
-  // that validates the package has already refused anything that is not a
-  // scoped name, and a reference that still does not match simply matches no
-  // catalog row below.
-  if (localServer) refs.push({ id: localServer.name as PackageIdString, type: "mcp-server" });
   return refs;
 }
 

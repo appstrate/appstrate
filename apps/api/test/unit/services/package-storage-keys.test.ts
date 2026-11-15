@@ -19,7 +19,7 @@ describe("package storage key parsers invert their builders", () => {
 
   it.each([
     ["org_123", "skills", "@acme/skill"],
-    [SYSTEM_STORAGE_NAMESPACE, "mcp-servers", "@appstrate/server"],
+    [SYSTEM_STORAGE_NAMESPACE, "integrations", "@appstrate/server"],
     ["2f0c1c1e-9a4e-4d3b-a1b6-0e7c3a2b1d00", "agents", "@acme/agent"],
   ] as const)("packageItemKey(%s, %s, %s)", (ns, folder, id) => {
     expect(packageItemKeyId(packageItemKey(folder, ns, id))).toBe(id);

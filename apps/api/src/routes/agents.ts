@@ -230,7 +230,7 @@ export function createAgentsRouter() {
         schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
-        // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
+        // `skills` says what the agent is BUILT FROM — the
         // one thing in this list a summary read withholds. `integrations` says
         // which SaaS it talks to, which is what a launcher connects, so it
         // answers every caller. Everything else is how the launcher names and
@@ -240,7 +240,6 @@ export function createAgentsRouter() {
             ? {}
             : {
                 skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-                mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
               }),
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },

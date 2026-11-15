@@ -134,6 +134,15 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out[0]!.policy).toBeUndefined();
   });
 
+  it("a server's listed tools stand for the catalog when the caller passes them", () => {
+    const out = resolveIntegrationToolCatalog({
+      integration: localSourceManifest({ serverTools: [{ name: "declared" }] }),
+      listedTools: [{ name: "listed_a", description: "live" }, { name: "listed_b" }],
+    });
+    expect(out.map((e) => e.name)).toEqual(["listed_a", "listed_b"]);
+    expect(out[0]!.description).toBe("live");
+  });
+
   it("attaches policy from integration.tools_policy[name] without forcing every tool to be declared", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({

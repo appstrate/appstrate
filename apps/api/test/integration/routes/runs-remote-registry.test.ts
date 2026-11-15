@@ -66,7 +66,7 @@ function publishedManifest(version = "1.2.3") {
     schema_version: "0.1",
     author: "tester",
     timeout: 300,
-    dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+    dependencies: { skills: {}, integrations: {} },
   } as const;
 }
 
@@ -375,7 +375,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         type: "agent",
         schema_version: "0.1",
         author: "tester",
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -412,7 +412,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         type: "agent",
         schema_version: "0.1",
         author: "tester",
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -433,7 +433,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         schema_version: "0.1",
         author: "tester",
         timeout: 300,
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       },
     });
     await db
@@ -452,7 +452,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
           schema_version: "0.1",
           author: "tester",
           timeout: 300,
-          dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+          dependencies: { skills: {}, integrations: {} },
         },
         PROMPT,
       ),
@@ -518,7 +518,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         version: "0.0.1",
         type: "agent",
         // display_name + schema_version intentionally omitted
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -685,7 +685,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -718,7 +718,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"] } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -891,7 +891,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -930,7 +930,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"] } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -1046,7 +1046,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       schema_version: "0.1",
       author: "tester",
       timeout: 300,
-      dependencies: { skills: { "@acme/helper": "^1.0.0" }, mcp_servers: {}, integrations: {} },
+      dependencies: { skills: { "@acme/helper": "^1.0.0" }, integrations: {} },
     } as unknown as Record<string, unknown>;
     await seedPackage({
       orgId: ctx.orgId,

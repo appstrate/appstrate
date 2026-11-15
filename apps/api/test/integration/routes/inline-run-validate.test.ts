@@ -301,7 +301,6 @@ describe("POST /api/runs/inline/validate", () => {
     function integrationManifest() {
       return localIntegrationManifest({
         name: INTEGRATION,
-        serverName: `${INTEGRATION}-server`,
         version: "1.0.0",
         auths: {
           primary: {
@@ -512,7 +511,6 @@ describe("POST /api/runs/inline/validate", () => {
       function svcManifest(tools: string[]): Record<string, unknown> {
         return localIntegrationManifest({
           name: PINNED,
-          serverName: `${PINNED}-server`,
           version: "1.0.0",
           auths: {
             primary: {

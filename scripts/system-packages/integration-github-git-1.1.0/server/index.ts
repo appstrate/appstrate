@@ -714,7 +714,7 @@ function requireWorkspace(env: NodeJS.ProcessEnv): { workspaceRoot: string } {
   if (!workspaceEnv) {
     throw new Error(
       "APPSTRATE_WORKSPACE is not set — this server requires the platform to mount the per-run workspace. " +
-        'Check that the integration\'s referenced mcp-server declares _meta["dev.appstrate/workspace"] AND that the run was launched on a workspace-capable orchestrator.',
+        'Check that the integration declares _meta["dev.appstrate/workspace"] AND that the run was launched on a workspace-capable orchestrator.',
     );
   }
   return { workspaceRoot: resolve(workspaceEnv) };

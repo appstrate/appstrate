@@ -51,7 +51,6 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       source: "local",
       draftManifest: localIntegrationManifest({
         name: INTEG,
-        serverName: "@verdictorg/svc-server",
         version: "1.0.0",
         auths: { primary: apiKeyAuth, backup: apiKeyAuth },
         tools_policy: { search: {} },
@@ -351,7 +350,6 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       const OPEN = "@verdictorg/open";
       const { auths: _auths, ...openManifest } = localIntegrationManifest({
         name: OPEN,
-        serverName: "@verdictorg/open-server",
         version: "1.0.0",
         auths: {},
         tools_policy: { search: {} },

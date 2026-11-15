@@ -28,10 +28,7 @@ import {
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas, expectProblem } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import {
-  mcpServerManifest,
-  remoteIntegrationManifest,
-} from "../../helpers/integration-manifests.ts";
+import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import {
   buildMinimalZip,
   uploadPackageZip,
@@ -470,7 +467,7 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/{skills,integrations,mcp-servers}/:scope/:name
+  // GET /api/packages/{skills,integrations}/:scope/:name
   //   — WHICH definition the page renders
   // ═══════════════════════════════════════════════
 
@@ -692,52 +689,6 @@ describe("Packages API", () => {
       expect(res.status, JSON.stringify(body)).toBe(200);
       expect(body.definition).toBe("draft");
       expect(body.content).toBe(EDITED_BODY);
-    });
-
-    it("applies the same rule to an mcp-server, whose content IS its manifest", async () => {
-      // The third type has no companion file at all (`PACKAGE_CONTENT_ENTRY`
-      // is `null`), so its published `content` is the manifest text — the exact
-      // inverse of what `applyDraftOverlay` puts in the draft column.
-      const mcpId = "@pkgorg/definition-mcp";
-      const mcpDraft = mcpServerManifest({ name: mcpId, version: "0.2.0" });
-      const mcpPublished = mcpServerManifest({ name: mcpId, version: "0.1.0" });
-      await seedPackage({
-        id: mcpId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        homeSpaceId: homeId,
-        createdBy: ctx.user.id,
-        draftManifest: mcpDraft,
-        draftContent: JSON.stringify(mcpDraft, null, 2),
-      });
-      await seedSpacePackage(homeId, mcpId);
-      const zip = zipArtifact(
-        {
-          "manifest.json": new TextEncoder().encode(JSON.stringify(mcpPublished, null, 2)),
-          "server.js": new TextEncoder().encode("// published server"),
-        },
-        6,
-      );
-      await uploadPackageZip(mcpId, "0.1.0", Buffer.from(zip));
-      const row = await seedPackageVersion({
-        packageId: mcpId,
-        version: "0.1.0",
-        manifest: mcpPublished,
-        integrity: computeIntegrity(new Uint8Array(zip)),
-        artifactSize: zip.byteLength,
-      });
-      await db
-        .insert(packageDistTags)
-        .values({ packageId: mcpId, tag: "latest", versionId: row.id });
-
-      const res = await app.request(`/api/packages/mcp-servers/${mcpId}`, {
-        headers: await memberIn("viewer"),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.definition).toBe("published");
-      expect(body.version).toBe("0.1.0");
-      expect(JSON.parse(body.content as string)).toMatchObject({ version: "0.1.0" });
     });
   });
 
@@ -1450,8 +1401,8 @@ describe("Packages API", () => {
     // ── retired AFPS 1.x dependency keys: same direction split (#1021) ──
     //
     // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
-    // renamed them to `mcp_servers` / `integrations`. Every reader destructures
-    // exactly the three canonical maps, so the retired spelling is INERT — it
+    // renamed `providers` to `integrations` and moved MCP servers inline on their
+    // integration. Every reader destructures exactly the two canonical maps, so the retired spelling is INERT — it
     // used to validate and then be silently ignored, shipping an agent whose
     // declared dependency is never resolved. Author input must reject.
     async function putManifestDependencies(
@@ -1492,7 +1443,7 @@ describe("Packages API", () => {
       // The error must name the retired key AND its replacement — a bare
       // "invalid manifest" leaves the author with nowhere to go.
       expect(body).toContain("dependencies.tools");
-      expect(body).toContain("dependencies.mcp_servers");
+      expect(body).toContain("source.server");
 
       // Not a partial write — the seeded draft is untouched.
       const [row] = await db
@@ -1522,6 +1473,25 @@ describe("Packages API", () => {
       expect(body).toContain("dependencies.integrations");
     });
 
+    it("rejects an update whose manifest declares dependencies.mcp_servers", async () => {
+      const agent = await seedAgent({
+        id: "@pkgorg/retired-dep-mcp-servers",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await putManifestDependencies(
+        "@pkgorg/retired-dep-mcp-servers",
+        agent.lockVersion,
+        { mcp_servers: { "@pkgorg/old-server": "^1.0.0" } },
+      );
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      expect(body).toContain("dependencies.mcp_servers");
+      expect(body).toContain("source.server");
+    });
+
     it("accepts the canonical dependency maps and an unrelated extension key", async () => {
       // Control: the rejects above are caused by the retired KEYS, not by the
       // mere presence of `dependencies`. `dependencies` stays a loose object
@@ -1531,7 +1501,6 @@ describe("Packages API", () => {
 
       const res = await putManifestDependencies(id, agent.lockVersion, {
         skills: {},
-        mcp_servers: {},
         integrations: {},
         _meta: { "dev.appstrate/note": "still legal" },
       });
@@ -1623,7 +1592,14 @@ describe("Packages API", () => {
         name: integrationId,
         version: "1.0.0",
         display_name: "Gmail (test)",
-        source: { kind: "local", server: { name: "@pkgorg/gmail-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "oauth2",
@@ -2011,57 +1987,42 @@ describe("Packages API", () => {
       expect(codes).toContain("unknown_tool");
     });
 
-    it("publish judges a local integration's mcp-server catalog on its RESOLVED version, not its draft", async () => {
-      // One level deeper than the test above. A `source.kind: "local"`
-      // integration takes its tool catalog from a separate mcp-server package,
-      // and the spawn resolver reads that package at the version
-      // `source.server.version` resolves to. The validator read
-      // `packages.draft_manifest` instead, which the runtime never does.
+    it("publish judges a local integration's own catalog on its RESOLVED version, not its draft", async () => {
+      // A `source.kind: "local"` integration declares its tool catalog inline
+      // (`source.server.tools`), and a run reads the PUBLISHED version the agent
+      // pinned. The validator must read that version, not `packages.draft_manifest`.
       //
       // Asserted in the ACCEPT direction on purpose: a tool present in the
-      // PUBLISHED mcp-server but absent from its author's draft must publish
+      // PUBLISHED 1.0.0 but absent from its author's draft must publish
       // cleanly, because the run will find it. A refusal here can only come
-      // from reading the draft — whereas a rejection test would also pass for
-      // the unrelated reason that an unreadable draft falls back to the
-      // integration's own `tools_policy`.
-      const serverId = "@pkgorg/gmail-server";
-      // Built through the shared helper: a hand-written manifest failed
-      // `mcpServerManifestSchema` (it wants manifest_version 0.3 and
-      // `server.mcp_config`), the resolver returned null, and the catalog fell
-      // back to the integration's own `tools_policy` — a green-looking test
-      // that exercised neither read path.
-      const serverManifest = (tools: string[], version: string) => ({
-        ...mcpServerManifest({ name: serverId, version }),
-        tools: tools.map((name) => ({ name })),
+      // from reading the draft.
+      const localSource = (tools: string[]) => ({
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+          tools: tools.map((name) => ({ name })),
+        },
       });
-      await seedPackage({
-        id: serverId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        source: "local",
-        // The DRAFT has dropped `archive_thread`…
-        draftManifest: serverManifest(["list_messages"], "1.1.0"),
-      });
-      // …the PUBLISHED 1.0.0 the integration pins still advertises it.
-      await seedPackageVersion({
-        packageId: serverId,
-        version: "1.0.0",
-        manifest: serverManifest(["list_messages", "archive_thread"], "1.0.0"),
-      });
-      const localIntegrationManifest = gmailIntegrationManifest({
-        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+      // The DRAFT has dropped `archive_thread`…
+      const draftManifest = gmailIntegrationManifest({
+        source: localSource(["list_messages"]),
       });
       await seedPackage({
         id: integrationId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
-        draftManifest: localIntegrationManifest,
+        draftManifest,
       });
+      // …the PUBLISHED 1.0.0 the agent pins still advertises it.
       await seedPackageVersion({
         packageId: integrationId,
         version: "1.0.0",
-        manifest: localIntegrationManifest,
+        manifest: gmailIntegrationManifest({
+          source: localSource(["list_messages", "archive_thread"]),
+        }),
       });
       await seedDraftDeclaring("@pkgorg/publish-server-published-tool", {
         tools: ["archive_thread"],
@@ -2113,22 +2074,16 @@ describe("Packages API", () => {
     });
 
     it("publish refuses wildcard when a known catalog is entirely hidden", async () => {
-      const serverId = "@pkgorg/gmail-server";
-      const server = {
-        ...mcpServerManifest({ name: serverId, version: "1.0.0" }),
-        tools: [{ name: "list_messages" }],
-      };
-      await seedPackage({
-        id: serverId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        source: "local",
-        draftManifest: server,
-      });
-      await seedPackageVersion({ packageId: serverId, version: "1.0.0", manifest: server });
-
       const manifest = gmailIntegrationManifest({
-        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+            tools: [{ name: "list_messages" }],
+          },
+        },
         allow_undeclared_tools: true,
         hidden_tools: ["list_messages"],
         tools_policy: { list_messages: { required_scopes: { primary: ["read"] } } },
@@ -3077,7 +3032,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
       const body = JSON.stringify(await res.json());
       expect(body).toContain("dependencies.tools");
-      expect(body).toContain("dependencies.mcp_servers");
+      expect(body).toContain("source.server");
 
       // Nothing was persisted — the reject is not a partial write.
       const [row] = await db
@@ -3860,7 +3815,7 @@ describe("Packages API", () => {
        * provider→integration migration left in the catalog. Defaults to the
        * manifest's own type (the aligned, ordinary case).
        */
-      rowType?: "agent" | "skill" | "integration" | "mcp-server",
+      rowType?: "agent" | "skill" | "integration",
     ): Promise<void> {
       const version = manifest.version as string;
       const type = rowType ?? (manifest.type as "agent" | "skill");
