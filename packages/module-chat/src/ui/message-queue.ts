@@ -34,16 +34,6 @@ export function flushDecision(input: {
   return input.snapshot.stopped ? "hold" : "send";
 }
 
-/**
- * The first whitespace-separated token of the display name, for a greeting. The
- * host falls back to the email address when a user has no name: an address is
- * not a name, so it yields none.
- */
-export function firstName(name: string | null | undefined): string | null {
-  const token = name?.trim().split(/\s+/)[0];
-  return token && !token.includes("@") ? token : null;
-}
-
 export interface MessageQueue {
   getSnapshot: () => QueueSnapshot;
   subscribe: (listener: () => void) => () => void;

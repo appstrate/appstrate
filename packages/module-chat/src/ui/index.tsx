@@ -178,8 +178,8 @@ export interface ChatPageProps {
   formatBytes: ChatHost["formatBytes"];
   /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
   onPackagesChanged: ChatHost["onPackagesChanged"];
-  /** The user's display name, greeted on a new conversation (see `ChatHost`). */
-  userName?: ChatHost["userName"];
+  /** The user's first name, greeted on a new conversation (see `ChatHost`). */
+  firstName?: ChatHost["firstName"];
 }
 
 export function ChatPage({
@@ -198,7 +198,7 @@ export function ChatPage({
   modelCredentials,
   formatBytes,
   onPackagesChanged,
-  userName,
+  firstName,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -299,7 +299,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
-      userName,
+      firstName,
     }),
     [
       onOpenFile,
@@ -311,7 +311,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
-      userName,
+      firstName,
     ],
   );
 

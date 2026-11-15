@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import {
-  createMessageQueue,
-  firstName,
-  flushDecision,
-  joinQueued,
-} from "../src/ui/message-queue.ts";
+import { createMessageQueue, flushDecision, joinQueued } from "../src/ui/message-queue.ts";
 
 describe("joinQueued", () => {
   it("joins queued texts into one message, a blank line apart", () => {
@@ -41,18 +36,6 @@ describe("flushDecision", () => {
         snapshot: { items: [], stopped: true },
       }),
     ).toBe("none");
-  });
-});
-
-describe("firstName", () => {
-  it("takes the first whitespace-separated token", () => {
-    expect(firstName("  Pierre  Cabriere ")).toBe("Pierre");
-  });
-
-  it("yields none for an absent name or an email fallback", () => {
-    expect(firstName(null)).toBeNull();
-    expect(firstName("   ")).toBeNull();
-    expect(firstName("pierre@example.com")).toBeNull();
   });
 });
 

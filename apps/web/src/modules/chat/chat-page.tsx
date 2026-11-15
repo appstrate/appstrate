@@ -22,6 +22,7 @@ import {
 } from "@appstrate/module-chat/ui";
 import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authoring";
 import { useAuth } from "../../hooks/use-auth";
+import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -46,7 +47,7 @@ export function ChatModulePage() {
   // The package-authoring preference is per user: bind it before the composer paints.
   const { user } = useAuth();
   const userId = user?.id ?? null;
-  const userName = user?.name ?? null;
+  const firstName = useFirstName();
   useLayoutEffect(() => bindPackageAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
@@ -167,7 +168,7 @@ export function ChatModulePage() {
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
               onPackagesChanged={onPackagesChanged}
-              userName={userName}
+              firstName={firstName || null}
             />
           </div>
           <ConversationSidebar

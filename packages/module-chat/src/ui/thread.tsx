@@ -59,7 +59,6 @@ import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./f
 import { isImageMime } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
 import {
-  firstName,
   flushDecision,
   joinQueued,
   type MessageQueue,
@@ -146,12 +145,17 @@ export function Thread({
           </ThreadPrimitive.Viewport>
         </AuiIf>
       </ThreadPrimitive.Root>
+      {/* The app's dropzone in its drag-over state (the form file field, the
+          import dialog): dashed border, primary tint. Over the thread it needs
+          a veil so the transcript does not show through. */}
       <div
         aria-hidden="true"
-        className="bg-canvas/80 duration-base ease-surface pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+        className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
       >
-        <UploadIcon className="text-muted-foreground motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-        <p className="text-muted-foreground text-sm font-medium">{t("composer.dropzone")}</p>
+        <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
+          <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+        </div>
       </div>
     </ComposerPrimitive.AttachmentDropzone>
   );
@@ -170,9 +174,8 @@ function ThreadWelcome({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, userName } = useChatHost();
+  const { can, t, firstName: name } = useChatHost();
   const canWrite = can("chat:write");
-  const name = firstName(userName);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
