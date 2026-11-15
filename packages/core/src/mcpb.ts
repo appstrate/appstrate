@@ -70,7 +70,7 @@ export interface McpbUserConfigEntry {
 }
 
 const USER_CONFIG_REF = /\$\{user_config\.([^}]+)\}/g;
-const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
+const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
 const CREDENTIAL_FIELD = /^[A-Za-z0-9_]+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,19 +144,23 @@ export function mcpbFromIntegration(
       );
     }
     const properties = credentialProperties(method);
+    // Each credential field a value references becomes ONE user_config entry, named after the
+    // field, so two variables fed the same credential ask the host for it once.
     for (const [variable, entry] of Object.entries(isRecord(delivery.env) ? delivery.env : {})) {
       if (!isRecord(entry) || typeof entry.value !== "string") continue;
-      const field = SINGLE_CREDENTIAL_REF.exec(entry.value)?.[1];
-      const property = field ? properties[field] : undefined;
-      const title = typeof property?.title === "string" ? property.title : variable;
-      userConfig[variable] = {
-        type: "string",
-        title,
-        description: typeof property?.description === "string" ? property.description : title,
-        sensitive: entry.sensitive === true,
-        required: true,
-      };
-      env[variable] = `\${user_config.${variable}}`;
+      env[variable] = entry.value.replace(CREDENTIAL_REF, (_, field: string) => {
+        const property = properties[field];
+        const title = typeof property?.title === "string" ? property.title : field;
+        const sensitive = entry.sensitive === true || userConfig[field]?.sensitive === true;
+        userConfig[field] = {
+          type: "string",
+          title,
+          description: typeof property?.description === "string" ? property.description : title,
+          sensitive,
+          required: true,
+        };
+        return `\${user_config.${field}}`;
+      });
     }
   }
 

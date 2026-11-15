@@ -189,10 +189,10 @@ describe("mcpbFromIntegration", () => {
     expect(mcpb.author).toEqual({ name: "Acme" });
     expect(mcpb.server.mcp_config.env).toEqual({
       LOG_LEVEL: "info",
-      API_KEY: "${user_config.API_KEY}",
+      API_KEY: "${user_config.api_key}",
     });
     expect(mcpb.user_config).toEqual({
-      API_KEY: {
+      api_key: {
         type: "string",
         title: "API key",
         description: "API key",
@@ -201,6 +201,23 @@ describe("mcpbFromIntegration", () => {
       },
     });
     expect(mcpb.tools).toEqual([{ name: "fetch_json", description: "Fetch a JSON document" }]);
+  });
+
+  it("asks once for a credential several variables receive, and keeps a composite value", () => {
+    const manifest = localIntegration();
+    (manifest as unknown as Record<string, any>).auths.primary.delivery.env = {
+      API_KEY: { value: "{$credential.api_key}", sensitive: true },
+      AUTH_HEADER: { value: "Bearer {$credential.api_key}" },
+    };
+    const mcpb = mcpbFromIntegration(manifest);
+    expectStrictMcpb(mcpb);
+    expect(mcpb.server.mcp_config.env).toEqual({
+      LOG_LEVEL: "info",
+      API_KEY: "${user_config.api_key}",
+      AUTH_HEADER: "Bearer ${user_config.api_key}",
+    });
+    expect(Object.keys(mcpb.user_config ?? {})).toEqual(["api_key"]);
+    expect(mcpb.user_config?.api_key?.sensitive).toBe(true);
   });
 
   it("uses manifest_version 0.4 for a uv server", () => {
@@ -253,21 +270,7 @@ describe("round trip", () => {
     expectStrictMcpb(exported);
     const second = integrationFromMcpb(exported, "acme");
     expectValidIntegration(second);
-    const strip = (m: IntegrationManifest) => {
-      const r = structuredClone(m) as unknown as Record<string, any>;
-      return {
-        source: r.source,
-        version: r.version,
-        name: r.name,
-        credentialFields: Object.keys(r.auths?.primary?.credentials?.schema?.properties ?? {})
-          .length,
-      };
-    };
-    expect(strip(second).source.server.mcp_config.env).toEqual(
-      strip(first).source.server.mcp_config.env,
-    );
-    expect(strip(second).source.server.tools).toEqual(strip(first).source.server.tools);
-    expect(strip(second).name).toBe(strip(first).name);
+    expect(second).toEqual(first);
     expect(mcpbFromIntegration(second)).toEqual(exported);
   });
 });
