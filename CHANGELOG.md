@@ -847,6 +847,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A draft saved right after a run starts no longer reaches that run** (#2203).
+  The run's integration versions were frozen with their manifest reads still
+  in flight, so an integration draft saved within that window could be the
+  manifest the run spawned with. The freeze now completes before the run
+  proceeds.
+
 - **`get_me` lists only the integrations active in the space** (#2146).
   `GET /api/me/context` listed every integration with a connection the caller
   may bind in the space, including an org-scope connection of an integration
