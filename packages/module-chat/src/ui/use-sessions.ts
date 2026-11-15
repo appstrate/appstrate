@@ -12,7 +12,8 @@
 
 import { useMemo } from "react";
 import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
-import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
+import { keysetPaging } from "@appstrate/ui/keyset-paging";
+import { useChatTransport, type ChatTransport } from "./runtime-context.ts";
 import {
   fetchSessionsPage,
   flattenSessions,
@@ -55,29 +56,27 @@ export function sessionsRefetchInterval(query: {
 }
 
 /** The session-list query, shared by the list and the nav badge (one key, one request). */
-function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boolean) {
-  const spaceId = spaceIdFromHeaders(getHeaders);
+function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boolean) {
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
   return infiniteQueryOptions({
     queryKey: sessionsQueryKey(spaceId),
-    queryFn: ({ pageParam }) => fetchSessionsPage(getHeaders, pageParam),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) =>
-      last.hasMore ? (last.data[last.data.length - 1]?.id ?? null) : null,
+    queryFn: ({ pageParam }) => fetchSessionsPage(transport!.request, pageParam),
+    ...keysetPaging,
     select: flattenSessions,
     // The route requires `X-Space-Id`. Firing before the host's space store
     // resolves (first login, org switch) would be a guaranteed 400; the key
     // carries the space, so it refetches the moment one arrives.
-    enabled: enabled && !!spaceId,
+    enabled: enabled && !!spaceId && !!transport,
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });
 }
 
-export function useSessions(headers?: GetHeaders) {
-  const contextHeaders = useChatHeaders();
+export function useSessions(transport?: ChatTransport) {
+  const contextTransport = useChatTransport();
   // ChatPage owns the provider below its render, so its own observer receives
-  // the host headers directly. Descendants read the same headers from context.
-  return useInfiniteQuery(sessionsQuery(headers ?? contextHeaders, true));
+  // the host transport directly. Descendants read the same one from context.
+  return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true));
 }
 
 /**
@@ -88,9 +87,9 @@ export function useSessions(headers?: GetHeaders) {
  * The viewed conversation is kept read by ChatPage, so it is not counted. Pass
  * `enabled: false` when the chat feature is off.
  */
-export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
+export function useChatUnreadCount(transport?: ChatTransport, enabled = true): number {
   // The badge is mounted on every page, including before a space is picked.
-  const { data } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
+  const { data } = useInfiniteQuery(sessionsQuery(transport, enabled));
   return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }
 
@@ -98,8 +97,8 @@ export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): num
  * Whether the caller has any conversation of their own — the same query as the
  * unread badge, so it costs no request. Undefined until it answers; a failed read is no.
  */
-export function useHasChatSessions(getHeaders?: GetHeaders, enabled = true): boolean | undefined {
-  const { data, isError } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
+export function useHasChatSessions(transport?: ChatTransport, enabled = true): boolean | undefined {
+  const { data, isError } = useInfiniteQuery(sessionsQuery(transport, enabled));
   // A failed read answers "none": undecided would hold the caller's placeholder forever.
   if (isError) return false;
   return data === undefined ? undefined : data.length > 0;

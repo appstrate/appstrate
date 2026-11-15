@@ -17,8 +17,7 @@
  * so there a row that exists is shown only to be deleted.
  */
 
-import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Mail, Trash2, Send } from "lucide-react";
@@ -31,9 +30,12 @@ import { SkeletonBadge } from "@/components/skeleton-line";
 import { FormSkeleton } from "@/components/form-skeleton";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { ErrorState } from "@/components/page-states";
-import { Modal } from "@/components/modal";
+import { FormModal } from "@/components/form-modal";
 import { GitHubIcon, GoogleIcon } from "@/components/icons";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useSettingDraft } from "@/hooks/use-setting-draft";
+import { useSaveAction } from "@/hooks/use-save-action";
+import { SaveControls } from "@/components/settings/manual-save";
 import {
   useSmtpConfig,
   useUpsertSmtpConfig,
@@ -82,29 +84,32 @@ function SmtpSection({ personal }: { personal: boolean }) {
   const del = useDeleteSmtpConfig();
   const test = useTestSmtp();
   const [testing, setTesting] = useState(false);
-  const [form, setForm] = useSeededForm(config, emptySmtp, fromSmtp);
+  // A read still in flight or failed seeds nothing: the form shows no savable empty row.
+  const draft = useSettingDraft(config ? fromSmtp(config) : emptySmtp());
+  const form = draft.value;
+  const setForm = draft.set;
+  const formRef = useRef<HTMLFormElement>(null);
   const initial = config ?? null;
 
-  function handleSubmit(e: React.FormEvent) {
+  const action = useSaveAction(async () => {
+    if (!formRef.current?.reportValidity()) throw new Error("invalid form");
+    const sent = draft.value;
+    await upsert.mutateAsync({
+      host: sent.host.trim(),
+      port: Number(sent.port),
+      username: sent.username,
+      pass: sent.pass,
+      from_address: sent.fromAddress.trim(),
+      from_name: sent.fromName.trim() || null,
+      secure_mode: sent.secureMode,
+    });
+    // The secret never comes back: the stored baseline holds it empty.
+    draft.accept(sent, { ...sent, pass: "" });
+  });
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        host: form.host.trim(),
-        port: Number(form.port),
-        username: form.username,
-        pass: form.pass,
-        from_address: form.fromAddress.trim(),
-        from_name: form.fromName.trim() || null,
-        secure_mode: form.secureMode,
-      },
-      {
-        onSuccess: () => {
-          toast.success(t("settings:spaceAuth.smtpSaved"));
-          setForm((f) => ({ ...f, pass: "" }));
-        },
-      },
-    );
-  }
+    void action.save().catch(() => {});
+  };
 
   return (
     <>
@@ -118,10 +123,9 @@ function SmtpSection({ personal }: { personal: boolean }) {
         del={del}
         deleteTitle={t("settings:spaceAuth.smtpDeleteTitle")}
         deleteDescription={t("settings:spaceAuth.smtpDeleteConfirm")}
-        deletedMessage={t("settings:spaceAuth.smtpDeleted")}
       >
         {(deleteButton) => (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4">
               <FormItem id="smtp-host" label={requiredLabel(t("settings:spaceAuth.smtpHost"))}>
                 <Input
@@ -198,10 +202,8 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </FormItem>
             </div>
 
+            <SaveControls dirty={draft.dirty} onDiscard={draft.reset} action={action} />
             <div className="flex flex-wrap gap-2">
-              <PendingButton type="submit" pending={upsert.isPending}>
-                {t("common:btn.save")}
-              </PendingButton>
               {initial && (
                 <Button type="button" variant="outline" onClick={() => setTesting(true)}>
                   <Send />
@@ -246,19 +248,16 @@ function SmtpTestModal({
   const { t } = useTranslation(["settings", "common"]);
   const [to, setTo] = useState("");
   return (
-    <Modal
+    <FormModal
       onClose={onClose}
       title={t("settings:spaceAuth.smtpTestTitle")}
-      actions={
-        <>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>
-            {t("common:btn.cancel")}
-          </Button>
-          <PendingButton onClick={() => onSend(to)} pending={isPending} disabled={!to}>
-            {t("settings:spaceAuth.smtpTest")}
-          </PendingButton>
-        </>
-      }
+      isPending={isPending}
+      submitLabel={t("settings:spaceAuth.smtpTest")}
+      submitDisabled={!to}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSend(to);
+      }}
     >
       <FormItem id="smtp-test-to" label={t("settings:spaceAuth.smtpTestTo")}>
         <Input
@@ -268,7 +267,7 @@ function SmtpTestModal({
           placeholder="you@example.com"
         />
       </FormItem>
-    </Modal>
+    </FormModal>
   );
 }
 
@@ -289,25 +288,26 @@ function SocialSection({
   const { data: config, error } = useSocialProvider(provider);
   const upsert = useUpsertSocialProvider(provider);
   const del = useDeleteSocialProvider(provider);
-  const [form, setForm] = useSeededForm(config, emptySocial, fromSocial);
+  const draft = useSettingDraft(config ? fromSocial(config) : emptySocial());
+  const form = draft.value;
+  const setForm = draft.set;
+  const formRef = useRef<HTMLFormElement>(null);
   const Icon = icon === "github" ? GitHubIcon : GoogleIcon;
 
-  function handleSubmit(e: React.FormEvent) {
+  const action = useSaveAction(async () => {
+    if (!formRef.current?.reportValidity()) throw new Error("invalid form");
+    const sent = draft.value;
+    await upsert.mutateAsync({
+      client_id: sent.clientId.trim(),
+      client_secret: sent.clientSecret,
+      scopes: sent.scopes.trim() ? sent.scopes.split(/[\s,]+/).filter(Boolean) : null,
+    });
+    draft.accept(sent, { ...sent, clientSecret: "" });
+  });
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        client_id: form.clientId.trim(),
-        client_secret: form.clientSecret,
-        scopes: form.scopes.trim() ? form.scopes.split(/[\s,]+/).filter(Boolean) : null,
-      },
-      {
-        onSuccess: () => {
-          toast.success(t("settings:spaceAuth.socialSaved"));
-          setForm((f) => ({ ...f, clientSecret: "" }));
-        },
-      },
-    );
-  }
+    void action.save().catch(() => {});
+  };
 
   return (
     <ProviderConfigSection
@@ -320,10 +320,9 @@ function SocialSection({
       del={del}
       deleteTitle={t("settings:spaceAuth.socialDeleteTitle")}
       deleteDescription={t("settings:spaceAuth.socialDeleteConfirm", { provider: title })}
-      deletedMessage={t("settings:spaceAuth.socialDeleted")}
     >
       {(deleteButton) => (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-4">
           <FormItem id={`${provider}-client-id`} label={requiredLabel("Client ID")}>
             <Input
               value={form.clientId}
@@ -355,12 +354,8 @@ function SocialSection({
             />
           </FormItem>
 
-          <div className="flex gap-2">
-            <PendingButton type="submit" pending={upsert.isPending}>
-              {t("common:btn.save")}
-            </PendingButton>
-            {deleteButton}
-          </div>
+          <SaveControls dirty={draft.dirty} onDiscard={draft.reset} action={action} />
+          {deleteButton && <div className="flex gap-2">{deleteButton}</div>}
         </form>
       )}
     </ProviderConfigSection>
@@ -368,27 +363,6 @@ function SocialSection({
 }
 
 // ─── bits ────────────────────────────────────────────────────────────────────
-
-/**
- * Re-seeds the form from the read row on first read and whenever the row's
- * `updatedAt` changes. Seeds only from an answer (`null` = no row): a read
- * still in flight or failed seeds nothing, so an empty form never stands in
- * for a row the server has not returned.
- */
-function useSeededForm<C extends { updatedAt: string }, F>(
-  config: C | null | undefined,
-  empty: () => F,
-  from: (c: C) => F,
-) {
-  const [form, setForm] = useState(empty);
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  const seedKey = config ? config.updatedAt : "none";
-  if (config !== undefined && seededFor !== seedKey) {
-    setForm(config ? from(config) : empty());
-    setSeededFor(seedKey);
-  }
-  return [form, setForm] as const;
-}
 
 /**
  * Shared skeleton of a per-space provider config: title, configured badge,
@@ -410,7 +384,6 @@ function ProviderConfigSection({
   del,
   deleteTitle,
   deleteDescription,
-  deletedMessage,
   children,
 }: {
   icon: ReactNode;
@@ -423,7 +396,6 @@ function ProviderConfigSection({
   del: { isPending: boolean; mutate: (v: undefined, o: { onSuccess: () => void }) => void };
   deleteTitle: string;
   deleteDescription: string;
-  deletedMessage: string;
   children: (deleteButton: ReactNode) => ReactNode;
 }) {
   const { t } = useTranslation("settings");
@@ -473,13 +445,11 @@ function ProviderConfigSection({
         onClose={() => setConfirmDelete(false)}
         title={deleteTitle}
         description={deleteDescription}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={del.isPending}
         onConfirm={() =>
           del.mutate(undefined, {
-            onSuccess: () => {
-              setConfirmDelete(false);
-              toast.success(deletedMessage);
-            },
+            onSuccess: () => setConfirmDelete(false),
           })
         }
       />

@@ -5,9 +5,9 @@
  * and remote CLIs post here — the auth model, the wire format, and the
  * handler logic are identical.
  *
- *   POST /api/runs/:runId/events           — one signed CloudEvent
- *   POST /api/runs/:runId/events/finalize  — terminal RunResult, idempotent
- *   POST /api/runs/:runId/mcp              — the run MCP server of a remote run
+ *   POST /api/runs/:id/events           — one signed CloudEvent
+ *   POST /api/runs/:id/events/finalize  — terminal RunResult, idempotent
+ *   POST /api/runs/:id/mcp              — the run MCP server of a remote run
  *
  * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`,
  * `verifyRunUploadSignature` and `verifyRunCallSignature`). No
@@ -245,7 +245,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const mcpLimiter = rateLimitRunMcp(mcpRatePerMin, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
-  // the per-run limiter second. The three limiters key on the `:runId` from the
+  // the per-run limiter second. The three limiters key on the `:id` from the
   // URL, so a limiter placed first would let anyone who merely knows a runId
   // burn a legitimate run's ingestion budget with unsigned garbage — a remote
   // DoS on that run's event stream and finalize sweep. Verifying first means
@@ -263,7 +263,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // `emitHeaders: false` (no response header the handler reads) and their only
   // effect is consuming a point or throwing 429.
 
-  router.post("/runs/:runId/events", verifyRunSignature, eventLimiter, async (c) => {
+  router.post("/runs/:id/events", verifyRunSignature, eventLimiter, async (c) => {
     // verifyRunSignature populated these. The runtime assertion is a
     // belt-and-suspenders against refactoring mistakes (types say
     // optional because AppEnv.Variables is a union with auth-less HMAC
@@ -286,7 +286,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     });
   });
 
-  router.post("/runs/:runId/events/finalize", verifyRunSignature, eventLimiter, async (c) => {
+  router.post("/runs/:id/events/finalize", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Zod's `unknown()` fields parse to `unknown` (not `unknown | null`);
@@ -312,7 +312,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.json({ ok: true });
   });
 
-  // POST /api/runs/:runId/events/heartbeat — runner-driven keep-alive.
+  // POST /api/runs/:id/events/heartbeat — runner-driven keep-alive.
   //
   // Same HMAC auth as event ingestion, so both platform containers
   // (runSecret only, no user principal) and remote CLIs can call it
@@ -325,7 +325,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // open-sink row. No sequence advance, no log row, no ordering
   // semantics. The watchdog reads `last_heartbeat_at` exclusively,
   // so this endpoint is the minimum-viable liveness beacon.
-  router.post("/runs/:runId/events/heartbeat", verifyRunSignature, eventLimiter, async (c) => {
+  router.post("/runs/:id/events/heartbeat", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     // Short-circuit if the sink is already closing — the runner's next
     // event will observe 410 anyway, no need to race.
@@ -345,13 +345,13 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // it is the run via a signature over the (empty) GET body, so no user
   // principal is involved.
 
-  // GET /api/runs/:runId/workspace — the AFPS bundle (`agent-package.afps`,
+  // GET /api/runs/:id/workspace — the AFPS bundle (`agent-package.afps`,
   // manifest + prompt + skills; itself a ZIP). Small and constant, served
   // verbatim; the agent writes it straight to its workspace root. A 404 means
   // no bundle was provisioned, which the runtime treats as a fatal
   // provisioning fault (never a legitimately-empty workspace — the platform
   // always uploads the agent package).
-  router.get("/runs/:runId/workspace", verifyRunSignature, eventLimiter, async (c) => {
+  router.get("/runs/:id/workspace", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const archive = await downloadRunWorkspace(run.id);
     if (!archive) throw notFound(`no workspace provisioned for run ${run.id}`);
@@ -366,11 +366,11 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.body(bytes);
   });
 
-  // GET /api/runs/:runId/files — the input-file manifest. The agent
+  // GET /api/runs/:id/files — the input-file manifest. The agent
   // enumerates this, then fetches each file by name. A 404 means the run
   // carries no input files (the common case), which the runtime treats as
   // an empty file set — not a fault.
-  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, async (c) => {
+  router.get("/runs/:id/files", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const manifest = await downloadRunFilesManifest(run.id);
     if (!manifest) throw notFound(`no input files for run ${run.id}`);
@@ -386,7 +386,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.json(manifest);
   });
 
-  // POST /api/runs/:runId/files — agent-published run output.
+  // POST /api/runs/:id/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
   // here, either via the runner's `publish_file` tool or the entrypoint's
@@ -404,7 +404,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
   // this router. Here the budget being protected is the run's finalize
   // `outputs/` sweep.
-  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, async (c) => {
+  router.post("/runs/:id/files", verifyRunUploadSignature, fileLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a file arriving after finalize (or
@@ -488,11 +488,11 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     );
   });
 
-  // GET /api/runs/:runId/files/:name — a single input file, streamed
+  // GET /api/runs/:id/files/:name — a single input file, streamed
   // straight from storage so neither the platform nor the agent buffers the
   // whole payload. The agent streams the response body to `files/<name>`.
   // A 404 on a file the manifest listed is a fatal provisioning fault.
-  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, async (c) => {
+  router.get("/runs/:id/files/:name", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const name = c.req.param("name")!;
     const stream = await downloadRunFileStream(run.id, name);
@@ -501,7 +501,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.body(stream);
   });
 
-  // POST /api/runs/:runId/mcp — the run MCP server (`@appstrate/platform`
+  // POST /api/runs/:id/mcp — the run MCP server (`@appstrate/platform`
   // tools) for the host executing a remote run, authenticated like the routes
   // above: the signature covers the exact request body, and each `webhook-id`
   // is single-use (a replay is a 409). The tools write in
@@ -511,7 +511,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // (it signs its events), but it reaches these tools through its sidecar,
   // which serves only the tools the agent selected; signing here would hand
   // it all six. A platform run answers the 404 of an unknown run.
-  router.post("/runs/:runId/mcp", verifyRunCallSignature, mcpLimiter, async (c) => {
+  router.post("/runs/:id/mcp", verifyRunCallSignature, mcpLimiter, async (c) => {
     const run = c.get("run")!;
     if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
     return serveRunMcp(c, run);
@@ -519,7 +519,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // The stateless server has no GET stream and no session to DELETE: every
   // other verb is a 405 with `Allow: POST`, as the Streamable HTTP transport
   // requires of a server that offers no GET stream.
-  router.all("/runs/:runId/mcp", () => {
+  router.all("/runs/:id/mcp", () => {
     throw methodNotAllowed(["POST"]);
   });
 

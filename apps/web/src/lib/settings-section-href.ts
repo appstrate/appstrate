@@ -47,13 +47,13 @@ export function agentSettingsHref(pathname: string, section: AgentSettingsSectio
   return sectionHref(pathname, "settings", "agentSettings", section, extra);
 }
 
-/** An integration's Paramètres is its `configuration` tab. */
+/** An integration's Paramètres is its `settings` tab. */
 export function integrationSettingsHref(
   pathname: string,
   section: IntegrationSettingsSection,
   extra?: Extra,
 ) {
-  return sectionHref(pathname, "configuration", "integrationSettings", section, extra);
+  return sectionHref(pathname, "settings", "integrationSettings", section, extra);
 }
 
 /** The editor a Paramètres URL mounts, for `EditorPlaceContext`: the definition sections are one editor, and the `file` remounts it like a section. */

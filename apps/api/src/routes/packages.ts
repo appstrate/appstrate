@@ -16,7 +16,7 @@ import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { assertImportedType, readExpectedImportType } from "../lib/import-type.ts";
@@ -675,7 +675,7 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     // type needs a correction pass behind this listing.
     //
     // What is merely PLACED here — a package switched off —
-    // belongs to the space library (`GET /api/spaces/{spaceId}/library`), which
+    // belongs to the space library (`GET /api/spaces/{id}/library`), which
     // carries the per-placement state and the switch that repairs it.
     const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
     const enriched = await enrichWithCreatorNames(items);
@@ -2231,7 +2231,7 @@ export function createPackagesRouter() {
   //
   // Authorized by `<type>:share` in the home (no route-level guard); withdraw
   // accepts either side (`assertPlacementRemovalAccess`). No ACCEPT route:
-  // switching a placement on is activation, via `POST /api/spaces/{spaceId}/packages`.
+  // switching a placement on is activation, via `POST /api/spaces/{id}/packages`.
 
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
@@ -2323,13 +2323,13 @@ export function createPackagesRouter() {
       }
     }
 
-    // 200 either way (idempotent), rendered through the listing's projection.
+    // 201 either way (idempotent), rendered through the listing's projection.
     const [view] = await listPackageShares(packageId, orgId, spaceId);
     if (!view) {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    return c.json({ object: "package_share", ...view });
+    return c.json({ object: "package_share", ...view }, 201);
   });
 
   router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {

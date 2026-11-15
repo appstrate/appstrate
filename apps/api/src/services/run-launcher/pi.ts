@@ -392,10 +392,10 @@ async function runPlatformContainerImpl(
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself
-    // at startup (`GET /api/runs/:runId/workspace`). Input files were
+    // at startup (`GET /api/runs/:id/workspace`). Input files were
     // already streamed into the same run-workspace namespace during
     // upload-consume — the agent fetches each one (`GET
-    // /api/runs/:runId/files/:name`) and streams it to disk, never buffering
+    // /api/runs/:id/files/:name`) and streams it to disk, never buffering
     // the whole payload. This replaces the old seed-into-the-run-volume
     // delivery, whose correctness depended on the volume driver — a tmpfs-backed
     // `local` volume is NOT shared between the short-lived seed helper and the

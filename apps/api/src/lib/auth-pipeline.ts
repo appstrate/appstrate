@@ -510,10 +510,10 @@ export function skipAuth(
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   // Unified-runner run-scoped routes: event ingestion
-  // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
-  // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
+  // (`/api/runs/:id/events[/finalize|/heartbeat]`) and the agent
+  // workspace self-provisioning fetches (`/api/runs/:id/workspace`,
   // `/files`, `/files/:name`), and the run MCP server of a remote run
-  // (`/api/runs/:runId/mcp`). All authenticate via a Standard
+  // (`/api/runs/:id/mcp`). All authenticate via a Standard
   // Webhooks HMAC signature at the route layer — not via JWT / API key /
   // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;

@@ -19,7 +19,7 @@ import type { ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Narrow projection of the `runs` row used for signature verification +
- * event dispatch on `POST /api/runs/:runId/events`.
+ * event dispatch on `POST /api/runs/:id/events`.
  */
 export interface RunSinkContext {
   id: string;

@@ -2,9 +2,9 @@
 
 /**
  * Tests for the agent self-provisioning fetches:
- *   - `GET /api/runs/:runId/workspace`         — the AFPS bundle (ZIP)
- *   - `GET /api/runs/:runId/files`         — the input-file manifest
- *   - `GET /api/runs/:runId/files/:name`   — one file, streamed
+ *   - `GET /api/runs/:id/workspace`         — the AFPS bundle (ZIP)
+ *   - `GET /api/runs/:id/files`         — the input-file manifest
+ *   - `GET /api/runs/:id/files/:name`   — one file, streamed
  *
  * The agent extracts the bundle to its workspace root and streams each input
  * file to `files/<name>` on disk, instead of relying on a
@@ -241,7 +241,7 @@ describe("run-workspace storage round-trip", () => {
   });
 });
 
-describe("GET /api/runs/:runId/workspace", () => {
+describe("GET /api/runs/:id/workspace", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -310,7 +310,7 @@ describe("GET /api/runs/:runId/workspace", () => {
   });
 });
 
-describe("GET /api/runs/:runId/files[/:name]", () => {
+describe("GET /api/runs/:id/files[/:name]", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {

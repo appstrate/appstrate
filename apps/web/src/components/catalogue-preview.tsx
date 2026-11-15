@@ -69,6 +69,7 @@ import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
 import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
+import { ManifestOverview } from "./package-manifest/manifest-overview";
 import { SettingsHeading } from "./settings/settings-heading";
 
 /** The alert's words per state, spelled out so the locale test sees every key. */
@@ -487,6 +488,8 @@ export function CataloguePreview({
           </dl>
         </SettingsGroup>
       )}
+
+      <ManifestOverview manifest={(agent ?? other)?.manifest} />
 
       <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
         {mode === "readonly" && (

@@ -226,6 +226,32 @@ export function parseLogListResponse(body: unknown): RunLogLine[] {
   return out;
 }
 
+/** Same page ceiling as the web's `useRunLogs`: ~20k rows against pathological runs. */
+export const RUN_LOG_PAGE_CAP = 20;
+
+/**
+ * Walk the run's log pages (`hasMore` + `since=<last id>`) to the end so the
+ * tail (final output) is never cut off by the page size. `fetchPage` returns
+ * the parsed envelope body, or undefined on any failure. Each page is handed to
+ * `onPage` as it lands. Resolves "failed" if any page failed, else "ok".
+ */
+export async function readRunLogPages(
+  fetchPage: (since: number | undefined) => Promise<unknown | undefined>,
+  onPage: (lines: RunLogLine[]) => void,
+): Promise<"ok" | "failed"> {
+  let since: number | undefined;
+  for (let page = 0; page < RUN_LOG_PAGE_CAP; page++) {
+    const body = await fetchPage(since);
+    if (body === undefined) return "failed";
+    const lines = parseLogListResponse(body);
+    onPage(lines);
+    const last = lines[lines.length - 1];
+    if (asRecordOrNull(body)?.hasMore !== true || !last) return "ok";
+    since = last.id;
+  }
+  return "ok";
+}
+
 /**
  * Merge incoming log lines into the existing list: dedup by `id` (the SSE tail
  * and the history fetch overlap), keep ascending `id` order. Stable + pure so

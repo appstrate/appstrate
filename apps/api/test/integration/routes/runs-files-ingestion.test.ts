@@ -2,7 +2,7 @@
 
 /**
  * Integration tests for the agent-output ingestion route (Phase 2):
- * `POST /api/runs/:runId/files`.
+ * `POST /api/runs/:id/files`.
  *
  * Covers the streaming happy path (durable row + org counter + sha256), the
  * synchronous enforcement gates (per-file 413 with partial-object cleanup,
@@ -94,7 +94,7 @@ function postDoc(runId: string, headers: Record<string, string>, body: Uint8Arra
   return app.request(`/api/runs/${runId}/files`, { method: "POST", headers, body });
 }
 
-describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
+describe("POST /api/runs/:id/files — agent-output ingestion", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {

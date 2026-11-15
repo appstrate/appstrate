@@ -15,7 +15,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { CataloguePreview } = await import("../catalogue-preview.tsx");
 const { cataloguePlacement } = await import("../../lib/catalogue-placement.ts");
-const { versionKeys } = await import("../../lib/query-keys.ts");
+const { $api } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const settingsFr = (await import("../../locales/fr/settings.json")).default;
@@ -45,10 +45,12 @@ const PACKAGE: LibraryPackageItem = {
 function sheet(options: { pinnedVersion?: string; latest?: string }): string {
   const queryClient = new QueryClient();
   if (options.latest) {
-    queryClient.setQueryData(versionKeys.info(null, null, "skill", PACKAGE.id), {
-      latest_published_version: options.latest,
-      active_version: null,
-    });
+    queryClient.setQueryData(
+      $api.queryOptions("get", "/api/packages/skills/{scope}/{name}/versions/info", {
+        params: { header: {}, path: { scope: "@acme", name: "notes" } },
+      }).queryKey,
+      { latest_published_version: options.latest, active_version: null },
+    );
   }
   return render(
     <CataloguePreview

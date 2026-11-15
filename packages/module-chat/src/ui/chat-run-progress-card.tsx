@@ -235,7 +235,7 @@ export function ChatRunProgressCard({
       <button
         type="button"
         aria-label={t("run.details")}
-        className="hover:bg-muted/40 absolute inset-0 z-0 rounded-lg"
+        className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
         onClick={() => setOpen(true)}
       />
       <div className="pointer-events-none relative z-10 flex items-center gap-2 px-3 py-2">

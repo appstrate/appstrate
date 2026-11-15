@@ -11,8 +11,8 @@
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
- * spells it — `POST /api/spaces/{spaceId}/packages` and
- * `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` (RBAC spec §6.10).
+ * spells it — `POST /api/spaces/{id}/packages` and
+ * `DELETE /api/spaces/{id}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
@@ -67,13 +67,9 @@ import {
   validationFailed,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
-import {
-  parseListPagination,
-  parseFieldSelection,
-  paginate,
-  projectFields,
-} from "../lib/list-query.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { parseListPagination } from "@appstrate/core/list-query";
+import { parseFieldSelection, paginate, projectFields } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
@@ -1087,7 +1083,7 @@ export function createIntegrationsRouter() {
       ...(body.connection_id ? { connectionId: body.connection_id } : {}),
       proxyReach: () => {
         assertPermission(c, "credential-proxy", "call-own");
-        return reachOutsideRun(callerPermissions(c));
+        return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
       caller: {
         apiKeyId: c.get("apiKeyId") || null,
@@ -1113,7 +1109,7 @@ export function createIntegrationsRouter() {
       scope,
       packageId,
       ...spaceListCaller(c),
-      reachOutsideRunIfPermitted(callerPermissions(c)),
+      reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
     );
     return c.json(status);
   });
@@ -1476,19 +1472,7 @@ export function createIntegrationsRouter() {
    */
   function endConnectSession(c: Context<AppEnv>, err: ApiError): ApiError {
     clearConnectPageCookie(c);
-    return new ApiError({
-      status: err.status,
-      code: err.code,
-      title: err.title,
-      detail: err.message,
-      param: err.param,
-      retryAfter: err.retryAfter,
-      errors: err.fieldErrors,
-      headers: err.headers,
-      extensions: { ...err.extensions, connect_session_ended: true },
-      // Only the original cause: the error handler logs any cause at error level.
-      cause: err.cause,
-    });
+    return err.with({ extensions: { ...err.extensions, connect_session_ended: true } });
   }
 
   // POST /connect/submit — hosted-form credential submit. Context + actor come
@@ -1685,7 +1669,7 @@ export function createIntegrationsRouter() {
         scope,
         packageId,
         ...spaceListCaller(c),
-        reachOutsideRunIfPermitted(callerPermissions(c)),
+        reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
       );
       return c.json(detail);
     },

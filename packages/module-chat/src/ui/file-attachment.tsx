@@ -81,7 +81,7 @@ function AttachmentChip({
       }}
       title={label}
       aria-label={label}
-      className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted`}
+      className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted/50`}
     >
       <Icon className="text-muted-foreground size-3.5 shrink-0" />
       <span className="truncate font-medium">{name || UNNAMED_FILE}</span>

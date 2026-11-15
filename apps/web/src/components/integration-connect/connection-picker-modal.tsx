@@ -9,6 +9,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { useIntegrationName } from "../../hooks/use-integration-name";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
+import { errorMessage } from "../../lib/mutation-error";
 import { toggleCapped, type ConnectionSet } from "../../lib/connection-set";
 import { ConfirmModal } from "../confirm-modal";
 import { FormModal } from "../form-modal";
@@ -28,13 +29,17 @@ const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1
 export function ConnectionPickerModal({
   integrationId,
   picker,
-  onClose,
+  onClose: close,
 }: {
   integrationId: string;
   picker: ConnectionPicker;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
+  const onClose = () => {
+    picker.clearWriteError();
+    close();
+  };
   const name = useIntegrationName(integrationId);
   const [ticked, setTicked] = useState<string[]>(picker.initialTicks);
   const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
@@ -47,7 +52,7 @@ export function ConnectionPickerModal({
   }, []);
   const { busy, offersDefault, offersNone } = picker;
   const value = picker.saveValue(ticked);
-  // Stays open on a refused write: the mutation toasted why, the ticks are still there.
+  // Stays open on a refused write: the refusal shows under the fields, the ticks are still there.
   const write = (next: ConnectionSet) =>
     void picker.persist(next).then((ok) => {
       if (ok) onClose();
@@ -62,6 +67,7 @@ export function ConnectionPickerModal({
       )}
       onClose={onClose}
       isPending={busy}
+      error={picker.writeError ? errorMessage(picker.writeError) : null}
       submitDisabled={value === undefined}
       submitTestId={`member-pick-save-${integrationId}`}
       onSubmit={(e) => {

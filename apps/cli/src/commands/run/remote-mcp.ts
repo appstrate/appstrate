@@ -15,7 +15,7 @@
  *
  * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
  * takes the same path with another target: the run's MCP server on the instance the run reports
- * to (`/api/runs/{runId}/mcp`), every request signed with the run secret as the run's events are
+ * to (`/api/runs/{id}/mcp`), every request signed with the run secret as the run's events are
  * (Standard Webhooks headers over the exact body, a fresh message id and timestamp each), so the
  * tools stay reachable for the whole run. A run that reports to no instance leaves it unbound.
  * Any other integration's requests carry no credential.

@@ -86,7 +86,7 @@ export function AgentInputForm({ wrapper, settings, value, onChange, ref }: Agen
     <div className="flex flex-col gap-3" data-testid="agent-input-form">
       {partition.locked.length > 0 && (
         <div
-          className="border-border bg-muted/40 flex flex-col gap-2 rounded-md border p-3"
+          className="border-border bg-muted/40 flex flex-col gap-2 rounded-lg border p-3"
           data-testid="locked-input-fields"
         >
           <div className="text-foreground flex items-center gap-1.5 text-xs font-medium">

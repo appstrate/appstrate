@@ -13,6 +13,7 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { SkillsPicker } from "../src/ui/skills-picker.tsx";
+import { transportOf } from "./fake-request.ts";
 
 const host: ChatHost = {
   openFile: () => {},
@@ -25,15 +26,15 @@ const host: ChatHost = {
   formatBytes: String,
 };
 
-const getHeaders = () => ({ "X-Space-Id": "spc_1" });
+const scoped = transportOf(() => ({ "X-Space-Id": "spc_1" }));
 
-function html(queryClient: QueryClient, headers: typeof getHeaders | undefined): string {
+function html(queryClient: QueryClient, transport: typeof scoped | undefined): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <ChatHostProvider value={host}>
         <TooltipProvider>
           <SkillsPicker
-            getHeaders={headers}
+            transport={transport}
             selection={{ skillMode: "manual", pinnedSkills: [] }}
             onChange={() => {}}
           />
@@ -45,7 +46,7 @@ function html(queryClient: QueryClient, headers: typeof getHeaders | undefined):
 
 describe("SkillsPicker trigger", () => {
   it("draws a skeleton, not the button, while the enforced read is in flight", () => {
-    const out = html(new QueryClient(), getHeaders);
+    const out = html(new QueryClient(), scoped);
     expect(out).not.toContain("skills-picker-trigger");
     expect(out).toContain("animate-pulse");
   });
@@ -53,7 +54,7 @@ describe("SkillsPicker trigger", () => {
   it("draws the button once the enforced read has answered", () => {
     const qc = new QueryClient();
     qc.setQueryData(["chat", "enforced-skills", "spc_1"], []);
-    expect(html(qc, getHeaders)).toContain("skills-picker-trigger");
+    expect(html(qc, scoped)).toContain("skills-picker-trigger");
   });
 
   it("draws the button when no space is known (the query is disabled, never loading)", () => {

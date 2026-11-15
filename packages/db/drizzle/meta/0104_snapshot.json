@@ -1,5 +1,5 @@
 {
-  "id": "2d21e5b4-e353-4cdb-b8c1-05f317a68382",
+  "id": "b2862cf1-b3b3-42d6-8811-3109bb5fbc88",
   "prevId": "c08e6819-9a73-4a41-b1d7-a8cd28e7c40e",
   "version": "7",
   "dialect": "postgresql",
@@ -2176,6 +2176,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "credential_proxy_open": {
+          "name": "credential_proxy_open",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "settings": {
           "name": "settings",
@@ -5257,7 +5264,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_failed', 'package_shared', 'agent_message')"
+          "value": "type IN ('run_failed', 'package_shared')"
         }
       },
       "isRLSEnabled": false

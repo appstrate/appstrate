@@ -733,8 +733,15 @@
     {
       "idx": 104,
       "version": "7",
-      "when": 1794624035895,
-      "tag": "0104_notification_agent_message",
+      "when": 1794700000000,
+      "tag": "0104_space_credential_proxy_open",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1794753815682,
+      "tag": "0105_notification_agent_message",
       "breakpoints": true
     }
   ]

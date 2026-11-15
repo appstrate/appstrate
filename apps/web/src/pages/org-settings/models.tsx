@@ -18,10 +18,9 @@
  */
 
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useQueryTab } from "../../hooks/use-query-tab";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
-import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -54,6 +53,7 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import type { MenuAction } from "../../lib/menu-action";
+import { errorMessage } from "../../lib/mutation-error";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
   isSystemModel,
@@ -64,7 +64,7 @@ import {
 } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 
-type ModelsTab = "org" | "personal";
+const MODELS_TABS = ["org", "personal"] as const;
 
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -95,20 +95,13 @@ export function OrgSettingsModelsPage() {
     [models, editModelId],
   );
 
-  // The tab is a place: `?tab=personal` opens it, and the first one leaves the URL alone.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab: ModelsTab = searchParams.get("tab") === "personal" ? "personal" : "org";
-  const setTab = (next: ModelsTab) =>
-    setSearchParams((prev) => {
-      const out = new URLSearchParams(prev);
-      if (next === "org") out.delete("tab");
-      else out.set("tab", next);
-      return out;
-    });
+  const [tab, setTab] = useQueryTab("tab", MODELS_TABS);
 
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
   const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
   const updateCredential = useUpdateModelProviderCredential();
+  // The key form shows its refusal inline; a rename goes through the cache's toast.
+  const editKeyCredential = useUpdateModelProviderCredential({ errorHandledByCaller: true });
   const setDefault = useSetDefaultModel();
   const deleteModel = useDeleteModel();
 
@@ -193,12 +186,7 @@ export function OrgSettingsModelsPage() {
             canWriteModels={canWriteModels}
             {...keyDeeds}
             onChooseModels={(pk) => chooseModels.open(pk.id)}
-            onSetDefault={(m: OrgModelInfo) =>
-              setDefault.mutate(
-                { body: { modelId: m.id } },
-                { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
-              )
-            }
+            onSetDefault={(m: OrgModelInfo) => setDefault.mutate({ body: { modelId: m.id } })}
             onDeleteModel={canDeleteModels ? setDeletingModel : undefined}
           />
         </div>
@@ -259,13 +247,17 @@ export function OrgSettingsModelsPage() {
       {editKey.target && (
         <CredentialFormModal
           key={editKey.target.id}
-          onClose={editKey.close}
+          onClose={() => {
+            editKeyCredential.reset();
+            editKey.close();
+          }}
           credential={editKey.target}
-          isPending={updateCredential.isPending}
+          isPending={editKeyCredential.isPending}
+          error={editKeyCredential.error ? errorMessage(editKeyCredential.error) : null}
           onSubmit={(data) => {
             // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
             // by `providerId` at create time.
-            updateCredential.mutate(
+            editKeyCredential.mutate(
               {
                 params: { path: { id: editKey.target!.id } },
                 body: credentialUpdateBody(editKey.target!, data),

@@ -148,7 +148,7 @@ export function ModelPickList({
   const section = (items: typeof indexed, label: string | null) => (
     <>
       {label && (
-        <div className="text-muted-foreground bg-muted/50 px-3 py-1 text-xs font-medium">
+        <div className="text-muted-foreground bg-muted/40 px-3 py-1 text-xs font-medium">
           {label}
         </div>
       )}

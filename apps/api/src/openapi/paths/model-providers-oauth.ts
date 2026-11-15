@@ -45,7 +45,7 @@ export const modelProvidersOAuthPaths = {
         },
       },
       responses: {
-        "200": {
+        "201": {
           description: "Pairing token created. The plaintext is included exactly once.",
           content: {
             "application/json": {

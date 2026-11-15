@@ -206,7 +206,7 @@ curl -X PATCH https://your-instance/api/agents/@acme/support-triage/model \
 
 Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/integrations/llm-models). The proxy cascade is in [Proxies](/features/proxies).
 
-The same per-space settings are also available through `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (`modelId`, `proxyId`, `generation_config`) and read back, resolved, by `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+The same per-space settings are also available through `PATCH /api/spaces/{id}/packages/{scope}/{name}` (`modelId`, `proxyId`, `generation_config`) and read back, resolved, by `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`.
 
 ## Running an agent
 

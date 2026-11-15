@@ -292,7 +292,7 @@ describe("buildAgentPackage — bundle output invariants", () => {
   });
 
   it("always emits a non-empty root package — the invariant behind the runtime's 404=fatal workspace fetch", async () => {
-    // The agent runtime treats a 404 on GET /api/runs/:runId/workspace as a
+    // The agent runtime treats a 404 on GET /api/runs/:id/workspace as a
     // FATAL provisioning fault, never a legitimately-empty workspace
     // (runtime-pi/entrypoint.ts `provisionWorkspace`). That 404=fatal
     // contract is sound ONLY because this chain never produces an empty

@@ -15,7 +15,7 @@ import {
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
@@ -269,10 +269,9 @@ export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor
 export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
-  options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
+  options: { unread?: boolean; limit: number; startingAfter?: string },
 ): Promise<ListEnvelope<NotificationDto>> {
-  const { unread = false, startingAfter } = options;
-  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const { unread = false, limit, startingAfter } = options;
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
   const extra: SQL[] = [recipientFilter(actor)];

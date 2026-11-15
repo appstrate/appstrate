@@ -69,6 +69,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     read `pi-1.5.2.json`, published by `publish-model-catalog.yml` once `main`
     carries the bump; until then they run on the embedded registry only.
 
+- **Migration `0104` adds `spaces.credential_proxy_open`** (#2204): a
+  boolean, `NOT NULL DEFAULT true`, so every existing space keeps direct
+  connection access open. Applied at boot, no data rewrite;
+  `packages/db/schema-catalog.txt` gains the column.
+
 - **A non-system integration whose authorization server does not support RFC 9207
   issuer identification no longer connects** (#2102). A client the platform
   provisions (DCR or client metadata document) now requires the server to
@@ -157,7 +162,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
   to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP
-  integrations, with the run's MCP server on the instance (`/api/runs/{runId}/mcp`) as its
+  integrations, with the run's MCP server on the instance (`/api/runs/{id}/mcp`) as its
   target, each request signed with the run's sink secret like its events. A run that reports to no
   instance starts without it (`no connection is bound to this run`).
 
@@ -191,6 +196,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `testModelInline` descriptions state that `ok: true` covers the credential
   (validated offline for a subscription, by one lightweight provider request
   for an API key), never the model itself. The response is unchanged.
+
+- **BREAKING (MCP): `search_integration_tools` and `call_integration_tool` replace
+  `list_connections` and `api_call`** (#2205, #2206). `search_integration_tools` lists the
+  tools of the integrations the caller holds a connection of in the space, each naming by
+  `connection_ids` the connections it reaches, which the result lists once in `connections`
+  (every field `list_connections` returned; a typed tool adds `missing_scopes` per
+  connection): `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths
+  expose one, for each `api_call` an integration's catalog exposes (every tool less
+  `hidden_tools`, not `default_tools`), and the typed tools of a remote MCP server (see
+  Added). A search by `query` or `integration` carries the first result's input schema
+  and usage in `best_match`. `call_integration_tool` takes the `tool` name, its
+  `arguments` and an optional `connection_id`: for `{ns}__api_call`, the `requests` batch,
+  `session_id` and `max_response_bytes` of the old `api_call`, without
+  `integration_package_id`, so a batch targets one integration. **An integration that
+  declares no `api_call` is no longer callable through the MCP** (the old generic
+  `api_call` took any integration); `/api/credential-proxy/proxy` is unchanged and still
+  serves it. A namespace is the normalised package id, cut at 20 characters without a
+  trailing `_`; two integrations active in the space whose namespaces are equal each take
+  `_` and a hash of their own id, 6 hex digits, 2 more while one still equals another,
+  where a run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. An
+  `{ns}__api_call__{auth}` name too long for the 56-character tool-name bound keeps
+  `{ns}__api_call__` and ends with its auth part cut to fit and a hash of the tool name.
+  Refusal codes: an unknown tool name passed to `call_integration_tool` is the tool result
+  `unknown_tool`, a name two tools would share `ambiguous_tool` (neither is called); an
+  `{ns}__api_call` batch has 45 s, past which an entry is `not_sent` or
+  `no_answer_before_deadline`. The old names answer `-32602 Unknown tool`, with no
+  alias: re-list the tools in the client. Each request still re-enters the proxy route
+  under its guard, rate limit and access rule.
 
 - **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
   are read through the MCP Skills extension: `skills/list` and `skills/get` for the
@@ -559,7 +592,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories`, `buildRuntimeToolExtensions` and its
   `./runtime-tools` export.
 - **BREAKING: the finalize contract carries no memories, pinned slots or logs** (#2199).
-  `POST /api/runs/{runId}/events/finalize` ignores `memories`, `pinned` and `logs`, and
+  `POST /api/runs/{id}/events/finalize` ignores `memories`, `pinned` and `logs`, and
   finalize writes neither `package_persistence`, `runs.checkpoint` nor a run log from them:
   `note`, `pin` and `log` write when the tool is called. `@appstrate/afps-runtime` drops
   `RunResult.memories`, `RunResult.pinned`, `RunResult.logs`, `Memory`, `PinnedSlot`,
@@ -594,21 +627,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound
   (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
   `recall_memory`, `run_history` and `notify`. All but `notify` are selected by default:
-  `notify` reaches people, so an agent gets it by selecting it.
+  `notify` reaches people, so an agent gets it by selecting it. Its tools exist only inside a
+  run: outside one, the credential proxy considers no runtime-bound integration, so
+  `GET /api/credential-proxy/tools` (and `search_integration_tools`) never lists it and
+  `POST /api/credential-proxy/tools/call` naming it answers `404`, before any request to its
+  declared URL.
 
-- **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`** (#2199).
+- **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{id}/mcp`** (#2199).
   One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
   for one run, and each tool writes at call time: `log` a run log (message up to 2 000
   characters), `note` an archive memory (up to 2 000 characters, refused beyond rather than
   cut), `pin` a pinned slot (and, for `checkpoint` with an object content, the run's checkpoint
   snapshot `run_history` returns), `notify` a notification. The sidecar authenticates `/internal/mcp` with the run
   token (a run that is not `running` answers 403). The host executing a remote run reaches
-  `/api/runs/{runId}/mcp` with the Standard Webhooks signature it already puts on the run's
+  `/api/runs/{id}/mcp` with the Standard Webhooks signature it already puts on the run's
   events, over the exact request body, so the credential lasts as long as the run's sink, not
   a session: a bad signature answers 401, a replayed `webhook-id` 409, a closed sink 410, and a
   platform-origin run 404 (its sidecar serves these tools, restricted to the agent's selection).
   `/internal/mcp` allows 200 requests a minute per run token (429 beyond), every verb counted;
-  `/api/runs/{runId}/mcp` allows 200 signed POSTs a minute per run. Both refuse a JSON-RPC batch
+  `/api/runs/{id}/mcp` allows 200 signed POSTs a minute per run. Both refuse a JSON-RPC batch
   with 400 and answer 405 (`Allow: POST`) to every other verb, GET included.
 
 - **`notify`: an agent sends an in-app notification from inside its run** (#2200).
@@ -620,7 +657,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   arguments outside the schema are tool errors that write nothing. The bell
   renders it with its title, message and a link to the run. `GET /api/notifications`
   adds the `agent_message` kind (payload `packageId`, `title`, `message`);
-  migration `0104` restates the `notifications_type_valid` CHECK. The bell shows it at its
+  migration `0105` restates the `notifications_type_valid` CHECK. The bell shows it at its
   next refresh — when the run ends, on reconnect, or at its five-minute poll — not instantly.
   Opening the run reads it, like a failure notice. An agent gets it
   by selecting it: it is not in the integration's `default_tools`, and the agents
@@ -639,6 +676,127 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   without it.
   Authenticated remote integrations and `local` sources stay unavailable to a
   local run; `--integrations none` wires none.
+
+- **The typed tools of a remote MCP integration are callable outside a run**
+  (#2206). `search_integration_tools` lists, for an integration backed by a
+  remote MCP server, the tools its catalog selects (the `tools_policy` keys, or
+  everything the server lists under `allow_undeclared_tools`, less
+  `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
+  the server's `tools/list`. The name is a function of the upstream name alone,
+  whatever the listing order, the connection listed with or the other tools:
+  `{ns}__{tool}` when that is a valid tool name (56 characters at most, the body
+  in `[A-Za-z0-9_-]`), the tool is not named `api_call`, `api_upload` or a
+  `…__{auth}` form of either, and its name does not end in `_` and 8 hex digits
+  (nor is 8 hex digits alone); otherwise the upstream name with each other
+  character made `_`, `_` runs collapsed, cut to fit, stripped of leading and
+  trailing `_` and always followed by `_` and 8 hex digits of its hash, so a
+  hashed name holds no `__` and never equals a plain one (two hashed names
+  still equal, a hash collision, are both dropped and logged; a run keeps a
+  transformed name's plain form while it is free, so there the name differs
+  from a run's). The catalog
+  is read through the credential proxy with the connection the proxy selects (when several qualify, the first of the caller's
+  own connections it accepts, never a colleague's shared one the caller did not
+  name; sanitised; cached 5 minutes per connection, integration version and
+  rendered server URL, read only after that selection, at most 128 catalogs
+  per replica; at most 500 tools of names up to 128 characters and 512 KiB of
+  descriptors, a longer catalog reported by a `note` and, on the listing route,
+  in `truncated_catalogs` with the number of tools read, `listed_tools`; a
+  declared output schema
+  relayed as `output_schema`). A server that cannot be listed leaves the names,
+  marked `catalog_unreadable`; one the proxy refused to list for the caller, or
+  whose server refused the connection's credential, comes back in `unlisted`
+  with that refusal. `call_integration_tool` sends one `tools/call` through the proxy, on
+  the named `connection_id` or the connection selected for that tool:
+  `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
+  `remedy`, or `must_choose_connection` with the candidates, both before
+  anything is sent (every auth of the integration serves a typed tool). A
+  JSON-RPC error -32602 (Invalid params) the server answers to the `tools/call` is
+  `422 upstream_invalid_params`, any other `502 upstream_mcp_error`
+  (`mcp_error: { code, message }`, the message bounded), an answer over the
+  exchange bound (2 MiB, or the proxy's `max_response_bytes` when lower)
+  `502 upstream_response_too_large` (at once, as JSON or as an event stream),
+  -32602 answered to anything but the `tools/call` itself (the handshake, which
+  MCP uses for an unsupported protocol version) `502 upstream_mcp_error`,
+  a 401 or 403 of the server `502 upstream_credential_rejected`
+  (`upstream_status`, and the proxy's `credential` verdict when its forced
+  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
+  each with its `Proxy-Status` (`received-status` on a credential rejection and
+  on a JSON-RPC error, the status the error came in, with
+  `error=http_request_error` on `upstream_invalid_params` and
+  `error=http_protocol_error` on `upstream_mcp_error` and on a `bad_gateway`
+  that received an answer); the server sync of
+  `POST /api/integrations/{packageId}/discover` answers the same codes (its
+  timeout 20 s, never `upstream_invalid_params`: it sends no arguments) where it
+  answered `bad_gateway`. The result
+  keeps no reserved `_meta` key, on the result or on any content block: a key
+  whose prefix (before its first `/`, in any case) is `dev.appstrate`, or has
+  `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`,
+  `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`).
+  Past 256 KiB the result is cut so that its JSON stays within 256 KiB: a text
+  block that does not fit is cut on a character boundary, any other is
+  replaced by a note while one fits, a closing note counts what was cut or
+  dropped, and `_meta["dev.appstrate/truncated"]` is set.
+  The call journal records one row per `tools/call` (that exchange, not a later
+  one of its session), a timeout included, and one per listing that reached the
+  server, a refused or unanswered handshake
+  included (one row for the sync as well), and a listing reaching a server
+  goes through the forced refresh on a 401, which can rotate the stored OAuth
+  tokens, and can flag the connection on a credential refusal, as a call does:
+  a search is annotated neither read-only nor idempotent. A
+  listing waits 20 s for all its servers (5 s when `call_integration_tool`
+  resolves its tool by name, keeping resolution and call under a client's
+  60 s), and no longer than its request: a catalog not read by then is listed
+  `catalog_unreadable` and read on for the next listing, and no further server
+  is contacted. Resolving a name its catalog is not there to prove — not
+  declared, under `allow_undeclared_tools`, and not an upstream name exposed as
+  itself (a name ending in `_` and 8 hex digits never is) — answers, in
+  `unlisted`, `503 tool_catalog_unavailable` and sends nothing: the catalog
+  could not be read, `listing_failure` naming why when known (the proxy's
+  problem code, or `timeout`); retryable, a later listing may read it. Tool names are unique in a space: a namespace equal to another
+  active integration's after normalisation (cut at 20 characters, without a
+  trailing `_`) takes a hash of its package id, and a name never depends on the
+  caller's connections. The listing gives the connections the tools reach
+  once (`connections`), each tool naming its own (`connection_ids`, a typed
+  tool's `missing_scopes` per connection). Both routes answer `Cache-Control: no-store`, like
+  `/proxy`. Two routes
+  back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
+  and `unlisted`) and
+  `POST /api/credential-proxy/tools/call`, under the access rule of
+  `/api/credential-proxy/proxy` outside a run, each with its own rate-limit
+  bucket, and both kept out of the MCP operation catalog like `/proxy`.
+  `search_integration_tools` also lists, in `not_ready`, the integrations
+  active in the space the caller has no usable connection of and that offer a
+  tool outside a run, each with the
+  `proxy_connection` verdict of a call naming none (`none`,
+  `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
+  the selection's `refusal` item, whose `connect_url` (run launch's minter and
+  policy, `integrations:connect`) connects or reconnects it. The MCP exchange
+  of the editor's server sync and of these routes share one proxy adapter;
+  `stripForgedRuntimeEvents` moves from the sidecar to
+  `@appstrate/mcp-transport`, which both consume, beside the relay's wider
+  `stripReservedResultMeta`.
+
+- **A space can close direct access to its connections** (#2204). A space
+  admin turns off « Direct connection access » in the space settings
+  (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
+  `spaces.credential_proxy_open`, default `true`, migration `0104`). The
+  credential proxy then answers calls that name no run
+  (`GET /api/credential-proxy/connections`, `GET /api/credential-proxy/tools`,
+  `POST /api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without
+  `X-Run-Id`) and the authenticated `POST /api/integrations/{packageId}/discover`
+  with `403 credential_proxy_closed` for every role,
+  organization owners and admins included, and the MCP tools
+  `search_integration_tools` and `call_integration_tool` are not declared for
+  that space; `get_me` stops naming them there. On the organization URL, a
+  call whose `space_id` names that space is refused with
+  `credential_proxy_closed`. Runs are unaffected: platform runs reach
+  their connections through the sidecar, remote runs (`X-Run-Id`) their bound
+  ones. The switch does not stop a member allowed to launch inline runs from
+  having an agent make the call inside a run. The space object carries
+  `credential_proxy_open`; a personal space keeps it open
+  (`409 personal_space_immutable`). The integration detail's `proxy_connection`
+  verdict (`GET /api/integrations/{packageId}`) is then `proxy_closed`, and the
+  editor's connect step says so instead of offering a connection.
 
 - **A model refused for the runtime version says so** (#2148). When a provider
   refuses a model for the client version the agent SDK announces (Anthropic's
@@ -844,10 +1002,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`get_me` lists only the integrations active in the space** (#2146).
   `GET /api/me/context` listed every integration with a connection the caller
   may bind in the space, including an org-scope connection of an integration
-  not activated there, which `list_connections`, `api_call` and runs refuse.
+  not activated there, which the credential proxy and runs refuse.
   `connections[]` now holds the active integrations only, as the agent and
   skill hints of the same payload do, and the `get_me` tool description points
-  to `list_connections` for the connections `api_call` can use.
+  to `search_integration_tools` for the tools those connections can call.
 
 - **A remote MCP integration whose credential is rejected at boot is flagged on
   the first run** (#2181). A 401 on the MCP handshake of an API key, basic or

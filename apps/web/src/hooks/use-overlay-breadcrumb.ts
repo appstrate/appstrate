@@ -15,3 +15,8 @@ export function useOverlayBreadcrumb(entries: BreadcrumbEntry[]) {
 export function usePageBreadcrumb(entries: BreadcrumbEntry[]) {
   useBreadcrumb("page", entries);
 }
+
+/** What a page inside an overlay appends to the overlay's trail (a webhook under Webhooks). */
+export function useOverlayPageBreadcrumb(entries: BreadcrumbEntry[]) {
+  useBreadcrumb("overlayPage", entries);
+}

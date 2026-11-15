@@ -4,14 +4,13 @@
  * Dual-mode OAuth client modal (create + edit).
  *
  * - Create: form → `onCreated` hands the plaintext secret to the host, which shows it once
- * - Edit: form → toast success → close
+ * - Edit: form → close
  *
  * Mounted by the host while open, one per client (`key`).
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { FormModal } from "@/components/form-modal";
 import { ErrorState } from "@/components/page-states";
 import { TextSkeleton } from "@/components/loading-skeletons";
@@ -205,10 +204,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
           },
         },
         {
-          onSuccess: () => {
-            toast.success(t("settings:oauthClients.updated"));
-            onClose();
-          },
+          onSuccess: onClose,
           onError: (err) => {
             setError("root", { message: errorMessage(err) });
           },

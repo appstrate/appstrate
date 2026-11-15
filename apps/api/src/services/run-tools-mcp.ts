@@ -9,7 +9,7 @@
  *
  *   - `POST /internal/mcp` — the sidecar of a platform run, authenticated by
  *     the run token;
- *   - `POST /api/runs/{runId}/mcp` — the host executing a remote run,
+ *   - `POST /api/runs/{id}/mcp` — the host executing a remote run,
  *     authenticated by the run's sink signature, like the run's other
  *     callback routes.
  *
@@ -27,10 +27,10 @@ import {
   type AppstrateToolDefinition,
   type CallToolResult,
 } from "@appstrate/mcp-transport";
+import { listResponse } from "@appstrate/core/list-query";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { listResponse } from "../lib/list-response.ts";
 import {
   appendRunLog,
   getRecentRuns,

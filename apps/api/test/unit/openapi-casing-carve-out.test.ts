@@ -98,7 +98,6 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
 
   hasMore: PAGINATION,
   startingAfter: PAGINATION,
-  endingBefore: PAGINATION,
 
   keyPrefix: API_KEYS,
   urlPrefix: PROXIES,

@@ -2,12 +2,12 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
+import { PackageOriginMeta } from "../package-origin-meta";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface PackageDetailBarDetail {
@@ -85,21 +85,7 @@ export function PackageDetailBar<T extends string>({
       meta={
         <>
           <DetailBarId id={detail.id} />
-          {/* Where the package comes from and where it LIVES, which is where it
-              may be edited: facts, kept off a phone's one line. */}
-          {detail.source === "system" && (
-            <span className="hidden shrink-0 items-center gap-1 sm:inline-flex">
-              <span aria-hidden>·</span>
-              <ShieldCheck className="size-3" aria-hidden />
-              {t("list.badgeBuiltIn", { ns: "agents" })}
-            </span>
-          )}
-          {detail.homeSpaceName && (
-            <span className="hidden shrink-0 items-center gap-1.5 md:inline-flex">
-              <span aria-hidden>·</span>
-              {t("packages.homeSpace", { ns: "settings", space: detail.homeSpaceName })}
-            </span>
-          )}
+          <PackageOriginMeta source={detail.source} homeSpaceName={detail.homeSpaceName} />
         </>
       }
       actions={actions}

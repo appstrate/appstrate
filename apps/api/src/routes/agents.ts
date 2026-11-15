@@ -4,7 +4,7 @@ import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { getRunningRunCounts } from "../services/state/runs.ts";
 import { getUnreadRunCountsByAgent } from "../services/state/run-reads.ts";
 import {
@@ -209,7 +209,7 @@ export function createAgentsRouter() {
     // switched on, or a system agent with no row) via LEFT JOIN. This page
     // answers "what can I launch here?", so every row on it is launchable;
     // an agent placed here but switched off (or never switched on) lives on the
-    // space library instead (`GET /api/spaces/{spaceId}/library`), which
+    // space library instead (`GET /api/spaces/{id}/library`), which
     // carries its origin, its state and the switch.
     const visibility = runVisibilityFilter(c);
     const [rows, runningCounts, unreadCounts] = await Promise.all([
@@ -684,8 +684,8 @@ export function createAgentsRouter() {
       });
 
       return c.json({
-        memories_deleted: memoriesDeleted,
-        checkpoint_deleted: checkpointDeleted,
+        memory_count: memoriesDeleted,
+        checkpoint_count: checkpointDeleted ? 1 : 0,
       });
     },
   );

@@ -24,13 +24,13 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     ctx = await createTestContext();
   });
 
-  it("returns 200 with a token + ready-to-paste npx command", async () => {
+  it("returns 201 with a token + ready-to-paste npx command", async () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({ providerId: "test-oauth" }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const body = (await res.json()) as {
       id: string;
       token: string;
@@ -103,7 +103,7 @@ describe("GET /api/model-providers-oauth/pairing/:id", () => {
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({ providerId: "test-oauth" }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string };
     return body.id;
   }

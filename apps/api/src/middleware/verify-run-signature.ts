@@ -2,8 +2,8 @@
 
 /**
  * Run-sink authentication for the routes an agent process calls back on
- * (`POST /api/runs/:runId/events`, `/finalize`, `/heartbeat`, the workspace
- * fetches, `POST /api/runs/:runId/files`, and `POST /api/runs/:runId/mcp`).
+ * (`POST /api/runs/:id/events`, `/finalize`, `/heartbeat`, the workspace
+ * fetches, `POST /api/runs/:id/files`, and `POST /api/runs/:id/mcp`).
  *
  * These routes are called from agent processes that hold no user session —
  * the authentic principal is the **run itself**. Proof of authenticity is
@@ -29,7 +29,7 @@
  * ## Ordering
  *
  * Signature verification comes FIRST on every run-HMAC route, before any
- * per-run limiter: those limiters key on the `:runId` from the URL, so
+ * per-run limiter: those limiters key on the `:id` from the URL, so
  * running them first would let anyone who merely knows a runId burn a
  * legitimate run's ingestion budget with unsigned requests. What guards the
  * pre-authentication work instead is the coarse, per-IP FAILURE budget below
@@ -62,7 +62,7 @@ import {
 const CLAIMED_MSG_ID_KEY_PREFIX = "appstrate:run-claimed-msg-id:";
 
 /**
- * Build a run-authentication middleware: resolve the run sink from `:runId`,
+ * Build a run-authentication middleware: resolve the run sink from `:id`,
  * fast-reject a closed sink, and verify the Standard Webhooks HMAC over the body
  * `readBody` returns (the raw body, or an EMPTY body for the streaming file
  * upload).
@@ -84,8 +84,8 @@ function makeRunSignatureGuard(
     await assertRunSinkAuthBudget(c);
 
     try {
-      const runId = c.req.param("runId");
-      if (!runId) throw invalidRequest("runId path parameter is required", "runId");
+      const runId = c.req.param("id");
+      if (!runId) throw invalidRequest("id path parameter is required", "id");
 
       const run = await getRunSinkContext(runId);
       if (!run) throw notFound(`run ${runId} not found`);
@@ -151,7 +151,7 @@ const readRawBody = async (c: Context<AppEnv>) =>
   new TextDecoder().decode(await c.req.raw.clone().arrayBuffer());
 
 /**
- * `POST /api/runs/:runId/events`, `/finalize`, `/heartbeat` and the signed
+ * `POST /api/runs/:id/events`, `/finalize`, `/heartbeat` and the signed
  * GETs — the HMAC signs the raw body bytes, and the `webhook-id` is exposed for
  * the event handler's replay dedup (`ingestRunEvent` owns the claim there,
  * because it also owns the release-on-error the runner's same-id retry
@@ -160,7 +160,7 @@ const readRawBody = async (c: Context<AppEnv>) =>
 export const verifyRunSignature = makeRunSignatureGuard(readRawBody, { exposeWebhookId: true });
 
 /**
- * `POST /api/runs/:runId/mcp` — the HMAC signs the raw body bytes, and the
+ * `POST /api/runs/:id/mcp` — the HMAC signs the raw body bytes, and the
  * guard claims the `webhook-id`: no handler dedups it, so without the claim a
  * captured request would replay within the timestamp tolerance (a replayed
  * `pin` overwriting a later value). A replay is refused with 409
@@ -170,7 +170,7 @@ export const verifyRunCallSignature = makeRunSignatureGuard(readRawBody, { consu
 
 /**
  * Signature guard for the streaming file-ingestion POST
- * (`POST /api/runs/:runId/files`). Identical run-authentication to
+ * (`POST /api/runs/:id/files`). Identical run-authentication to
  * {@link verifyRunSignature} — Standard Webhooks HMAC over the run secret —
  * but the HMAC is verified over an EMPTY body, exactly like the run's signed
  * workspace/files GET provisioning fetches (see `runtime-pi/provision.ts`).

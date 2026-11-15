@@ -10,7 +10,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
 import {
   fileBlobKeys,
@@ -60,13 +60,20 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/** The gallery's files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
-export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose"> = {}) {
+/** The gallery's (or one run's) files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+export function useFilesPaged(
+  filters: Pick<FileListFilters, "search" | "purpose" | "runId" | "limit"> = {},
+) {
   const scope = useOrgScope();
   const { can } = usePermissions();
-  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
+  const query = {
+    purpose: filters.purpose,
+    runId: filters.runId,
+    q: filters.search || undefined,
+    limit: filters.limit ?? 25,
+  };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
+    queryKey: pagedQueryKey("/api/files", { params: { header: scope.header, query } }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/files", {
         params: { query: { ...query, startingAfter: pageParam }, header: scope.header },

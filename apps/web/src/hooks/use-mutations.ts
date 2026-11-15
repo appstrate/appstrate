@@ -24,7 +24,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
-  versionKeys,
+  invalidateVersionInfo,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -264,7 +264,6 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
@@ -391,7 +390,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+      void invalidateVersionInfo(qc);
     },
   });
 }

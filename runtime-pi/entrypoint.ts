@@ -19,7 +19,7 @@
  * Wire protocol (agent ↔ platform): HMAC-signed CloudEvents over HTTP via
  * `@appstrate/afps-runtime/sinks.HttpSink`. Every runner — platform
  * container, CLI, GitHub Action — speaks the exact same protocol against
- * `/api/runs/:runId/events` and `/events/finalize`. No stdout parsing.
+ * `/api/runs/:id/events` and `/events/finalize`. No stdout parsing.
  *
  * Required env vars:
  *   - `APPSTRATE_SINK_URL`, `APPSTRATE_SINK_FINALIZE_URL`, `APPSTRATE_SINK_SECRET`

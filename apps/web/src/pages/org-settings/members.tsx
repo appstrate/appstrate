@@ -9,8 +9,12 @@ import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
+import { ListFooter, ListToolbar } from "../../components/list-toolbar";
+import { useListParams } from "../../lib/list-params";
+import { useSearchPlaceholder } from "../../lib/search-placeholder";
+import { matchesSearch } from "../../lib/strings";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
@@ -23,6 +27,9 @@ import { memberLabel } from "../../lib/members";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
+
+/** The search is this page's only list parameter. */
+const NO_FILTERS: readonly string[] = [];
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -47,7 +54,12 @@ export function OrgSettingsMembersPage() {
 
   const { data: orgData, isLoading, error } = useOrgDetail();
 
-  const members = orgData?.members ?? [];
+  const allMembers = orgData?.members ?? [];
+  const list = useListParams(NO_FILTERS);
+  const searchPlaceholder = useSearchPlaceholder(t("orgSettings.tabMembers"));
+  const members = allMembers.filter((member) =>
+    matchesSearch(list.search, [memberLabel(member), member.email]),
+  );
   const memberParam = useUrlModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
@@ -142,10 +154,16 @@ export function OrgSettingsMembersPage() {
         </Modal>
       )}
 
-      {/* No `empty` prop on purpose: this page has TWO lists and one shared
-          empty state below, for when neither members nor invitations exist. A
-          per-list empty sentence here would fire while invitations are pending
-          and say the page is empty when it is not. */}
+      <ListToolbar
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: searchPlaceholder,
+        }}
+      />
+
+      {/* This page has TWO lists: the members' own empty state fires only when no
+          invitation is pending either, or it would say the page is empty when it is not. */}
       <DataTable
         tableId="org-members"
         label={t("orgSettings.tabMembers")}
@@ -156,6 +174,25 @@ export function OrgSettingsMembersPage() {
         rowLabel={memberLabel}
         isLoading={isLoading}
         failure={error}
+        empty={
+          list.search ? (
+            <NoMatchState message={t("orgSettings.noMatchingMembers")} onReset={list.reset} />
+          ) : invitations.length === 0 ? (
+            <EmptyState
+              message={t("orgSettings.noMembers")}
+              hint={t("orgSettings.noMembersHint")}
+              icon={Users}
+              compact
+            >
+              <EmptyStateAction action={inviteAction} />
+            </EmptyState>
+          ) : undefined
+        }
+      />
+      <ListFooter
+        count={
+          isLoading || error ? undefined : t("list.count", { ns: "agents", count: members.length })
+        }
       />
 
       {openedUser && (
@@ -171,17 +208,6 @@ export function OrgSettingsMembersPage() {
       )}
 
       {orgId && <InvitationsTable orgId={orgId} invitations={orgData?.invitations} />}
-
-      {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
-        <EmptyState
-          message={t("orgSettings.noMembers")}
-          hint={t("orgSettings.noMembersHint")}
-          icon={Users}
-          compact
-        >
-          <EmptyStateAction action={inviteAction} />
-        </EmptyState>
-      )}
 
       <ConfirmModal
         open={!!roleChange}

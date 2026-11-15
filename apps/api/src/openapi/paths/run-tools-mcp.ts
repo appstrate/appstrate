@@ -2,7 +2,7 @@
 
 /**
  * The parts of the run MCP server's operation (`services/run-tools-mcp.ts`)
- * shared by its two mounts: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`.
+ * shared by its two mounts: `POST /internal/mcp` and `POST /api/runs/{id}/mcp`.
  */
 
 import { RUN_ROUTE_RATE_PER_MIN } from "../../middleware/rate-limit.ts";

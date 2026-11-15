@@ -63,10 +63,10 @@ describe("semantics", () => {
     expect([...html.matchAll(/<th /g)]).toHaveLength(COLUMNS.length);
   });
 
-  it("keeps the card frame and lets the settings surface remove it", () => {
+  it("draws its own card, which an already framed surface removes", () => {
     const html = table();
     expect(html).toContain("bg-card rounded-lg border");
-    expect(html).toContain("data-settings-table-surface=integrated");
+    expect(html).toContain("data-table-surface=integrated");
   });
 });
 

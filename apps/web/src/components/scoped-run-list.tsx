@@ -45,8 +45,6 @@ export function ScopedRunList({
         : { scheduleId: scope.scheduleId, fixedAgentName: scope.agentName })}
       status={statuses}
       search={list.search}
-      tableSurface="integrated"
-      countLabel={(total) => t("runs.count", { count: total })}
       toolbar={({ columns }) => (
         <ListToolbar
           columns={columns}

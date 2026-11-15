@@ -268,7 +268,7 @@ const canonicalRunsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`.",
         },
         "409": {
           description:
@@ -330,7 +330,8 @@ const canonicalRunsPaths = {
       operationId: "listAgentRuns",
       tags: ["Runs"],
       summary: "List runs for an agent",
-      description: "List runs for a specific agent (org-scoped, default limit 50).",
+      description:
+        "List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -339,9 +340,15 @@ const canonicalRunsPaths = {
         {
           name: "limit",
           in: "query",
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { $ref: "#/components/parameters/Offset" },
+        {
+          name: "startingAfter",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+        },
         { $ref: "#/components/parameters/RunStatusFilter" },
         { $ref: "#/components/parameters/RunSearch" },
       ],
@@ -372,8 +379,7 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+          description: "`limit` outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
@@ -819,7 +825,13 @@ const canonicalRunsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { $ref: "#/components/parameters/Offset" },
+        {
+          name: "startingAfter",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+        },
         {
           name: "kind",
           in: "query",
@@ -1136,8 +1148,7 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+          description: "`limit` outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1246,7 +1257,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1450,7 +1461,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/events": {
+  "/api/runs/{id}/events": {
     post: {
       operationId: "ingestRunEvent",
       tags: ["Runs"],
@@ -1459,7 +1470,7 @@ const canonicalRunsPaths = {
         'Receives a single AFPS `RunEvent` CloudEvent from the run\'s HttpSink. Authenticated via Standard Webhooks HMAC-SHA256 (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers). Idempotent: duplicate `webhook-id` values inside the replay window return `200 { outcome: "replay" }` without reprocessing. Events with non-contiguous sequence numbers are buffered and drained in order on the next contiguous arrival or when a terminal event flushes the buffer.',
       parameters: [
         {
-          name: "runId",
+          name: "id",
           in: "path",
           required: true,
           schema: { type: "string" },
@@ -1548,7 +1559,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/events/finalize": {
+  "/api/runs/{id}/events/finalize": {
     post: {
       operationId: "finalizeRemoteRun",
       tags: ["Runs"],
@@ -1556,7 +1567,7 @@ const canonicalRunsPaths = {
       description:
         'Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent\'s declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.',
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
@@ -1644,7 +1655,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/events/heartbeat": {
+  "/api/runs/{id}/events/heartbeat": {
     post: {
       operationId: "heartbeatRemoteRun",
       tags: ["Runs"],
@@ -1652,7 +1663,7 @@ const canonicalRunsPaths = {
       description:
         "Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
@@ -1690,15 +1701,15 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/workspace": {
+  "/api/runs/{id}/workspace": {
     get: {
       operationId: "fetchRunWorkspace",
       tags: ["Runs"],
       summary: "Fetch the run bundle archive (HMAC)",
       description:
-        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{id}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
@@ -1724,15 +1735,15 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/files": {
+  "/api/runs/{id}/files": {
     get: {
       operationId: "fetchRunFilesManifest",
       tags: ["Runs"],
       summary: "List the run's input files (HMAC)",
       description:
-        "Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).",
+        "Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{id}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
@@ -1777,7 +1788,7 @@ const canonicalRunsPaths = {
       description:
         "Posted by the agent runtime — via the runner's `publish_file` tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "X-File-Name",
           in: "header",
@@ -1884,7 +1895,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/files/{name}": {
+  "/api/runs/{id}/files/{name}": {
     get: {
       operationId: "fetchRunFile",
       tags: ["Runs"],
@@ -1892,7 +1903,7 @@ const canonicalRunsPaths = {
       description:
         "Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
@@ -1919,7 +1930,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/sink/extend": {
+  "/api/runs/{id}/sink/extend": {
     patch: {
       operationId: "extendRunSink",
       tags: ["Runs"],
@@ -1928,7 +1939,7 @@ const canonicalRunsPaths = {
         "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and bumps `last_heartbeat_at` (the column the stall watchdog reads). Extendable sinks are the open ones (not closed, not already expired) on a run in the caller's org and space that the caller may READ: `runs:read` is the runs they launched, `runs:read-all` the whole space. Anything else returns 404 rather than confirming the run exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -1971,7 +1982,7 @@ const canonicalRunsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/mcp": {
+  "/api/runs/{id}/mcp": {
     post: {
       operationId: "runToolsMcpPost",
       tags: ["Runs"],
@@ -1980,7 +1991,7 @@ const canonicalRunsPaths = {
         RUN_TOOLS_MCP_DESCRIPTION +
         " Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes, and each `webhook-id` is single-use (a replay answers 409 `message_replayed`). It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
       parameters: [
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
@@ -2011,7 +2022,7 @@ const canonicalRunsPaths = {
       summary: "Run MCP server of a remote run (GET)",
       description:
         "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.",
-      parameters: [{ name: "runId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       security: [],
       responses: { "405": runToolsMcpMethodNotAllowed },
     },

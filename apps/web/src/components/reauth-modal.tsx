@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FormModal } from "./form-modal";
 import { Modal } from "./modal";
+import { FormItem } from "@/components/app-ui/form-item";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { useAuth } from "../hooks/use-auth";
 import type { ReauthMethod } from "../lib/reauth-methods";
 import { errorMessage } from "../lib/mutation-error";
@@ -55,48 +54,63 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
     }
   };
 
-  return open ? (
-    <Modal onClose={handleClose} title={t("preferences.reauthTitle")}>
-      <div className="flex flex-col gap-4">
-        <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
+  if (!open) return null;
 
-        {methods.length === 0 ? (
-          <div className="flex flex-col items-start gap-4">
-            <p className="text-muted-foreground text-sm">{t("preferences.reauthFallback")}</p>
+  const social = socialMethods.map((method) => (
+    <SocialSignInButton
+      key={method.provider}
+      provider={method.provider}
+      callbackURL="/preferences"
+      disabled={submitting}
+    />
+  ));
+  const description = (
+    <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
+  );
+
+  if (!passwordMethod) {
+    return (
+      <Modal
+        onClose={handleClose}
+        title={t("preferences.reauthTitle")}
+        actions={
+          methods.length === 0 ? (
             <Button onClick={() => logout("/login")}>{t("login.login")}</Button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {passwordMethod && (
-              <form onSubmit={onPasswordSubmit} className="flex flex-col gap-3">
-                <div className="flex flex-col gap-2">
-                  <Label className="mb-0">{t("common:claim.passwordLabel")}</Label>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    autoFocus
-                  />
-                </div>
-                <FieldError>{error}</FieldError>
-                <PendingButton type="submit" pending={submitting} className="self-start">
-                  {t("common:btn.confirm")}
-                </PendingButton>
-              </form>
-            )}
+          ) : undefined
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {description}
+          {methods.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("preferences.reauthFallback")}</p>
+          ) : (
+            social
+          )}
+        </div>
+      </Modal>
+    );
+  }
 
-            {socialMethods.map((method) => (
-              <SocialSignInButton
-                key={method.provider}
-                provider={method.provider}
-                callbackURL="/preferences"
-                disabled={submitting}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </Modal>
-  ) : null;
+  return (
+    <FormModal
+      onClose={handleClose}
+      title={t("preferences.reauthTitle")}
+      onSubmit={onPasswordSubmit}
+      isPending={submitting}
+      error={error || null}
+      submitLabel={t("common:btn.confirm")}
+    >
+      {description}
+      <FormItem id="reauth-password" label={t("common:claim.passwordLabel")}>
+        <Input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          autoFocus
+        />
+      </FormItem>
+      {social}
+    </FormModal>
+  );
 }

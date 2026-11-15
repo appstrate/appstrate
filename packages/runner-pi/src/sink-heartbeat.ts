@@ -3,7 +3,7 @@
 /**
  * Runner-side liveness keep-alive.
  *
- * Posts to `POST /api/runs/:runId/events/heartbeat` on a jittered
+ * Posts to `POST /api/runs/:id/events/heartbeat` on a jittered
  * interval using the same Standard-Webhooks HMAC auth as event
  * ingestion — so platform containers (runSecret only, no user
  * principal) and remote CLIs share a single implementation. The server

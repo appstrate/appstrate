@@ -211,7 +211,7 @@ test("browser Back can be cancelled without unmounting the edited form", async (
   await expect(page).toHaveURL(/preferences\/appearance/);
 });
 
-test("leaving a conversation cancels its rename without asking, and a rename saves to its own target", async ({
+test("the trail shows a conversation's name, and its settings dialog renames it: Annuler writes nothing, Enregistrer writes to its own target", async ({
   authedPage: page,
   apiClient,
 }) => {
@@ -233,19 +233,32 @@ test("leaving a conversation cancels its rename without asking, and a rename sav
   });
   await page.goto(`/chat/${a}`);
   const trail = page.locator("[data-trail]:visible");
-  await trail.getByRole("button", { name: "Rename A", exact: true }).click();
-  const name = trail.getByRole("textbox");
-  await name.fill("Pending A");
-  // A rename is a named action: leaving cancels it, no dialog, no write.
-  await page.getByRole("button", { name: "Rename B", exact: true }).click();
-  await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
+  // The trail names where you are, like every page; it edits nothing.
+  await expect(trail).toContainText("Chat");
+  await expect(trail).toContainText("Rename A");
   await expect(trail.getByRole("textbox")).toHaveCount(0);
-  await trail.getByRole("button", { name: "Rename B", exact: true }).click();
+
+  const openSettings = () =>
+    page.getByRole("button", { name: "Paramètres de la conversation", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Paramètres de la conversation" });
+  await openSettings();
+  const name = dialog.getByRole("textbox", { name: "Nom" });
+  await expect(name).toHaveValue("Rename A");
+  await name.fill("Pending A");
+  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(trail).toContainText("Rename A");
+
+  await page.getByRole("button", { name: "Rename B", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
+  await openSettings();
   await expect(name).toHaveValue("Rename B");
+  // Unchanged, nothing to save.
+  await expect(dialog.getByRole("button", { name: "Enregistrer", exact: true })).toBeDisabled();
   await name.fill("Saved B");
-  await trail.getByRole("button", { name: "Enregistrer", exact: true }).click();
-  await expect(trail.getByRole("button", { name: "Saved B", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(trail).toContainText("Saved B");
   expect(writes).toEqual([{ id: b, title: "Saved B" }]);
   const original = await apiClient.get(`/chat/sessions/${a}`);
   expect((await original.json()).title).toBe("Rename A");

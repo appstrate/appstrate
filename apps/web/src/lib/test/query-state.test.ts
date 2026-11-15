@@ -2,13 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import {
-  generatedKeyPackage,
-  isQueryInFlight,
-  keepPreviousWithin,
-  versionKeyPackage,
-} from "../query-state";
-import { versionKeys } from "../query-keys";
+import { generatedKeyPackage, isQueryInFlight, keepPreviousWithin } from "../query-state";
 
 describe("isQueryInFlight", () => {
   it("is true while fetching without data", () => {
@@ -36,17 +30,18 @@ const fileKey = (pkg: { scope: string; name: string }, path: string) =>
     { params: { path: pkg, query: { path } } },
   ] as const;
 
-describe("generatedKeyPackage / versionKeyPackage", () => {
+describe("generatedKeyPackage", () => {
   it("name the package a key reads, whatever the file or version", () => {
     const pkg = { scope: "@acme", name: "mail" };
     expect(generatedKeyPackage(fileKey(pkg, "a.md"))).toBe("@acme/mail");
     expect(generatedKeyPackage(["agents", "x"])).toBeUndefined();
-    expect(versionKeyPackage(versionKeys.detail("o", "s", "agent", "@a/b", "1.0.0"))).toBe(
-      "agent/@a/b",
-    );
-    expect(versionKeyPackage(versionKeys.detail("o", "s", "agent", "@a/b", "1.1.0"))).toBe(
-      "agent/@a/b",
-    );
+    expect(
+      generatedKeyPackage([
+        "get",
+        "/api/packages/agents/{scope}/{name}/versions/{version}",
+        { params: { path: { scope: "@a", name: "b", version: "1.0.0" } } },
+      ]),
+    ).toBe("@a/b");
   });
 });
 

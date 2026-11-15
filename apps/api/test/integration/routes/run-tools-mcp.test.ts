@@ -2,7 +2,7 @@
 
 /**
  * The run MCP server (`services/run-tools-mcp.ts`) on its two mounts:
- * `POST /internal/mcp` (run token) and `POST /api/runs/{runId}/mcp` (the run's
+ * `POST /internal/mcp` (run token) and `POST /api/runs/{id}/mcp` (the run's
  * sink signature, remote runs only).
  */
 
@@ -732,7 +732,7 @@ describe("run MCP server", () => {
     });
   });
 
-  describe("POST /api/runs/{runId}/mcp", () => {
+  describe("POST /api/runs/{id}/mcp", () => {
     const path = (runId: string) => `/api/runs/${runId}/mcp`;
     const SECRET = "a".repeat(43);
     const OTHER_SECRET = "b".repeat(43);

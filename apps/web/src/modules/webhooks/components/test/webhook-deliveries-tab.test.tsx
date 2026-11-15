@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
+import { pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import i18n, { i18nReady } from "@/i18n.ts";
 import { render } from "@/test/render.tsx";
 import { WebhookDeliveriesTab } from "../webhook-deliveries-tab.tsx";
@@ -10,11 +11,9 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 // Zustand's server snapshot has no selected org; seed that real query key.
-const queryKey = [
-  "get",
-  "/api/webhooks/{id}/deliveries",
-  { params: { path: { id: "wh_1" }, header: { "X-Org-Id": undefined } } },
-];
+const queryKey = pagedQueryKey("/api/webhooks/{id}/deliveries", {
+  params: { path: { id: "wh_1" }, header: { "X-Org-Id": undefined } },
+});
 
 function page(eventId: string, hasMore: boolean) {
   return {

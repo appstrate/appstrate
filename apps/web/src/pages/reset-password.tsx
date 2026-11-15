@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthLink, AuthMessage } from "../components/auth-message";
@@ -87,9 +87,9 @@ export function ResetPasswordPage() {
           {revocationFailed && (
             <AuthLink to="/forgot-password">{t("resetPassword.requestNew")}</AuthLink>
           )}
-          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? t("loading") : t("resetPassword.submit")}
-          </Button>
+          <PendingButton type="submit" className="w-full" pending={form.formState.isSubmitting}>
+            {t("resetPassword.submit")}
+          </PendingButton>
         </form>
         <AuthLink to="/login" className="text-center">
           {t("magicLink.backToLogin")}

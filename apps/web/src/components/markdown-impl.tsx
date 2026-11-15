@@ -21,11 +21,6 @@ const components: Components = {
   },
 };
 
-const inlineComponents: Components = {
-  ...components,
-  p: ({ children }) => <span>{children}</span>,
-};
-
 interface MarkdownProps {
   children: string;
   className?: string;
@@ -72,15 +67,5 @@ export function Markdown({ children, className, inert = false }: MarkdownProps) 
         {children}
       </ReactMarkdown>
     </div>
-  );
-}
-
-export function InlineMarkdown({ children, className }: MarkdownProps) {
-  return (
-    <span className={className}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={inlineComponents}>
-        {children}
-      </ReactMarkdown>
-    </span>
   );
 }

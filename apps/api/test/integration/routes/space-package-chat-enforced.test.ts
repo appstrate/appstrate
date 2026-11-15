@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` with `chat_enforced`
+ * `PATCH /api/spaces/{id}/packages/{scope}/{name}` with `chat_enforced`
  * (issue #1586): a space imposes a skill on every chat conversation held in it.
  *
  * Pinned here: the gate (`skills:write` in the space, no personal-space waiver),

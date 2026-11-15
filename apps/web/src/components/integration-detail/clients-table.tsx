@@ -6,7 +6,7 @@ import { ChevronDown, KeyRound, Plus } from "lucide-react";
 import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "../app-ui/checkbox-field";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   DropdownMenu,
@@ -18,7 +18,8 @@ import { FormItem } from "../app-ui/form-item";
 import { CopyBlock } from "../copy-block";
 import { CallbackUrlHint } from "../package-detail/callback-url-hint";
 import { ConfirmModal } from "../confirm-modal";
-import { Modal } from "../modal";
+import { FormModal } from "../form-modal";
+import { errorMessage } from "../../lib/mutation-error";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -140,7 +141,8 @@ function OAuthClientModal({
   const { t } = useTranslation("settings");
   const create = useCreateIntegrationOAuthClient(tier);
   const update = useUpdateIntegrationOAuthClient(tier);
-  const pending = mode === "create" ? create.isPending : update.isPending;
+  const mutation = mode === "create" ? create : update;
+  const pending = mutation.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
@@ -206,76 +208,69 @@ function OAuthClientModal({
   };
 
   return (
-    <Modal
+    <FormModal
       onClose={onClose}
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
           : t("integration.oauthClient.btnEdit")
       }
+      onSubmit={submit}
+      isPending={pending}
+      error={mutation.error ? errorMessage(mutation.error) : null}
+      submitLabel={
+        mode === "create"
+          ? t("integration.oauthClient.btnRegister")
+          : t("integration.oauthClient.btnEdit")
+      }
+      submitDisabled={clientId.trim() === ""}
+      submitTestId={`oauth-client-save-${authKey}`}
+      formProps={{ className: "grid gap-3 sm:grid-cols-2" }}
     >
-      <form
-        className="grid gap-3 sm:grid-cols-2"
-        onSubmit={submit}
-        data-testid={`oauth-client-form-${authKey}`}
-      >
-        <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
-          <Input
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            disabled={mode === "edit"}
-            data-testid={`oauth-clientid-${authKey}`}
-          />
-        </FormItem>
-        <FormItem
-          id={`csecret-${authKey}`}
-          label={t("integration.oauthClient.clientSecret")}
-          error={
-            secretMissing && (secretTouched || attempted) ? (
-              <span data-testid={`oauth-clientsecret-error-${authKey}`}>
-                {t("integration.oauthClient.clientSecretRequired")}
-              </span>
-            ) : undefined
-          }
-        >
-          <Input
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            onBlur={() => setSecretTouched(true)}
-            disabled={publicClient}
-            placeholder={existing?.has_client_secret ? "••••••••" : ""}
-            data-testid={`oauth-clientsecret-${authKey}`}
-          />
-        </FormItem>
-        <OAuthClientRedirectFields
-          authKey={authKey}
-          authDecl={authDecl}
-          redirectUri={redirectUri}
-          onRedirectUriChange={setRedirectUri}
-          platformRedirectUri={platformRedirectUri}
+      <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
+        <Input
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={mode === "edit"}
+          data-testid={`oauth-clientid-${authKey}`}
         />
-        <label className="flex items-center gap-2 text-sm sm:col-span-2">
-          <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
-          {t("integration.oauthClient.publicClient")}
-        </label>
-        <div className="flex items-center justify-end gap-2 sm:col-span-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={pending || clientId.trim() === ""}
-            data-testid={`oauth-client-save-${authKey}`}
-          >
-            {mode === "create"
-              ? t("integration.oauthClient.btnRegister")
-              : t("integration.oauthClient.btnEdit")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+      </FormItem>
+      <FormItem
+        id={`csecret-${authKey}`}
+        label={t("integration.oauthClient.clientSecret")}
+        error={
+          secretMissing && (secretTouched || attempted) ? (
+            <span data-testid={`oauth-clientsecret-error-${authKey}`}>
+              {t("integration.oauthClient.clientSecretRequired")}
+            </span>
+          ) : undefined
+        }
+      >
+        <Input
+          type="password"
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
+          onBlur={() => setSecretTouched(true)}
+          disabled={publicClient}
+          placeholder={existing?.has_client_secret ? "••••••••" : ""}
+          data-testid={`oauth-clientsecret-${authKey}`}
+        />
+      </FormItem>
+      <OAuthClientRedirectFields
+        authKey={authKey}
+        authDecl={authDecl}
+        redirectUri={redirectUri}
+        onRedirectUriChange={setRedirectUri}
+        platformRedirectUri={platformRedirectUri}
+      />
+      <CheckboxField
+        id={`public-client-${authKey}`}
+        className="sm:col-span-2"
+        label={t("integration.oauthClient.publicClient")}
+        checked={publicClient}
+        onCheckedChange={(c) => setPublicClient(Boolean(c))}
+      />
+    </FormModal>
   );
 }
 
@@ -456,7 +451,6 @@ export function ClientsTable({
 
       <DataTable
         tableId="integration-clients"
-        surface="integrated"
         label={t("integration.clients.title")}
         columns={columns}
         rows={rows}
@@ -533,6 +527,7 @@ export function ClientsTable({
         onClose={() => setConfirmPromote(null)}
         title={t("integration.clients.promote.action")}
         description={t("integration.clients.promote.confirm")}
+        confirmLabel={t("integration.clients.promote.action")}
         variant="default"
         isPending={promote.isPending}
         onConfirm={() => {

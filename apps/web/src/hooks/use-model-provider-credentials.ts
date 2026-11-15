@@ -68,7 +68,7 @@ export function useProvidersRegistry() {
   );
 }
 
-/** `meta`: the model form reports a refused inline key itself; the key dialog leaves it to the cache. */
+/** `meta`: the model form and the key form report a refusal themselves. */
 export function useCreateModelProviderCredential(meta?: MutationMeta) {
   const invalidate = useInvalidatePaths("/api/model-provider-credentials");
   return $api.useMutation("post", "/api/model-provider-credentials", {
@@ -79,9 +79,11 @@ export function useCreateModelProviderCredential(meta?: MutationMeta) {
 
 // `apiShape` / `baseUrl` are pinned by `providerId` at create time and cannot
 // be mutated — delete and re-create to switch providers.
-export function useUpdateModelProviderCredential() {
+/** `meta`: the key form shows its refusal inline; a rename reports through the cache. */
+export function useUpdateModelProviderCredential(meta?: MutationMeta) {
   const invalidate = useInvalidatePaths("/api/model-provider-credentials");
   return $api.useMutation("patch", "/api/model-provider-credentials/{id}", {
+    meta,
     onSuccess: invalidate,
   });
 }

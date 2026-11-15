@@ -6,7 +6,7 @@ import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SkeletonLine } from "../../components/skeleton-line";
@@ -259,15 +259,16 @@ export function OrgSettingsGeneralPage() {
             )
           }
         >
-          <Button
+          <PendingButton
             data-testid="leave-org-button"
             aria-describedby={orgDetailLoading && !previewing ? undefined : leaveHintId}
             variant="destructive"
-            disabled={!canLeave || leaveOrgMutation.isPending}
+            pending={leaveOrgMutation.isPending}
+            disabled={!canLeave}
             onClick={() => setConfirmLeave(true)}
           >
-            {leaveOrgMutation.isPending ? t("orgSettings.leaving") : t("orgSettings.leaveOrg")}
-          </Button>
+            {t("orgSettings.leaveOrg")}
+          </PendingButton>
         </SettingRow>
         {can("org:delete") && (
           <SettingRow
@@ -275,14 +276,14 @@ export function OrgSettingsGeneralPage() {
             label={t("orgSettings.deleteOrg")}
             description={t("orgSettings.deleteOrgDesc")}
           >
-            <Button
+            <PendingButton
               data-testid="delete-org-button"
               variant="destructive"
-              disabled={deleteOrgMutation.isPending}
+              pending={deleteOrgMutation.isPending}
               onClick={() => setConfirmDelete(true)}
             >
-              {deleteOrgMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
-            </Button>
+              {t("btn.delete")}
+            </PendingButton>
           </SettingRow>
         )}
       </SettingsGroup>
@@ -292,6 +293,7 @@ export function OrgSettingsGeneralPage() {
         onClose={() => setConfirmDelete(false)}
         title={t("orgSettings.deleteOrg")}
         description={t("orgSettings.deleteConfirm", { name: currentOrg.name })}
+        confirmLabel={t("btn.delete")}
         isPending={deleteOrgMutation.isPending}
         onConfirm={() => deleteOrgMutation.mutate({ params: { path: { orgId: currentOrg.id } } })}
       />

@@ -2,14 +2,14 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { Badge } from "@appstrate/ui/components/badge";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { ItemList } from "@/components/item-list";
-import { ListFooter } from "@/components/list-toolbar";
+import { KeysetListFooter } from "@/components/list-toolbar";
+import { SkeletonBadge, SkeletonLine } from "@/components/skeleton-line";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
@@ -43,17 +43,25 @@ function deliveryStatusLabel(d: WebhookDelivery): string {
   return d.status;
 }
 
+/** `WebhookDeliveriesTab`'s card while the deliveries load: its two lines, each in its own box. */
+export function WebhookDeliverySkeleton() {
+  return (
+    <Card className="p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <SkeletonLine className="w-40 font-mono text-sm" />
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <SkeletonBadge className="w-10" />
+        <SkeletonLine className="w-48 text-xs" />
+      </div>
+    </Card>
+  );
+}
+
 export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   const { t } = useTranslation(["settings", "common"]);
-  const {
-    data,
-    isLoading,
-    error,
-    hasNextPage,
-    fetchNextPage,
-    isFetchingNextPage,
-    isFetchNextPageError,
-  } = useWebhookDeliveries(webhookId);
+  const deliveriesQuery = useWebhookDeliveries(webhookId);
+  const { data, isLoading, error } = deliveriesQuery;
   const deliveries = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
 
   // Only a failed FIRST load answers as a failure. Once rows are on screen, a
@@ -65,6 +73,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
       <ItemList
         items={deliveries}
         itemKey={(d) => d.id}
+        placeholder={<WebhookDeliverySkeleton />}
         isLoading={isLoading}
         isError={failed}
         error={<ErrorState error={error} compact />}
@@ -90,7 +99,10 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
           );
         }}
       />
-      <ListFooter
+      <KeysetListFooter
+        query={deliveriesQuery}
+        loaded={deliveries.length}
+        ready={!isLoading && !failed}
         count={
           error && data ? (
             <span className="text-destructive">
@@ -98,18 +110,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
             </span>
           ) : undefined
         }
-      >
-        {hasNextPage && !failed && (
-          <PendingButton
-            variant="outline"
-            size="sm"
-            pending={isFetchingNextPage}
-            onClick={() => void fetchNextPage()}
-          >
-            {isFetchNextPageError ? t("common:btn.retry") : t("settings:spaces.loadMore")}
-          </PendingButton>
-        )}
-      </ListFooter>
+      />
     </>
   );
 }

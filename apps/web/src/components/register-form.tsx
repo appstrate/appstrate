@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
@@ -147,9 +147,9 @@ export function RegisterForm({
           />
           <FieldError>{errors.root?.message}</FieldError>
         </div>
-        <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? t("loading") : t("login.signup")}
-        </Button>
+        <PendingButton size="lg" className="w-full" type="submit" pending={isSubmitting}>
+          {t("login.signup")}
+        </PendingButton>
         {hasSocialAuth && (
           <>
             <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">

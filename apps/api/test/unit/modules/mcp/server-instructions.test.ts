@@ -213,7 +213,7 @@ describe("MCP server instructions — named operations follow their grant", () =
     expect(withoutRead).not.toContain("listIntegrations");
     expect(withoutRead).not.toContain("GET /api/integrations");
     // The control: the pagination advice around the example stays.
-    expect(withoutRead).toContain("query: { limit, offset }");
+    expect(withoutRead).toContain("query: { limit, startingAfter }");
 
     const withRead = prose(["mcp:read", "mcp:invoke", "integrations:read"]);
     expect(withRead).toContain("listIntegrations");
@@ -302,9 +302,9 @@ describe("MCP server instructions — run guidance", () => {
 
   it("withholds the invoke-only acts from a caller who can only read", () => {
     const readOnly = prose(READ_ONLY);
-    // `query: { limit, offset }` is `invoke_operation`'s argument envelope and
+    // `query: { limit, startingAfter }` is `invoke_operation`'s argument envelope and
     // `GET /api/integrations` is an operation to call — neither is reachable.
-    expect(readOnly).not.toContain("query: { limit, offset }");
+    expect(readOnly).not.toContain("query: { limit, startingAfter }");
     expect(readOnly).not.toContain("GET /api/integrations");
     // The control: the bullets around them, and the section holding both, stay
     // — this is a targeted removal, not a collapsed prompt.
@@ -314,7 +314,7 @@ describe("MCP server instructions — run guidance", () => {
 
   it("teaches both to a caller holding `mcp:invoke`", () => {
     const invoker = prose(INVOKER);
-    expect(invoker).toContain("query: { limit, offset }");
+    expect(invoker).toContain("query: { limit, startingAfter }");
     expect(invoker).toContain("GET /api/integrations");
   });
 

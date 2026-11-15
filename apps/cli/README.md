@@ -782,7 +782,7 @@ appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file .
 
 An id with no `@spec` runs the **latest published version**, on this surface as on every other. `draft` and `published` are the two reserved selectors: `@draft` runs the author's working copy and the instance answers `403 draft_not_writable` to anyone who cannot write the package, `@published` spells the default out loud. Neither can collide with a dist-tag: `latest` is the only dist-tag the platform ever writes, auto-managed at publication, and there is no route through which anyone creates another.
 
-Run-config inheritance (model, proxy, stored inputs) is fetched from `/api/spaces/{spaceId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI). The version is not part of it: a space holds no version of its own, so nothing about the version is inherited.
+Run-config inheritance (model, proxy, stored inputs) is fetched from `/api/spaces/{id}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI). The version is not part of it: a space holds no version of its own, so nothing about the version is inherited.
 
 Agent parameters are supplied with `--input <json>` / `--input-file <path>`. Remote runs send your input verbatim — the instance resolves and validates it server-side. A **local** run reaches none of the server's code, so the CLI reproduces the same chain in-process:
 
@@ -798,7 +798,7 @@ The resolved result is then validated against the agent's `input` schema before 
 
 A remote run executes on the instance and outlives the CLI process by design — like closing a dashboard tab. What `SIGINT` / `SIGTERM` / `SIGHUP` does to that run depends on whether a human sent it:
 
-- **Interactive** (stdin is a TTY and `--json` is not set) — the signal **cancels** the run server-side (`POST /api/runs/{runId}/cancel`) and the CLI keeps polling until the run reaches a terminal status, so the final state still prints. Ctrl-C at a keyboard is a cancel intent.
+- **Interactive** (stdin is a TTY and `--json` is not set) — the signal **cancels** the run server-side (`POST /api/runs/{id}/cancel`) and the CLI keeps polling until the run reaches a terminal status, so the final state still prints. Ctrl-C at a keyboard is a cancel intent.
 - **Non-interactive** (`--json`, or stdin is not a TTY: CI, a supervisor, a background shell) — the signal **detaches**. No cancel is sent, the CLI stops tailing, and the run keeps going:
 
 ```
