@@ -8,12 +8,11 @@
  * lookup and the version lookup (`orgOrSystemFilter`), so a run can only ever
  * resolve a package its org owns or a system package (`org_id IS NULL`). If
  * the filter is reverted, a run in org A referencing an integration
- * mcp-server package PUBLISHED BY ORG B would happily feed org B's manifest
+ * PUBLISHED BY ORG B would happily feed org B's manifest
  * (and its bytes) into org A's spawn path.
  *
- * The kernel is private; it is exercised through its two exported wrappers:
- *   - `resolveMcpServerForSpawn` (mcp-server axis, #588)
- *   - `resolveRunIntegrationVersions` (integration axis, #686)
+ * The kernel is private; it is exercised through its exported wrapper
+ * `resolveRunIntegrationVersions` (#686)
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";

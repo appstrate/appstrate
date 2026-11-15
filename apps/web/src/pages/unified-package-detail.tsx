@@ -190,7 +190,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // Skill and MCP-server details carry no `active`; an agent's does, so the query is not mounted there.
+  // A skill detail carries no `active`; an agent's does, so the query is not mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
     enabled: type !== "agent",
   });

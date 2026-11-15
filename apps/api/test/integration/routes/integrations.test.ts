@@ -318,8 +318,8 @@ describe("GET /api/integrations/:packageId", () => {
     // Local-source oauth2 → no auto-provisioning (endpoints are manifest-
     // declared and a client must be pre-registered).
     expect(google?.client_auto_provisioned).toBe(false);
-    // The gmail fixture has no referenced mcp-server seeded → resolver
-    // falls back to the integration's `tools` keys. Shape assertion keeps
+    // The gmail fixture declares no `source.server.tools` → the catalog
+    // falls back to the integration's `tools_policy` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
     expect(Array.isArray(body.tool_catalog)).toBe(true);
     // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim

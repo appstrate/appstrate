@@ -58,12 +58,6 @@ function readRootManifest(
   }
 }
 
-/** Whether the archive's root `manifest.json` is an MCPB manifest. */
-export function isMcpbArchive(bytes: Uint8Array): boolean {
-  const root = readRootManifest(bytes);
-  return root !== null && isMcpbManifest(root.raw);
-}
-
 async function orgSlugOf(orgId: string): Promise<string> {
   const [row] = await db
     .select({ slug: organizations.slug })

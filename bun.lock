@@ -170,7 +170,6 @@
       "name": "@appstrate/e2e",
       "devDependencies": {
         "@playwright/test": "^1.65.0",
-        "fflate": "^0.8.2",
       },
     },
     "packages/afps-runtime": {
