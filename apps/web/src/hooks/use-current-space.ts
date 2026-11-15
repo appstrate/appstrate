@@ -3,6 +3,8 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import { ENTER_SPACE_PARAM, linkedSpaceStep } from "../lib/across-spaces";
 import {
   agentModelKeys,
   agentProxyKeys,
@@ -119,4 +121,36 @@ export function useSpaceResolver(): void {
     const next = enterableSpaceId(remembered, spaces);
     if (next !== current) selectSpace(queryClient, next);
   }, [queryClient, spaces, remembered, current]);
+}
+
+/**
+ * Enters the space a link names (`?enterSpace=`, `lib/across-spaces.ts`) through the one door,
+ * `switchSpace`, then drops the param; a space the caller cannot enter is ignored. Answers
+ * whether it is still pending: the page waits, or its first reads would go out scoped to the
+ * previous space. `setId` remembers the space, so the resolver's next pass keeps it.
+ */
+export function useEnterLinkedSpace(): boolean {
+  const { switchSpace } = useSpaceSwitcher();
+  const [params, setParams] = useSearchParams();
+  const linked = params.get(ENTER_SPACE_PARAM);
+  const current = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
+  const enterable = !!spaces?.some((s) => s.id === linked && isSpaceEnterable(s));
+
+  useEffect(() => {
+    if (!spaces) return;
+    const step = linkedSpaceStep(linked, current, enterable);
+    if (step === "enter" && linked) switchSpace(linked);
+    if (step !== "drop") return;
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(ENTER_SPACE_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [switchSpace, linked, spaces, enterable, current, setParams]);
+
+  return !!linked;
 }

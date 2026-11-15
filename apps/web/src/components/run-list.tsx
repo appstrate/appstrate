@@ -46,6 +46,8 @@ interface RunListProps {
   status?: RunStatus[];
   /** Free text: the agent a run executed, the error it ended on, its number. */
   search?: string;
+  /** Several spaces of the org instead of the current one; each row then names its space. */
+  spaceIds?: string[];
   /**
    * The bar above the table.
    *
@@ -74,6 +76,7 @@ export function RunList({
   kind,
   status,
   search,
+  spaceIds,
   toolbar,
   countLabel,
   tableSurface = "framed",
@@ -84,7 +87,12 @@ export function RunList({
   // Inside one agent (its tab, a schedule's history) the « Run » column leads
   // with the number: the agent is the page's title.
   const oneAgent = packageId != null || scheduleId != null;
-  const allColumns = useRunColumns({ agentName, agentIdentity, oneAgent });
+  const allColumns = useRunColumns({
+    agentName,
+    agentIdentity,
+    oneAgent,
+    spanning: !!spaceIds?.length,
+  });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
   const { columns, menu } = useColumnVisibility("runs", allColumns);
@@ -97,7 +105,7 @@ export function RunList({
   // The search asks once the typing pauses; clearing it asks at once.
   const debouncedSearch = useDebouncedValue(search ?? "");
   const querySearch = search ? debouncedSearch : "";
-  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${querySearch}`;
+  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${spaceIds?.join(",") ?? ""}|${querySearch}`;
   const [paging, setPaging] = useState({ signature, page: 0 });
   const page = paging.signature === signature ? paging.page : 0;
   const setPage = (next: number) => setPaging({ signature, page: next });
@@ -108,6 +116,7 @@ export function RunList({
     user,
     kind,
     status,
+    spaceIds,
     search: querySearch || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,

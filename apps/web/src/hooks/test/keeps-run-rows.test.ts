@@ -32,4 +32,22 @@ describe("keepsRunRows", () => {
   it("drops the rows when a filter changes", () => {
     expect(keepsRunRows(key(), key({ status: "failed" }))).toBe(false);
   });
+
+  it("treats a list across spaces like any list: paging keeps, a new selection drops", () => {
+    const across = (spaceIds: string, offset = 0) =>
+      paginatedRunsKeys.acrossSpaces(
+        "org_1",
+        spaceIds,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "",
+        20,
+        offset,
+      );
+    expect(keepsRunRows(across("spc_a,spc_b"), across("spc_a,spc_b", 20))).toBe(true);
+    expect(keepsRunRows(across("spc_a,spc_b"), across("spc_a"))).toBe(false);
+    expect(keepsRunRows(key(), across("spc_a,spc_b"))).toBe(false);
+  });
 });

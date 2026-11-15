@@ -87,6 +87,31 @@ export const paginatedRunsKeys = {
       limit,
       offset,
     ] as const,
+  /** `GET /api/orgs/{orgId}/runs`: the listed spaces (comma-joined) instead of the current one; same tail as `list`. */
+  acrossSpaces: (
+    orgId: Id,
+    spaceIds: string,
+    user: string | null | undefined,
+    kind: string | null | undefined,
+    status: string | null | undefined,
+    unread: boolean | undefined,
+    search: string | null | undefined,
+    limit: number,
+    offset: number,
+  ) =>
+    [
+      "paginated-runs",
+      orgId,
+      "/orgs/runs",
+      spaceIds,
+      user,
+      kind,
+      status,
+      unread,
+      search,
+      limit,
+      offset,
+    ] as const,
 };
 
 /** Package caches; `path` is the plural route segment (`"agents"`, `"skills"`, …), NOT the singular type. */
@@ -153,6 +178,11 @@ export const scheduleKeys = {
   detailAll: ["schedule"] as const,
   runsAll: ["schedule-runs"] as const,
   list: (orgId: Id, spaceId: Id) => ["schedules", orgId, spaceId] as const,
+  /** Prefix of every list across spaces (`GET /api/orgs/{orgId}/schedules`). */
+  acrossSpacesAll: (orgId: Id) => ["schedules", orgId, "/orgs/schedules"] as const,
+  /** The listed spaces (comma-joined) in place of the current one. */
+  acrossSpaces: (orgId: Id, spaceIds: string) =>
+    ["schedules", orgId, "/orgs/schedules", spaceIds] as const,
   listForAgent: (orgId: Id, spaceId: Id, packageId: Id) =>
     ["schedules", orgId, spaceId, packageId] as const,
   detail: (orgId: Id, spaceId: Id, scheduleId: Id) =>

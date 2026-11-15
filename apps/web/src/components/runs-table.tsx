@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { runDetailPath } from "../lib/package-paths";
+import { linkedSpacePath } from "../lib/across-spaces";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 
 export function RunsTable({
   runs,
@@ -33,6 +35,7 @@ export function RunsTable({
   surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["agents"]);
+  const currentSpaceId = useCurrentSpaceId();
 
   return (
     <DataTable
@@ -52,7 +55,12 @@ export function RunsTable({
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`
       // would 404: that row stays static rather than leading nowhere.
-      rowHref={(run) => (run.packageId == null ? undefined : runDetailPath(run.packageId, run.id))}
+      // A run of another space (a list spanning several) names it: the detail enters it.
+      rowHref={(run) =>
+        run.packageId == null
+          ? undefined
+          : linkedSpacePath(runDetailPath(run.packageId, run.id), run.spaceId, currentSpaceId)
+      }
       rowLabel={(run) =>
         t("runs.rowLabel", { number: run.runNumber ?? "?", agent: agentName(run) })
       }

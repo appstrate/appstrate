@@ -352,6 +352,8 @@
   "toolbar.columnsLabel": "Toggle columns",
   "toolbar.selected": "{{count}} selected",
   "toolbar.reset": "Reset",
+  "toolbar.selectAll": "Select all",
+  "toolbar.space": "Space",
   "toolbar.clearFilters": "Clear this filter",
   "toolbar.noResults": "No results found.",
   "validation.required": "This field is required",

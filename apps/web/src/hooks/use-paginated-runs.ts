@@ -8,7 +8,8 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
+import { pollWhileMoving } from "../lib/across-spaces";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun, type ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
 export type RunKindFilter = "all" | "package" | "inline";
@@ -24,8 +25,17 @@ interface UsePaginatedRunsOptions {
   search?: string;
   /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
   unread?: boolean;
+  /** Several spaces of the org instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
+  spaceIds?: string[];
   limit: number;
   offset: number;
+}
+
+/** Polled across spaces while a listed run is pending or running. Exported for its test. */
+export function pollWhileActive(page: ListEnvelope<EnrichedRun> | undefined): number | false {
+  return pollWhileMoving(page?.data, (run) =>
+    (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status),
+  );
 }
 
 /**
@@ -50,6 +60,7 @@ export function usePaginatedRuns({
   status,
   search,
   unread,
+  spaceIds,
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
@@ -63,6 +74,9 @@ export function usePaginatedRuns({
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
 
+  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
+  const acrossSpaces = !scheduleId && !packageId && spaceIds?.length ? spaceIds : undefined;
+
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
     : packageId
@@ -70,59 +84,107 @@ export function usePaginatedRuns({
       : `/runs`;
 
   // use-global-run-sync and the run mutations invalidate by the key prefix.
-  const currentKey = paginatedRunsKeys.list(
-    orgId,
-    spaceId,
-    endpoint,
-    user,
-    kind,
-    statusKey,
-    unread,
-    search,
-    limit,
-    offset,
-  );
+  const currentKey = acrossSpaces
+    ? paginatedRunsKeys.acrossSpaces(
+        orgId,
+        acrossSpaces.join(","),
+        user,
+        kind,
+        statusKey,
+        unread,
+        search,
+        limit,
+        offset,
+      )
+    : paginatedRunsKeys.list(
+        orgId,
+        spaceId,
+        endpoint,
+        user,
+        kind,
+        statusKey,
+        unread,
+        search,
+        limit,
+        offset,
+      );
 
   return useQuery({
     queryKey: currentKey,
-    // `user`/`kind`/`unread` exist only on the global /api/runs view.
-    queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
-      if (scheduleId) {
-        const { data } = await client.GET("/api/schedules/{id}/runs", {
-          params: {
-            path: { id: scheduleId },
-            query: { limit, offset, status: statusQuery, q: search || undefined },
-          },
-        });
-        return data!;
-      }
-      if (packageId) {
-        const { scope, name } = splitPackageRef(packageId);
-        const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-          params: {
-            path: { scope, name },
-            query: { limit, offset, status: statusQuery, q: search || undefined },
-          },
-        });
-        return data!;
-      }
-      const { data } = await client.GET("/api/runs", {
-        params: {
-          query: {
-            limit,
-            offset,
-            user,
-            kind: kind && kind !== "all" ? kind : undefined,
-            status: statusQuery,
-            q: search || undefined,
-            unread: unread || undefined,
-          },
-        },
-      });
-      return data!;
-    },
+    queryFn: () =>
+      fetchRunPage(orgId, {
+        packageId,
+        scheduleId,
+        user,
+        kind,
+        status: statusQuery,
+        search,
+        unread,
+        spaceIds: acrossSpaces,
+        limit,
+        offset,
+      }),
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
-    enabled: canRead && !!spaceId,
+    // Each row's space grants it server-side; the current space's gate does not apply.
+    enabled: acrossSpaces ? !!orgId : canRead && !!spaceId,
+    refetchInterval: acrossSpaces ? (query) => pollWhileActive(query.state.data) : undefined,
   });
+}
+
+/**
+ * One page, from the door the options name. `user`/`kind`/`unread` exist only on the global
+ * view; `spaceIds` moves it to the org route. Exported for its test.
+ */
+export async function fetchRunPage(
+  orgId: string | null,
+  {
+    packageId,
+    scheduleId,
+    user,
+    kind,
+    status,
+    search,
+    unread,
+    spaceIds,
+    limit,
+    offset,
+  }: UsePaginatedRunsOptions,
+): Promise<ListEnvelope<EnrichedRun>> {
+  if (scheduleId) {
+    const { data } = await client.GET("/api/schedules/{id}/runs", {
+      params: {
+        path: { id: scheduleId },
+        query: { limit, offset, status, q: search || undefined },
+      },
+    });
+    return data!;
+  }
+  if (packageId) {
+    const { scope, name } = splitPackageRef(packageId);
+    const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
+      params: {
+        path: { scope, name },
+        query: { limit, offset, status, q: search || undefined },
+      },
+    });
+    return data!;
+  }
+  const query = {
+    limit,
+    offset,
+    user,
+    kind: kind && kind !== "all" ? kind : undefined,
+    status,
+    q: search || undefined,
+    unread: unread || undefined,
+  };
+  if (spaceIds && spaceIds.length > 0) {
+    const { data } = await client.GET("/api/orgs/{orgId}/runs", {
+      params: { path: { orgId: orgId! }, query: { ...query, spaceId: spaceIds.join(",") } },
+    });
+    return data!;
+  }
+  const { data } = await client.GET("/api/runs", { params: { query } });
+  return data!;
 }

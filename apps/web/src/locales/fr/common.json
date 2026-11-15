@@ -352,6 +352,8 @@
   "toolbar.columnsLabel": "Afficher les colonnes",
   "toolbar.selected": "{{count}} sélectionnés",
   "toolbar.reset": "Réinitialiser",
+  "toolbar.selectAll": "Tout sélectionner",
+  "toolbar.space": "Espace",
   "toolbar.clearFilters": "Effacer ce filtre",
   "toolbar.noResults": "Aucun résultat",
   "validation.required": "Ce champ est requis",

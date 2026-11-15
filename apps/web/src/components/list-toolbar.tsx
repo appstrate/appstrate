@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { toggleValue } from "../lib/toggle-value";
+import { facetTicks } from "../lib/facet-ticks";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -77,6 +78,13 @@ export interface FilterSpec {
   values: string[];
   options: FilterOption[];
   onChange: (values: string[]) => void;
+  /**
+   * What the list already shows while `values` is empty: ticked in the menu, yet not a filter
+   * (no chip, no count, no reset). A tick starts from it.
+   */
+  implicit?: string[];
+  /** Offers one entry ticking every option. */
+  selectAll?: boolean;
 }
 
 /** Beyond this many, the button counts instead of naming. */
@@ -84,8 +92,8 @@ const NAMED_VALUES = 2;
 
 function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
-  const chosen = new Set(filter.values);
-  const selected = filter.options.filter((option) => chosen.has(option.value));
+  const { ticked, selected, offerAll } = facetTicks(filter);
+  const chosen = new Set(ticked);
 
   return (
     <Popover>
@@ -137,7 +145,7 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                 return (
                   <CommandItem
                     key={option.value}
-                    onSelect={() => filter.onChange(toggleValue(filter.values, option.value))}
+                    onSelect={() => filter.onChange(toggleValue(ticked, option.value))}
                   >
                     <div
                       className={cn(
@@ -154,16 +162,26 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                 );
               })}
             </CommandGroup>
-            {selected.length > 0 && (
+            {(selected.length > 0 || offerAll) && (
               <>
                 <CommandSeparator />
                 <CommandGroup>
-                  <CommandItem
-                    onSelect={() => filter.onChange([])}
-                    className="justify-center text-center"
-                  >
-                    {t("toolbar.clearFilters")}
-                  </CommandItem>
+                  {offerAll && (
+                    <CommandItem
+                      onSelect={() => filter.onChange(filter.options.map((option) => option.value))}
+                      className="justify-center text-center"
+                    >
+                      {t("toolbar.selectAll")}
+                    </CommandItem>
+                  )}
+                  {selected.length > 0 && (
+                    <CommandItem
+                      onSelect={() => filter.onChange([])}
+                      className="justify-center text-center"
+                    >
+                      {t("toolbar.clearFilters")}
+                    </CommandItem>
+                  )}
                 </CommandGroup>
               </>
             )}

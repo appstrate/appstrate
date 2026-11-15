@@ -13,6 +13,8 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
+import { useSpaceFilter, type AdmitsList } from "../hooks/use-space-filter";
+import { canReadRuns } from "@appstrate/core/permissions";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -23,7 +25,10 @@ const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
 /** The query parameters this screen filters on, and nothing else. */
-const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
+const FILTER_PARAMS = ["user", "kind", "status", "spaceId", "q"] as const;
+
+/** The org route lists a space's runs where they are read there. */
+const admitsRuns: AdmitsList = (permissions) => canReadRuns((p) => permissions.includes(p));
 
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
@@ -33,8 +38,14 @@ export function RunsPage() {
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
-  // Without `runs:read-all` the list is already "mine": no scope filter.
-  const canSeeEveryRun = can("runs:read-all");
+  // Ticked spaces list across them (org route); none is the current space, as always.
+  const { spaceIds, selected: spaces, filter: spaceFilter } = useSpaceFilter(list, admitsRuns);
+  const acrossSpaces = spaces.length > 0;
+  // Without `runs:read-all` the list is already "mine": no scope filter. Across spaces, each
+  // row follows its own space: "mine" narrows as soon as one of them shows others' runs.
+  const canSeeEveryRun = acrossSpaces
+    ? spaces.some((space) => space.permissions.includes("runs:read-all"))
+    : can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);
   const kinds = list.values("kind", KINDS);
@@ -64,6 +75,7 @@ export function RunsPage() {
       onChange: list.setValues("kind"),
     },
     statusFilter,
+    ...(spaceFilter ? [spaceFilter] : []),
   ];
 
   // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
@@ -86,6 +98,8 @@ export function RunsPage() {
                 icon: CheckCheck,
                 onSelect: () => markAllRead.mutate({}),
                 disabled: markAllRead.isPending || !unreadCount,
+                // It marks the CURRENT space's runs only: across spaces, the other rows would stay unread.
+                hidden: acrossSpaces,
               },
             ]}
           />
@@ -96,6 +110,7 @@ export function RunsPage() {
         user={user}
         kind={kind}
         status={statuses}
+        spaceIds={acrossSpaces ? spaceIds : undefined}
         search={search}
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (

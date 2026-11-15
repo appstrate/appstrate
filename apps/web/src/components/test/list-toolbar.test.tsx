@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { facetTicks } from "../../lib/facet-ticks.ts";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -207,5 +208,46 @@ describe("the filters button", () => {
     expect(html).toContain('aria-expanded="true"');
     // The state IS the style hook: no second flag to keep in step.
     expect(html).toContain("aria-expanded:bg-accent");
+  });
+});
+
+describe("a dimension with an implicit value", () => {
+  // The space filter: untouched, the list shows the current space, which is not a filter.
+  const spaces = (values: string[]): FilterSpec => ({
+    id: "spaceId",
+    label: "Espace",
+    values,
+    implicit: ["spc_here"],
+    selectAll: true,
+    options: [
+      { value: "spc_here", label: "Ici" },
+      { value: "spc_studio", label: "Studio" },
+      { value: "spc_ops", label: "Ops" },
+    ],
+    onChange: () => {},
+  });
+
+  it("ticks it in the menu while untouched, yet names nothing on the trigger", () => {
+    expect(facetTicks(spaces([]))).toEqual({ ticked: ["spc_here"], selected: [], offerAll: true });
+  });
+
+  it("is not a filter: no count, no reset, the row stays shut", () => {
+    const html = render(<ListToolbar filters={[spaces([])]} onReset={() => {}} />);
+    expect(html).not.toMatch(/>\d</);
+    expect(html).not.toContain("Réinitialiser");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("is where a first tick starts: it adds to what the list shows", () => {
+    expect(toggleValue(facetTicks(spaces([])).ticked, "spc_studio")).toEqual([
+      "spc_here",
+      "spc_studio",
+    ]);
+  });
+
+  it("offers « Tout sélectionner » until every option is ticked", () => {
+    expect(facetTicks(spaces(["spc_here", "spc_studio"])).offerAll).toBe(true);
+    expect(facetTicks(spaces(["spc_here", "spc_studio", "spc_ops"])).offerAll).toBe(false);
+    expect(facetTicks({ ...spaces([]), selectAll: undefined }).offerAll).toBe(false);
   });
 });

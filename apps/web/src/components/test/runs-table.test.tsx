@@ -8,7 +8,7 @@
  * subtracts when it already knows the answer.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunsTable } from "../runs-table.tsx";
@@ -17,6 +17,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { makeRun, STARTED_AT } from "../../test/run-fixture.ts";
 import { formatDateField } from "../../lib/format-date.ts";
+import { spaceStore } from "../../stores/space-store.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -33,12 +34,14 @@ const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "blue" });
 function Harness({
   runs,
   oneAgent,
+  spanning,
   ...props
 }: {
   runs: EnrichedRun[];
   oneAgent?: boolean;
+  spanning?: boolean;
 } & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
-  const columns = useRunColumns({ agentName, agentIdentity, oneAgent });
+  const columns = useRunColumns({ agentName, agentIdentity, oneAgent, spanning });
   return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
@@ -143,5 +146,30 @@ describe("a run whose agent was deleted", () => {
 
   it("says why, where the missing link is", () => {
     expect(html).toContain(agentsFr["runs.deletedAgentBadge"]);
+  });
+});
+
+describe("a list spanning spaces", () => {
+  const run = makeRun({ spaceId: "spc_2" });
+
+  it("gives each row's space a column, and only there", () => {
+    expect(table([run], { spanning: true })).toContain('data-column="space"');
+    expect(table([run])).not.toContain('data-column="space"');
+  });
+
+  it("links a run of another space naming that space, and one of the current space as before", () => {
+    // A static render reads a zustand store's INITIAL state (its server snapshot).
+    const current = spyOn(spaceStore, "getInitialState").mockReturnValue({
+      ...spaceStore.getInitialState(),
+      id: "spc_1",
+    });
+    try {
+      expect(table([run])).toContain('href="/agents/@acme/reporter/runs/run_1?enterSpace=spc_2"');
+      expect(table([makeRun({ spaceId: "spc_1" })])).toContain(
+        'href="/agents/@acme/reporter/runs/run_1"',
+      );
+    } finally {
+      current.mockRestore();
+    }
   });
 });
