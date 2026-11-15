@@ -126,20 +126,24 @@ export function HeaderTabBar<T extends string>({
   );
 }
 
-/** One tab's card; `flush` for content that draws its own padding. */
+/**
+ * One tab's content, laid on the page: its blocks (tables, sections, notices) draw
+ * their own surfaces, so a wrapping card would only nest them. `framed` is for a
+ * two-pane surface (a settings rail beside its section) whose frame is the surface.
+ */
 export function DetailTabPanel({
   value,
-  flush,
+  framed,
   children,
 }: {
   value: string;
-  flush?: boolean;
+  framed?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <TabsContent
       value={value}
-      className={cn("bg-card mt-0 overflow-hidden rounded-lg border shadow-sm", !flush && "p-6")}
+      className={cn("mt-0", framed && "bg-card overflow-hidden rounded-lg border shadow-sm")}
     >
       {children}
     </TabsContent>
