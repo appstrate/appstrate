@@ -160,7 +160,7 @@ function localSpec(integrationId: string, connectionId?: string): IntegrationSpa
     manifest: {
       name: integrationId,
       version: "1.0.0",
-      server: { type: "bun", entry_point: "server.ts", packageId: `${integrationId}-mcp` },
+      server: { type: "bun", entry_point: "server.ts" },
     },
     spawnEnv: {},
   } as IntegrationSpawnSpec;

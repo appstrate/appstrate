@@ -1047,21 +1047,10 @@ async function startLocalIntegration(params: {
     });
   }
 
-  // Fetch the integration's own archive (it carries the server payload).
-  // `server.packageId` is the integration id and is required for a local
-  // source (optional in TypeScript only because the `server` bag is the
-  // collapsed union of the local / remote / serverless shapes), so an absent
-  // one means the spec did not come from a conforming manifest — a hard-fail
-  // at boot, never a fetch of some other package's bytes into a
-  // code-execution position.
-  const integrationId = spec.manifest.server?.packageId;
-  if (!integrationId) {
-    throw new Error(
-      `integration ${spec.integrationId} declares sourceKind="local" but no server.packageId`,
-    );
-  }
+  // Fetch the integration's own archive (it carries the server payload), keyed by the
+  // integration id itself: never some other package's bytes in a code-execution position.
   const bytes = await fetchBundleBytes(
-    integrationId,
+    spec.integrationId,
     spec.manifest.server?.version,
     bundleFetchOpts,
   );

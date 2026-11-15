@@ -119,9 +119,6 @@ const TAG = "RUNNER_EGRESS_1547";
 const DIRECT_PATH = "/runner-egress-1547/direct";
 /** Stub path the agent dials (it may) — proves the counter and the route work. */
 const CONTROL_PATH = "/runner-egress-1547/control";
-/** The integration package whose archive carries the probe server (bundle served by the stub). */
-const SERVER_PACKAGE = "@smoke/runner-egress-probe-server";
-const BUNDLE_PATH = `/internal/integration-bundle/${SERVER_PACKAGE}`;
 /** The `delivery.http` integration whose credential the stub serves (MITM runner). */
 const MITM_INTEGRATION = "@smoke/runner-egress-mitm";
 /**
@@ -156,6 +153,10 @@ const INTEGRATION_OF: Record<RunnerId, string> = {
   r2: "@smoke/runner-egress-cross",
   mitm: MITM_INTEGRATION,
 };
+/** Each integration's own bundle path: the stub serves the one probe archive on all of them. */
+const BUNDLE_PATHS = new Set(
+  Object.values(INTEGRATION_OF).map((id) => `/internal/integration-bundle/${id}`),
+);
 /**
  * Guest-side ports the sidecar pins — `FirecrackerOrchestrator.createSidecar`
  * passes `port: "8080"` / `forwardProxyPort: "8081"`, asserted against the
@@ -288,7 +289,7 @@ function probeIntegration(
     manifest: {
       name: integrationId,
       version: "1.0.0",
-      server: { type: "bun", entry_point: "server.js", packageId: SERVER_PACKAGE },
+      server: { type: "bun", entry_point: "server.js" },
     },
     ...extra,
   };
@@ -1232,7 +1233,7 @@ export async function createRunnerEgressVm(
   return {
     handleStubRequest(req: Request): Response | undefined {
       const { pathname } = new URL(req.url);
-      if (pathname === BUNDLE_PATH) {
+      if (BUNDLE_PATHS.has(pathname)) {
         hits.bundle++;
         return new Response(probeBundle, { headers: { "content-type": "application/zip" } });
       }

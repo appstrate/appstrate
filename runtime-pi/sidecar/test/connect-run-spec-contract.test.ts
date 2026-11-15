@@ -3,13 +3,10 @@
 /**
  * `runConnectOnce` — the sidecar entry point every orchestrated `connect.tool`
  * / `runAt: "link"` login goes through — had no test at all. The gap let a
- * live regression ship: `startLocalIntegration` hard-fails a
- * `sourceKind: "local"` spec that names no `server.packageId` (correct — the
- * old fallback fetched the INTEGRATION's own bundle into a code-execution
- * position), while the platform-side spec builder emitted only
- * `{ type, entry_point }`. Every orchestrated login therefore aborted at boot
+ * live regression ship: the platform-side spec builder and the sidecar
+ * disagreed about the spec shape, so every orchestrated login aborted at boot
  * with `APPSTRATE_CONNECT_ERROR`, and the platform-side unit test stayed green
- * because it pinned the truncated shape.
+ * because it pinned the wrong shape.
  *
  * This file owns the SIDECAR half of that contract: what `runConnectOnce`
  * requires of a connect spec, and which bytes it reaches for. The PLATFORM
@@ -154,7 +151,6 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );
@@ -168,16 +164,6 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
     expect(error).toContain("bundle route reached");
   });
 
-  it("regression: the truncated `{ type, entry_point }` spec aborts before any fetch", async () => {
-    const { error, bundleUrls } = await connectRun(
-      connectSpec({ type: "python", entry_point: "./server.py" }),
-    );
-    expect(error).toContain(INTEGRATION_ID);
-    expect(error).toContain("no server.packageId");
-    // The point of the failure: it never reached for another package's bytes.
-    expect(bundleUrls).toEqual([]);
-  });
-
   it("a non-2xx credentials answer aborts the connect run BEFORE any bundle fetch", async () => {
     // Why the platform's credentials route MUST answer 2xx for a connect
     // token, and why fixing only the bundle route would have left the run dead
@@ -189,7 +175,6 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
       () => new Response(JSON.stringify({ detail: "Run not found" }), { status: 404 }),
@@ -210,7 +195,6 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );
@@ -232,7 +216,6 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );

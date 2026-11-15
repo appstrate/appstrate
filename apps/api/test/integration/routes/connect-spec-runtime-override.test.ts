@@ -87,7 +87,8 @@ describe("connect login spec — Appstrate runtime override", () => {
     // wrong interpreter — silently, since node will happily start a bun-native
     // entry point and fail later.
     expect(spec.manifest.server?.type).toBe("bun");
-    expect(spec.manifest.server?.packageId).toBe(INTEGRATION_ID);
+    expect(spec.integrationId).toBe(INTEGRATION_ID);
+    expect(spec.manifest.server).not.toHaveProperty("packageId");
   });
 
   // Control: without the override the declared type must survive untouched. A fix

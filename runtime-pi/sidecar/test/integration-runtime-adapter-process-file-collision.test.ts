@@ -42,7 +42,7 @@ describe("process adapter — delivery.files across connections of one run", () 
       manifest: {
         name: "@appstrate/ssh",
         version: "1.0.0",
-        server: { type: "bun", entry_point: "server.ts", packageId: "@appstrate/integration-ssh" },
+        server: { type: "bun", entry_point: "server.ts" },
       },
       spawnEnv: {},
       fileMounts: { [path]: { content_b64: b64(content), mode: "0600" } },

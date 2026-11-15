@@ -47,7 +47,7 @@ function localSpec(): IntegrationSpawnSpec {
     manifest: {
       name: "@orga/third-party",
       version: "1.0.0",
-      server: { type: "bun", entry_point: "server.ts", packageId: "@orga/third-party" },
+      server: { type: "bun", entry_point: "server.ts" },
     },
     spawnEnv: {},
   } as IntegrationSpawnSpec;

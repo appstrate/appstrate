@@ -1110,7 +1110,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
 /**
  * Reject (409) when an agent package has runs in progress. No-op for package
- * types that don't gate version/delete ops on running runs (skills/tools, where
+ * types that don't gate version/delete ops on running runs (skills, where
  * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
  * / restore-version / delete-version handlers so the conflict message + the
  * `(orgId, spaceId)` scoping stay identical across all four.
@@ -2900,7 +2900,10 @@ export function createPackagesRouter() {
       const packageId = getItemId(c);
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
-      const versionSpec = c.req.query("version") ?? "latest";
+      // Non-empty like the file explorer's: an empty selector would otherwise slip past the draft
+      // gate below while `resolvePackageFileValidator` still reads it as the draft.
+      const { version: requested } = parseFileQuery(c, fileIndexQuerySchema);
+      const versionSpec = requested ?? "latest";
 
       if (!(await isPackageReadableInSpace(spaceId, packageId))) {
         throw notFound("Package not found");
@@ -2927,7 +2930,9 @@ export function createPackagesRouter() {
         );
       }
 
-      const isDraft = versionSpec === VERSION_SELECTOR_DRAFT;
+      // The gate follows what is SERVED, not how the selector is spelled.
+      const validator = await resolvePackageFileValidator(pkg, versionSpec);
+      const isDraft = validator.kind === "draft";
       if (isDraft) {
         await assertDraftSelectorAllowed(c, pkg.id, VERSION_SELECTOR_DRAFT);
       } else {
@@ -2937,8 +2942,6 @@ export function createPackagesRouter() {
           { orgId, accessible: await packageAccessSpaces(c) },
         );
       }
-
-      const validator = await resolvePackageFileValidator(pkg, versionSpec);
       const snapshot = await readPackageSnapshot(pkg, validator);
       let built: ReturnType<typeof buildMcpbArchive>;
       try {
@@ -2964,6 +2967,9 @@ export function createPackagesRouter() {
           "Cache-Control": "private, no-cache",
           Vary: "X-Org-Id, X-Space-Id",
           "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
+          "Cross-Origin-Resource-Policy": "same-origin",
+          ...(validator.yanked ? { "X-Yanked": "true" } : {}),
         },
       });
     },

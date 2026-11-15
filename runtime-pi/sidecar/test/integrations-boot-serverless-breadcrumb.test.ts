@@ -86,7 +86,7 @@ function localSpec(): IntegrationSpawnSpec {
     manifest: {
       name: "@tractr/github",
       version: "1.0.0",
-      server: { type: "node", entry_point: "./server.js", packageId: "@tractr/github-server" },
+      server: { type: "node", entry_point: "./server.js" },
     },
     spawnEnv: {},
   } as IntegrationSpawnSpec;

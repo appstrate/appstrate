@@ -4,11 +4,11 @@
  * Spawn resolver — the inline local server of a `local` integration.
  *
  * A local integration declares its MCP server inline (`source.server`) and ships the payload in
- * its OWN archive, so the spawn spec names the integration itself — `server.packageId` is the
- * integration id — and, when the run froze a published version, that version. This suite locks:
+ * its OWN archive, so the spec carries no package id (the sidecar fetches by `integrationId`)
+ * and, when the run froze a published version, that version. This suite locks:
  *
- *   - the spec carries `{ type, entry_point, packageId: <integration id> }` and `version` only
- *     for a run that froze a published version (system / draft / unfrozen carry none);
+ *   - the spec carries `{ type, entry_point }` and `version` only for a run that froze a
+ *     published version (system / draft / unfrozen carry none);
  *   - the server's literal `mcp_config.env` reaches `spawnEnv`, `delivery.env` winning on a
  *     name conflict;
  *   - the literal env is a LOCAL-source fact: a remote integration never inherits it.
@@ -110,7 +110,7 @@ describe("resolveIntegrationSpawns — inline local server", () => {
     ctx = await createTestContext({ orgSlug: "pinorg" });
   });
 
-  it("names the integration itself and the version the run froze", async () => {
+  it("carries the entry point and the version the run froze", async () => {
     await seed(ctx, { entryPoint: "server/main.js" });
 
     const specs = await resolve(ctx, { [INTEG]: { source: "version", version: "1.2.0" } });
@@ -119,7 +119,6 @@ describe("resolveIntegrationSpawns — inline local server", () => {
     expect(specs[0]!.manifest.server).toEqual({
       type: "node",
       entry_point: "server/main.js",
-      packageId: INTEG,
       version: "1.2.0",
     });
   });
@@ -137,7 +136,6 @@ describe("resolveIntegrationSpawns — inline local server", () => {
       expect(specs[0]!.manifest.server).toEqual({
         type: "node",
         entry_point: "server/index.js",
-        packageId: INTEG,
       });
     }
   });

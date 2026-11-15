@@ -10,7 +10,7 @@
  * drift between them is not a cosmetic bug: it is a package the library shows
  * as off and the run gate lets through, or the reverse.
  *
- * The table below is every cell of the rule: four package types × three row
+ * The table below is every cell of the rule: three package types × three row
  * states (no row, a row saying `false`, a row saying `true`) × two provenances
  * (org-local, and the deployment's own — `source = "system"`, plus the
  * `SYSTEM_INTEGRATIONS` membership that decides an integration's default).

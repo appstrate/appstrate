@@ -201,12 +201,10 @@ export async function buildConnectLoginSpec(
     manifest: {
       name: execution.manifest.name,
       version: execution.manifest.version,
-      // The runnable bytes live in the integration's own archive: the sidecar fetches
-      // `server.packageId`'s bundle, and hard-fails a local spec that omits it.
+      // The runnable bytes live in the integration's own archive, fetched by `integrationId`.
       server: {
         type,
         entry_point: localServer.entry_point,
-        packageId: execution.integrationId,
         // The published version the byte route serves as `?version=`, so the bytes match the
         // manifest read above. Absent for a system integration and for an unpublished draft.
         ...(version ? { version } : {}),

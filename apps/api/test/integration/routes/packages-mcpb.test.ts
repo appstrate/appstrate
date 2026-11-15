@@ -13,8 +13,15 @@ import { zipSync, unzipSync } from "fflate";
 import Ajv from "ajv";
 import mcpbV03 from "../../../../../packages/core/test/fixtures/mcpb/mcpb-manifest-v0.3.schema.json";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { eq, sql } from "drizzle-orm";
+import { organizations } from "@appstrate/db/schema";
+import { db, truncateAll } from "../../helpers/db.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberHolding,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   localIntegrationManifest,
   remoteIntegrationManifest,
@@ -279,5 +286,82 @@ describe("MCPB import and export", () => {
     const exported = await exportMcpb(packageId, "", stranger);
     expect(download.status).toBe(404);
     expect(exported.status).toBe(download.status);
+  });
+
+  it("refuses an archive over the decompression budget the same way with or without an MCPB manifest", async () => {
+    // 51 MB of zeros deflates to a few dozen KB: well under the compressed cap, past the 50 MB one.
+    const pad = { "pad.bin": new Uint8Array(51 * 1024 * 1024) };
+    const asMcpb = zipSync({
+      "manifest.json": enc(JSON.stringify(mcpbManifest())),
+      "server/index.js": enc(SERVER),
+      ...pad,
+    } as unknown as Parameters<typeof zipSync>[0]);
+    const asAfps = zipSync({
+      "manifest.json": enc(
+        JSON.stringify(remoteIntegrationManifest({ name: "@mcpborg/padded", auths: {} })),
+      ),
+      ...pad,
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const mcpbRes = await importFile(asMcpb, "big.mcpb");
+    const afpsRes = await importFile(asAfps, "big.afps");
+    expect(mcpbRes.status).toBe(400);
+    expect(afpsRes.status).toBe(400);
+    const [a, b] = (await Promise.all([mcpbRes.json(), afpsRes.json()])) as {
+      code: string;
+      detail: string;
+    }[];
+    expect({ code: a!.code, detail: a!.detail }).toEqual({ code: b!.code, detail: b!.detail });
+    expect(a!.detail).toContain("Decompressed size exceeds limit");
+  });
+
+  describe("version selector", () => {
+    async function importedId(): Promise<string> {
+      const imported = await importFile(zip(mcpbManifest(), { "server/index.js": SERVER }));
+      return ((await imported.json()) as { packageId: string }).packageId;
+    }
+
+    it("refuses an empty ?version= instead of serving the draft", async () => {
+      const id = await importedId();
+      const reader = await memberHolding(ctx, ["integrations:read"]);
+      const res = await exportMcpb(id, "?version=", reader);
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses ?version=draft to a caller who cannot write the package", async () => {
+      const id = await importedId();
+      const reader = await memberHolding(ctx, ["integrations:read"]);
+      const res = await exportMcpb(id, "?version=draft", reader);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("draft_not_writable");
+    });
+
+    it("serves ?version=draft to the author", async () => {
+      const id = await importedId();
+      const res = await exportMcpb(id, "?version=draft");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-disposition")).toContain("-draft.mcpb");
+      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(res.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    });
+  });
+
+  it("applies the organization's copy restriction to a published export", async () => {
+    const imported = await importFile(zip(mcpbManifest(), { "server/index.js": SERVER }));
+    const { packageId } = (await imported.json()) as { packageId: string };
+    await db
+      .update(organizations)
+      .set({
+        orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify({ restrict_package_copy: true })}::jsonb`,
+      })
+      .where(eq(organizations.id, ctx.orgId));
+
+    const reader = await memberHolding(ctx, ["integrations:read"]);
+    const refused = await exportMcpb(packageId, "", reader);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("package_copy_restricted");
+
+    const sharer = await memberHolding(ctx, ["integrations:read", "integrations:share"]);
+    expect((await exportMcpb(packageId, "", sharer)).status).toBe(200);
   });
 });

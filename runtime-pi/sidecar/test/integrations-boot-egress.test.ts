@@ -27,7 +27,6 @@ import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 
 const ADAPTER_ID = `egress-wiring-${Math.random().toString(36).slice(2, 8)}`;
 const INTEGRATION_ID = "@tractr/egress";
-const SERVER_ID = "@tractr/egress-server";
 const EGRESS = {
   authorizedUris: ["https://api.allowed.test/**"],
   declaredUris: ["https://api.allowed.test/**"],
@@ -109,7 +108,7 @@ function spec(overrides: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
     manifest: {
       name: INTEGRATION_ID,
       version: "1.0.0",
-      server: { type: "bun", entry_point: "./server.ts", packageId: SERVER_ID },
+      server: { type: "bun", entry_point: "./server.ts" },
     },
     spawnEnv: {},
     ...overrides,

@@ -397,7 +397,6 @@ async function resolveOne(
         entry_point?: string;
         url?: string;
         transport?: "streamable-http" | "sse";
-        packageId?: string;
         version?: string;
       }
     | undefined;
@@ -457,7 +456,6 @@ async function resolveOne(
     serverSpec = {
       type: effectiveType,
       entry_point: localServer.entry_point,
-      packageId: integrationId,
       // The version the byte route must serve. Absent for a system integration (boot
       // registry) and for a draft run (the draft files).
       ...(frozenVersion?.source === "version" && frozenVersion.version
@@ -598,7 +596,6 @@ function serverWire(
   return {
     ...(server.type ? { type: server.type } : {}),
     ...(server.entry_point ? { entry_point: server.entry_point } : {}),
-    ...(server.packageId ? { packageId: server.packageId } : {}),
     ...(server.version ? { version: server.version } : {}),
     ...(server.url ? { url: server.url } : {}),
     ...(server.transport ? { transport: server.transport } : {}),

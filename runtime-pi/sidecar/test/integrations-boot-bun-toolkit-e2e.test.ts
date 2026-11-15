@@ -53,7 +53,7 @@ function spec(): IntegrationSpawnSpec {
       // The process adapter runs `.ts` under bun (`HOST_INTERPRETER_BY_TYPE["bun"]`).
       // The manifest declares `node`, but this synthetic
       // spec pins `bun` so the host subprocess runs the TypeScript entry directly.
-      server: { type: "bun", entry_point: "./server.ts", packageId: INTEG_ID },
+      server: { type: "bun", entry_point: "./server.ts" },
     },
     spawnEnv: {},
     // Native-tool subset under test (api_call / fetch_echo need creds + MITM).

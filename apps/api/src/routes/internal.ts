@@ -16,7 +16,7 @@ import { parseBearer } from "@appstrate/core/bearer";
 import { zipArtifact } from "@appstrate/core/zip";
 import { getLocalServer } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
-import { downloadPackageFiles } from "../services/package-items/storage.ts";
+import { readPackageSnapshot, resolvePackageFileValidator } from "../services/package-files.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
@@ -645,8 +645,8 @@ export function createInternalRouter() {
   // WHICH bytes: the one version the run froze (`runs.resolved_integration_versions`). The
   // spawn spec names a published version in `server.version`, and `?version=` must equal it. A
   // system integration is served from the boot registry, and an integration the run froze on its
-  // DRAFT (`dependency_overrides[id] = "draft"`) — or did not freeze at all — from the draft
-  // files; both carry no version, and `?version=` is refused for them.
+  // DRAFT (`dependency_overrides[id] = "draft"`) from the draft files; both carry no version, and
+  // `?version=` is refused for them. A run with no frozen entry for the integration gets a 404.
   //
   // An ephemeral CONNECT run (`runAt: "link"` connect.tool login) reaches this endpoint too and
   // has no `runs` row and no agent to walk: it authorises against its launcher-published grant,
@@ -663,10 +663,19 @@ export function createInternalRouter() {
     }
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresLocalIntegration(integrationId, run, runId);
+    // Every launch path freezes each declared integration (`freezeRunSpawnDependencies`), so a
+    // missing entry is not "serve the draft" — it is a run that never resolved this integration.
     const frozen = run.resolvedIntegrationVersions?.[integrationId];
+    if (!frozen) {
+      logger.warn("integration bundle request rejected — run froze no version for it", {
+        runId,
+        integrationId,
+      });
+      throw notFound(`Run has no resolved version for '${integrationId}'`);
+    }
     assertBundleVersionPermitted(
       integrationId,
-      frozen?.source === "version" ? frozen.version : null,
+      frozen.source === "version" ? frozen.version : null,
       requestedVersion,
       { runId },
     );
@@ -739,7 +748,13 @@ export function createInternalRouter() {
     caller: { runId: string } | { connectId: string },
   ): Promise<Response> {
     const [row] = await db
-      .select({ id: packages.id })
+      .select({
+        id: packages.id,
+        type: packages.type,
+        orgId: packages.orgId,
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+      })
       .from(packages)
       .where(
         and(
@@ -749,10 +764,11 @@ export function createInternalRouter() {
         ),
       )
       .limit(1);
-    const files = row
-      ? await downloadPackageFiles("integrations", orgId, integrationId, null, "org")
-      : null;
-    if (!files) throw notFound(`Draft files unavailable for '${integrationId}'`);
+    if (!row) throw notFound(`Draft files unavailable for '${integrationId}'`);
+    // The explorer's reader, so the archive carries the same DB-authoritative `manifest.json`
+    // overlay every other draft reader sees — the one the spawn spec was built from.
+    const source = { ...row, type: "integration" as const };
+    const { files } = await readPackageSnapshot(source, await resolvePackageFileValidator(source));
     const bytes = zipArtifact(files, 6);
     logger.info("integration bundle delivered (draft)", {
       ...caller,

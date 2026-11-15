@@ -210,11 +210,10 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       integrationVersions: { [LOCAL]: { source: "version", version: "0.1.0" } },
     });
     expect(specs.length).toBe(1);
-    // The bytes are the integration's own: its id, and the version the run froze.
+    // The bytes are the integration's own, at the version the run froze.
     expect(specs[0]!.manifest.server).toEqual({
       type: "bun",
       entry_point: "./server.ts",
-      packageId: LOCAL,
       version: "0.1.0",
     });
   });

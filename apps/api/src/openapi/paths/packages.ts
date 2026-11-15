@@ -7,6 +7,10 @@ import {
 } from "../headers.ts";
 
 /** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
+/** The refusals a `.mcpb` upload can answer 400 with, shared by every route that accepts one. */
+const MCPB_IMPORT_REFUSALS =
+  " A `.mcpb` the integration projection cannot carry answers `mcpb_invalid_manifest`, `mcpb_unsupported_user_config`, `mcpb_unsupported_placeholder` or `mcpb_unsupported_platform`.";
+
 const SCOPE_RESERVED_RULE =
   "A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.";
 
@@ -148,8 +152,8 @@ function versionRestoreResponseSchema(detailRef: string) {
 /**
  * The authority sentence EVERY mutation of an EXISTING package carries — five
  * verbs (draft update, delete, version create, version restore, version delete)
- * times four types, twenty descriptions off ONE definition. Same reason
- * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than four
+ * times three types, fifteen descriptions off ONE definition. Same reason
+ * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than three
  * copies: the rule is single (`packages.home_space_id`, RBAC spec §6.9) and
  * hand-copied prose drifts the moment it changes. It answered nothing at all
  * before — a reader could not tell from these descriptions that the space in
@@ -346,7 +350,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            MCPB_IMPORT_REFUSALS +
+            " " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
@@ -401,7 +407,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    "ZIP file containing the package, or a `.mcpb` MCP Bundle (converted to a local integration named `@<org slug>/<mcpb name>`, payload kept verbatim — AFPS §7.1.1). A bundle the projection cannot carry answers 400 with `mcpb_invalid_manifest` or `mcpb_unsupported_user_config`.",
+                    "ZIP file containing the package, or a `.mcpb` MCP Bundle (converted to a local integration named `@<org slug>/<mcpb name>`, payload kept verbatim — AFPS §7.1.1).",
                 },
               },
             },
@@ -442,7 +448,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            MCPB_IMPORT_REFUSALS +
+            " " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
@@ -529,7 +537,9 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy." +
+            MCPB_IMPORT_REFUSALS +
+            " " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
@@ -805,14 +815,26 @@ export const packagesPaths = {
           in: "query",
           required: false,
           description:
-            "Exact version, dist-tag, semver range, or the literal `draft`. Defaults to `latest`.",
-          schema: { type: "string" },
+            "Exact version, dist-tag, semver range, or the literal `draft`. Defaults to `latest`; an empty value is a 400.",
+          schema: { type: "string", minLength: 1 },
         },
       ],
       responses: {
         "200": {
           description: "The MCP Bundle.",
           headers: {
+            "X-Yanked": {
+              description: "`true` when the exported version is yanked.",
+              schema: { type: "string" },
+            },
+            "Referrer-Policy": {
+              description: "Always `no-referrer`.",
+              schema: { type: "string" },
+            },
+            "Cross-Origin-Resource-Policy": {
+              description: "Always `same-origin`.",
+              schema: { type: "string" },
+            },
             "Content-Disposition": {
               description: "Attachment filename: `<name>-<version>.mcpb`.",
               schema: { type: "string" },
@@ -836,6 +858,7 @@ export const packagesPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",

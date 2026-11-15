@@ -19,7 +19,13 @@ import {
   McpbProjectionError,
 } from "@appstrate/core/mcpb";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import {
+  PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
+  PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
+  unzipArtifact,
+  zipArtifact,
+} from "@appstrate/core/zip";
+import { unzipSync } from "fflate";
 import { ApiError } from "../lib/errors.ts";
 
 const MANIFEST = "manifest.json";
@@ -39,20 +45,23 @@ export function mcpbProblem(err: McpbProjectionError, status: 400 | 422): ApiErr
   });
 }
 
-/** Parse the root `manifest.json` of an archive; `null` when it is not a readable ZIP or JSON. */
-function readRootManifest(
-  bytes: Uint8Array,
-): { files: Record<string, Uint8Array>; raw: unknown } | null {
-  let files: Record<string, Uint8Array>;
+/** The root manifest is a small JSON document; anything larger is not an MCPB manifest. */
+const MANIFEST_PEEK_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Parse the root `manifest.json` of an archive WITHOUT inflating anything else; `null` when it is
+ * not a readable ZIP or JSON, or exceeds the package limits. Returning `null` hands the original
+ * bytes to the normal package parse, which refuses them with its own error — so an oversized
+ * archive gets the same answer whether or not it is an `.mcpb`.
+ */
+function peekRootManifest(bytes: Uint8Array): { raw: unknown } | null {
+  if (bytes.length > PACKAGE_ZIP_MAX_COMPRESSED_BYTES) return null;
   try {
-    files = unzipArtifact(bytes);
-  } catch {
-    return null;
-  }
-  const manifest = files[MANIFEST];
-  if (!manifest) return null;
-  try {
-    return { files, raw: JSON.parse(decoder.decode(manifest)) };
+    const entries = unzipSync(bytes, {
+      filter: (file) => file.name === MANIFEST && file.originalSize <= MANIFEST_PEEK_MAX_BYTES,
+    });
+    const manifest = entries[MANIFEST];
+    return manifest ? { raw: JSON.parse(decoder.decode(manifest)) } : null;
   } catch {
     return null;
   }
@@ -83,8 +92,16 @@ export async function convertMcpbArchive(
   bytes: Uint8Array,
   org: { slug: string } | { id: string },
 ): Promise<Uint8Array> {
-  const root = readRootManifest(bytes);
+  const root = peekRootManifest(bytes);
   if (!root || !isMcpbManifest(root.raw)) return bytes;
+  // Under the package budget, like every other archive read: an archive that blows it is left to
+  // the package parse, which refuses it.
+  let files: Record<string, Uint8Array>;
+  try {
+    files = unzipArtifact(bytes, { maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES });
+  } catch {
+    return bytes;
+  }
   const scope = "slug" in org ? org.slug : await orgSlugOf(org.id);
   let manifest: IntegrationManifest;
   try {
@@ -94,7 +111,7 @@ export async function convertMcpbArchive(
     throw err;
   }
   return zipArtifact({
-    ...root.files,
+    ...files,
     [MANIFEST]: encoder.encode(JSON.stringify(manifest, null, 2)),
   });
 }

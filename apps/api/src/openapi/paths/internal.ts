@@ -476,7 +476,7 @@ export const internalPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
-            "The run's agent does not declare this integration, it is not active in the space or not a local one, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
+            "The run's agent does not declare this integration, it is not active in the space or not a local one, the run froze no version for it, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

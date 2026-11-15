@@ -230,13 +230,11 @@ describe("buildConnectLoginSpec", () => {
     const spec = await buildConnectLoginSpec(execution(), fakeVersionResolver);
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
-    // The runnable server config is the integration's own, INCLUDING which archive and which
-    // published version, without which the sidecar cannot fetch the bytes (it hard-fails a
-    // local spec that names no `packageId`).
+    // The runnable server config is the integration's own, INCLUDING the published version the
+    // sidecar forwards when it fetches the integration's archive by `integrationId`.
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
-      packageId: INTEGRATION_ID,
       version: BUNDLE_VERSION,
     });
     // The literal `mcp_config.env` of the server rides the spawn env, as on the agent-run path.
@@ -336,7 +334,6 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
-      packageId: INTEGRATION_ID,
     });
   });
 });

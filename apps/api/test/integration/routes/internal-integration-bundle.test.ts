@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages } from "@appstrate/db/schema";
+import { packages, spacePackages } from "@appstrate/db/schema";
 import { unzipArtifact } from "@appstrate/core/zip";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
@@ -210,25 +210,116 @@ describe("GET /internal/integration-bundle/:scope/:name", () => {
         },
       })
       .where(eq(packages.id, AGENT));
+    // Published and frozen with a real archive: only the local-server check can produce the 404.
+    const remote = remoteIntegrationManifest({
+      name: REMOTE_INTEGRATION,
+      version: VERSION,
+      auths: AUTH,
+      tools_policy: { search: {} },
+    });
     await seedPackage({
       id: REMOTE_INTEGRATION,
       homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: remoteIntegrationManifest({
-        name: REMOTE_INTEGRATION,
-        version: VERSION,
-        auths: AUTH,
-        tools_policy: { search: {} },
-      }),
+      draftManifest: remote,
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, REMOTE_INTEGRATION);
-    await runFreezing(undefined);
+    await storage.uploadFile(
+      BUCKET,
+      `${REMOTE_INTEGRATION}/${VERSION}.afps`,
+      Buffer.from(ARCHIVE_BYTES),
+    );
+    await seedPackageVersion({
+      packageId: REMOTE_INTEGRATION,
+      version: VERSION,
+      integrity: computeIntegrity(ARCHIVE_BYTES),
+      artifactSize: ARCHIVE_BYTES.length,
+      manifest: remote,
+    });
+    await runFreezing({ source: "version", version: VERSION }, REMOTE_INTEGRATION);
 
-    const res = await app.request(url(REMOTE_INTEGRATION), bearer());
+    const res = await app.request(url(REMOTE_INTEGRATION, VERSION), bearer());
 
     expect(res.status).toBe(404);
+    expect(await res.text()).toContain("not a local integration");
+  });
+
+  it("DENY: 404 when the run froze nothing for the integration (no draft fallback)", async () => {
+    await seedLocalIntegration(INTEGRATION, { published: true });
+    await uploadPackageFiles("integrations", ctx.orgId, INTEGRATION, {
+      "manifest.json": new TextEncoder().encode(JSON.stringify(localManifest(INTEGRATION))),
+      "server/index.js": new TextEncoder().encode("// draft server payload"),
+    });
+    await runFreezing(undefined);
+
+    expect((await app.request(url(INTEGRATION), bearer())).status).toBe(404);
+    expect((await app.request(url(INTEGRATION, VERSION), bearer())).status).toBe(404);
+  });
+
+  describe("an integration id that belongs to another organization", () => {
+    const FOREIGN = "@otherorg/secret-integ";
+    const FOREIGN_MARKER = "// foreign org secret payload";
+
+    async function declareForeign(frozen: { source: "version" | "draft"; version: string | null }) {
+      const other = await createTestContext({ orgSlug: "otherorg" });
+      const manifest = localManifest(FOREIGN);
+      await seedPackage({
+        id: FOREIGN,
+        homeSpaceId: other.defaultSpaceId,
+        orgId: other.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: manifest,
+      });
+      await storage.uploadFile(BUCKET, `${FOREIGN}/${VERSION}.afps`, Buffer.from(FOREIGN_MARKER));
+      await seedPackageVersion({
+        packageId: FOREIGN,
+        version: VERSION,
+        integrity: computeIntegrity(new TextEncoder().encode(FOREIGN_MARKER)),
+        artifactSize: FOREIGN_MARKER.length,
+        manifest,
+      });
+      await uploadPackageFiles("integrations", other.orgId, FOREIGN, {
+        "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+        "server/index.js": new TextEncoder().encode(FOREIGN_MARKER),
+      });
+      await db
+        .update(packages)
+        .set({
+          draftManifest: {
+            name: AGENT,
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.2",
+            display_name: "Test Agent",
+            dependencies: { integrations: { [FOREIGN]: "^1.0.0" } },
+            integrations_configuration: { [FOREIGN]: { tools: ["search"] } },
+          },
+        })
+        .where(eq(packages.id, AGENT));
+      // `activatePackage` refuses a foreign package, so place the row by hand: the guard under
+      // test is the one that must hold even if a placement ever slipped through.
+      await db
+        .insert(spacePackages)
+        .values({ spaceId: ctx.defaultSpaceId, packageId: FOREIGN, enabled: true });
+      await runFreezing(frozen, FOREIGN);
+    }
+
+    it("is never served on the version branch", async () => {
+      await declareForeign({ source: "version", version: VERSION });
+      const res = await app.request(url(FOREIGN, VERSION), bearer());
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain(FOREIGN_MARKER);
+    });
+
+    it("is never served on the draft branch", async () => {
+      await declareForeign({ source: "draft", version: null });
+      const res = await app.request(url(FOREIGN), bearer());
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain(FOREIGN_MARKER);
+    });
   });
 
   it("serves the EXACT version the run froze, refusing any other and an absent one", async () => {
@@ -305,6 +396,27 @@ describe("GET /internal/integration-bundle/:scope/:name", () => {
     expect(new TextDecoder().decode(files["server/index.js"])).toBe("// draft server payload");
     // A draft run names no version, and naming one is refused.
     expect((await app.request(url(INTEGRATION, VERSION), bearer())).status).toBe(404);
+  });
+
+  it("serves the draft archive with the DB-authoritative manifest, as every draft reader does", async () => {
+    await seedLocalIntegration(INTEGRATION, { published: true });
+    // The stored tree lags the draft manifest column (a `manifest` edit lands in the column first).
+    await uploadPackageFiles("integrations", ctx.orgId, INTEGRATION, {
+      "manifest.json": new TextEncoder().encode(
+        JSON.stringify(localManifest(INTEGRATION, "0.0.1-stale")),
+      ),
+      "server/index.js": new TextEncoder().encode("// draft server payload"),
+    });
+    await runFreezing({ source: "draft", version: null });
+
+    const res = await app.request(url(INTEGRATION), bearer());
+
+    expect(res.status).toBe(200);
+    const files = unzipArtifact(new Uint8Array(await res.arrayBuffer()));
+    const served = JSON.parse(new TextDecoder().decode(files["manifest.json"])) as {
+      version: string;
+    };
+    expect(served.version).toBe(VERSION);
   });
 
   it("ALLOW: a version-pinned run keeps bundle access when the draft dropped the integration dep", async () => {

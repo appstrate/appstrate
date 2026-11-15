@@ -796,7 +796,7 @@ export function createSpacesRouter() {
   });
 
   // POST /api/spaces/:id/packages — ACTIVATE a package here. THE door, for
-  // a team space and a personal one alike, and for all four package types:
+  // a team space and a personal one alike, and for all three package types:
   // there is no per-type activation route beside it.
   //
   // Idempotent upsert: 201 when this call put the package on, 200 when it

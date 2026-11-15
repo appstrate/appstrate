@@ -4110,8 +4110,8 @@ describe("Packages API", () => {
   // "which archive entry is this type's primary content" fact. Import
   // (`parsePackageZip`), the file explorer's overlay and the package UI all
   // read it from `PACKAGE_CONTENT_ENTRY`; the fork read a hardcoded
-  // `prompt.md`/`SKILL.md` pair, so it covered two of the four types and
-  // produced `""` for the other two — a column NO import of the same bytes
+  // `prompt.md`/`SKILL.md` pair, so it covered two of the three types and
+  // produced `""` for the third — a column NO import of the same bytes
   // could ever produce.
   // ═══════════════════════════════════════════════
 
