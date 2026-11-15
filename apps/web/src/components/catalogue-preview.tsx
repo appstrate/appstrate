@@ -171,6 +171,7 @@ export function CataloguePreview({
   agents,
   protocol,
   actionsMenu,
+  icon,
   pinnedVersion,
   onUnpin,
   busy,
@@ -193,6 +194,8 @@ export function CataloguePreview({
   protocol?: string;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
+  /** The package's tile, the one its card draws. */
+  icon: ReactNode;
   /**
    * The published version the address asked to read. The sheet then draws that
    * version's content; its spaces and switches are the package's, which run the
@@ -359,8 +362,11 @@ export function CataloguePreview({
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <SettingsHeading className="mb-2" title={item.name || item.id} />
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          {icon}
+          <SettingsHeading className="mb-0 min-w-0" title={item.name || item.id} />
+        </div>
         <div className="flex shrink-0 items-center gap-3">{actionsMenu}</div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

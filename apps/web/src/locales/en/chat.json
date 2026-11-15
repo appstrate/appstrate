@@ -111,7 +111,7 @@
   "generation.noneSupported": "No generation settings are available for this model.",
   "packageAuthoring.label": "Package authoring",
   "packageAuthoring.onTitle": "Package authoring: on",
-  "packageAuthoring.onHint": "The assistant may create and edit agents, skills, integrations and local MCP servers, and compose an agent on the fly for a one-off task (each execution costs a run). Click to keep it to what exists. Remembered for your account in this browser.",
+  "packageAuthoring.onHint": "The assistant may create and edit agents, skills, integrations and MCP servers, and compose an agent on the fly for a one-off task (each execution costs a run). Click to keep it to what exists. Remembered for your account in this browser.",
   "packageAuthoring.offTitle": "Package authoring: off",
   "packageAuthoring.offHint": "The assistant sticks to what exists: it creates, imports or edits no package, and does not run your drafts. Click to let it create packages. Remembered for your account in this browser.",
   "access.title": "Assistant access",

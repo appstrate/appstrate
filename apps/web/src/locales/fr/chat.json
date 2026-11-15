@@ -111,7 +111,7 @@
   "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
   "packageAuthoring.label": "Création de packages",
   "packageAuthoring.onTitle": "Création de packages : activée",
-  "packageAuthoring.onHint": "L'assistant peut créer et modifier des agents, des skills, des intégrations et des serveurs MCP locaux, et composer un agent à la volée pour une tâche ponctuelle (une exécution coûte un run). Cliquez pour qu'il s'en tienne à l'existant. Réglage mémorisé pour votre compte dans ce navigateur.",
+  "packageAuthoring.onHint": "L'assistant peut créer et modifier des agents, des skills, des intégrations et des serveurs MCP, et composer un agent à la volée pour une tâche ponctuelle (une exécution coûte un run). Cliquez pour qu'il s'en tienne à l'existant. Réglage mémorisé pour votre compte dans ce navigateur.",
   "packageAuthoring.offTitle": "Création de packages : désactivée",
   "packageAuthoring.offHint": "L'assistant s'en tient à l'existant : il ne crée, n'importe ni ne modifie aucun package, et ne lance pas vos brouillons. Cliquez pour l'autoriser à créer des packages. Réglage mémorisé pour votre compte dans ce navigateur.",
   "access.title": "Accès de l'assistant",
