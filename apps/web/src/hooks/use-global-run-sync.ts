@@ -249,6 +249,8 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, spaceId, scheduleId) });
     qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, spaceId, scheduleId) });
     qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, spaceId) });
+    // A list spanning spaces holds this space's schedules too.
+    qc.invalidateQueries({ queryKey: scheduleKeys.acrossSpacesAll(orgId) });
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
@@ -256,7 +258,7 @@ function handleSSEMessage(
     invalidateNotificationQueries(qc);
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has finished writing its output files and memory (pinned slots, notes).
-    void invalidatePaths(qc, ["/api/files"]);
+    void invalidatePaths(qc, ["/api/files", "/api/orgs/{orgId}/files"]);
     qc.invalidateQueries({ queryKey: persistenceKeys.all });
     void invalidatePaths(qc, ["/api/billing"]);
   }

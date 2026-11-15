@@ -19,15 +19,22 @@ import { matchesSearch } from "../lib/strings";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { NewScheduleModal } from "../components/new-schedule-modal";
+import { useSpaceFilter, type AdmitsList } from "../hooks/use-space-filter";
 
 /** The values the state dimension accepts — a URL is user input. */
 const STATES = ["enabled", "disabled"] as const;
+
+/** The org route lists a space's schedules where they are read there. */
+const admitsSchedules: AdmitsList = (permissions) => permissions.includes("schedules:read");
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  const { data: schedules, isLoading, isError, error } = useAllSchedules();
+  // The spaces the list spans ride in the URL with its state (see the search below).
+  const list = useListParams(["state", "spaceId"]);
+  const { spaceIds, filter: spaceFilter } = useSpaceFilter(list, admitsSchedules);
+  const { data: schedules, isLoading, isError, error } = useAllSchedules(spaceIds);
   const agentsQuery = useAgents();
   const { data: agents } = agentsQuery;
   const agentsPending = isQueryInFlight(agentsQuery);
@@ -53,6 +60,7 @@ export function SchedulesListPage() {
   const allColumns = useScheduleColumns({
     agentName: (schedule) => agentName(schedule.packageId),
     agentPending: agentsPending,
+    spanning: spaceIds.length > 0,
   });
   const { columns, menu } = useColumnVisibility("schedules", allColumns);
 
@@ -63,7 +71,6 @@ export function SchedulesListPage() {
   //
   // The state still rides in the URL, like the runs page: a filtered list is
   // what people paste to each other, whoever does the filtering.
-  const list = useListParams(["state"]);
   const query = list.search;
   const states = list.values("state", STATES);
   const shown = useMemo(() => {
@@ -75,7 +82,7 @@ export function SchedulesListPage() {
     });
   }, [schedules, query, states, agentName]);
 
-  const filtering = query.trim() !== "" || states.length > 0;
+  const filtering = query.trim() !== "" || states.length > 0 || spaceIds.length > 0;
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} />
   ) : (
@@ -111,6 +118,7 @@ export function SchedulesListPage() {
               { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
             ],
           },
+          ...(spaceFilter ? [spaceFilter] : []),
         ]}
         onReset={list.reset}
         columns={menu}

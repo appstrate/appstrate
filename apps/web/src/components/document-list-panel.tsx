@@ -11,6 +11,7 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
@@ -26,6 +27,10 @@ import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 import { useUrlModal } from "../hooks/use-url-modal";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useCurrentOrgId } from "../hooks/use-org";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLabelOf } from "../hooks/use-spaces";
+import { fileReaderPath, type FileContext } from "../lib/file-link";
 
 export function DocumentListPanel({
   documents,
@@ -38,6 +43,7 @@ export function DocumentListPanel({
   toolbar,
   tableLabel,
   tableSurface = "framed",
+  spanning = false,
 }: {
   documents: FileDto[];
   isLoading: boolean;
@@ -54,12 +60,40 @@ export function DocumentListPanel({
   tableLabel?: string;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }) {
   const { t } = useTranslation("files");
   const download = useFileDownload();
   const deleteDoc = useDeleteFile();
   const keepDoc = useKeepFile();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
+  const navigate = useNavigate();
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+  const spaceLabelOf = useSpaceLabelOf();
+
+  // A file of another space (a list spanning spaces) is read in its own, through the reader's
+  // `?org=…&space=…`, without switching. Its writes (keep, delete) are space-scoped: not offered
+  // here — the reader's « Ouvrir dans l'espace » leads to them.
+  const contextOf = (doc: FileDto): FileContext | undefined =>
+    orgId && currentSpaceId && doc.spaceId !== currentSpaceId
+      ? { orgId, spaceId: doc.spaceId }
+      : undefined;
+  const rows = documents.map((doc) =>
+    contextOf(doc)
+      ? { ...doc, capabilities: { ...doc.capabilities, keep: false, delete: false } }
+      : doc,
+  );
+  const readerHref = (doc: FileDto) => {
+    const context = contextOf(doc);
+    return context && doc.capabilities.preview ? fileReaderPath(doc.id, context) : undefined;
+  };
+  const openPreview = (doc: FileDto) => {
+    const href = readerHref(doc);
+    if (href) navigate(href);
+    else preview.open(doc.id);
+  };
 
   // A deep-linked doc may be outside the currently loaded page, so an empty name
   // is fine — the preview modal falls back to the fetched DTO's name.
@@ -99,13 +133,14 @@ export function DocumentListPanel({
   };
 
   const pendingKeepId = keepDoc.isPending ? (keepDoc.variables?.params.path.id ?? null) : null;
-  const onDownload = (doc: FileDto) => void download(doc.id, doc.name);
+  const onDownload = (doc: FileDto) => void download(doc.id, doc.name, contextOf(doc));
   const allColumns = useDocumentColumns({
     pendingKeepId,
     showRunLink,
     onDownload,
     onKeep,
     onDelete,
+    spanning,
   });
   const { columns, menu } = useColumnVisibility("documents", allColumns);
   const emptyState = (
@@ -119,7 +154,7 @@ export function DocumentListPanel({
       <div className="flex flex-col gap-3">
         {display === "cards" ? (
           <CardGrid
-            items={documents}
+            items={rows}
             itemKey={(doc) => doc.id}
             min="12rem"
             placeholder={<FileTileSkeleton />}
@@ -131,7 +166,8 @@ export function DocumentListPanel({
                 file={doc}
                 isKeepPending={pendingKeepId === doc.id}
                 showRunLink={showRunLink}
-                onPreview={(d) => preview.open(d.id)}
+                spaceName={spanning ? spaceLabelOf(doc.spaceId) : undefined}
+                onPreview={openPreview}
                 onDownload={onDownload}
                 onKeep={onKeep}
                 onDelete={onDelete}
@@ -140,7 +176,7 @@ export function DocumentListPanel({
           />
         ) : display === "compact" ? (
           <ItemList
-            items={documents}
+            items={rows}
             itemKey={(doc) => doc.id}
             isLoading={isLoading && documents.length === 0}
             failure={error}
@@ -154,7 +190,7 @@ export function DocumentListPanel({
                   doc={doc}
                   isPending={pendingKeepId === doc.id}
                   showRunLink={showRunLink}
-                  onPreview={(d) => preview.open(d.id)}
+                  onPreview={openPreview}
                   onDownload={onDownload}
                   onKeep={onKeep}
                   onDelete={onDelete}
@@ -168,10 +204,12 @@ export function DocumentListPanel({
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
             surface={tableSurface}
-            rows={documents}
+            rows={rows}
             rowKey={(doc) => doc.id}
+            rowHref={readerHref}
             rowAction={(doc) => preview.open(doc.id)}
-            rowActionable={(doc) => doc.capabilities.preview}
+            // The in-place preview reads in the current space; another space's row links instead.
+            rowActionable={(doc) => doc.capabilities.preview && !contextOf(doc)}
             rowLabel={(doc) => doc.name}
             isLoading={isLoading && documents.length === 0}
             failure={error}

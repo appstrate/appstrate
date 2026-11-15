@@ -19,6 +19,7 @@ import { DetailBar } from "../components/detail-bar";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { ResourceErrorState, EmptyState } from "../components/page-states";
 import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
+import { useEnterLinkedSpace } from "../hooks/use-current-space";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -57,6 +58,12 @@ type ScheduleTab = "details" | "runs" | "settings";
 const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
 
 export function ScheduleDetailPage() {
+  // A row of a list spanning spaces links here naming the schedule's space.
+  if (useEnterLinkedSpace()) return <ScheduleDetailSkeleton />;
+  return <ScheduleDetailBody />;
+}
+
+function ScheduleDetailBody() {
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
   const { id } = useParams<{ id: string }>();

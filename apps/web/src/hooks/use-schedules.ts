@@ -15,6 +15,7 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
+import { pollWhileMoving } from "../lib/across-spaces";
 import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
@@ -26,19 +27,42 @@ function useCanReadSchedules(): boolean {
   return can("schedules:read");
 }
 
-export function useAllSchedules() {
+/** Polled across spaces while a listed schedule has a run going. Exported for its test. */
+export function pollWhileScheduleRuns(rows: EnrichedSchedule[] | undefined): number | false {
+  return pollWhileMoving(rows, (schedule) => schedule.running_runs > 0);
+}
+
+/** The current space's schedules, or those of `spaceIds` (`GET /api/orgs/{orgId}/schedules`). */
+export function useAllSchedules(spaceIds?: string[]) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
+  const acrossSpaces = spaceIds?.length ? spaceIds : undefined;
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
-    queryKey: scheduleKeys.list(orgId, spaceId),
-    queryFn: async (): Promise<EnrichedSchedule[]> => {
-      const { data } = await client.GET("/api/schedules");
-      return data?.data ?? [];
-    },
-    enabled: canRead && !!orgId && !!spaceId,
+    queryKey: acrossSpaces
+      ? scheduleKeys.acrossSpaces(orgId, acrossSpaces.join(","))
+      : scheduleKeys.list(orgId, spaceId),
+    queryFn: () => fetchSchedules(orgId, acrossSpaces),
+    // Each row's space grants it server-side; the current space's gate does not apply.
+    enabled: acrossSpaces ? !!orgId : canRead && !!orgId && !!spaceId,
+    refetchInterval: acrossSpaces ? (query) => pollWhileScheduleRuns(query.state.data) : undefined,
   });
+}
+
+/** The list from the door `spaceIds` names. Exported for its test. */
+export async function fetchSchedules(
+  orgId: string | null,
+  spaceIds: string[] | undefined,
+): Promise<EnrichedSchedule[]> {
+  if (spaceIds?.length) {
+    const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
+      params: { path: { orgId: orgId! }, query: { spaceId: spaceIds.join(",") } },
+    });
+    return data?.data ?? [];
+  }
+  const { data } = await client.GET("/api/schedules");
+  return data?.data ?? [];
 }
 
 export function useScheduleById(id: string | undefined) {

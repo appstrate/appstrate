@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type { ComponentProps } from "react";
 import { ApiError } from "../../api/errors.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -8,6 +8,8 @@ import { DocumentListPanel } from "../document-list-panel.tsx";
 import { ListFooter } from "../list-toolbar.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { fileFixture, render } from "../../test/render.tsx";
+import { orgStore } from "../../stores/org-store.ts";
+import { spaceStore } from "../../stores/space-store.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -115,4 +117,53 @@ it("keeps the same empty and error states in the grid", () => {
   expect(failed).not.toContain("Vide");
   expect(failed).not.toContain("private server detail");
   expect(failed).toContain("Une erreur est survenue.");
+});
+
+describe("a list spanning spaces", () => {
+  /** Renders standing in `spc_1` of `org_1`: a static render reads each store's initial state. */
+  function inSpace1(node: React.ReactElement): string {
+    const stubs = [
+      spyOn(orgStore, "getInitialState").mockReturnValue({
+        ...orgStore.getInitialState(),
+        id: "org_1",
+      }),
+      spyOn(spaceStore, "getInitialState").mockReturnValue({
+        ...spaceStore.getInitialState(),
+        id: "spc_1",
+      }),
+    ];
+    try {
+      return render(node);
+    } finally {
+      for (const stub of stubs) stub.mockRestore();
+    }
+  }
+  const elsewhere = fileFixture({
+    ...file,
+    id: "file_ailleurs",
+    name: "ailleurs.txt",
+    spaceId: "spc_2",
+  });
+  const panel = (spanning: boolean) =>
+    inSpace1(
+      <DocumentListPanel
+        documents={[file, elsewhere]}
+        isLoading={false}
+        error={null}
+        empty={{ message: "Vide" }}
+        spanning={spanning}
+      />,
+    );
+
+  it("opens a file of another space in the reader, in its own space, without switching", () => {
+    const html = panel(true);
+    expect(html).toContain(`href="/files/${elsewhere.id}?org=org_1&amp;space=spc_2"`);
+    // The current space's file keeps its in-place preview.
+    expect(html).not.toContain(`href="/files/${file.id}?`);
+  });
+
+  it("names each row's space in a column, only when spanning", () => {
+    expect(panel(true)).toContain('data-column="space"');
+    expect(panel(false)).not.toContain('data-column="space"');
+  });
 });

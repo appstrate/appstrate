@@ -26,12 +26,14 @@ import { CellDate, CellPlaceholder, CellText } from "./table-cells";
 import { formatDateField } from "../lib/format-date";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
+import { useSpaceColumn } from "./space-column";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
   agentName,
   agentPending = false,
   showAgentName = true,
+  spanning = false,
 }: {
   /** What to call the agent a schedule fires. */
   agentName: (schedule: EnrichedSchedule) => string;
@@ -39,8 +41,11 @@ export function useScheduleColumns({
   agentPending?: boolean;
   /** Embedded agent detail already supplies this context in the page heading. */
   showAgentName?: boolean;
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }): DataColumn<EnrichedSchedule>[] {
   const { t } = useTranslation(["settings", "agents", "common"]);
+  const spaceColumn = useSpaceColumn<EnrichedSchedule>(spanning);
 
   const columns: DataColumn<EnrichedSchedule>[] = [
     {
@@ -71,6 +76,7 @@ export function useScheduleColumns({
         </div>
       ),
     },
+    ...spaceColumn,
     {
       id: "cron",
       header: t("schedules.column.cron"),

@@ -25,8 +25,13 @@ import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { useSpaceFilter, type AdmitsList } from "../hooks/use-space-filter";
+import type { FilterSpec } from "../components/list-toolbar";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
+
+/** The org route lists a space's files where they are read there. */
+const admitsFiles: AdmitsList = (permissions) => permissions.includes("files:read");
 
 export function FilesPage() {
   // Remount on space switch so the loaded pages reset.
@@ -35,7 +40,8 @@ export function FilesPage() {
 }
 
 function DocumentsPageContent() {
-  const list = useListParams(["purpose"]);
+  const list = useListParams(["purpose", "spaceId"]);
+  const { spaceIds, filter: spaceFilter } = useSpaceFilter(list, admitsFiles);
   const purposes = list.values("purpose", PURPOSES);
   const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
   const search = list.search;
@@ -45,6 +51,8 @@ function DocumentsPageContent() {
       purposes={purposes}
       effectivePurpose={effectivePurpose}
       search={search}
+      spaceIds={spaceIds}
+      spaceFilter={spaceFilter}
       onSearchChange={list.setSearch}
       onPurposeChange={list.setValues("purpose")}
       onReset={list.reset}
@@ -56,6 +64,8 @@ function DocumentsCollection({
   purposes,
   effectivePurpose,
   search,
+  spaceIds,
+  spaceFilter,
   onSearchChange,
   onPurposeChange,
   onReset,
@@ -63,6 +73,9 @@ function DocumentsCollection({
   purposes: Array<(typeof PURPOSES)[number]>;
   effectivePurpose: (typeof PURPOSES)[number] | undefined;
   search: string;
+  /** Several spaces of the org instead of the current one; empty for the current space. */
+  spaceIds: string[];
+  spaceFilter: FilterSpec | undefined;
   onSearchChange: (value: string) => void;
   onPurposeChange: (values: string[]) => void;
   onReset: () => void;
@@ -77,10 +90,11 @@ function DocumentsCollection({
   const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
     search: query,
     purpose: effectivePurpose,
+    spaceIds,
   });
   const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
-  const filtering = purposes.length > 0 || query.trim() !== "";
+  const filtering = purposes.length > 0 || spaceIds.length > 0 || query.trim() !== "";
   const countLabel = hasNextPage
     ? t("page.countLoaded", { count: files.length })
     : t("page.count", { count: files.length });
@@ -132,6 +146,7 @@ function DocumentsCollection({
                   { value: "user_upload", label: t("filter.user_upload") },
                 ],
               },
+              ...(spaceFilter ? [spaceFilter] : []),
             ]}
             onReset={onReset}
             columns={view === "table" ? columns : undefined}
@@ -144,6 +159,7 @@ function DocumentsCollection({
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
         showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
+        spanning={spaceIds.length > 0}
         footer={
           <ListFooter count={isLoading || error ? undefined : footerLabel}>
             {hasNextPage && (
