@@ -38,7 +38,10 @@ export const openApiInfo = {
       name: "Library",
       description: "Consolidated package catalog across an organization's spaces (UI-oriented).",
     },
-    { name: "Notifications", description: "Run notification management" },
+    {
+      name: "Notifications",
+      description: "The recipient's notification feed (the dashboard bell)",
+    },
     { name: "Organizations", description: "Organization and member management" },
     { name: "Profile", description: "User profile management" },
     { name: "Realtime", description: "Server-Sent Events (SSE) for real-time updates" },

@@ -68,6 +68,7 @@ export const paginatedRunsKeys = {
     user: string | null | undefined,
     kind: string | null | undefined,
     status: string | null | undefined,
+    unread: boolean | undefined,
     search: string | null | undefined,
     limit: number,
     offset: number,
@@ -80,6 +81,7 @@ export const paginatedRunsKeys = {
       user,
       kind,
       status,
+      unread,
       search,
       // The OFFSET stays last: `placeholderData` keeps rows only when everything before it matched (paging vs a changed question).
       limit,

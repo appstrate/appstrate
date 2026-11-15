@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { CheckCheck } from "lucide-react";
-import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
+import { useUnreadRunCount, useMarkAllRunsRead } from "../hooks/use-run-reads";
 import { PageHeader } from "../components/page-header";
 import { NoMatchState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
@@ -28,8 +28,8 @@ const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: unreadCount } = useUnreadCount();
-  const markAllRead = useMarkAllRead();
+  const unreadCount = useUnreadRunCount();
+  const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();

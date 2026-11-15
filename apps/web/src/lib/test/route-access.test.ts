@@ -64,7 +64,6 @@ describe("route declarations", () => {
     expect([...new Set(targets)].sort()).toEqual([
       "/",
       "/agents",
-      "/agents/:scope/:name/runs/:runId",
       "/catalogue",
       "/chat",
       "/files",

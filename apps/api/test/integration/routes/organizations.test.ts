@@ -17,6 +17,7 @@ import {
   seedApiKey,
   seedInvitation,
   seedPackage,
+  seedRun,
   seedSchedule,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
@@ -28,6 +29,7 @@ import {
   auditEvents,
   apiKeys,
   notifications,
+  runReads,
   schedules,
   spaceMembers,
   spaces,
@@ -1517,8 +1519,22 @@ describe("Organizations API", () => {
         spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: leaver.id,
-        type: "run_completed",
-        payload: { packageId: pkg.id, status: "success" },
+        type: "run_failed",
+        payload: { packageId: pkg.id, agent_name: null, status: "failed" },
+      });
+      const leaverRun = await seedRun({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: leaver.id,
+        status: "success",
+      });
+      await db.insert(runReads).values({
+        runId: leaverRun.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: leaver.id,
       });
       const key = await seedApiKey({
         orgId: ctx.orgId,
@@ -1542,6 +1558,9 @@ describe("Organizations API", () => {
       expect(
         await db.select().from(notifications).where(eq(notifications.recipientId, leaver.id)),
       ).toEqual([]);
+      expect(await db.select().from(runReads).where(eq(runReads.recipientId, leaver.id))).toEqual(
+        [],
+      );
       const [revoked] = await db.select().from(apiKeys).where(eq(apiKeys.id, key.id));
       expect(revoked!.revokedAt).not.toBeNull();
       expect((await app.request("/api/orgs", { headers: bearer })).status).toBe(401);

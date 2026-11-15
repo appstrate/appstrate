@@ -150,7 +150,7 @@ describe("the dashboard", () => {
     } as unknown as DashboardData["agents"][number];
     const html = asOrgMember(
       READER,
-      <DashboardContent {...content({ agents: [agent], unreadCounts: { [agent.id]: 3 } })} />,
+      <DashboardContent {...content({ agents: [{ ...agent, unread_count: 3 }] })} />,
     );
     expect(html).toContain('aria-label="3 runs non lus"');
   });

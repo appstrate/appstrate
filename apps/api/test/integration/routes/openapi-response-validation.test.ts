@@ -378,40 +378,6 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Notifications unread counts by agent (auth + space-scoped) ─
-
-  describe("GET /api/notifications/unread-counts-by-agent -> 200", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/notifications/unread-counts-by-agent", "GET", "200");
-      expect(schema).not.toBeNull();
-
-      const res = await app.request("/api/notifications/unread-counts-by-agent", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error(
-          "GET /api/notifications/unread-counts-by-agent validation errors:",
-          result.errors,
-        );
-      }
-      if (result.extraFields.length > 0) {
-        console.warn(
-          "GET /api/notifications/unread-counts-by-agent extra fields not in spec:",
-          result.extraFields,
-        );
-      }
-
-      expect(result.valid).toBe(true);
-      expect(result.extraFields).toEqual([]);
-      expect(body).toHaveProperty("counts");
-    });
-  });
-
   // ── End-users CRUD (auth + space-scoped) ─────────────────────
 
   describe("POST /api/end-users -> 201", () => {

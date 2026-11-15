@@ -7,9 +7,7 @@ import { getActor } from "../lib/actor.ts";
 import { requireAnyCeiling } from "../middleware/require-permission.ts";
 import {
   getUnreadNotificationCount,
-  getUnreadCountsByAgent,
   markNotificationRead,
-  markNotificationReadByRun,
   markAllNotificationsRead,
   listNotifications,
 } from "../services/state/notifications.ts";
@@ -18,11 +16,16 @@ import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 
+/**
+ * The recipient's notification feed — the dashboard bell: what needs their
+ * attention (a failed run, a share). A run's read state is served with the
+ * runs (`GET /api/runs?unread=true`, `PUT /api/runs/{id}/read`, `read-all`).
+ */
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
   // The feed is the recipient's own, so no role grant is asked (a share
   // notice reaches a member who reads no run); a delegated credential is
-  // capped by the run read its entries are about (RBAC spec §7.1).
+  // capped by the run read (RBAC spec §7.1).
   const feedCeiling = requireAnyCeiling(RUNS_READ_PERMISSIONS);
 
   // GET /api/notifications — recipient-scoped feed, newest first.
@@ -43,52 +46,24 @@ export function createNotificationsRouter() {
 
   // GET /api/notifications/unread-count
   router.get("/notifications/unread-count", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const count = await getUnreadNotificationCount(scope, actor);
+    const count = await getUnreadNotificationCount(getSpaceScope(c), getActor(c));
     return c.json({ count });
-  });
-
-  // GET /api/notifications/unread-counts-by-agent
-  router.get("/notifications/unread-counts-by-agent", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const counts = await getUnreadCountsByAgent(scope, actor);
-    return c.json({ counts });
   });
 
   // PUT /api/notifications/:id/read
   router.put("/notifications/:id/read", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const id = c.req.param("id")!;
     // Idempotent for the recipient (204 whether it was unread or already
     // read); 404 when the notification isn't the caller's — no silent no-op
     // for non-recipients.
-    const ok = await markNotificationRead(scope, id, actor);
+    const ok = await markNotificationRead(getSpaceScope(c), c.req.param("id")!, getActor(c));
     if (!ok) throw notFound("Notification not found");
-    return c.body(null, 204);
-  });
-
-  // PUT /api/notifications/read/:runId — mark the caller's notification for a
-  // run read, keyed by run id. First-class convenience for callers that hold a
-  // run id but not the notification id (the run-detail page marks the run's
-  // notification read on open). Complements PUT /notifications/:id/read.
-  // Idempotent 204 — a missing run or non-recipient is a no-op, not a 404.
-  router.put("/notifications/read/:runId", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const runId = c.req.param("runId")!;
-    await markNotificationReadByRun(scope, runId, actor);
     return c.body(null, 204);
   });
 
   // PUT /api/notifications/read-all — bulk mutation: returns a documented
   // operation result ({ updated_count }), not a resource.
   router.put("/notifications/read-all", feedCeiling, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const updated = await markAllNotificationsRead(scope, actor);
+    const updated = await markAllNotificationsRead(getSpaceScope(c), getActor(c));
     return c.json({ updated_count: updated });
   });
 

@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { useUnreadCount } from "../hooks/use-notifications";
+import { useUnreadRunCount } from "../hooks/use-run-reads";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
@@ -43,7 +43,7 @@ export function NavOrg() {
   // cold settings link is not where the user is.
   const { pathname } = useLocation();
   const visiblePathname = useOverlayPath() ?? pathname;
-  const { data: unreadCount } = useUnreadCount();
+  const unread = useUnreadRunCount();
   const { data: agents } = useAgents();
   const canReach = useCanReach();
   const ready = useReachReady();
@@ -58,7 +58,6 @@ export function NavOrg() {
   });
   const hasRunning =
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
-  const unread = unreadCount ?? 0;
 
   // Two groups, split by what you are DOING rather than by object type:
   // Activité is what happened (dashboard, runs, files), Construire is what you

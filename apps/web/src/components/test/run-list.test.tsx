@@ -29,6 +29,7 @@ function failedQuery(data: ListEnvelope<EnrichedRun> | undefined): QueryClient {
     undefined,
     undefined,
     undefined,
+    undefined,
     15,
     0,
   );

@@ -47,6 +47,7 @@ import {
   type PersistenceScope,
 } from "./state/package-persistence.ts";
 import { createAgentMessageNotifications } from "./state/notifications.ts";
+import { resolveRunRecipients } from "./state/run-reads.ts";
 import { isPlainObject } from "@appstrate/core/safe-json";
 
 /** Server identity returned by `initialize`. */
@@ -250,9 +251,9 @@ const DESCRIPTORS = {
     name: "notify",
     description:
       "Send an in-app notification about this run — it appears in the notification bell and links to the run. " +
-      "It reaches the people the run's completion notifies: the member or end-user who triggered the run, or the " +
+      "It reaches the run's recipients: the member or end-user who triggered the run, or the " +
       "organization's owners and admins for an unattended run. It is not instant: the bell shows it at its next " +
-      "refresh, when the run ends or at its periodic refresh. Each recipient receives ONE notification per run: a " +
+      "refresh: when the run ends, on reconnect, or at the 5-minute poll. Each recipient receives ONE notification per run: a " +
       "second call is refused, so send it once, for what deserves attention (a result to review, a decision to make). " +
       `Title up to ${NOTIFY_TITLE_MAX} characters, message up to ${NOTIFY_MESSAGE_MAX}.`,
     inputSchema: inputSchemaOf(notifyArgs),
@@ -414,16 +415,19 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       handler: async (raw) => {
         const parsed = parseArgs("notify", notifyArgs, raw);
         if (!parsed.ok) return parsed.result;
-        const { recipients, inserted } = await createAgentMessageNotifications(
-          { orgId: run.orgId, spaceId: run.spaceId },
-          run.runId,
-          parsed.args,
-        );
-        if (recipients === 0) {
+        const scope = { orgId: run.orgId, spaceId: run.spaceId };
+        const target = await resolveRunRecipients(scope, run.runId);
+        if (!target || target.recipients.length === 0) {
           return errorResult(
             "notify: nobody can be notified for this run (a foreground run, or no recipient); nothing was sent.",
           );
         }
+        const inserted = await createAgentMessageNotifications(
+          scope,
+          target.run,
+          target.recipients,
+          parsed.args,
+        );
         if (inserted === 0) {
           return errorResult(
             "notify: this run already sent its notification; a run notifies each recipient once.",

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0052 — every stored agent manifest moved from `runtime_tools` to the
+ * 0053 — every stored agent manifest moved from `runtime_tools` to the
  * `@appstrate/platform` integration (#2197, #2199):
  *
  *   set -a && . ./.env && set +a && \
- *     bun scripts/migration/0052-migrate-runtime-tools.ts [--apply]
+ *     bun scripts/migration/0053-migrate-runtime-tools.ts [--apply]
  *
  * Run in the deployment window of the release that ships #2199, the app stopped,
  * `pg_dump` first. Dry run by default: it prints the report and rolls back;
@@ -196,10 +196,10 @@ export async function runMigrateRuntimeTools(options: {
     });
   } catch (error) {
     if (!(error instanceof DryRunRollback)) throw error;
-    out("0052: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
+    out("0053: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
     return result;
   }
-  out("0052: APPLIED — committed.");
+  out("0053: APPLIED — committed.");
   return result;
 }
 
@@ -231,11 +231,11 @@ if (import.meta.main) {
     const apply = values.apply === true;
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
-    out(`0052 — ${apply ? "APPLY" : "DRY RUN"}`);
+    out(`0053 — ${apply ? "APPLY" : "DRY RUN"}`);
     await runMigrateRuntimeTools({ apply, out });
     code = 0;
   } catch (error) {
-    process.stdout.write(`0052: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
+    process.stdout.write(`0053: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
   } finally {
     await closeDb?.();
   }

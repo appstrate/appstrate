@@ -385,7 +385,6 @@
   "notifications.ariaLabel": "Notifications",
   "notifications.empty": "Aucune notification",
   "notifications.markAllRead": "Tout marquer comme lu",
-  "notifications.viewAll": "Voir tous les runs",
   "unsaved.title": "Modifications non enregistrées",
   "unsaved.message": "Vous avez des modifications non enregistrées. Que souhaitez-vous faire ?",
   "unsaved.saveDraft": "Enregistrer le brouillon",

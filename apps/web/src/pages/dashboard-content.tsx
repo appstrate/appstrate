@@ -43,8 +43,6 @@ export interface DashboardData {
   /** Every schedule: the active ones are counted, the soonest listed. */
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
-  /** Unread run notifications per agent id. */
-  unreadCounts?: Record<string, number>;
 }
 
 function SectionHeading({ title, href, action }: { title: string; href: string; action: string }) {
@@ -169,13 +167,7 @@ function MetricCard({
   );
 }
 
-function RecentAgents({
-  agents,
-  unreadCounts,
-}: {
-  agents: AgentListItem[];
-  unreadCounts: Record<string, number> | undefined;
-}) {
+function RecentAgents({ agents }: { agents: AgentListItem[] }) {
   const { t } = useTranslation("common");
   return (
     <div
@@ -185,7 +177,7 @@ function RecentAgents({
     >
       {agents.map((agent) => (
         <div key={agent.id} className="w-[19rem] shrink-0">
-          <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
+          <PackageCard {...agentCardItem(agent)} headingLevel={3} />
         </div>
       ))}
     </div>
@@ -387,7 +379,7 @@ export function DashboardContent(data: DashboardData) {
               href="/agents"
               action={t("dashboard.allAgents")}
             />
-            <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
+            <RecentAgents agents={data.agents} />
           </section>
         )}
 

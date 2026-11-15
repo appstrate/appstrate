@@ -20,7 +20,7 @@ import { DetailBar } from "../components/detail-bar";
 import { PackageIcon } from "../components/package-icon";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
-import { useMarkReadByRun } from "../hooks/use-notifications";
+import { useMarkRunRead } from "../hooks/use-run-reads";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
@@ -116,9 +116,9 @@ function RunDetailBody() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkReadByRun();
+  const markRead = useMarkRunRead();
 
-  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // Mark the run read when viewing it terminal, and refetch the
   // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
   // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
   // the moment status flips terminal. Idempotent server-side (no-op for a
@@ -131,7 +131,7 @@ function RunDetailBody() {
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
-      markRead.mutate({ params: { path: { runId } } });
+      markRead.mutate({ params: { path: { id: runId } } });
       void invalidateRunLogs(qc, orgId, spaceId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps

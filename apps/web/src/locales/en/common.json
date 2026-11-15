@@ -385,7 +385,6 @@
   "notifications.ariaLabel": "Notifications",
   "notifications.empty": "No notifications",
   "notifications.markAllRead": "Mark all as read",
-  "notifications.viewAll": "View all runs",
   "unsaved.title": "Unsaved changes",
   "unsaved.message": "You have unsaved changes. What would you like to do?",
   "unsaved.saveDraft": "Save draft",

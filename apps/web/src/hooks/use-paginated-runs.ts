@@ -22,6 +22,8 @@ interface UsePaginatedRunsOptions {
   status?: RunStatus[];
   /** Free text, matched server-side against the agent, the error and the run number. */
   search?: string;
+  /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
+  unread?: boolean;
   limit: number;
   offset: number;
 }
@@ -47,6 +49,7 @@ export function usePaginatedRuns({
   kind,
   status,
   search,
+  unread,
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
@@ -74,6 +77,7 @@ export function usePaginatedRuns({
     user,
     kind,
     statusKey,
+    unread,
     search,
     limit,
     offset,
@@ -81,7 +85,7 @@ export function usePaginatedRuns({
 
   return useQuery({
     queryKey: currentKey,
-    // `user`/`kind` exist only on the global /api/runs view.
+    // `user`/`kind`/`unread` exist only on the global /api/runs view.
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
       if (scheduleId) {
         const { data } = await client.GET("/api/schedules/{id}/runs", {
@@ -111,6 +115,7 @@ export function usePaginatedRuns({
             kind: kind && kind !== "all" ? kind : undefined,
             status: statusQuery,
             q: search || undefined,
+            unread: unread || undefined,
           },
         },
       });

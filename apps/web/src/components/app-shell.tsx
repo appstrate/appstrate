@@ -12,7 +12,7 @@ import { ProductTabs } from "@/components/product-tabs";
 import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { SidebarCredits } from "@/components/sidebar-credits";
-import { useUnreadCount } from "@/hooks/use-notifications";
+import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
 import { catalogueHref } from "@/lib/catalogue-link";
@@ -197,7 +197,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  const { data: unreadCount } = useUnreadCount();
+  const unreadRuns = useUnreadRunCount();
   const collapsed = !isMobile && state === "collapsed";
 
   return (
@@ -237,7 +237,7 @@ export function ShellHeader() {
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
-            {(unreadCount ?? 0) > 0 && (
+            {unreadRuns > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
             )}
           </SidebarTrigger>

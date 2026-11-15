@@ -1,5 +1,5 @@
 {
-  "id": "354be2c8-48c1-4e77-bbf0-8af6b29eb5fc",
+  "id": "c08e6819-9a73-4a41-b1d7-a8cd28e7c40e",
   "prevId": "95d44df0-8561-4f5e-93ef-bf0928130567",
   "version": "7",
   "dialect": "postgresql",
@@ -5257,7 +5257,184 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_completed', 'package_shared', 'agent_message')"
+          "value": "type IN ('run_failed', 'package_shared')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.run_reads": {
+      "name": "run_reads",
+      "schema": "",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_type": {
+          "name": "recipient_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_id": {
+          "name": "recipient_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_run_reads_unread": {
+          "name": "idx_run_reads_unread",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"run_reads\".\"read_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_run_reads_recipient": {
+          "name": "idx_run_reads_recipient",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_run_reads_space": {
+          "name": "idx_run_reads_space",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "run_reads_run_id_runs_id_fk": {
+          "name": "run_reads_run_id_runs_id_fk",
+          "tableFrom": "run_reads",
+          "tableTo": "runs",
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_reads_org_id_organizations_id_fk": {
+          "name": "run_reads_org_id_organizations_id_fk",
+          "tableFrom": "run_reads",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_reads_space_id_spaces_id_fk": {
+          "name": "run_reads_space_id_spaces_id_fk",
+          "tableFrom": "run_reads",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "run_reads_run_id_recipient_type_recipient_id_pk": {
+          "name": "run_reads_run_id_recipient_type_recipient_id_pk",
+          "columns": ["run_id", "recipient_type", "recipient_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "run_reads_recipient_type_valid": {
+          "name": "run_reads_recipient_type_valid",
+          "value": "recipient_type IN ('user', 'end_user')"
         }
       },
       "isRLSEnabled": false

@@ -2,7 +2,7 @@
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
 import { sql, type SQL } from "drizzle-orm";
-import { PENDING_RUNTIME_TOOLS_COUNT } from "../../../../scripts/migration/0052-migrate-runtime-tools.ts";
+import { PENDING_RUNTIME_TOOLS_COUNT } from "../../../../scripts/migration/0053-migrate-runtime-tools.ts";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -766,7 +766,7 @@ export async function unfoldedPackageShareCount(
 /**
  * Refuse to boot while a stored agent manifest (`package_versions.manifest`,
  * `packages.draft_manifest`) still carries `runtime_tools`
- * (`carriesRuntimeTools`, `scripts/migration/0052-migrate-runtime-tools.ts`): nothing reads the
+ * (`carriesRuntimeTools`, `scripts/migration/0053-migrate-runtime-tools.ts`): nothing reads the
  * field, so every such agent runs without the `@appstrate/platform` tools it had. Refuses rather
  * than warns, like {@link assertOAuthResourceColumnsPresent}.
  *
@@ -787,7 +787,7 @@ export async function assertRuntimeToolsMigrated(
   const pending = await pendingRewrites();
   if (pending === 0) return;
 
-  const script = "bun scripts/migration/0052-migrate-runtime-tools.ts";
+  const script = "bun scripts/migration/0053-migrate-runtime-tools.ts";
   const command =
     embeddedDataDir === null
       ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
@@ -796,7 +796,7 @@ export async function assertRuntimeToolsMigrated(
         "opens in one process at a time)";
   throw new Error(
     `Agent manifests not migrated: ${pending} stored agent manifest(s) still carry runtime_tools, ` +
-      "so scripts/migration/0052-migrate-runtime-tools.ts has not run. Until it runs, those " +
+      "so scripts/migration/0053-migrate-runtime-tools.ts has not run. Until it runs, those " +
       "agents run without the @appstrate/platform tools they had. " +
       `Refusing to boot: run ${command}, then restart. A manifest the script leaves untouched ` +
       "(it lists them as malformed) is fixed by hand.",

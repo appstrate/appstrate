@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0052-migrate-runtime-tools.ts` against seeded manifests, and the boot
+ * `scripts/migration/0053-migrate-runtime-tools.ts` against seeded manifests, and the boot
  * gate that refuses to start while a manifest still carries `runtime_tools`
  * (`assertRuntimeToolsMigrated`).
  *
@@ -18,7 +18,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { assertRuntimeToolsMigrated, unmigratedRuntimeToolsCount } from "../../../src/lib/boot.ts";
-import { runMigrateRuntimeTools } from "../../../../../scripts/migration/0052-migrate-runtime-tools.ts";
+import { runMigrateRuntimeTools } from "../../../../../scripts/migration/0053-migrate-runtime-tools.ts";
 
 const AGENT = "@migr/agent";
 const MALFORMED = "@migr/malformed";
@@ -48,7 +48,7 @@ async function versionOf(id: string): Promise<Record<string, unknown>> {
 const apply = (lines: string[] = []) =>
   runMigrateRuntimeTools({ apply: true, out: (line) => lines.push(line) });
 
-describe("scripts/migration/0052 — runtime_tools moved to @appstrate/platform", () => {
+describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform", () => {
   beforeEach(async () => {
     await truncateAll();
     const orgId = (await createTestContext({ orgSlug: "migr" })).org.id;
@@ -140,7 +140,7 @@ describe("scripts/migration/0052 — runtime_tools moved to @appstrate/platform"
   it("boot refuses while a stored agent manifest carries runtime_tools", async () => {
     expect(await unmigratedRuntimeToolsCount()).toBe(4);
     await expect(assertRuntimeToolsMigrated(null)).rejects.toThrow(
-      /4 stored agent manifest\(s\) still carry runtime_tools[\s\S]*Refusing to boot: run[\s\S]*0052-migrate-runtime-tools\.ts --apply/,
+      /4 stored agent manifest\(s\) still carry runtime_tools[\s\S]*Refusing to boot: run[\s\S]*0053-migrate-runtime-tools\.ts --apply/,
     );
 
     await apply();
@@ -162,7 +162,7 @@ describe("assertRuntimeToolsMigrated", () => {
 
   it("names the embedded data directory and asks for the platform to be stopped", async () => {
     await expect(assertRuntimeToolsMigrated("/data/pglite", async () => 2)).rejects.toThrow(
-      /2 stored agent manifest[\s\S]*PGLITE_DATA_DIR=\/data\/pglite bun scripts\/migration\/0052[\s\S]*while it is stopped/,
+      /2 stored agent manifest[\s\S]*PGLITE_DATA_DIR=\/data\/pglite bun scripts\/migration\/0053[\s\S]*while it is stopped/,
     );
   });
 

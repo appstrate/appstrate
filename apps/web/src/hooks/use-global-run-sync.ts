@@ -252,6 +252,7 @@ function handleSSEMessage(
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
+    // A run that needs attention lands in the bell.
     invalidateNotificationQueries(qc);
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has finished writing its output files and memory (pinned slots, notes).

@@ -8,11 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **BREAKING: run `scripts/migration/0052-migrate-runtime-tools.ts` between the migration and
+- **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
+  `0103` creates `run_reads` and renames the stored run notifications to
+  `run_failed`). It copies each run's read state out of the
+  `run_completed` notifications and removes the notifications of runs that did
+  not fail or time out. Until it runs, runs finished before the deploy read as
+  read and the bell still lists them. The app may keep running. `0103` makes
+  the previous release unable to record a finished run: do not serve both
+  releases at once, and roll back by restoring the backup. Detail in
+  `scripts/migration/README.md`.
+
+- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` between the migration and
   the app's start** (#2197, #2199). Wait for zero `running` runs before stopping the platform: a
   container started before the deploy posts its notes, pins and logs in a finalize body the new
   platform does not read. Then, app stopped, `pg_dump` first, the script's dry run (it prints
-  what it rewrites), then `--apply`: `bun scripts/migration/0052-migrate-runtime-tools.ts
+  what it rewrites), then `--apply`: `bun scripts/migration/0053-migrate-runtime-tools.ts
 [--apply]` with the platform's `DATABASE_URL`, or with `PGLITE_DATA_DIR` naming an embedded
   database. It rewrites every stored agent manifest (`packages.draft_manifest`,
   `package_versions.manifest`) that carries `runtime_tools` or does not declare
@@ -132,6 +142,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persistence read.
 
 ### Changed
+
+- **Breaking (API): a run's read state leaves the notifications; the bell
+  shows only what needs attention.** Every finished run used to be a bell
+  notification, so the bell repeated the unread runs of the runs page, and the
+  unread totals and acks lived under `/api/notifications`. Now:
+  - A run's read state is its own (`run_reads`): `GET /api/runs?unread=true`
+    lists the caller's unread runs (its `total` is the Runs badge),
+    `PUT /api/runs/{id}/read` marks one read, `PUT /api/runs/read-all` all;
+    `GET /api/agents` items carry `unread_count`, like a schedule.
+  - The bell (`/api/notifications`) receives a run only when it ended `failed`
+    or `timeout`, plus package shares. Opening the run reads its notification.
+    Its notification type is renamed `run_completed` → `run_failed`. Its payload
+    carries `agent_name`, the name stamped on the run, so the bell names an
+    agent that is switched off or deleted.
+  - A scheduled run refused before it starts is now unread and notified like
+    any other failed run; it used to be recorded for nobody.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use
+    `unread_count` on `GET /api/agents`) and
+    `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
 - **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). The key binds an
   integration to the runtime that executes the run, which authenticates to it with the run token,
@@ -567,7 +596,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `dependencies.integrations["@appstrate/platform"]` and `integrations_configuration`, and so is
   a stored manifest that still carries it (a draft published or run, a bundle import), which is
   why the platform refuses to boot until stored manifests have moved with
-  `scripts/migration/0052` (see Operators).
+  `scripts/migration/0053` (see Operators).
 
 - **BREAKING: `@appstrate/core` removes its runtime-tool exports** (#2197, #2199):
   `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
@@ -597,16 +626,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`notify`: an agent sends an in-app notification from inside its run** (#2200).
   A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100
   characters, message 1–500) writes an `agent_message` notification, linked to the
-  run, to the recipients its `run_completed` would reach: the member or end-user
+  run, to the run's recipients (those of its read state): the member or end-user
   who triggered it, else the organization's owners and admins. Each recipient gets
   one per run; a second call, a run with no recipient (an inline run) and
   arguments outside the schema are tool errors that write nothing. The bell
   renders it with its title, message and a link to the run. `GET /api/notifications`
   adds the `agent_message` kind (payload `packageId`, `title`, `message`);
-  migration `0103` restates the `notifications_type_valid` CHECK. The bell shows it at its
-  next refresh — when the run ends, or at its five-minute poll — not instantly. An agent gets it
+  migration `0104` restates the `notifications_type_valid` CHECK. The bell shows it at its
+  next refresh — when the run ends, on reconnect, or at its five-minute poll — not instantly.
+  Opening the run reads it, like a failure notice. An agent gets it
   by selecting it: it is not in the integration's `default_tools`, and the agents
-  `scripts/migration/0052` rewrites keep an explicit selection without it.
+  `scripts/migration/0053` rewrites keep an explicit selection without it.
 
 - **`appstrate run --local` wires unauthenticated remote MCP integrations**
   (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
