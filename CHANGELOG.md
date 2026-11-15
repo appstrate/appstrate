@@ -531,7 +531,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   everything the server lists under `allow_undeclared_tools`, less
   `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
   the server's `tools/list`, read through the credential proxy with the
-  connection the proxy selects (sanitised; cached 5 minutes per connection and
+  connection the proxy selects (when several qualify, the first of the caller's
+  own connections it accepts, never a colleague's shared one the caller did not
+  name; sanitised; cached 5 minutes per connection and
   integration version, read only after that selection, at most 128 catalogs
   per replica; at most 500 tools of names up to 128 characters and 512 KiB of
   descriptors, a longer catalog reported by a `note` and, on the listing route,
@@ -545,12 +547,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
   `remedy`, or `must_choose_connection` with the candidates, both before
   anything is sent (every auth of the integration serves a typed tool). A
-  JSON-RPC error of the server is `502 upstream_mcp_error`
-  (`mcp_error: { code, message }`, the message bounded), an answer over 2 MiB
+  JSON-RPC error -32602 of the server (Invalid params) is
+  `422 upstream_invalid_params`, any other `502 upstream_mcp_error`
+  (`mcp_error: { code, message }`, the message bounded), an answer over the
+  exchange bound (2 MiB, or the proxy's `max_response_bytes` when lower)
   `502 upstream_response_too_large` (at once, as JSON or as an event stream),
   a 401 or 403 of the server `502 upstream_credential_rejected`
   (`upstream_status`, and the proxy's `credential` verdict when its forced
-  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`;
+  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
+  each with its `Proxy-Status` (`received-status` on a credential rejection);
   the server sync of `POST /api/integrations/{packageId}/discover` answers the
   same codes (its timeout 20 s) where it answered `bad_gateway`. The result
   keeps no reserved `_meta` key, on the result or on any content block: a key
@@ -563,10 +568,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dropped, and `_meta["dev.appstrate/truncated"]` is set.
   The call journal records one row per `tools/call`, a timeout included, and
   one per listing that reached the server, a refused or unanswered handshake
-  included (one row for the sync as well). A listing waits 20 s for all its
-  servers, and no longer than its request: a catalog not read by then is
-  listed `catalog_unreadable` and read on for the next listing, and no further
-  server is contacted. Both routes answer `Cache-Control: no-store`, like
+  included (one row for the sync as well), and a listing reaching a server
+  counts a credential refusal toward flagging the connection, as a call does. A
+  listing waits 20 s for all its servers (5 s when `call_integration_tool`
+  resolves its tool by name, keeping resolution and call under a client's
+  60 s), and no longer than its request: a catalog not read by then is listed
+  `catalog_unreadable` and read on for the next listing, and no further server
+  is contacted. Tool names are unique in a space: a namespace equal to another
+  active integration's after normalisation (cut at 20 characters, without a
+  trailing `_`) takes a hash of its package id, and a name never depends on the
+  caller's connections. The listing gives the connections the tools reach
+  once (`connections`), each tool naming its own (`connection_ids`, a typed
+  tool's `missing_scopes` per connection). Both routes answer `Cache-Control: no-store`, like
   `/proxy`. Two routes
   back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
   and `unlisted`) and

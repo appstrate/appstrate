@@ -68,7 +68,11 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
-import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
+import {
+  credentialProxyClosedDetail,
+  reachOutsideRunIfPermitted,
+} from "../../services/credential-proxy/access.ts";
+import type { SpaceContextRow } from "../../lib/space-lookup.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -1837,8 +1841,8 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
-  /** The space leaves the credential proxy open outside a run (`credential_proxy_open`). */
-  proxyOpen: boolean,
+  /** The space, whose setting the proxy's access rule reads (`reachOutsideRunIfPermitted`). */
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
@@ -1847,6 +1851,7 @@ export function deriveMcpSurface(
   // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the listing's
   // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
   const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
+  const closed = reachOutsideRunIfPermitted(permissions, space) === "closed";
   return {
     invokes,
     runs,
@@ -1857,8 +1862,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    proxies: mayProxy && proxyOpen,
-    proxiesClosed: mayProxy && !proxyOpen,
+    proxies: mayProxy && !closed,
+    proxiesClosed: mayProxy && closed,
   };
 }
 
@@ -2001,7 +2006,7 @@ function withSpaceArgument(
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
       // The space's setting, not the caller's role, withholds the proxy there.
-      if (need === "proxies" && !current.credentialProxyOpen) {
+      if (need === "proxies" && current.surface.proxiesClosed) {
         return refusalResult({
           code: "credential_proxy_closed",
           error: credentialProxyClosedDetail(current),

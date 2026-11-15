@@ -726,23 +726,23 @@ describe("mcp integration tools", () => {
         expect(invoked.isError).toBe(false);
         const tools = listed.data.tools as Array<{
           tool: string;
-          integration: string;
-          connections: Array<{ connection_id: string; owned_by_actor: boolean }>;
+          integration_package_id: string;
+          connection_ids: string[];
         }>;
-        expect(tools.map((tool) => [tool.tool, tool.integration])).toEqual([
+        expect(tools.map((tool) => [tool.tool, tool.integration_package_id])).toEqual([
           [TOOL, INTEGRATION_ID],
         ]);
-        const rows = tools[0]!.connections;
-        // Every field of the listing's rows and the integration carried by the tool; an HTTP
-        // call selects no tool, so no `missing_scopes`.
+        const rows = listed.data.connections as Array<
+          Record<string, unknown> & { connection_id: string; owned_by_actor: boolean }
+        >;
+        expect([...tools[0]!.connection_ids].sort()).toEqual(
+          rows.map((row) => row.connection_id).sort(),
+        );
+        // Every field of the listing's rows, each once.
         const listingRows: Record<string, unknown>[] = (
           invoked.data.body as { data: Record<string, unknown>[] }
         ).data;
-        const searchRows: Record<string, unknown>[] = rows.map((row) => ({
-          integration_package_id: INTEGRATION_ID,
-          ...row,
-        }));
-        expect(listingRows).toEqual(searchRows);
+        expect(listingRows).toEqual(rows);
         return rows
           .map((row): [string, boolean] => [row.connection_id, row.owned_by_actor])
           .sort(([a], [b]) => a.localeCompare(b));
@@ -845,7 +845,7 @@ describe("mcp integration tools", () => {
       expect(searched.isError).toBe(false);
       expect(searched.data.best_match).toMatchObject({
         tool: REMOTE_TOOL,
-        integration: REMOTE_ID,
+        integration_package_id: REMOTE_ID,
         description: `${REMOTE_ID}. Full-text search.`,
         input_schema: { type: "object", properties: {} },
       });
@@ -855,13 +855,13 @@ describe("mcp integration tools", () => {
         integration: NOTES_ID,
       });
       const notReady = forNotes.data.not_ready as Array<{
-        integration: string;
+        integration_package_id: string;
         proxy_connection: { status: string };
         refusal?: { code: string; connect_url?: string };
       }>;
       expect(notReady).toEqual([
         expect.objectContaining({
-          integration: NOTES_ID,
+          integration_package_id: NOTES_ID,
           proxy_connection: { status: "none", imposed: false },
           refusal: expect.objectContaining({ code: "not_connected", auth_key: "oauth" }),
         }),

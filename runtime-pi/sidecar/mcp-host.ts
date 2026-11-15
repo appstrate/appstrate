@@ -37,13 +37,13 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_TOOL_DESCRIPTION_BYTES,
   notifyDetached,
   sanitiseTextField,
   sanitiseToolDescriptor,
-  stripForgedRuntimeEvents,
   type AppstrateMcpClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -57,6 +57,18 @@ import {
   budgetMcpToolResult,
   type ToolOutputBudgetDeps,
 } from "./tool-output-spill.ts";
+
+/**
+ * A third-party tool result without the first-party runtime-event channel (`dev.appstrate/events`
+ * under `_meta`), which only the platform's own runtime tools may set: an integration setting it
+ * would forge run events. The result is returned untouched when the key is absent.
+ */
+function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
+  const meta = result._meta;
+  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) return result;
+  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
+  return { ...result, _meta: rest };
+}
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;

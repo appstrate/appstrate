@@ -151,7 +151,7 @@ const requestSchema = z.strictObject({
     .uuid()
     .optional()
     .describe(
-      "Which of the tool's `connections` to use. Required when the tool lists several and its " +
+      "Which of the tool's `connection_ids` to use. Required when the tool names several and its " +
         "integration also has connections of another auth.",
     ),
 });
@@ -473,26 +473,23 @@ export async function executeApiCall(
   ctx: DispatchContext,
   tool: {
     name: string;
-    integration: string;
-    connections: readonly { connection_id: string }[];
-    /** A request names one of `connections`: the integration has connections of another auth. */
-    connectionRequired: boolean;
+    integration_package_id: string;
+    connection_ids: readonly string[];
+    /** A request names one of `connection_ids`: the integration has connections of another auth. */
+    connection_required: boolean;
   },
   args: ApiCallArguments,
   extra: AppstrateRequestExtra,
-  options: {
-    /** Applies to each request naming no `connection_id` of its own. */
-    defaultConnectionId: string | undefined;
-  },
+  /** Applies to each request naming no `connection_id` of its own. */
+  defaultConnectionId: string | undefined,
 ): Promise<ToolCallOutcome | Refusal> {
-  const { defaultConnectionId } = options;
   const deadlineMs = batchDeadlineMs;
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
   const sessionId = args.session_id ?? crypto.randomUUID();
   const maxResponseBytes = args.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
-  const shared = { integrationId: tool.integration, sessionId, maxResponseBytes };
-  const connectionIds = tool.connections.map((connection) => connection.connection_id);
+  const shared = { integrationId: tool.integration_package_id, sessionId, maxResponseBytes };
+  const connectionIds = tool.connection_ids;
 
   const calls: PreparedCall[] = [];
   for (const [index, request] of requests.entries()) {
@@ -508,7 +505,7 @@ export async function executeApiCall(
         hint: `Pass one of: ${connectionIds.join(", ")}.`,
       };
     }
-    if (connectionId === undefined && tool.connectionRequired) {
+    if (connectionId === undefined && tool.connection_required) {
       if (connectionIds.length > 1) {
         return {
           code: "missing_argument",

@@ -104,10 +104,7 @@ import {
   listConnectionsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
-import {
-  listIntegrationTools,
-  listingDeadline,
-} from "../services/credential-proxy/integration-tools.ts";
+import { listIntegrationTools } from "../services/credential-proxy/integration-tools.ts";
 import { callRemoteTool } from "../services/credential-proxy/remote-tools.ts";
 import type { ProxyReach } from "../services/integration-connections.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -522,15 +519,11 @@ export function createCredentialProxyRouter() {
     async (c) => {
       const caller = remoteToolsCaller(c);
       const query = parseBody(listIntegrationToolsQuerySchema, c.req.query());
-      const listing = await listIntegrationTools(
-        caller,
-        {
-          ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
-          ...(query.name ? { name: query.name } : {}),
-          ...(query.connection_id ? { connectionId: query.connection_id } : {}),
-        },
-        listingDeadline(),
-      );
+      const listing = await listIntegrationTools(caller, {
+        ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
+        ...(query.name ? { name: query.name } : {}),
+        ...(query.connection_id ? { connectionId: query.connection_id } : {}),
+      });
       return c.json(listing);
     },
   );

@@ -399,14 +399,18 @@ role. Runs keep their connections there:
   optional `integration` (`@scope/name`) and a `limit`; with neither `query`
   nor `integration` it lists every tool you can call. A tool is named
   `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths of the
-  integration expose it, `{ns}` being the package id in snake case; when two
-  integrations active in the space share it, each takes a 6-hex suffix hashed from its own
-  package id. A run suffixes `_2`, `_3`… instead, so on such a collision the
+  integration expose it, `{ns}` being the package id in snake case, cut at 20
+  characters and without a trailing `_`; while it equals the namespace of
+  another integration active in the space, it takes `_` and a 6-hex suffix
+  hashed from its own package id (longer if that still collides). No two tools
+  of a space share a name, and a name never depends on which connections you
+  hold. A run suffixes `_2`, `_3`… instead, so on such a collision the
   names differ from a run's. An integration lists the `api_call` tools its
   catalog exposes (every tool, less `hidden_tools` and its connect tools; not
   its `default_tools`, which only matter to an agent) whose auth has a
-  connection you reach. Each result carries `tool`, `integration`,
-  `description` and `connections`; with `query` or `integration`, `best_match`
+  connection you reach. Each result carries `tool`, `integration_package_id`,
+  `description` and `connection_ids`, the connections it reaches among the
+  result's `connections`, each listed once; with `query` or `integration`, `best_match`
   adds the first result's `input_schema` and `usage` (how to call the tool and
   read its result), so a search by a tool's exact name stands for a describe
   call, which does not exist. `note` says when more tools match than `limit`
@@ -416,7 +420,7 @@ role. Runs keep their connections there:
   tool the server lists after those is not offered.
   `not_ready`, apart from the tools and present when not empty, lists the
   integrations active in the space you have no usable connection of, filtered
-  by `query` and `integration` like the tools: each `integration` with its
+  by `query` and `integration` like the tools: each `integration_package_id` with its
   `display_name`, the `proxy_connection` verdict of a call naming no
   connection (`status`: `none`, `needs_reconnection`, `not_permitted`,
   `default_unavailable` or `unusable`; `imposed` when an enforced organization
@@ -427,26 +431,28 @@ role. Runs keep their connections there:
   `connect_url`, minted as for a run launch: hand it to the user, who connects
   the integration by opening it.
   `unlisted`, also present when not empty, lists the remote integrations whose
-  server the platform refused to list for you (a connection, permission or
-  `authorized_uris` refusal, or the server refusing the connection's
+  server the platform refused to list for you (a connection, permission,
+  `authorized_uris` or egress refusal, or the server refusing the connection's
   credential: `upstream_credential_rejected`), each with that `refusal`: their typed tools are
   missing until it is cleared, and calling one returns that refusal. Tools,
   `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`.
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
-  `allow_all_uris`, `needs_reconnection`, `call_permission_required` and, on a
-  typed tool, `missing_scopes`: the scopes the tool's `tools_policy` entry requires
-  on the connection's auth that it lacks. A `{ns}__api_call` selects no tool, so
-  its connections carry no `missing_scopes`. It never carries a credential value: an entry that
+  `allow_all_uris`, `needs_reconnection` and `call_permission_required`. A
+  typed tool carries `missing_scopes`, per `connection_id` lacking some: the
+  scopes the tool's `tools_policy` entry requires on that connection's auth. A
+  `{ns}__api_call` selects no tool, so it carries none. A connection never carries a credential value: an entry that
   depends on one reads `{$credential.<field>}`, and you target it by writing
   `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
   is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
   `https://{$credential.host}/**`); the platform fills it in.
 - **A call.** `call_integration_tool` takes the `tool` name and its
-  `arguments`, validates them against that tool's `input_schema` and hands
-  them to the tool, whose result it returns; what holds for one tool only is in
-  that tool's `usage`. For `{ns}__api_call`, `arguments.requests` holds 1 to 50
+  `arguments` and hands them to the tool, whose result it returns; what holds
+  for one tool only is in that tool's `usage`. An `{ns}__api_call` validates
+  its arguments against its `input_schema`; a typed tool's are checked only
+  for the presence of its required ones, and its server validates the rest. A
+  name two tools shared would be refused (`ambiguous_tool`) rather than guessed. For `{ns}__api_call`, `arguments.requests` holds 1 to 50
   requests to its integration, each naming a `method` and a `target`, with
   optional `headers`, `body`, `substitute_body` and `connection_id` (one of the
   tool's `connections`: which one, when several are callable, or to use a
@@ -471,20 +477,25 @@ role. Runs keep their connections there:
   or every tool the server lists when `allow_undeclared_tools` is `true`), less
   `hidden_tools` and its connect tool. Descriptions and input schemas come from
   the server's `tools/list`, read with the connection the proxy selects for
-  you as for an `api_call` (when several qualify, the first of your connections
-  it accepts), sanitised as in a run and cached for 5 minutes per connection,
+  you as for an `api_call` (when several qualify, the first of your OWN
+  connections it accepts: a connection another member shared is used only when
+  you name it or an organization default designates it), sanitised as in a run and cached for 5 minutes per connection,
   integration version and server URL; the cache is read only after that selection, so it
   never answers for a connection you do not reach. A server URL built from
   connection variables (`{$variable.…}`) is rendered from that connection's.
   At most 500 tools are read per server, and a name over 128 characters is
   dropped, and a catalog keeps at most 512 KiB of descriptors. A tool whose
   server declares an output schema carries it as `output_schema` in
-  `best_match`. A server that cannot be listed, or not within the listing's 20 s,
-  leaves the tool names alone, each marked `catalog_unreadable: true`; once
-  that wait is over, the search contacts no further server. A call is one `tools/call`
+  `best_match`. A server that cannot be listed, or not within the listing's 20 s
+  (5 s when a call resolves its tool by name, so that resolution and the
+  call's 45 s stay under a client's 60 s), leaves the tool names alone, each
+  marked `catalog_unreadable: true`; once that wait is over, the search
+  contacts no further server. Listing a server sends the connection's
+  credential: a server refusing it counts toward flagging the connection
+  `needs_reconnection`, as a call does, so a search is not idempotent. A call is one `tools/call`
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
   connection named by the `connection_id` argument of `call_integration_tool`
-  (one of the tool's `connections`) or, without it, the one the proxy selects
+  (one of the tool's `connection_ids`) or, without it, the one the proxy selects
   as for an `api_call`, judged for that tool: a connection lacking the scopes
   the tool's `tools_policy` entry requires is refused with
   `409 insufficient_scopes` (`missing_scopes`, `required_scopes`, `auth_key`,
@@ -507,9 +518,11 @@ role. Runs keep their connections there:
   not fit whole is cut on a character boundary (its text alone) and marked, any
   other block that does not fit is replaced by a note while one fits, a closing
   note counts what was cut or dropped, and `_meta["dev.appstrate/truncated"]`
-  is `true`. A JSON-RPC
-  error of the server is `upstream_mcp_error` with its `mcp_error.code` and
-  `message` (the server's own text), an answer over 2 MiB
+  is `true`. The server's JSON-RPC error -32602 (Invalid params: your
+  arguments or the tool name) is `422 upstream_invalid_params`, any other
+  `upstream_mcp_error`, both with its `mcp_error.code` and `message` (the
+  server's own text, cut at 512 characters), an answer over the exchange bound
+  (2 MiB, or the proxy's `max_response_bytes` when lower)
   `upstream_response_too_large` (as JSON or as an event stream), no answer
   within 45 s `upstream_timeout` (the tool may have run), the server refusing
   the connection's credential `upstream_credential_rejected` (`upstream_status`,

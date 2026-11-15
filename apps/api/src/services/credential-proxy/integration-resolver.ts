@@ -45,7 +45,6 @@ import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
   connectionParam,
-  listIntegrationIdsActiveInSpace,
   listReachableConnections,
   proxyConnectionVerdicts,
   selectAccessibleConnection,
@@ -57,6 +56,7 @@ import {
   type RunBoundSelection,
 } from "../integration-connections.ts";
 import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
+import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
@@ -272,6 +272,11 @@ export interface ConnectionOutsideRun {
   call_permission_required: boolean;
 }
 
+/** The integrations of the organization (system ones included) active in the space. */
+export async function activeIntegrationIds(scope: SpaceScope): Promise<string[]> {
+  return (await listActivePackages(scope, "integration")).map((row) => row.id);
+}
+
 /**
  * What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. Only the
  * manifests of the active integrations the caller reaches a connection of are read.
@@ -283,7 +288,7 @@ export async function listConnectionsOutsideRun(
 ): Promise<ConnectionOutsideRun[]> {
   const [rows, activeIds] = await Promise.all([
     listReachableConnections({ spaceId: scope.spaceId, actor }, reach),
-    listIntegrationIdsActiveInSpace(scope),
+    activeIntegrationIds(scope),
   ]);
   const connected = new Set(rows.map((row) => row.integrationId));
   const manifests = await publishedManifests(

@@ -73,3 +73,21 @@ export function bearerOauthAuth(authorizedUris: string[]): Record<string, unknow
     },
   };
 }
+
+/** An api_key auth whose `token` field is sent as a Bearer to `authorizedUris`. */
+export function bearerApiKeyAuth(authorizedUris: string[]) {
+  return {
+    type: "api_key" as const,
+    authorizedUris,
+    credentialFields: ["token"],
+    requiredCredentialFields: ["token"],
+    delivery: {
+      http: {
+        in: "header" as const,
+        name: "Authorization",
+        prefix: "Bearer ",
+        value: "{$credential.token}",
+      },
+    },
+  };
+}

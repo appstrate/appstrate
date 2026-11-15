@@ -13,9 +13,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
+  IntegrationTool,
   IntegrationToolListing,
-  IntegrationTool as ListedIntegrationTool,
-  ToolConnection,
 } from "../../services/credential-proxy/integration-tools.ts";
 import {
   API_CALL_DESCRIPTION,
@@ -32,57 +31,26 @@ import {
 import { INTEGRATION_TOOLS_PATH, REMOTE_TOOLS_CALL_PATH } from "./catalog.ts";
 import { asRecord, dispatchHeaders, jsonResult, type Refusal } from "./tool-results.ts";
 
-/** One tool of an integration the caller holds a connection of, ready to call. */
-export interface IntegrationTool {
-  /** The name `call_integration_tool` takes. */
-  name: string;
-  /** The integration package id (`@scope/name`). */
-  integration: string;
-  /** What the tool does, as a search lists it. */
-  description: string;
-  /** A remote tool whose server could not be listed: named only, without description or schema. */
-  catalogUnreadable?: true;
+/** A tool of the listing, as the route returns it, with how `call_integration_tool` calls it. */
+export type CallableTool = IntegrationTool & {
   /** How to call it and read its result, carried with its `input_schema` by `best_match`. */
   usage: string;
+  /** Its arguments as JSON Schema. */
+  input_schema: Record<string, unknown>;
   /**
    * Its arguments, which `call_integration_tool` validates `arguments` against before `execute`;
    * absent for a typed tool, whose server validates them.
    */
   schema?: z.ZodType;
-  /** Its arguments as JSON Schema: the `input_schema` of `best_match`. */
-  inputSchema: Record<string, unknown>;
-  /** A typed tool's declared result schema: the `output_schema` of `best_match`. */
-  outputSchema?: Record<string, unknown>;
-  /** The connections it reaches. */
-  connections: ToolConnection[];
   /** Runs a call whose arguments `schema` accepted, with the connection the caller named. */
   execute(
     args: unknown,
     extra: AppstrateRequestExtra,
     connectionId: string | undefined,
   ): Promise<ToolCallOutcome | Refusal>;
-}
+};
 
-/** A listing entry about an integration, named as the MCP tools name it (`integration`). */
-type AboutIntegration<T extends { integration_package_id: string }> = Omit<
-  T,
-  "integration_package_id"
-> & { integration: string };
-
-export interface IntegrationTools {
-  tools: IntegrationTool[];
-  not_ready: AboutIntegration<IntegrationToolListing["not_ready"][number]>[];
-  unlisted: AboutIntegration<IntegrationToolListing["unlisted"][number]>[];
-  truncated_catalogs: AboutIntegration<IntegrationToolListing["truncated_catalogs"][number]>[];
-}
-
-/** `entry` with its `integration_package_id` named `integration`. */
-function aboutIntegration<T extends { integration_package_id: string }>({
-  integration_package_id,
-  ...rest
-}: T): AboutIntegration<T> {
-  return { integration: integration_package_id, ...rest };
-}
+export type CallableListing = Omit<IntegrationToolListing, "tools"> & { tools: CallableTool[] };
 
 /** The listing route's refusal, as `invoke_operation` would relay it. */
 export interface ListingRefusal {
@@ -90,15 +58,17 @@ export interface ListingRefusal {
   body: unknown;
 }
 
-/** What every tool's `usage` says of its `connections`. */
+/** What every tool's `usage` says of its connections. */
 const CONNECTIONS_USAGE =
-  "Its `connections`: with `credential-proxy:call`, yours and those other members shared into " +
-  "the space (`owned_by_actor: false`); with `credential-proxy:call-own` alone, yours only. " +
-  "Each has the `connection_id` to pass, the `authorized_uris` a target must match (unless " +
-  "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves), " +
-  "its `scopes_granted`, and what a call passing that `connection_id` would still refuse: on a " +
-  "typed tool `missing_scopes` (the scopes its policy requires that the connection lacks: the " +
-  "call answers `insufficient_scopes`), and `needs_reconnection` and " +
+  "Its `connection_ids` name, among the result's `connections`, those it reaches: with " +
+  "`credential-proxy:call`, yours and those other members shared into the space " +
+  "(`owned_by_actor: false`); with `credential-proxy:call-own` alone, yours only. Each " +
+  "connection has the `connection_id` to pass, the `authorized_uris` a target must match " +
+  "(unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone " +
+  "resolves), its `scopes_granted`, and what a call passing that `connection_id` would still " +
+  "refuse: a typed tool's `missing_scopes` maps a connection id to the scopes its policy " +
+  "requires that the connection lacks (the call answers `insufficient_scopes`), and " +
+  "`needs_reconnection` and " +
   "`call_permission_required` (an enforced organization default governs the integration and " +
   "you hold `credential-proxy:call-own` alone). With no `connection_id` and " +
   "`credential-proxy:call` held, an organization default applies first. A connection you do " +
@@ -107,7 +77,8 @@ const CONNECTIONS_USAGE =
 const REMOTE_TOOL_USAGE =
   "Pass the tool's own arguments in `arguments`, following its `input_schema`: the platform " +
   "checks only that the required ones are present, the server validates the rest (a refusal " +
-  "of the server answers `upstream_mcp_error`, with its `mcp_error.code` and `message`). When " +
+  "of the server answers `upstream_invalid_params` for its arguments or tool name, else " +
+  "`upstream_mcp_error`, either with its `mcp_error.code` and `message`). When " +
   "it has an `output_schema`, its `structuredContent` follows it. The `connection_id` of " +
   "call_integration_tool names the connection; without it the proxy chooses as for an " +
   "`api_call`, and `must_choose_connection` lists the candidates in " +
@@ -118,7 +89,8 @@ const REMOTE_TOOL_USAGE =
   'and `_meta["dev.appstrate/truncated"]` is `true`. An error ' +
   "result carrying `content` is the tool's own failure (`isError: true`); one carrying `code`, " +
   "`status` and `detail` is the platform's answer: a refusal before anything was sent, or the " +
-  "server failing the exchange: `bad_gateway`, `upstream_mcp_error`, `upstream_timeout` (no " +
+  "server failing the exchange: `bad_gateway`, `upstream_invalid_params`, `upstream_mcp_error`, " +
+  "`upstream_timeout` (no " +
   "answer in time: the tool may have run, check before repeating a write), " +
   "`upstream_response_too_large` (the tool ran but its answer exceeds the exchange bound: ask " +
   "it for less), or `upstream_credential_rejected` (the server refused the connection's " +
@@ -262,33 +234,21 @@ async function executeRemoteTool(
 }
 
 /** A listed tool with how the MCP tool calls it. */
-function callable(ctx: DispatchContext, tool: ListedIntegrationTool): IntegrationTool {
-  const base = {
-    name: tool.name,
-    integration: tool.integration_package_id,
-    connections: tool.connections,
-  };
+function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
   if (tool.kind === "api_call") {
-    const target = { ...base, connectionRequired: tool.connection_required };
     return {
-      ...base,
+      ...tool,
       description: `${tool.description} ${API_CALL_DESCRIPTION}`,
       usage: `${API_CALL_USAGE} ${CONNECTIONS_USAGE}`,
       schema: apiCallSchema,
-      inputSchema: API_CALL_INPUT_SCHEMA,
+      input_schema: API_CALL_INPUT_SCHEMA,
       execute: (args, extra, named) =>
-        executeApiCall(ctx, target, args as ApiCallArguments, extra, {
-          defaultConnectionId: named,
-        }),
+        executeApiCall(ctx, tool, args as ApiCallArguments, extra, named),
     };
   }
   return {
-    ...base,
-    description: tool.description,
-    ...(tool.catalog_unreadable ? { catalogUnreadable: true as const } : {}),
+    ...tool,
     usage: REMOTE_TOOL_USAGE,
-    inputSchema: tool.input_schema,
-    ...(tool.output_schema ? { outputSchema: tool.output_schema } : {}),
     execute: (args, extra, named) =>
       executeRemoteTool(
         ctx,
@@ -303,12 +263,14 @@ function callable(ctx: DispatchContext, tool: ListedIntegrationTool): Integratio
 
 /**
  * The caller's integration tools, from the listing route, filtered by its query parameters
- * (`integration_package_id`, `name`, `connection_id`). The route's refusal comes back as is.
+ * (`integration_package_id`, `name`, `connection_id`); the MCP request's `signal` cancels it. The
+ * route's refusal comes back as is.
  */
 export async function readIntegrationTools(
   ctx: DispatchContext,
   query: { integration?: string; name?: string; connectionId?: string },
-): Promise<IntegrationTools | { refused: ListingRefusal }> {
+  signal: AbortSignal | undefined,
+): Promise<CallableListing | { refused: ListingRefusal }> {
   const url = new URL(INTEGRATION_TOOLS_PATH, ctx.origin);
   if (query.integration !== undefined) {
     url.searchParams.set("integration_package_id", query.integration);
@@ -316,17 +278,16 @@ export async function readIntegrationTools(
   if (query.name !== undefined) url.searchParams.set("name", query.name);
   if (query.connectionId !== undefined) url.searchParams.set("connection_id", query.connectionId);
   const response = await ctx.dispatch(
-    new Request(url.toString(), { method: "GET", headers: toolRouteHeaders(ctx) }),
+    new Request(url.toString(), {
+      method: "GET",
+      headers: toolRouteHeaders(ctx),
+      ...(signal ? { signal } : {}),
+    }),
   );
   const body = asRecord(await response.json().catch(() => undefined));
   if (!response.ok || !Array.isArray(body?.tools)) {
     return { refused: { status: response.status, body: body ?? null } };
   }
   const listing = body as unknown as IntegrationToolListing;
-  return {
-    tools: listing.tools.map((tool) => callable(ctx, tool)),
-    not_ready: listing.not_ready.map(aboutIntegration),
-    unlisted: listing.unlisted.map(aboutIntegration),
-    truncated_catalogs: listing.truncated_catalogs.map(aboutIntegration),
-  };
+  return { ...listing, tools: listing.tools.map((tool) => callable(ctx, tool)) };
 }

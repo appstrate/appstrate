@@ -1306,7 +1306,7 @@ export interface paths {
         };
         /**
          * List the tools the caller can call outside a run
-         * @description Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's connections it accepts), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all, and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. Each tool carries the connections it reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the integrations active in the space the caller has no usable connection of, with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         * @description Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential counts toward flagging the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of, with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
          */
         get: operations["listIntegrationTools"];
         put?: never;
@@ -1328,7 +1328,7 @@ export interface paths {
         put?: never;
         /**
          * Call a typed tool of a remote MCP integration
-         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks or a transport fault carries RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
          */
         post: operations["callRemoteIntegrationTool"];
         delete?: never;
@@ -12509,7 +12509,7 @@ export interface operations {
             query?: {
                 /** @description Lists the tools of this integration alone (`@scope/name`); `404` when it is not active in the space. */
                 integration_package_id?: string;
-                /** @description Resolves the tool of this name alone: an `api_call` tool lists no server, and only the remote integrations whose namespace starts the name are listed. `not_ready` is then empty. */
+                /** @description Resolves the tool of this name alone, waiting 5 s at most for its server: an `api_call` tool lists no server, and only the remote integration whose namespace starts the name is listed. `not_ready` is then empty. */
                 name?: string;
                 /** @description The connection the server of the integration it belongs to is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. */
                 connection_id?: string;
@@ -12537,10 +12537,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         tools: {
-                            /** @description The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the package id normalised, with a suffix hashed from the package id when another integration active in the space normalises alike. */
+                            /** @description The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of the integration expose one) or `{ns}__{tool}` for a typed tool. `{ns}` is the package id normalised (cut at 20 characters, without a trailing `_`), followed by `_` and a hash of the package id while it equals the namespace of another integration active in the space. No two tools of a space share a name, and a name depends on the space's active integrations and the tool alone, never on the caller's connections. */
                             name: string;
                             /**
-                             * @description `api_call`: called through `/api/credential-proxy/proxy` with one of `connections`; `remote`: a typed tool of the integration's MCP server, called through `/api/credential-proxy/tools/call` by its `remote_name`.
+                             * @description `api_call`: called through `/api/credential-proxy/proxy` with one of `connection_ids`; `remote`: a typed tool of the integration's MCP server, called through `/api/credential-proxy/tools/call` by its `remote_name`.
                              * @enum {string}
                              */
                             kind: "api_call" | "remote";
@@ -12549,7 +12549,7 @@ export interface operations {
                             description: string;
                             /** @description `api_call` only: the auth whose connections it reaches. */
                             auth_key?: string;
-                            /** @description `api_call` only: the integration also has connections of another auth, so a call names one of `connections` (`X-Connection-Id`). */
+                            /** @description `api_call` only: the integration also has connections of another auth, so a call names one of `connection_ids` (`X-Connection-Id`). */
                             connection_required?: boolean;
                             /** @description `remote` only: the name the server lists the tool by, which `tools/call` takes. */
                             remote_name?: string;
@@ -12562,34 +12562,40 @@ export interface operations {
                                 [key: string]: unknown;
                             };
                             /**
-                             * @description `remote` only: the server's `tools/list` could not be read, or not within the listing's 20 s, so the tool is a declared name, without description and with an empty object schema.
+                             * @description `remote` only: the server's `tools/list` could not be read, or not within the listing's wait (20 s, 5 s when resolving a `name`), so the tool is a declared name, without description and with an empty object schema.
                              * @enum {boolean}
                              */
                             catalog_unreadable?: true;
-                            /** @description The connections it reaches, as `GET /api/credential-proxy/connections` lists them. */
-                            connections: {
-                                /**
-                                 * Format: uuid
-                                 * @description The `X-Connection-Id` that names this connection.
-                                 */
-                                connection_id: string;
-                                label: string;
-                                /** @description True when the connection is the caller's own, false when another member shared it in the space: listed for a caller holding `credential-proxy:call`, and used when named or designated by an org default. */
-                                owned_by_actor: boolean;
-                                /** @description The manifest auth the connection is on. */
-                                auth_key: string;
-                                scopes_granted: string[];
-                                /** @description The auth's `authorized_uris`: what `X-Target` and every redirect hop are matched against. A literal entry is given as is, an entry templated on a connection variable (`{$variable.<name>}`) rendered for this connection, or omitted when the connection does not render it. An entry templated on a credential field (`{$credential.<field>}`) is given as the manifest declares it, never rendered: the proxy resolves it server-side from the stored credential, whose values this list never carries. To call such a target, write `{{<field>}}` in `X-Target` where the entry has `{$credential.<field>}`: `{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone (the field holds the whole URL), `https://{{host}}/v1/items` for `https://{$credential.host}/**`. */
-                                authorized_uris: string[];
-                                /** @description The auth sets `allow_all_uris`. Ignored on a call that places a `{{credential_field}}`: see `X-Target`. */
-                                allow_all_uris: boolean;
-                                /** @description A call binding it answers `409 needs_reconnection` until it is reconnected. */
-                                needs_reconnection: boolean;
-                                /** @description An enforced org default governs the integration in this space and the caller holds no `credential-proxy:call`: their call without `X-Run-Id` answers `403 call_permission_required`, this connection named or not. */
-                                call_permission_required: boolean;
-                                /** @description `remote` only: the scopes the tool's `tools_policy` entry requires on the connection's auth that it lacks; a call with it answers `409 insufficient_scopes`. */
-                                missing_scopes?: string[];
-                            }[];
+                            /** @description The listing's `connections` the tool reaches, by `connection_id`. */
+                            connection_ids: string[];
+                            /** @description `remote` only, when one of its connections lacks some: per `connection_id`, the scopes the tool's `tools_policy` entry requires on that connection's auth that it lacks; a call with it answers `409 insufficient_scopes`. */
+                            missing_scopes?: {
+                                [key: string]: string[];
+                            };
+                        }[];
+                        /** @description The connections the tools reach, each once. */
+                        connections: {
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            /**
+                             * Format: uuid
+                             * @description The `X-Connection-Id` that names this connection.
+                             */
+                            connection_id: string;
+                            label: string;
+                            /** @description True when the connection is the caller's own, false when another member shared it in the space: listed for a caller holding `credential-proxy:call`, and used when named or designated by an org default. */
+                            owned_by_actor: boolean;
+                            /** @description The manifest auth the connection is on. */
+                            auth_key: string;
+                            scopes_granted: string[];
+                            /** @description The auth's `authorized_uris`: what `X-Target` and every redirect hop are matched against. A literal entry is given as is, an entry templated on a connection variable (`{$variable.<name>}`) rendered for this connection, or omitted when the connection does not render it. An entry templated on a credential field (`{$credential.<field>}`) is given as the manifest declares it, never rendered: the proxy resolves it server-side from the stored credential, whose values this list never carries. To call such a target, write `{{<field>}}` in `X-Target` where the entry has `{$credential.<field>}`: `{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone (the field holds the whole URL), `https://{{host}}/v1/items` for `https://{$credential.host}/**`. */
+                            authorized_uris: string[];
+                            /** @description The auth sets `allow_all_uris`. Ignored on a call that places a `{{credential_field}}`: see `X-Target`. */
+                            allow_all_uris: boolean;
+                            /** @description A call binding it answers `409 needs_reconnection` until it is reconnected. */
+                            needs_reconnection: boolean;
+                            /** @description An enforced org default governs the integration in this space and the caller holds no `credential-proxy:call`: their call without `X-Run-Id` answers `403 call_permission_required`, this connection named or not. */
+                            call_permission_required: boolean;
                         }[];
                         not_ready: {
                             /** @description Integration package id: the `X-Integration-Id` of a call. */
@@ -12625,7 +12631,7 @@ export interface operations {
                                     failures?: number;
                                     max_failures?: number;
                                 };
-                                /** @description `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted. */
+                                /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
                                 mcp_error?: {
                                     code: number;
                                     message: string;
@@ -12722,7 +12728,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`). */
+            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12752,7 +12758,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12761,17 +12767,39 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status` error `http_request_error`). */
             422: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description `upstream_credential_rejected`: the server's HTTP status.
+                         * @enum {integer}
+                         */
+                        upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                        credential?: {
+                            /** @enum {string} */
+                            status: "in_use" | "needs_reconnection";
+                            cause: string;
+                            detail: string;
+                            failures?: number;
+                            max_failures?: number;
+                        };
+                        /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
+                        mcp_error?: {
+                            code: number;
+                            message: string;
+                        };
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `bad_gateway` — the MCP server failed the exchange; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail, failures?, max_failures? }` when the proxy's forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on `/proxy`: `needs_reconnection` — the connection is now flagged and its owner must reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`, its message untrusted text); `upstream_response_too_large` — the tool ran, but its answer exceeds the exchange bound, answered as JSON or as an event stream; the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), `upstream_unreachable` (`destination_unavailable`) and `credential_unusable` (`proxy_configuration_error`). */
+            /** @description `bad_gateway` — the MCP server failed the exchange (`Proxy-Status` error `http_protocol_error`; `received-status` when it asked a credential of an integration declaring none); `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403, `Proxy-Status: appstrate; received-status=<401|403>`; `credential: { status, cause, detail, failures?, max_failures? }` when the proxy's forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on `/proxy`: `needs_reconnection` — the connection is now flagged and its owner must reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a JSON-RPC error other than -32602 (`mcp_error: { code, message }`, its message untrusted text; `http_protocol_error`); `upstream_response_too_large` — the tool ran, but its answer exceeds the exchange bound (at most 2 MiB, lower when the proxy's `max_response_bytes` is), answered as JSON or as an event stream (`http_response_body_size`); the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), `upstream_unreachable` (`destination_unavailable`) and `credential_unusable` (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12794,7 +12822,7 @@ export interface operations {
                             failures?: number;
                             max_failures?: number;
                         };
-                        /** @description `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted. */
+                        /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
                         mcp_error?: {
                             code: number;
                             message: string;

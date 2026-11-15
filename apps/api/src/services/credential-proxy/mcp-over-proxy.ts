@@ -18,9 +18,13 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "../../lib/error-cause.ts";
-import { ApiError, badGateway } from "../../lib/errors.ts";
+import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { proxyProblem, upstreamFailureDetail } from "../../lib/proxy-status.ts";
+import {
+  proxyProblem,
+  upstreamFailureDetail,
+  upstreamProxyStatus,
+} from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { trackAudit } from "../audit.ts";
 import type { ProxyReach } from "../integration-connections.ts";
@@ -29,7 +33,6 @@ import { getCredentialProxyLimits } from "../proxy-limits.ts";
 import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
 import { proxyCall, ProxyCallError } from "./core.ts";
 
-/** Who calls, as the call journal records it. */
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
 
 interface ProxiedMcpOperationInput {
@@ -42,7 +45,6 @@ interface ProxiedMcpOperationInput {
   /** The version the exchange is authorized against; the latest published one when omitted. */
   version?: ResolvedIntegrationVersion;
   caller: ProxyCaller;
-  /** Bounds every exchange. */
   deadline: AbortSignal;
 }
 
@@ -72,17 +74,13 @@ class McpCredentialRejectedError extends Error {
   }
 }
 
-/** Tools read from one server's `tools/list`, whatever its pages hold. */
 export const MAX_LISTED_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
 export const MAX_LISTED_PAGES = 20;
 /** The longest tool name read (MCP's own bound); a longer one is dropped. */
 const MAX_TOOL_NAME_LENGTH = 128;
 
-/**
- * A server's `tools/list`, page by page, up to {@link MAX_LISTED_TOOLS} tools over at most
- * {@link MAX_LISTED_PAGES} pages; `truncated` when the server lists more.
- */
+/** A server's `tools/list`, page by page, within the bounds above. */
 export async function listToolPages(
   client: AppstrateMcpClient,
   signal: AbortSignal,
@@ -116,17 +114,68 @@ interface JournaledExchange {
   durationMs: number;
 }
 
-/** One exchange dispatched by an operation. */
-interface Dispatched {
-  /** The operation's own: its `tools/call`, or the first page of its `tools/list`. */
-  own: boolean;
-  /** Settles once the proxy answered or failed it. */
-  done: Promise<void>;
-  reached?: JournaledExchange;
+interface JournalEntry {
+  reached(connectionId: string, outcome: string): void;
+  ended(): void;
+}
+
+/**
+ * The journal row of one operation: the last exchange it dispatched that reached a connection,
+ * whatever its outcome (a timeout included); none when nothing reached one (a catalog served from
+ * cache, a refusal before dispatch). Registered with the audit drain at its first exchange, so a
+ * shutdown waits for an operation outliving its request; written once every exchange has ended.
+ */
+function operationJournal(input: ProxiedMcpOperationInput) {
+  const entries: { reached?: JournaledExchange; done: Promise<void> }[] = [];
+  let release: (() => void) | undefined;
+  let settled = false;
+  const write = async () => {
+    await Promise.all(entries.map((entry) => entry.done));
+    const row = entries.findLast((entry) => entry.reached)?.reached;
+    if (!row) return;
+    await recordConnectionCall({
+      ...input.caller,
+      ...row,
+      orgId: input.scope.orgId,
+      spaceId: input.scope.spaceId,
+      integrationId: input.integrationId,
+      actor: input.actor,
+      runId: null,
+    });
+  };
+  return {
+    /** `null` once settled: an exchange then (the session's close) is none of the operation's. */
+    dispatch(method: string, target: string): JournalEntry | null {
+      if (settled) return null;
+      if (!release) {
+        const released = new Promise<void>((resolve) => (release = resolve));
+        void trackAudit(released.then(write));
+      }
+      const started = Date.now();
+      let end!: () => void;
+      const entry: (typeof entries)[number] = { done: new Promise((resolve) => (end = resolve)) };
+      entries.push(entry);
+      return {
+        reached: (connectionId, outcome) => {
+          entry.reached = {
+            connectionId,
+            method,
+            target,
+            outcome,
+            durationMs: Date.now() - started,
+          };
+        },
+        ended: end,
+      };
+    },
+    settle(): void {
+      settled = true;
+      release?.();
+    },
+  };
 }
 
 export interface ProxiedMcpOperation {
-  /** For `createMcpHttpClient`: each exchange through `proxyCall`. */
   fetch: typeof fetch;
   /** The deadline, or the operation failing: what every request of the client is bound by. */
   signal: AbortSignal;
@@ -136,71 +185,28 @@ export interface ProxiedMcpOperation {
    * erroring) and wait for its timeout; the operation answers at once.
    */
   guard<T>(work: Promise<T>): Promise<T>;
-  /**
-   * Schedules the operation's journal row, written once every exchange it dispatched has ended
-   * (`trackAudit`, which shutdown drains); returns at once, so no answer waits on an exchange
-   * still in flight.
-   */
   settle(): void;
 }
 
 /**
- * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`.
- * The SDK echoes the server's own values (`Mcp-Session-Id`, `nextCursor`), so headers go
- * literally: no placeholder they carry reaches a credential.
- *
- * The call journal keeps one row per operation that reached upstream: its own exchange whatever
- * its outcome (a timeout included) once it reached the connection, else the last exchange that
- * did (a handshake refused, a transport failure after dispatch). An operation that reached
- * nothing (a catalog served from cache, a refusal before dispatch) writes none.
+ * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`,
+ * journaled as one row ({@link operationJournal}). The SDK echoes the server's own values
+ * (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no placeholder they carry reaches a
+ * credential.
  */
 export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcpOperation {
-  const { scope } = input;
-  const ended = new AbortController();
-  const signal = AbortSignal.any([input.deadline, ended.signal]);
-  let failure: Error | undefined;
-  const fail = (err: Error) => {
-    if (failure) return;
-    failure = err;
-    ended.abort(err);
-  };
-  const failed = new Promise<never>((_, reject) => {
-    ended.signal.addEventListener("abort", () => reject(failure), { once: true });
-  });
-  failed.catch(() => {});
-
-  const dispatched: Dispatched[] = [];
-  let lastReached: JournaledExchange | undefined;
-  let settled = false;
+  const failed = new AbortController();
+  const signal = AbortSignal.any([input.deadline, failed.signal]);
+  const fail = (err: Error) => failed.abort(err);
+  const journal = operationJournal(input);
 
   const fetchImpl = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // The standalone GET stream carries server-initiated messages, which a bounded exchange never reads.
     if (init?.method === "GET") return new Response(null, { status: 405 });
-    // Nothing more leaves once the operation is over.
     signal.throwIfAborted();
     const method = init?.method ?? "POST";
     const href = target instanceof Request ? target.url : String(target);
-    const body = typeof init?.body === "string" ? init.body : null;
-    const started = Date.now();
-    let markDone!: () => void;
-    const exchange: Dispatched = {
-      own: isOperationExchange(body) && !dispatched.some((d) => d.own),
-      done: new Promise<void>((resolve) => (markDone = resolve)),
-    };
-    // An exchange after `settle` (the session's close) is none of the operation's.
-    const journaled = !settled;
-    if (journaled) dispatched.push(exchange);
-    const reached = (connectionId: string, outcome: string) => {
-      if (!journaled) return;
-      exchange.reached = {
-        connectionId,
-        method,
-        target: href,
-        outcome,
-        durationMs: Date.now() - started,
-      };
-      lastReached = exchange.reached;
-    };
+    const entry = journal.dispatch(method, href);
     const maxResponseBytes = Math.min(
       MAX_EXCHANGE_BYTES,
       getCredentialProxyLimits().max_response_bytes,
@@ -208,8 +214,8 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
     let result;
     try {
       result = await proxyCall({
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
+        orgId: input.scope.orgId,
+        spaceId: input.scope.spaceId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         connectionNaming: "connection_id",
@@ -219,18 +225,20 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
         method,
         target: href,
         headers: Object.fromEntries(new Headers(init?.headers)),
-        body,
+        body: typeof init?.body === "string" ? init.body : null,
         literalHeaders: true,
         maxResponseBytes,
         signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
       });
     } catch (err) {
-      if (err instanceof ProxyCallError && err.connectionId) reached(err.connectionId, err.code);
+      if (err instanceof ProxyCallError && err.connectionId) {
+        entry?.reached(err.connectionId, err.code);
+      }
       throw err;
     } finally {
-      markDone();
+      entry?.ended();
     }
-    reached(result.connectionId, String(result.status));
+    entry?.reached(result.connectionId, String(result.status));
     if (result.status === 401 || result.status === 403) {
       fail(new McpCredentialRejectedError(result.status, result.credential));
     }
@@ -254,65 +262,59 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): ProxiedMcp
     fetch: fetchImpl,
     signal,
     guard: async (work) => {
-      work.catch(() => {});
       try {
-        return await Promise.race([work, failed]);
+        return await untilAborted(work, failed.signal);
       } catch (err) {
-        throw failure ?? err;
+        throw failed.signal.aborted ? failed.signal.reason : err;
       }
     },
-    settle: () => {
-      if (settled) return;
-      settled = true;
-      const exchanges = dispatched;
-      if (exchanges.length === 0) return;
-      void trackAudit(
-        (async () => {
-          await Promise.all(exchanges.map((d) => d.done));
-          const row = exchanges.find((d) => d.own)?.reached ?? lastReached;
-          if (!row) return;
-          await recordConnectionCall({
-            ...input.caller,
-            ...row,
-            orgId: scope.orgId,
-            spaceId: scope.spaceId,
-            integrationId: input.integrationId,
-            actor: input.actor,
-            runId: null,
-          });
-        })(),
-      );
-    },
+    settle: journal.settle,
   };
 }
 
-/** Whether a JSON-RPC body is a `tools/call`, or a `tools/list` asking for no cursor. */
-function isOperationExchange(body: string | null): boolean {
-  if (body === null) return false;
-  let message: unknown;
-  try {
-    message = JSON.parse(body);
-  } catch {
-    return false;
-  }
-  if (typeof message !== "object" || message === null) return false;
-  const { method, params } = message as { method?: unknown; params?: { cursor?: unknown } };
-  return method === "tools/call" || (method === "tools/list" && params?.cursor === undefined);
+/** `work`'s outcome, or `signal`'s reason once it aborts first; `work` then settles unobserved. */
+export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  work.catch(() => {});
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
-/** Characters kept of a server's JSON-RPC error message, untrusted text. */
-const MAX_RPC_MESSAGE_CHARS = 512;
+/** Characters kept of any text a server wrote, as a model reads it and as it is logged. */
+const MAX_UNTRUSTED_CHARS = 512;
+
+export function untrustedText(text: string): string {
+  return text.slice(0, MAX_UNTRUSTED_CHARS);
+}
+
+/** A log record's fields that may carry server-authored text, each string bounded. */
+export function untrustedFields(
+  data: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!data) return {};
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [
+      key,
+      typeof value === "string" ? untrustedText(value) : value,
+    ]),
+  );
+}
+
+export function isCredentialRejection(err: unknown): boolean {
+  const status = err instanceof McpCredentialRejectedError ? err.status : httpStatusOf(err);
+  return status === 401 || status === 403;
+}
+
+/** JSON-RPC "Invalid params": the server refused the call's arguments or tool name. */
+const JSON_RPC_INVALID_PARAMS = -32602;
 
 /**
  * The error a failed MCP operation answers: the proxy's own refusal as it is, a server fault as a
- * 502 naming the server's origin only (its message is untrusted text).
- *
- *   - `upstream_response_too_large`: an answer over the exchange bound;
- *   - `upstream_credential_rejected`: the server answered 401 or 403 to the connection's
- *     credential, with the proxy's `credential` verdict when its forced refresh judged it. For an
- *     integration declaring no auth, that is the server asking for one: `bad_gateway`;
- *   - `upstream_timeout` (504): no answer before the operation's deadline;
- *   - `upstream_mcp_error`: a JSON-RPC error the server answered, its `code` and bounded message.
+ * problem naming the server's origin only, with its `Proxy-Status`. A 401 or 403 of a server whose
+ * integration declares no auth is the server asking for one: `bad_gateway`.
  */
 export function mcpServerFailure(
   err: unknown,
@@ -332,8 +334,9 @@ export function mcpServerFailure(
   logger.warn("credential-proxy: remote MCP exchange failed", {
     integrationId: input.integrationId,
     origin,
-    error: getErrorMessage(err),
+    error: untrustedText(getErrorMessage(err)),
   });
+  const protocolError = upstreamProxyStatus({ error: "http_protocol_error" });
   const tooLarge = findCause(err, (e) => e instanceof McpExchangeTooLargeError);
   if (tooLarge instanceof McpExchangeTooLargeError) {
     return new ApiError({
@@ -341,13 +344,15 @@ export function mcpServerFailure(
       code: "upstream_response_too_large",
       title: "Upstream Response Too Large",
       detail: `${server} answered with more than ${tooLarge.limit} bytes: ${input.tooLarge ?? "the answer is too large to read"}.`,
+      headers: upstreamProxyStatus({ error: "http_response_body_size" }),
     });
   }
   const status = err instanceof McpCredentialRejectedError ? err.status : httpStatusOf(err);
   if (status === 401 || status === 403) {
     if (input.unauthenticated) {
-      return badGateway(
+      return gatewayFault(
         `${server} asks for a credential (HTTP ${status}), but the integration declares no authentication.`,
+        upstreamProxyStatus({ receivedStatus: status }),
       );
     }
     const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
@@ -364,6 +369,7 @@ export function mcpServerFailure(
         upstream_status: status,
         ...(credential ? { credential: credentialMember(credential) } : {}),
       },
+      headers: upstreamProxyStatus({ receivedStatus: status }),
     });
   }
   if (isRequestTimeout(err) || findCause(err, (e) => e.name === "TimeoutError")) {
@@ -371,15 +377,29 @@ export function mcpServerFailure(
   }
   const rpc = jsonRpcErrorOf(err);
   if (rpc) {
-    return new ApiError({
-      status: 502,
-      code: "upstream_mcp_error",
-      title: "Upstream MCP Error",
-      detail: `${server} answered JSON-RPC error ${rpc.code}; \`mcp_error.message\` is its own text.`,
-      extensions: {
-        mcp_error: { code: rpc.code, message: rpc.message.slice(0, MAX_RPC_MESSAGE_CHARS) },
-      },
-    });
+    const mcpError = { code: rpc.code, message: untrustedText(rpc.message) };
+    const detail = `${server} answered JSON-RPC error ${rpc.code}; \`mcp_error.message\` is its own text.`;
+    return rpc.code === JSON_RPC_INVALID_PARAMS
+      ? new ApiError({
+          status: 422,
+          code: "upstream_invalid_params",
+          title: "Upstream Invalid Params",
+          detail: `${detail} The server refused the arguments or the tool name.`,
+          extensions: { mcp_error: mcpError },
+          headers: upstreamProxyStatus({ error: "http_request_error" }),
+        })
+      : new ApiError({
+          status: 502,
+          code: "upstream_mcp_error",
+          title: "Upstream MCP Error",
+          detail,
+          extensions: { mcp_error: mcpError },
+          headers: protocolError,
+        });
   }
-  return badGateway(`${server} ${input.failed ?? "did not answer"}.`);
+  return gatewayFault(`${server} ${input.failed ?? "did not answer"}.`, protocolError);
+}
+
+function gatewayFault(detail: string, headers: Record<string, string>): ApiError {
+  return new ApiError({ status: 502, code: "bad_gateway", title: "Bad Gateway", detail, headers });
 }

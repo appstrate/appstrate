@@ -48,6 +48,7 @@ type RefusalCode =
   | RunAndWaitArgumentCode
   | "unknown_operation"
   | "unknown_tool"
+  | "ambiguous_tool"
   | "unknown_space"
   | "space_mismatch"
   | "not_granted"

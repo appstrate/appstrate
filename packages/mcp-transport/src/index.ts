@@ -464,7 +464,6 @@ export {
   isHiddenCodePoint,
   sanitiseTextField,
   sanitiseToolDescriptor,
-  stripForgedRuntimeEvents,
   stripReservedResultMeta,
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,

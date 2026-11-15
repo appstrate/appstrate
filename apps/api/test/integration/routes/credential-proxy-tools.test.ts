@@ -112,6 +112,7 @@ describe("GET /api/credential-proxy/tools", () => {
       expect(status).toBe(200);
       expect(body).toEqual({
         tools: [],
+        connections: [],
         not_ready: [
           {
             integration_package_id: ID,
@@ -214,14 +215,15 @@ describe("GET /api/credential-proxy/tools", () => {
       ]);
     });
 
-    it("leaves out an integration whose call asks for a choice: its connections are listed on the tool", async () => {
+    it("leaves out an integration whose call asks for a choice: the tool names its connections", async () => {
       const first = await seedProxyConnection(ctx, ID, "oauth", { access_token: "a" }, "a");
       const second = await seedProxyConnection(ctx, ID, "oauth", { access_token: "b" }, "b");
       const { body } = await list();
       expect(body.not_ready).toEqual([]);
-      expect(body.tools.map((tool) => tool.connections.map((c) => c.connection_id).sort())).toEqual(
-        [[first, second].sort()],
-      );
+      expect(body.tools.map((tool) => [...tool.connection_ids].sort())).toEqual([
+        [first, second].sort(),
+      ]);
+      expect(body.connections.map((c) => c.connection_id).sort()).toEqual([first, second].sort());
     });
 
     it("reconnects the caller's own connection that needs it, when asked for", async () => {
@@ -251,9 +253,10 @@ describe("GET /api/credential-proxy/tools", () => {
           description: "Acme Mail.",
           auth_key: "oauth",
           connection_required: false,
-          connections: [expect.objectContaining({ connection_id: connectionId })],
+          connection_ids: [connectionId],
         }),
       ]);
+      expect(body.connections).toEqual([expect.objectContaining({ connection_id: connectionId })]);
     });
 
     it("omits an integration switched off in the space", async () => {
@@ -300,7 +303,7 @@ describe("GET /api/credential-proxy/tools", () => {
             tool.name,
             tool.auth_key,
             tool.connection_required,
-            tool.connections.map((c) => c.connection_id).sort(),
+            [...tool.connection_ids].sort(),
           ])
           .sort(),
       ).toEqual([
@@ -353,18 +356,19 @@ describe("GET /api/credential-proxy/tools", () => {
       expect((await list()).body.tools.map((tool) => tool.name)).toContain(name);
     });
 
-    it("resolves a tool by its full name, a namespace ending in `_` included", async () => {
-      // `acme_crm_suite_tool_` (cut at 20 characters) and `acme_crm_suite_tool`: the second
-      // name's namespace and separator start the first's.
+    it("resolves a tool by its full name, a namespace the length cut ends in `_` included", async () => {
+      // `acme_crm_suite_tool_` (cut at 20 characters) loses its trailing `_`: it then equals
+      // `acme_crm_suite_tool`, and both take their id's hash.
       const ids = ["@acme/crm-suite-tool-mail", "@acme/crm-suite-tool"];
       for (const id of ids) {
         await seedProxyIntegration(ctx, keyManifest(id));
         await seedProxyConnection(ctx, id, "api", { api_key: "a" });
       }
+      const hashed = (id: string) => `acme_crm_suite_tool_${fnv1a64Hex(id).slice(0, 6)}__api_call`;
       const all = (await list()).body.tools;
       expect(all.map((tool) => [tool.integration_package_id, tool.name])).toEqual([
-        ["@acme/crm-suite-tool", "acme_crm_suite_tool__api_call"],
-        ["@acme/crm-suite-tool-mail", "acme_crm_suite_tool___api_call"],
+        ["@acme/crm-suite-tool", hashed("@acme/crm-suite-tool")],
+        ["@acme/crm-suite-tool-mail", hashed("@acme/crm-suite-tool-mail")],
       ]);
       for (const tool of all) {
         const { body } = await list({ name: tool.name });

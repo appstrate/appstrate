@@ -5,13 +5,11 @@
  * integration's `api_call` tools (`{ns}__api_call`, `{ns}__api_call__{auth}` when several of its
  * auths expose one), reached through `/api/credential-proxy/proxy`, and the typed tools of a
  * remote MCP server (`{ns}__{tool}`), read by `listRemoteTools` and reached through
- * `callRemoteTool`. Each tool carries the connections it reaches, as the proxy's listing gives
- * them, a typed tool's with the scopes its `tools_policy` entry requires that the connection
- * lacks. The integrations active here that the caller has no usable connection of come apart.
+ * `callRemoteTool`. The connections the tools reach are listed once; each tool names its own
+ * among them, a typed tool with the scopes its `tools_policy` entry requires that one lacks.
  *
- * A namespace is the package id normalised (`normaliseMcpToolNamespace`); the integrations
- * active in the space whose ids normalise alike each take a suffix hashed from their own id, so a
- * tool's name depends on the space's integrations, never on which connections the caller holds.
+ * Tool names are unique in a space ({@link integrationNamespaces}): a name resolves to one tool of
+ * one integration, whatever connections the caller holds.
  */
 
 import {
@@ -27,11 +25,9 @@ import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
+import type { ProxyConnectionStatus } from "../integration-connections.ts";
 import {
-  listIntegrationIdsActiveInSpace,
-  type ProxyConnectionStatus,
-} from "../integration-connections.ts";
-import {
+  activeIntegrationIds,
   connectionsOutsideRun,
   integrationsOutsideRun,
   publishedManifests,
@@ -39,64 +35,55 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
+  listingDeadline,
   listRemoteTools,
   offeredRemoteToolNames,
   type RemoteToolCatalog,
   type RemoteToolsCaller,
 } from "./remote-tools.ts";
 
-/** One connection a tool reaches. */
-export type ToolConnection = Omit<ConnectionOutsideRun, "integration_package_id"> & {
-  /** Typed tool only: the scopes its `tools_policy` entry requires on this auth that it lacks. */
-  missing_scopes?: string[];
-};
-
 interface ToolBase {
-  /** The name the tool is called by. */
   name: string;
   integration_package_id: string;
   description: string;
-  connections: ToolConnection[];
+  /** The listing's `connections` it reaches. */
+  connection_ids: string[];
 }
 
-/** A tool reached through `/api/credential-proxy/proxy`. */
 interface ApiCallTool extends ToolBase {
   kind: "api_call";
-  /** The auth whose connections it reaches. */
   auth_key: string;
-  /** The integration also has connections of another auth: a call names one of `connections`. */
+  /** The integration also has connections of another auth: a call names one of them. */
   connection_required: boolean;
 }
 
-/** A typed tool of a remote MCP server, reached through `/api/credential-proxy/tools/call`. */
 interface RemoteTool extends ToolBase {
   kind: "remote";
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
   input_schema: Record<string, unknown>;
-  /** The server's declared output schema, when it declares one. */
   output_schema?: Record<string, unknown>;
   /** The server could not be listed: the tool is declared, without description or schema. */
   catalog_unreadable?: true;
+  /** Per connection lacking some, the scopes its `tools_policy` entry requires. */
+  missing_scopes?: Record<string, string[]>;
 }
 
 export type IntegrationTool = ApiCallTool | RemoteTool;
 
-/** A remote integration whose server the proxy refused to list. */
 interface UnlistedIntegration {
   integration_package_id: string;
   refusal: ProblemDetail;
 }
 
-/** A remote integration whose server lists more tools than are read. */
 interface TruncatedCatalog {
   integration_package_id: string;
-  /** The tools read from its catalog: the first ones the server lists. */
   listed_tools: number;
 }
 
 export interface IntegrationToolListing {
   tools: IntegrationTool[];
+  connections: ConnectionOutsideRun[];
   /** The integrations active here that the caller has no usable connection of. */
   not_ready: IntegrationOutsideRun[];
   unlisted: UnlistedIntegration[];
@@ -104,14 +91,13 @@ export interface IntegrationToolListing {
 }
 
 interface IntegrationToolQuery {
-  /** Lists this integration alone, which must be active in the space. */
   integrationId?: string;
   /**
-   * Resolves the tool of this name alone: an `api_call` tool reads no server, and only the remote
-   * integrations whose namespace starts the name are listed. `not_ready` is then left empty.
+   * Resolves the tool of this name alone, under the shorter resolution deadline: an `api_call`
+   * tool reads no server, and only the remote integration whose namespace starts the name is
+   * listed. `not_ready` is then left empty.
    */
   name?: string;
-  /** The connection a remote integration it belongs to is listed with. */
   connectionId?: string;
 }
 
@@ -128,61 +114,91 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "unusable",
 ]);
 
-/** Remote servers listed at once. */
 const LIST_CONCURRENCY = 3;
-/**
- * How long a listing waits for remote servers, all of them, well below an MCP client's 60 s
- * request timeout: each cold server costs up to its own listing timeout, and a failure is not
- * cached. A catalog not read by then is listed as one whose server could not be listed.
- */
-const LISTING_DEADLINE_MS = 20_000;
-/** Hex digits of the package id's hash a colliding namespace takes. */
+/** Hex digits of the package id's hash a clashing namespace takes first; 16 at most. */
 const NAMESPACE_HASH_LENGTH = 6;
+const MAX_NAMESPACE_HASH_LENGTH = 16;
 
-/** The namespace of each integration: its normalised id, hashed apart when another shares it. */
-function namespacesOf(ids: readonly string[]): Map<string, string> {
-  const bases = new Map(ids.map((id) => [id, normaliseMcpToolNamespace(id)]));
-  const holders = new Map<string, number>();
-  for (const base of bases.values()) holders.set(base, (holders.get(base) ?? 0) + 1);
-  return new Map(
+/**
+ * The namespace of each integration active in a space: its normalised id, without the trailing
+ * `_` the length cut may leave, followed by `_` and a hash of its id while it equals another's.
+ * No namespace holds `__` or ends with `_`, so distinct namespaces never yield the same
+ * `{ns}__{body}` name, and the result depends on the set of ids alone.
+ */
+export function integrationNamespaces(ids: readonly string[]): Map<string, string> {
+  const bases = new Map(
     ids.map((id) => {
-      const base = bases.get(id)!;
-      return [
-        id,
-        holders.get(base) === 1
-          ? base
-          : `${base}_${fnv1a64Hex(id).slice(0, NAMESPACE_HASH_LENGTH)}`,
-      ];
+      let base = normaliseMcpToolNamespace(id);
+      while (base.endsWith("_")) base = base.slice(0, -1);
+      return [id, base];
     }),
   );
+  const hashLength = new Map<string, number>(
+    ids.map((id) => [id, bases.get(id) ? 0 : NAMESPACE_HASH_LENGTH]),
+  );
+  const namespaceOf = (id: string) => {
+    const base = bases.get(id)!;
+    const length = hashLength.get(id)!;
+    if (length === 0) return base;
+    const hash = fnv1a64Hex(id).slice(0, length);
+    return base ? `${base}_${hash}` : hash;
+  };
+  for (;;) {
+    const holders = new Map<string, string[]>();
+    for (const id of ids) {
+      const namespace = namespaceOf(id);
+      holders.set(namespace, [...(holders.get(namespace) ?? []), id]);
+    }
+    const clashing = [...holders.values()].filter((group) => group.length > 1).flat();
+    const growable = clashing.filter((id) => hashLength.get(id)! < MAX_NAMESPACE_HASH_LENGTH);
+    if (growable.length === 0) break;
+    for (const id of growable) {
+      const length = hashLength.get(id)!;
+      hashLength.set(id, length === 0 ? NAMESPACE_HASH_LENGTH : length + 2);
+    }
+  }
+  return new Map(ids.map((id) => [id, namespaceOf(id)]));
 }
 
-/** The `api_call` tools of one integration whose auth has a connection. */
-function apiCallTools(
-  integrationId: string,
-  namespace: string,
-  manifest: IntegrationManifest,
-  connections: readonly ToolConnection[],
-): ApiCallTool[] {
+/** Every `api_call` tool name of the catalog, connected or not: a typed tool never takes one. */
+function apiCallToolNames(namespace: string, manifest: IntegrationManifest): Set<string> {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
   );
+  return new Set(
+    getApiCallConfigs(manifest)
+      .filter((config) => catalog.has(config.toolName))
+      .map((config) => `${namespace}__${config.toolName}`),
+  );
+}
+
+interface ListedIntegration {
+  id: string;
+  namespace: string;
+  manifest: IntegrationManifest;
+  connections: readonly ConnectionOutsideRun[];
+  apiCallNames: ReadonlySet<string>;
+}
+
+function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
+  const { id, namespace, manifest, connections } = entry;
   const configs = getApiCallConfigs(manifest);
   const about = `${manifest.display_name ?? manifest.name}.${
     typeof manifest.description === "string" ? ` ${manifest.description}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
+    const name = `${namespace}__${config.toolName}`;
     const reached = connections.filter((c) => c.auth_key === config.authKey);
-    if (!catalog.has(config.toolName) || reached.length === 0) return [];
+    if (!entry.apiCallNames.has(name) || reached.length === 0) return [];
     return [
       {
         kind: "api_call",
-        name: `${namespace}__${config.toolName}`,
-        integration_package_id: integrationId,
+        name,
+        integration_package_id: id,
         description: configs.length > 1 ? `${about} Uses its \`${config.authKey}\` auth.` : about,
         auth_key: config.authKey,
         connection_required: reached.length < connections.length,
-        connections: reached,
+        connection_ids: reached.map((c) => c.connection_id),
       },
     ];
   });
@@ -190,17 +206,16 @@ function apiCallTools(
 
 /**
  * The server's catalog, listed with the connection named when it is one of `connections`, else
- * with the proxy's selection; when that selection asks for a choice, with the first of
- * `connections` the proxy accepts.
+ * with the proxy's selection. When that selection asks for a choice, the first of the caller's
+ * own connections the proxy accepts serves: a connection another member shared serves only when
+ * named or designated by an organization default, as for a call.
  */
 async function readRemoteCatalog(
   caller: RemoteToolsCaller,
-  entry: { id: string; manifest: IntegrationManifest; connections: readonly ToolConnection[] },
+  entry: ListedIntegration,
   connectionId: string | undefined,
-  waitUntil: AbortSignal,
 ): Promise<RemoteToolCatalog> {
-  const { connections } = entry;
-  const named = connections.find(
+  const named = entry.connections.find(
     (c) => c.connection_id.toLowerCase() === connectionId?.toLowerCase(),
   );
   const list = (id: string | undefined) =>
@@ -208,14 +223,13 @@ async function readRemoteCatalog(
       ...caller,
       integrationId: entry.id,
       manifest: entry.manifest,
-      waitUntil,
       ...(id ? { connectionId: id } : {}),
     });
   try {
     return await list(named?.connection_id);
   } catch (err) {
     if (named || !(err instanceof ApiError) || err.code !== "must_choose_connection") throw err;
-    for (const connection of connections) {
+    for (const connection of entry.connections.filter((c) => c.owned_by_actor)) {
       try {
         return await list(connection.connection_id);
       } catch {
@@ -226,7 +240,6 @@ async function readRemoteCatalog(
   }
 }
 
-/** What one remote integration contributes to a listing. */
 type RemoteListing =
   { tools: RemoteTool[]; truncatedAt: number | null } | { unlisted: UnlistedIntegration };
 
@@ -234,43 +247,35 @@ type RemoteListing =
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
  * namespace when it allows undeclared tools, else one of its declared tools' names.
  */
-function mayNameRemoteTool(
-  manifest: IntegrationManifest,
-  namespace: string,
-  name: string,
-): boolean {
-  if (!name.startsWith(`${namespace}__`)) return false;
-  if (allowsUndeclaredTools(manifest)) return true;
-  return [...offeredRemoteToolNames(manifest, undefined)].some((declared) => {
-    const plain = allocateMcpToolName(namespace, declared, () => false);
-    return name === plain || name === allocateMcpToolName(namespace, declared, (n) => n === plain);
+function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
+  if (!name.startsWith(`${entry.namespace}__`)) return false;
+  if (allowsUndeclaredTools(entry.manifest)) return true;
+  return [...offeredRemoteToolNames(entry.manifest, undefined)].some((declared) => {
+    const taken = new Set(entry.apiCallNames);
+    const plain = allocateMcpToolName(entry.namespace, declared, (n) => taken.has(n));
+    taken.add(plain);
+    return (
+      name === plain || name === allocateMcpToolName(entry.namespace, declared, (n) => taken.has(n))
+    );
   });
 }
 
 /**
- * The typed tools a remote integration's server offers, or the proxy's refusal to list it. With
- * `name`, a refusal is kept only when that name may be one of the integration's tools, and an
- * undeclared tool of an integration allowing them is still named when its server cannot be read.
+ * The typed tools of a remote integration, or the proxy's refusal to list it, kept with `name`
+ * only when that name may be one of its tools.
  */
 async function remoteTools(
   caller: RemoteToolsCaller,
-  entry: {
-    id: string;
-    namespace: string;
-    manifest: IntegrationManifest;
-    connections: readonly ToolConnection[];
-  },
-  taken: Set<string>,
+  entry: ListedIntegration,
   query: Pick<IntegrationToolQuery, "name" | "connectionId">,
-  waitUntil: AbortSignal,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(caller, entry, query.connectionId, waitUntil);
+    catalog = await readRemoteCatalog(caller, entry, query.connectionId);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
-    if (query.name !== undefined && !mayNameRemoteTool(manifest, namespace, query.name)) {
+    if (query.name !== undefined && !mayNameRemoteTool(entry, query.name)) {
       return { tools: [], truncatedAt: null };
     }
     return {
@@ -285,26 +290,33 @@ async function remoteTools(
     name: string,
     upstream: RemoteToolCatalog["tools"][number],
     unreadable: boolean,
-  ): RemoteTool => ({
-    kind: "remote",
-    name,
-    integration_package_id: integrationId,
-    description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
-    remote_name: upstream.name,
-    input_schema: upstream.input_schema,
-    ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
-    ...(unreadable ? { catalog_unreadable: true as const } : {}),
-    connections: connections.map((connection) => ({
-      ...connection,
-      missing_scopes: missingScopesForConnection({
-        manifest,
-        authKey: connection.auth_key,
-        granted: connection.scopes_granted,
-        agentTools: [upstream.name],
-        agentScopes: [],
+  ): RemoteTool => {
+    const missing = Object.fromEntries(
+      connections.flatMap((connection) => {
+        const scopes = missingScopesForConnection({
+          manifest,
+          authKey: connection.auth_key,
+          granted: connection.scopes_granted,
+          agentTools: [upstream.name],
+          agentScopes: [],
+        });
+        return scopes.length > 0 ? [[connection.connection_id, scopes]] : [];
       }),
-    })),
-  });
+    );
+    return {
+      kind: "remote",
+      name,
+      integration_package_id: integrationId,
+      description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
+      remote_name: upstream.name,
+      input_schema: upstream.input_schema,
+      ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
+      ...(unreadable ? { catalog_unreadable: true as const } : {}),
+      connection_ids: connections.map((c) => c.connection_id),
+      ...(Object.keys(missing).length > 0 ? { missing_scopes: missing } : {}),
+    };
+  };
+  const taken = new Set(entry.apiCallNames);
   const tools = catalog.tools.flatMap((upstream): RemoteTool[] => {
     let name: string;
     try {
@@ -314,7 +326,7 @@ async function remoteTools(
       logger.warn("credential-proxy: MCP tool name collides after re-hashing, tool dropped", {
         integrationId,
         namespace,
-        originalName: upstream.name,
+        originalName: upstream.name.slice(0, 128),
       });
       return [];
     }
@@ -327,7 +339,7 @@ async function remoteTools(
     !catalog.listed &&
     allowsUndeclaredTools(manifest) &&
     named.startsWith(`${namespace}__`) &&
-    !tools.some((tool) => tool.name === named)
+    !taken.has(named)
   ) {
     // Its server unread, an undeclared tool is called by the name it was given.
     const remoteName = named.slice(namespace.length + 2);
@@ -338,20 +350,16 @@ async function remoteTools(
 
 /**
  * Every tool the caller may call outside a run in the space, sorted by integration, `api_call`
- * tools first within one; the integrations active here without a usable connection, under the
- * connect-offer policy of the caller (`connectOffers`); and the remote integrations whose server
- * the proxy refused to list, with that refusal. Read under the access rule of
- * `/api/credential-proxy/proxy` without a run (`reach`), every integration's activation checked
- * before any connection is selected. Remote servers are waited for until `waitUntil`
- * ({@link listingDeadline}).
+ * tools first, with the connections they reach, the integrations without a usable connection and
+ * the remote ones the proxy refused to list. Read under `reach`, activation checked before any
+ * connection is selected; servers are waited for until {@link listingDeadline}.
  */
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,
   query: IntegrationToolQuery,
-  waitUntil: AbortSignal,
 ): Promise<IntegrationToolListing> {
   const { scope, actor, reach, connectOffers } = caller;
-  const activeIds = await listIntegrationIdsActiveInSpace(scope);
+  const activeIds = await activeIntegrationIds(scope);
   if (query.integrationId !== undefined && !activeIds.includes(query.integrationId)) {
     throw notFound(`Integration '${query.integrationId}' is not active in this space`);
   }
@@ -366,30 +374,42 @@ export async function listIntegrationTools(
       : [],
   ]);
 
-  const byIntegration = new Map<string, ToolConnection[]>();
-  for (const { integration_package_id: id, ...connection } of reachable) {
+  const byIntegration = new Map<string, ConnectionOutsideRun[]>();
+  for (const connection of reachable) {
+    const id = connection.integration_package_id;
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);
   }
-  // Every integration active in the space takes its namespace, connected by the caller or not.
-  const namespaces = namespacesOf(activeIds);
-  const integrations = [...byIntegration].map(([id, connections]) => ({
-    id,
-    namespace: namespaces.get(id)!,
-    manifest: manifests.get(id)!,
-    connections,
-  }));
+  const namespaces = integrationNamespaces(activeIds);
+  const integrations = [...byIntegration]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, connections]): ListedIntegration => {
+      const namespace = namespaces.get(id)!;
+      const manifest = manifests.get(id)!;
+      return {
+        id,
+        namespace,
+        manifest,
+        connections,
+        apiCallNames: apiCallToolNames(namespace, manifest),
+      };
+    });
 
-  const httpTools = new Map(
-    integrations.map((entry) => [
-      entry.id,
-      apiCallTools(entry.id, entry.namespace, entry.manifest, entry.connections),
-    ]),
-  );
+  const httpTools = new Map(integrations.map((entry) => [entry.id, apiCallTools(entry)]));
   const named = (tools: IntegrationTool[]) =>
     query.name === undefined ? tools : tools.filter((tool) => tool.name === query.name);
+  const connectionsOf = (tools: IntegrationTool[]) => {
+    const ids = new Set(tools.map((tool) => tool.integration_package_id));
+    return reachable.filter((c) => ids.has(c.integration_package_id));
+  };
   const httpMatch = named([...httpTools.values()].flat());
   if (query.name !== undefined && httpMatch.length > 0) {
-    return { tools: httpMatch, not_ready: [], unlisted: [], truncated_catalogs: [] };
+    return {
+      tools: httpMatch,
+      connections: connectionsOf(httpMatch),
+      not_ready: [],
+      unlisted: [],
+      truncated_catalogs: [],
+    };
   }
 
   const remote = integrations.filter(
@@ -397,11 +417,16 @@ export async function listIntegrationTools(
       entry.manifest.source?.kind === "remote" &&
       (query.name === undefined || query.name.startsWith(`${entry.namespace}__`)),
   );
+  const listing = {
+    ...caller,
+    signal: AbortSignal.any([caller.signal, listingDeadline(query.name !== undefined)]),
+  };
   const listed = new Map(
-    await mapWithConcurrency(remote, LIST_CONCURRENCY, async (entry) => {
-      const taken = new Set(httpTools.get(entry.id)!.map((tool) => tool.name));
-      return [entry.id, await remoteTools(caller, entry, taken, query, waitUntil)] as const;
-    }),
+    await mapWithConcurrency(
+      remote,
+      LIST_CONCURRENCY,
+      async (entry) => [entry.id, await remoteTools(listing, entry, query)] as const,
+    ),
   );
 
   const tools: IntegrationTool[] = [];
@@ -420,15 +445,12 @@ export async function listIntegrationTools(
       truncatedCatalogs.push({ integration_package_id: id, listed_tools: result.truncatedAt });
     }
   }
+  const shown = named(tools);
   return {
-    tools: named(tools),
+    tools: shown,
+    connections: connectionsOf(shown),
     not_ready: notReady.filter((entry) => NOT_READY_STATUSES.has(entry.proxy_connection.status)),
     unlisted,
     truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
   };
-}
-
-/** A listing's wait for its remote servers, from now: {@link LISTING_DEADLINE_MS}. */
-export function listingDeadline(): AbortSignal {
-  return AbortSignal.timeout(LISTING_DEADLINE_MS);
 }

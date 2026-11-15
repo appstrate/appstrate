@@ -50,7 +50,6 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { activePackagesFilter } from "./space-packages.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -834,17 +833,6 @@ export async function listActiveIntegrationIds(
     if (activation.active) active.add(id);
   }
   return active;
-}
-
-/** The integrations of the organization (system ones included) active in the space, sorted by id. */
-export async function listIntegrationIdsActiveInSpace(scope: SpaceScope): Promise<string[]> {
-  const rows = await db
-    .select({ id: packages.id })
-    .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .where(activePackagesFilter(scope, "integration"))
-    .orderBy(packages.id);
-  return rows.map((row) => row.id);
 }
 
 /** Throw `notFound` unless the integration is active in the space. */

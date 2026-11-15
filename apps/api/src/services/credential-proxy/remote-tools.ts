@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The typed tools of an integration backed by a remote MCP server (`source.kind: "remote"`),
- * outside a run: its `tools/list` and one `tools/call`, spoken over the credential proxy
- * (`mcp-over-proxy.ts`). The connection is selected first, by the proxy's rule
- * (`selectAccessibleConnection`), and every catalog read, URL rendering and exchange uses it. The
- * tools offered are the integration catalog's (`"*"` selection less `hidden_tools` and the connect
- * tool), sanitised as `McpHost` registers them in a run.
+ * The typed tools of a remote MCP integration outside a run: its `tools/list` and one
+ * `tools/call` over the credential proxy (`mcp-over-proxy.ts`), with the connection the proxy's
+ * selection picks first.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -17,6 +14,7 @@ import {
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { createCache } from "@appstrate/core/cache";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   allowsUndeclaredTools,
   getApiCallConfigs,
@@ -27,7 +25,7 @@ import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { proxyProblem } from "../../lib/proxy-status.ts";
+import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import {
@@ -40,22 +38,33 @@ import { readIntegrationManifestForProxy } from "../integration-service.ts";
 import { ProxyCallError } from "./core.ts";
 import { noConnectionMessage } from "./integration-resolver.ts";
 import {
+  isCredentialRejection,
   listToolPages,
   mcpServerFailure,
   proxiedMcpOperation,
+  untilAborted,
+  untrustedFields,
+  untrustedText,
   type ProxyCaller,
 } from "./mcp-over-proxy.ts";
 
 /**
- * Listing a catalog takes a few round trips, each answered within seconds by a healthy server; a
- * call stays below an MCP client's 60 s request timeout, which the caller's request also counts.
+ * The deadlines, kept under an MCP client's 60 s request timeout. `call_integration_tool`
+ * resolves its tool by name (`resolveMs`, a cold catalog not read by then leaves its declared
+ * names), then calls it (`callMs`): 5 + 45 = 50 s, the rest left to the platform's own reads. A
+ * search waits up to `listingMs` for every server; each cold `tools/list` runs under its own
+ * `listMs` and is cached for the next listing.
  */
-const TIMEOUTS = { listMs: 10_000, callMs: 45_000 } as const;
-let timeouts: { listMs: number; callMs: number } = TIMEOUTS;
+const TIMEOUTS = { listMs: 10_000, listingMs: 20_000, resolveMs: 5_000, callMs: 45_000 } as const;
+let timeouts: Record<keyof typeof TIMEOUTS, number> = TIMEOUTS;
 
-/** @internal Test-only. Shortens the operations' deadlines; with no argument, restores them. */
+/** @internal Test-only. Shortens the deadlines; with no argument, restores them. */
 export function _setRemoteToolTimeoutsForTesting(next?: Partial<typeof timeouts>): void {
   timeouts = { ...TIMEOUTS, ...next };
+}
+
+export function listingDeadline(resolving: boolean): AbortSignal {
+  return AbortSignal.timeout(resolving ? timeouts.resolveMs : timeouts.listingMs);
 }
 
 const CATALOG_TTL_MS = 5 * 60 * 1000;
@@ -64,7 +73,6 @@ const MAX_CATALOG_BYTES = 512 * 1024;
 /** Per replica, at most 64 MiB of catalogs; one evicted is listed again on its next use. */
 const MAX_CACHED_CATALOGS = 128;
 
-/** A server's catalog as read: `truncated` when the server lists more than `tools`. */
 interface ReadCatalog {
   tools: Tool[];
   truncated: boolean;
@@ -77,11 +85,8 @@ const catalogCache = createCache<ReadCatalog>({
   max: MAX_CACHED_CATALOGS,
 });
 
-/**
- * A catalog's cache key. The URL is in it because a reconnect may rewrite the variables it is
- * rendered from: a connection whose variables were cleared takes them anew on its next reconnect.
- */
-export function remoteCatalogKey(entry: {
+/** A reconnect may rewrite the variables the URL is rendered from: the URL is in the key. */
+function remoteCatalogKey(entry: {
   orgId: string;
   connectionId: string;
   integrationId: string;
@@ -91,25 +96,19 @@ export function remoteCatalogKey(entry: {
   return `${entry.orgId}:${entry.connectionId}:${entry.integrationId}@${entry.version}:${entry.url}`;
 }
 
-/** Who lists or calls a remote integration's tools outside a run, and how. */
 export interface RemoteToolsCaller {
   scope: SpaceScope;
   actor: Actor;
   reach: ProxyReach;
   caller: ProxyCaller;
-  /** The caller's request: its going away ends a tool call and its wait for a listing. */
+  /** The caller's request, or a listing's wait: its end ends a tool call and a wait for a catalog. */
   signal: AbortSignal;
-  /**
-   * The policy of a caller that asked for connect links (`RUN_CONNECT_OFFERS_HEADER`), `null`
-   * otherwise: a selection refusal's items then carry a `connect_url` where a run launch's would
-   * (`attachConnectOffers`).
-   */
+  /** Set when the caller asked for connect links: a selection refusal then carries them. */
   connectOffers: ConnectOfferPolicy | null;
 }
 
 type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
-/** `manifest`, when its server speaks Streamable HTTP; else `422 integration_not_remote`. */
 function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
   const source = manifest.source;
   if (source?.kind !== "remote" || source.remote.transport === "sse") {
@@ -124,10 +123,8 @@ function streamableRemote(integrationId: string, manifest: IntegrationManifest) 
 }
 
 /**
- * The caller's connection of the integration, selected as `proxyCall` selects it (named id,
- * organization defaults, reach), and the server URL rendered from its variables (AFPS §7.12).
- * With `tool`, the selection serves that tool: its auths and the scopes its `tools_policy` entry
- * requires (`insufficient_scopes` names what is missing and the remedy).
+ * The caller's connection, selected as `proxyCall` selects it (for `tool` when given), and the
+ * server URL rendered from its variables (AFPS §7.12).
  */
 async function remoteConnection(
   input: RemoteToolsInput & { connectionId?: string },
@@ -172,7 +169,6 @@ async function remoteConnection(
   return { connectionId: connection.id, url: remote.url };
 }
 
-/** A selection refusal with the `connect_url` of each item a connect flow clears (`attachConnectOffers`). */
 async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
   const policy = input.connectOffers;
   if (!policy || !(err instanceof ApiError) || !err.fieldErrors?.length) return err;
@@ -185,11 +181,7 @@ async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise
   return err.with({ errors });
 }
 
-/**
- * The upstream tool names the catalog offers: the `"*"` selection (the `tools_policy` keys, or
- * every tool listed when `allow_undeclared_tools` is set), less `hidden_tools`, the connect tool
- * and the `api_call` tools the platform itself serves.
- */
+/** The catalog's `"*"` selection, less the `api_call` tools the platform itself serves. */
 export function offeredRemoteToolNames(
   manifest: IntegrationManifest,
   listed: readonly Pick<Tool, "name" | "description">[] | undefined,
@@ -206,7 +198,6 @@ export function offeredRemoteToolNames(
   return new Set(catalog.map((entry) => entry.name).filter((name) => !synthetic.has(name)));
 }
 
-/** One MCP operation over the proxy, bounded by `timeoutMs` and `signal` if given. */
 async function withClient<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
     connectionId: string;
@@ -234,7 +225,10 @@ async function withClient<T>(
           fetch: operation.fetch,
           signal: operation.signal,
           onWarning: (message, data) =>
-            logger.warn(message, { integrationId: input.integrationId, ...data }),
+            logger.warn(untrustedText(message), {
+              integrationId: input.integrationId,
+              ...untrustedFields(data),
+            }),
         });
         return use(client, operation.signal);
       })(),
@@ -246,7 +240,6 @@ async function withClient<T>(
   }
 }
 
-/** The descriptors kept within {@link MAX_CATALOG_BYTES}, in the server's order. */
 function boundedCatalog(tools: Tool[], truncated: boolean): ReadCatalog {
   const encoder = new TextEncoder();
   let bytes = 0;
@@ -257,8 +250,7 @@ function boundedCatalog(tools: Tool[], truncated: boolean): ReadCatalog {
   return { tools, truncated };
 }
 
-/** A tool as the catalog offers it, in the REST wire's casing. */
-interface RemoteTool {
+interface ServerTool {
   name: string;
   description?: string;
   input_schema: Tool["inputSchema"];
@@ -267,37 +259,20 @@ interface RemoteTool {
 }
 
 export interface RemoteToolCatalog {
-  /** The offered tools: in the server's order when listed, else the declared names. */
-  tools: RemoteTool[];
-  /** False when the server could not be listed: `tools` are the declared names alone. */
+  tools: ServerTool[];
   listed: boolean;
-  /**
-   * When the server lists more tools than are read, how many were read (the first ones it lists):
-   * only those are offered. `null` when its whole catalog was read.
-   */
+  /** How many tools were read when the server lists more; `null` when all were. */
   truncatedAt: number | null;
 }
 
 /**
- * The tools the caller's connection of a remote integration offers, described by the server's
- * `tools/list` (cached per connection, integration version and server URL), for an integration
- * whose activation the listing checked and whose published `manifest` it read. The connection is
- * selected before the cache is read, so a cached catalog answers only a caller who reaches that
- * connection.
- *
- * The listing runs under its own timeout alone: callers sharing it never depend on the first one
- * staying, and a caller whose wait (`waitUntil`, or its own request) ends first leaves it running
- * for the next. Once that wait is over, no listing is started: a cached catalog answers, else the
- * declared names. A server that cannot be listed leaves the declared names; a refusal of the proxy
- * (connection, permission, `authorized_uris`) or of the server (the connection's credential) is
- * thrown.
+ * The tools the caller's connection offers, from the server's cached `tools/list`, read only
+ * after the connection is selected. The `tools/list` runs under its own timeout, so a caller whose
+ * `signal` ends first leaves it running for the next one; a server that cannot be listed leaves
+ * the declared names, and a refusal ({@link isCatalogRefusal}) is thrown.
  */
 export async function listRemoteTools(
-  input: RemoteToolsInput & {
-    manifest: IntegrationManifest;
-    connectionId?: string;
-    waitUntil: AbortSignal;
-  },
+  input: RemoteToolsInput & { manifest: IntegrationManifest; connectionId?: string },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
   const { connectionId, url } = await remoteConnection(input, manifest);
@@ -308,9 +283,8 @@ export async function listRemoteTools(
     version: manifest.version,
     url,
   });
-  const wait = AbortSignal.any([input.waitUntil, input.signal]);
   let described = catalogCache.peek(key);
-  if (described === undefined && !wait.aborted) {
+  if (described === undefined && !input.signal.aborted) {
     const load = () =>
       withClient(
         { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },
@@ -324,26 +298,20 @@ export async function listRemoteTools(
         },
       );
     try {
-      described = await beforeDeadline(catalogCache.get(key, load), wait);
+      described = await untilAborted(catalogCache.get(key, load), input.signal);
     } catch (err) {
-      // A refusal made before any exchange is the caller's to see.
-      if (err instanceof ApiError || (err instanceof ProxyCallError && !err.connectionId)) {
+      if (input.signal.aborted && err === input.signal.reason) {
+        // The listing runs on for the next one.
+      } else if (isCatalogRefusal(err)) {
         throw mcpServerFailure(err, { integrationId: input.integrationId, url });
-      }
-      // Any other fault leaves the declared names, logged once; a listing not read before the
-      // caller's wait ended is no fault: it runs on for the next one.
-      if (err instanceof ProxyCallError) {
+      } else {
         logger.warn("credential-proxy: remote tools/list failed", {
           integrationId: input.integrationId,
           connectionId,
-          code: err.code,
+          ...(err instanceof ProxyCallError
+            ? { code: err.code }
+            : { error: untrustedText(getErrorMessage(err)) }),
         });
-      } else if (!(err instanceof ListingDeadlineError)) {
-        const failure = mcpServerFailure(err, { integrationId: input.integrationId, url });
-        // The server refusing the connection's credential is the caller's to see.
-        if (failure instanceof ApiError && failure.code === "upstream_credential_rejected") {
-          throw failure;
-        }
       }
     }
   }
@@ -369,31 +337,20 @@ export async function listRemoteTools(
   };
 }
 
-/** A listing no longer waited for: its catalog is read for a later one. */
-class ListingDeadlineError extends Error {
-  constructor() {
-    super("the listing's deadline passed before the server's catalog was read");
-    this.name = "ListingDeadlineError";
-  }
-}
-
-/** `work`'s outcome, or a {@link ListingDeadlineError} once `deadline` ends first. */
-function beforeDeadline<T>(work: Promise<T>, deadline: AbortSignal): Promise<T> {
-  // Its outcome after the deadline belongs to the cache alone.
-  work.catch(() => {});
-  return new Promise<T>((resolve, reject) => {
-    const expire = () => reject(new ListingDeadlineError());
-    if (deadline.aborted) return expire();
-    deadline.addEventListener("abort", expire, { once: true });
-    work.then(resolve, reject).finally(() => deadline.removeEventListener("abort", expire));
-  });
+/**
+ * Whether a failed catalog read is the caller's to see: a refusal of the proxy, before any
+ * exchange or after one (its own 4xx), or the server refusing the connection's credential. Any
+ * other failure is the server's, and leaves the declared names.
+ */
+function isCatalogRefusal(err: unknown): boolean {
+  if (err instanceof ApiError) return true;
+  if (err instanceof ProxyCallError) return !err.connectionId || isProxyRefusal(err.code);
+  return isCredentialRejection(err);
 }
 
 /**
- * One `tools/call` on a remote integration's server, for a tool its catalog offers; the result's
- * reserved `_meta` keys are dropped. Entered directly by its route: the integration's activation
- * is checked before anything else, and a tool outside the catalog, or a connection that does not
- * serve the tool (its auth, its scopes), is refused before any exchange.
+ * One `tools/call`, its result without reserved `_meta` keys. Activation is checked first; a tool
+ * outside the catalog, or a connection not serving it, is refused before any exchange.
  */
 export async function callRemoteTool(
   input: RemoteToolsInput & {
@@ -410,7 +367,6 @@ export async function callRemoteTool(
   );
   if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
   const manifest = streamableRemote(input.integrationId, loaded.manifest);
-  // With `allow_undeclared_tools`, any listed name is in the selection; the hidden ones never are.
   const offered = offeredRemoteToolNames(
     manifest,
     allowsUndeclaredTools(manifest) ? [{ name: input.name }] : undefined,

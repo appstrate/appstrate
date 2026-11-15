@@ -23,7 +23,10 @@ type ProxyErrorType =
   | "http_response_timeout"
   | "proxy_internal_response"
   | "proxy_internal_error"
-  | "proxy_configuration_error";
+  | "proxy_configuration_error"
+  | "http_protocol_error"
+  | "http_request_error"
+  | "http_response_body_size";
 
 export function relayedProxyStatus(receivedStatus: number): string {
   return `${PROXY_NAME}; received-status=${receivedStatus}`;
@@ -102,6 +105,26 @@ const PROXY_PROBLEMS = {
 } as const satisfies Record<string, ProxyProblem> & Record<ApiCallFailureCode, ProxyProblem>;
 
 export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
+
+/** A problem the proxy answers instead of the request, before or after it reached the upstream. */
+export function isProxyRefusal(code: ProxyProblemCode): boolean {
+  return PROXY_PROBLEMS[code].status < 500;
+}
+
+/**
+ * The `Proxy-Status` of a problem the platform derived from an upstream's answer: the HTTP status
+ * it answered (`receivedStatus`), or the RFC 9209 §2.3 error type of what it answered.
+ */
+export function upstreamProxyStatus(
+  marker: { receivedStatus: number } | { error: ProxyErrorType },
+): Record<string, string> {
+  return {
+    "Proxy-Status":
+      "receivedStatus" in marker
+        ? relayedProxyStatus(marker.receivedStatus)
+        : proxyErrorStatus(marker.error),
+  };
+}
 
 /** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
 export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;

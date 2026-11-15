@@ -573,12 +573,19 @@ const notReadyIntegrationSchema = {
   },
 } as const;
 
-const { integration_package_id: _toolIntegration, ...toolConnectionProperties } =
-  connectionOutsideRunSchema.properties;
+/** The 403 every route of the proxy outside a run answers on its access rule. */
+const PROXY_FORBIDDEN =
+  "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
+  "`credential-proxy:call`";
+const BEARER_ONLY_FORBIDDEN =
+  ", or authenticates with a session cookie or another credential the bearer-only proxy " +
+  "refuses (the chat's MCP loopback bearer included)";
+const PROXY_CLOSED = "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`";
 
 /**
- * A remote MCP server failing an operation: the `refusal` of an `unlisted` entry and the 502 of
- * `tools/call`, with the members of `upstream_credential_rejected` and `upstream_mcp_error`.
+ * A remote MCP server failing an operation: the `refusal` of an `unlisted` entry and the 422 and
+ * 502 of `tools/call`, with the members of `upstream_credential_rejected`,
+ * `upstream_invalid_params` and `upstream_mcp_error`.
  */
 const upstreamMcpProblemSchema = {
   allOf: [
@@ -612,7 +619,9 @@ const upstreamMcpProblemSchema = {
           type: "object",
           required: ["code", "message"],
           additionalProperties: false,
-          description: "`upstream_mcp_error`: the server's JSON-RPC error, its message untrusted.",
+          description:
+            "`upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its " +
+            "message untrusted text cut at 512 characters.",
           properties: { code: { type: "integer" }, message: { type: "string" } },
         },
       },
@@ -623,22 +632,24 @@ const upstreamMcpProblemSchema = {
 /** One tool `GET /api/credential-proxy/tools` lists. */
 const integrationToolSchema = {
   type: "object",
-  required: ["name", "kind", "integration_package_id", "description", "connections"],
+  required: ["name", "kind", "integration_package_id", "description", "connection_ids"],
   additionalProperties: false,
   properties: {
     name: {
       type: "string",
       description:
         "The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of " +
-        "the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the " +
-        "package id normalised, with a suffix hashed from the package id when another " +
-        "integration active in the space normalises alike.",
+        "the integration expose one) or `{ns}__{tool}` for a typed tool. `{ns}` is the package " +
+        "id normalised (cut at 20 characters, without a trailing `_`), followed by `_` and a " +
+        "hash of the package id while it equals the namespace of another integration active in " +
+        "the space. No two tools of a space share a name, and a name depends on the space's " +
+        "active integrations and the tool alone, never on the caller's connections.",
     },
     kind: {
       type: "string",
       enum: ["api_call", "remote"],
       description:
-        "`api_call`: called through `/api/credential-proxy/proxy` with one of `connections`; " +
+        "`api_call`: called through `/api/credential-proxy/proxy` with one of `connection_ids`; " +
         "`remote`: a typed tool of the integration's MCP server, called through " +
         "`/api/credential-proxy/tools/call` by its `remote_name`.",
     },
@@ -655,7 +666,7 @@ const integrationToolSchema = {
       type: "boolean",
       description:
         "`api_call` only: the integration also has connections of another auth, so a call " +
-        "names one of `connections` (`X-Connection-Id`).",
+        "names one of `connection_ids` (`X-Connection-Id`).",
     },
     remote_name: {
       type: "string",
@@ -679,29 +690,21 @@ const integrationToolSchema = {
       enum: [true],
       description:
         "`remote` only: the server's `tools/list` could not be read, or not within the " +
-        "listing's 20 s, so the tool is a declared name, without description and with an empty " +
-        "object schema.",
+        "listing's wait (20 s, 5 s when resolving a `name`), so the tool is a declared name, " +
+        "without description and with an empty object schema.",
     },
-    connections: {
+    connection_ids: {
       type: "array",
+      items: { type: "string", format: "uuid" },
+      description: "The listing's `connections` the tool reaches, by `connection_id`.",
+    },
+    missing_scopes: {
+      type: "object",
+      additionalProperties: { type: "array", items: { type: "string" } },
       description:
-        "The connections it reaches, as `GET /api/credential-proxy/connections` lists them.",
-      items: {
-        type: "object",
-        required: connectionOutsideRunSchema.required.filter(
-          (field) => field !== "integration_package_id",
-        ),
-        properties: {
-          ...toolConnectionProperties,
-          missing_scopes: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "`remote` only: the scopes the tool's `tools_policy` entry requires on the " +
-              "connection's auth that it lacks; a call with it answers `409 insufficient_scopes`.",
-          },
-        },
-      },
+        "`remote` only, when one of its connections lacks some: per `connection_id`, the scopes " +
+        "the tool's `tools_policy` entry requires on that connection's auth that it lacks; a " +
+        "call with it answers `409 insufficient_scopes`.",
     },
   },
 } as const;
@@ -756,10 +759,7 @@ export const credentialProxyPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description:
-            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
-            "`credential-proxy:call`; `credential_proxy_closed` — the space's " +
-            "`credential_proxy_open` is `false`.",
+          description: `${PROXY_FORBIDDEN}; ${PROXY_CLOSED}.`,
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
@@ -783,20 +783,25 @@ export const credentialProxyPaths = {
         "`true`), less `hidden_tools` and the connect tool, described by the server's " +
         "`tools/list`. Each server is listed with the connection the proxy selects (or the " +
         "`connection_id` named, when it is one of that integration's; when the selection asks " +
-        "for a choice, the first of the caller's connections it accepts), cached per " +
-        "connection, integration version and server URL for 5 minutes, and journaled as one " +
-        "call of the connection when the listing reaches the server, its handshake refused " +
-        "included. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The " +
-        "listing waits 20 s for the servers in all, and no longer than the request: a catalog " +
-        "not read by then is listed as one whose server could not be listed, and read on for " +
-        "the next listing; once that wait is over, no further server is contacted. Each tool " +
-        "carries the connections it " +
-        "reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the " +
+        "for a choice, the first of the caller's OWN connections it accepts: a connection " +
+        "another member shared serves only when named or designated by an org default), " +
+        "cached per connection, integration version and server URL for 5 minutes, and " +
+        "journaled as one call of the connection when the listing reaches the server, its " +
+        "handshake refused included. Reaching a server sends the connection's credential: a " +
+        "401 goes through the proxy's forced refresh, and a server refusing the credential " +
+        "counts toward flagging the connection `needs_reconnection`, as a call does. A catalog " +
+        "keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s " +
+        "for the servers in all (5 s when it resolves a `name`), and no longer than the " +
+        "request: a catalog not read by then is listed as one whose server could not be " +
+        "listed, and read on for the next listing; once that wait is over, no further server " +
+        "is contacted. `connections` lists the connections the tools reach, each once, as " +
+        "`GET /api/credential-proxy/connections` lists them; each tool names its own " +
+        "(`connection_ids`). `not_ready` lists the " +
         "integrations active in the space the caller has no usable connection of, with the " +
         "verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a " +
         "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
         "whose server the proxy refused to list (connection selection, permission, " +
-        "`authorized_uris`, an unrenderable URL) or whose server refused the connection's " +
+        "`authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's " +
         "credential (`upstream_credential_rejected`), each with that refusal. Read with the access " +
         "rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's " +
         "latest published version. Requires `credential-proxy:call-own` or " +
@@ -820,9 +825,9 @@ export const credentialProxyPaths = {
           in: "query",
           required: false,
           description:
-            "Resolves the tool of this name alone: an `api_call` tool lists no server, and only " +
-            "the remote integrations whose namespace starts the name are listed. `not_ready` is " +
-            "then empty.",
+            "Resolves the tool of this name alone, waiting 5 s at most for its server: an " +
+            "`api_call` tool lists no server, and only the remote integration whose namespace " +
+            "starts the name is listed. `not_ready` is then empty.",
           schema: { type: "string", minLength: 1 },
         },
         {
@@ -848,10 +853,15 @@ export const credentialProxyPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["tools", "not_ready", "unlisted", "truncated_catalogs"],
+                required: ["tools", "connections", "not_ready", "unlisted", "truncated_catalogs"],
                 additionalProperties: false,
                 properties: {
                   tools: { type: "array", items: integrationToolSchema },
+                  connections: {
+                    type: "array",
+                    description: "The connections the tools reach, each once.",
+                    items: connectionOutsideRunSchema,
+                  },
                   not_ready: { type: "array", items: notReadyIntegrationSchema },
                   unlisted: {
                     type: "array",
@@ -900,11 +910,9 @@ export const credentialProxyPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
-            "`credential-proxy:call`, or authenticates with a session cookie or another credential " +
-            "the bearer-only proxy refuses (the chat's MCP loopback bearer included); " +
-            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever " +
-            "the caller's role. No `Proxy-Status`: nothing is relayed on this route.",
+            `${PROXY_FORBIDDEN}${BEARER_ONLY_FORBIDDEN}; ${PROXY_CLOSED}, whatever the caller's ` +
+            "role. No `Proxy-Status`: " +
+            "nothing is relayed on this route.",
           content: problemContent,
         },
         "404": {
@@ -936,9 +944,11 @@ export const credentialProxyPaths = {
         "first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as " +
         "its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, " +
         "`api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. " +
-        "A refusal produced by the credential proxy's own checks or a transport fault carries " +
-        "RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name " +
-        "it); the platform's other refusals and the result carry none. " +
+        "A refusal produced by the credential proxy's own checks, a transport fault, or an " +
+        "answer of the server the platform turns into a problem carries RFC 9209 " +
+        "`Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other " +
+        "refusals and the result carry none. The arguments go to the server as given: it " +
+        "validates them. " +
         "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
         "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
       parameters: [
@@ -1009,17 +1019,17 @@ export const credentialProxyPaths = {
             "`connection_id` that is not a uuid, `arguments` that is not an object, an unknown " +
             "field such as the retired `integration_id`); `connection_not_in_org_default` — an " +
             "enforced org default governs the integration and `connection_id` names a connection " +
-            "outside its set (a holder of `credential-proxy:call`).",
+            "outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an " +
+            "exchange before it is sent: `unresolved_placeholder` — the server URL holds a " +
+            "placeholder no credential field fills, `invalid_request` — it is otherwise not a " +
+            "request the proxy can send.",
           content: problemContent,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
-            "`credential-proxy:call`, or authenticates with a session cookie or another credential " +
-            "the bearer-only proxy refuses (the chat's MCP loopback bearer included); " +
-            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever " +
-            "the caller's role; `call_permission_required` — an enforced org default governs the " +
+            `${PROXY_FORBIDDEN}${BEARER_ONLY_FORBIDDEN}; ${PROXY_CLOSED}, whatever the caller's ` +
+            "role; `call_permission_required` — an enforced org default governs the " +
             "integration and the caller holds `credential-proxy:call-own` without " +
             "`credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's " +
             "refusals of the server URL, before anything is sent: `unauthorized_target` " +
@@ -1043,7 +1053,9 @@ export const credentialProxyPaths = {
             "The connection selection of `/api/credential-proxy/proxy` refused, judged for the " +
             "named tool: `must_choose_connection` (`errors[0].candidate_connections`, each " +
             "with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), " +
-            "`needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the " +
+            "`needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org " +
+            "default that cannot bind `required_integration_unbound` (an empty set) or " +
+            "`connection_set_too_large`; `insufficient_scopes` — the " +
             "connection lacks scopes the tool's `tools_policy` entry requires " +
             "(`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, " +
             "`owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and " +
@@ -1056,21 +1068,30 @@ export const credentialProxyPaths = {
           description:
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
             "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
-            "variables and they do not render it.",
-          content: problemContent,
+            "variables and they do not render it; `upstream_invalid_params` — the server answered " +
+            "JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name " +
+            "(`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status` error " +
+            "`http_request_error`).",
+          headers: PROXY_STATUS_HEADER,
+          content: { "application/problem+json": { schema: upstreamMcpProblemSchema } },
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
           description:
-            "`bad_gateway` — the MCP server failed the exchange; `upstream_credential_rejected` — " +
-            "it refused the connection's credential (`upstream_status`: 401 or 403; " +
+            "`bad_gateway` — the MCP server failed the exchange (`Proxy-Status` error " +
+            "`http_protocol_error`; `received-status` when it asked a credential of an " +
+            "integration declaring none); `upstream_credential_rejected` — " +
+            "it refused the connection's credential (`upstream_status`: 401 or 403, " +
+            "`Proxy-Status: appstrate; received-status=<401|403>`; " +
             "`credential: { status, cause, detail, failures?, max_failures? }` when the proxy's " +
             "forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on " +
             "`/proxy`: `needs_reconnection` — the connection is now flagged and its owner must " +
-            "reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a JSON-RPC error " +
-            "(`mcp_error: { code, message }`, its message untrusted text); " +
-            "`upstream_response_too_large` — the tool ran, but its answer exceeds the exchange " +
-            "bound, answered as JSON or as an event stream; the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), " +
+            "reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a " +
+            "JSON-RPC error other than -32602 (`mcp_error: { code, message }`, its message " +
+            "untrusted text; `http_protocol_error`); `upstream_response_too_large` — the tool " +
+            "ran, but its answer exceeds the exchange bound (at most 2 MiB, lower when the " +
+            "proxy's `max_response_bytes` is), answered as JSON or as an event stream " +
+            "(`http_response_body_size`); the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), " +
             "`upstream_unreachable` (`destination_unavailable`) and `credential_unusable` " +
             "(`proxy_configuration_error`).",
           headers: PROXY_STATUS_HEADER,

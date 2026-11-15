@@ -28,6 +28,7 @@ import {
 } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
 import {
+  bearerApiKeyAuth,
   seedProxyConnection,
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
@@ -104,20 +105,7 @@ const remote = (opts: { url?: string; transport?: string; authorizedUris?: strin
     url: opts.url ?? server.url,
     ...(opts.transport ? { transport: opts.transport } : {}),
     auths: {
-      api_key: {
-        type: "api_key",
-        authorizedUris: opts.authorizedUris ?? [`${server.origin}/**`],
-        credentialFields: ["token"],
-        requiredCredentialFields: ["token"],
-        delivery: {
-          http: {
-            in: "header",
-            name: "Authorization",
-            prefix: "Bearer ",
-            value: "{$credential.token}",
-          },
-        },
-      },
+      api_key: bearerApiKeyAuth(opts.authorizedUris ?? [`${server.origin}/**`]),
     },
   });
 

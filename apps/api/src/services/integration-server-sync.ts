@@ -30,6 +30,8 @@ import {
   McpExchangeTooLargeError,
   mcpServerFailure,
   proxiedMcpOperation,
+  untrustedFields,
+  untrustedText,
   type ProxyCaller,
 } from "./credential-proxy/mcp-over-proxy.ts";
 import type { ProxyReach } from "./integration-connections.ts";
@@ -160,7 +162,8 @@ export async function syncIntegrationFromServer(input: {
     client = await createMcpHttpClient(url, {
       fetch: proxied?.fetch ?? direct,
       signal,
-      onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
+      onWarning: (message, data) =>
+        logger.warn(untrustedText(message), { packageId, ...untrustedFields(data) }),
     });
     const { tools, truncated } = await listToolPages(client, signal);
     return {

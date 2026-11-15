@@ -131,7 +131,21 @@ const listingOf =
   ) =>
   () =>
     Response.json({
-      tools,
+      // A fixture tool's `connections` are listed once, the tool naming them by id.
+      tools: tools.map(({ connections, ...tool }) => ({
+        ...tool,
+        connection_ids: (connections as { connection_id: string }[]).map((c) => c.connection_id),
+      })),
+      connections: [
+        ...new Map(
+          tools.flatMap((tool) =>
+            (tool.connections as Record<string, unknown>[]).map((c) => [
+              c.connection_id,
+              { integration_package_id: tool.integration_package_id, ...c },
+            ]),
+          ),
+        ).values(),
+      ],
       not_ready: rest.not_ready ?? [],
       unlisted: rest.unlisted ?? [],
       truncated_catalogs: rest.truncated_catalogs ?? [],
@@ -251,7 +265,7 @@ describe("search_integration_tools", () => {
   const toolNames = (payload: Record<string, unknown>) =>
     (payload.tools as Array<{ tool: string }>).map((tool) => tool.tool);
 
-  it("with no argument, lists every tool with every field of the listing's connections", async () => {
+  it("with no argument, lists every tool, and each connection they reach once with every field", async () => {
     const { result, payload, listings, calls, events } = await search({});
     expect(result.isError).toBe(false);
     expect(payload).toEqual({
@@ -259,11 +273,12 @@ describe("search_integration_tools", () => {
       tools: [
         {
           tool: TOOL,
-          integration: INTEGRATION,
+          integration_package_id: INTEGRATION,
           description: expect.stringMatching(/^Acme Items\. Calls the integration's API/),
-          connections: [connection()],
+          connection_ids: [CONNECTION_ID],
         },
       ],
+      connections: [{ integration_package_id: INTEGRATION, ...connection() }],
     });
     expect(calls).toHaveLength(0);
     const req = listings[0]!;
@@ -375,13 +390,13 @@ describe("search_integration_tools", () => {
     expect(toolNames(payload)).toEqual([TOOL]);
     expect(payload.not_ready).toEqual([
       {
-        integration: "@acme/mail",
+        integration_package_id: "@acme/mail",
         display_name: "@acme/mail app",
         proxy_connection: { status: "none", imposed: false },
         refusal,
       },
       {
-        integration: "@acme/crm",
+        integration_package_id: "@acme/crm",
         display_name: "@acme/crm app",
         proxy_connection: { status: "needs_reconnection", imposed: false },
       },
@@ -395,8 +410,8 @@ describe("search_integration_tools", () => {
     const shown = async (args: Record<string, unknown>) =>
       (
         (await search(args, { listing })).payload.not_ready as
-          Array<{ integration: string }> | undefined
-      )?.map((entry) => entry.integration);
+          Array<{ integration_package_id: string }> | undefined
+      )?.map((entry) => entry.integration_package_id);
     expect(await shown({ query: "mail" })).toEqual(["@acme/mail"]);
     expect(await shown({ query: "nothing-matches" })).toBeUndefined();
   });
@@ -444,6 +459,38 @@ describe("call_integration_tool — tool", () => {
     const query = new URL(listings[0]!.url).searchParams;
     expect([...query]).toEqual([["name", "acme_other___api_call"]]);
     expect(calls[0]!.headers.get("X-Integration-Id")).toBe("@acme/other");
+  });
+
+  it("refuses a name the listing gives two tools, calling neither", async () => {
+    const twin = apiCallTool({ integration_package_id: "@acme/twin" });
+    const { result, payload, calls } = await callWith(
+      { tool: TOOL, arguments: { requests: [get()] } },
+      { listing: listingOf([apiCallTool(), twin]) },
+    );
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({ code: "ambiguous_tool", arguments: ["tool"] });
+    expect(payload.error).toContain("@acme/twin");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("cancels the listing it resolves the tool with when the MCP request is cancelled", async () => {
+    const cancel = new AbortController();
+    const made = makeTools(CALL_OWN, undefined, true, {
+      listing: (req) =>
+        new Promise<Response>((_, reject) => {
+          cancel.abort();
+          req.signal.addEventListener("abort", () => reject(req.signal.reason), { once: true });
+          if (req.signal.aborted) reject(req.signal.reason);
+        }),
+    });
+    const call = made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: TOOL, arguments: { requests: [get()] } }, {
+        signal: cancel.signal,
+      } as unknown as AppstrateRequestExtra);
+    await expect(call).rejects.toBeDefined();
+    expect(made.listings[0]!.signal.aborted).toBe(true);
+    expect(made.calls).toHaveLength(0);
   });
 
   it("documents in its description only what holds for every tool", () => {
@@ -538,8 +585,9 @@ describe("call_integration_tool — arguments", () => {
       code: "invalid_argument",
       arguments: ["arguments.requests[1].method"],
     });
+    // An absent required field is missing, not invalid.
     expect(await refused({ requests: [{ method: "GET" }] })).toMatchObject({
-      code: "invalid_argument",
+      code: "missing_argument",
       arguments: ["arguments.requests[0].target"],
     });
     expect(await refused({ requests: [get({ body: 42 })] })).toMatchObject({
@@ -961,7 +1009,7 @@ describe("typed tools of a remote MCP integration", () => {
     description: "Acme Docs. Full-text search.",
     remote_name: "search",
     input_schema: inputSchema,
-    connections: [connection({ missing_scopes: [] })],
+    connections: [connection()],
     ...overrides,
   });
   const fixture: Fixture = { listing: listingOf([remoteTool()]) };
@@ -976,11 +1024,12 @@ describe("typed tools of a remote MCP integration", () => {
     expect(payload.tools).toEqual([
       {
         tool: "acme_docs__search",
-        integration: REMOTE,
+        integration_package_id: REMOTE,
         description: "Acme Docs. Full-text search.",
-        connections: [connection({ missing_scopes: [] })],
+        connection_ids: [CONNECTION_ID],
       },
     ]);
+    expect(payload.connections).toEqual([{ integration_package_id: REMOTE, ...connection() }]);
     const best = payload.best_match as { input_schema: unknown; usage: string };
     expect(best.input_schema).toEqual(inputSchema);
     expect(best.usage).toContain("the server's own tool result");
@@ -1145,7 +1194,7 @@ describe("search_integration_tools — what a search says it leaves out", () => 
         }),
       },
     );
-    expect(payload.unlisted).toEqual([{ integration: "@acme/docs", refusal }]);
+    expect(payload.unlisted).toEqual([{ integration_package_id: "@acme/docs", refusal }]);
   });
 });
 
@@ -1178,7 +1227,7 @@ describe("call_integration_tool — a result past the budget", () => {
         description: "Acme Docs.",
         remote_name: "search",
         input_schema: { type: "object" },
-        connections: [connection({ missing_scopes: [] })],
+        connections: [connection()],
       },
     ]),
   };
@@ -1276,7 +1325,7 @@ describe("call_integration_tool — a result past the budget", () => {
           remote_name: "search",
           input_schema: { type: "object" },
           output_schema: outputSchema,
-          connections: [connection({ missing_scopes: [] })],
+          connections: [connection()],
         },
       ]),
     };
@@ -1311,10 +1360,15 @@ describe("call_integration_tool — a batch's deadline", () => {
     _setBatchDeadlineForTesting(50);
     const outcome = await executeApiCall(
       ctx,
-      { name: TOOL, integration: INTEGRATION, connections: [], connectionRequired: false },
+      {
+        name: TOOL,
+        integration_package_id: INTEGRATION,
+        connection_ids: [],
+        connection_required: false,
+      },
       { requests: Array.from({ length: 6 }, () => get()) as never },
       noExtra,
-      { defaultConnectionId: undefined },
+      undefined,
     );
     if ("code" in outcome) throw new Error("refused");
     const payload = parseResult(outcome.result);

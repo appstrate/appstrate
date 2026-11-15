@@ -23,7 +23,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
 import {
   readIntegrationTools,
-  type IntegrationTool,
+  type CallableTool,
   type ListingRefusal,
 } from "./integration-tool-catalog.ts";
 import {
@@ -46,8 +46,21 @@ interface IntegrationToolContext extends DispatchContext {
 /** Issues one argument refusal names. */
 const MAX_REPORTED_ISSUES = 10;
 
-/** The refusal of a parse; `prefix` places the parsed object among the tool's arguments. */
-function argumentsRefusal(error: z.ZodError, prefix: PropertyKey[] = []): Refusal {
+/** The value at `path` in `value`, `undefined` when a step is missing. */
+function valueAt(value: unknown, path: readonly PropertyKey[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null) return undefined;
+    current = (current as Record<PropertyKey, unknown>)[key];
+  }
+  return current;
+}
+
+/**
+ * The refusal of a parse of `input`; `prefix` places the parsed object among the tool's
+ * arguments. A required argument absent is `missing_argument`.
+ */
+function argumentsRefusal(error: z.ZodError, input: unknown, prefix: PropertyKey[] = []): Refusal {
   const path = (issuePath: PropertyKey[]) => renderFieldPath([...prefix, ...issuePath]);
   const unknown = error.issues.flatMap((issue) =>
     issue.code === "unrecognized_keys" ? issue.keys.map((key) => path([...issue.path, key])) : [],
@@ -57,6 +70,16 @@ function argumentsRefusal(error: z.ZodError, prefix: PropertyKey[] = []): Refusa
       code: "unknown_argument",
       error: `Unknown argument(s): ${unknown.join(", ")}.`,
       arguments: unknown,
+    };
+  }
+  const missing = error.issues
+    .filter((issue) => issue.code === "invalid_type" && valueAt(input, issue.path) === undefined)
+    .map((issue) => path(issue.path));
+  if (missing.length > 0) {
+    return {
+      code: "missing_argument",
+      error: missing.map((name) => `${name} is required.`).join(" "),
+      arguments: missing,
     };
   }
   const issues = error.issues.slice(0, MAX_REPORTED_ISSUES);
@@ -85,14 +108,17 @@ function listingRefused(
   return jsonResult({ ...refused }, true);
 }
 
-/** A tool as a search lists it. */
-function listedTool(tool: IntegrationTool): Record<string, unknown> {
+/** A tool as a search lists it, its connections among the result's `connections`. */
+function listedTool(tool: CallableTool): Record<string, unknown> {
   return {
     tool: tool.name,
-    integration: tool.integration,
+    integration_package_id: tool.integration_package_id,
     description: tool.description,
-    ...(tool.catalogUnreadable ? { catalog_unreadable: true } : {}),
-    connections: tool.connections,
+    ...(tool.kind === "remote" && tool.catalog_unreadable ? { catalog_unreadable: true } : {}),
+    connection_ids: tool.connection_ids,
+    ...(tool.kind === "remote" && tool.missing_scopes
+      ? { missing_scopes: tool.missing_scopes }
+      : {}),
   };
 }
 
@@ -104,9 +130,12 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "and/or integration; with neither, list them, `limit` at a time. They are each " +
       "integration's `api_call` tools and, for an integration backed by a remote MCP server, " +
       "the typed tools that server offers. Each result has the `tool` name to pass to " +
-      "call_integration_tool, its `integration`, a `description` and the `connections` it " +
-      "reaches, each with the `connection_id` to pass; `catalog_unreadable: true` marks a typed " +
+      "call_integration_tool, its `integration_package_id`, a `description` and the " +
+      "`connection_ids` it reaches among the result's `connections`, each with the " +
+      "`connection_id` to pass; `catalog_unreadable: true` marks a typed " +
       "tool whose server could not be listed, named without description or schema. " +
+      "Listing a cold server's catalog sends the connection's credential, and a server refusing " +
+      "it counts toward flagging the connection for reconnection. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
       "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
       "`not_ready`, the integrations active here you have no usable connection of, each with " +
@@ -124,7 +153,8 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     annotations: {
       title: "Search integration tools",
       readOnlyHint: true,
-      idempotentHint: true,
+      // Not idempotent: a server refusing the credential moves the connection's health.
+      idempotentHint: false,
       // It queries third-party servers and relays their text.
       openWorldHint: true,
     },
@@ -150,26 +180,30 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
     const integration = typeof args.integration === "string" ? args.integration : undefined;
     const limit = searchLimit(args.limit);
     const tokens = searchTokens(args.query);
-    const read = await readIntegrationTools(ctx, integration ? { integration } : {});
+    const read = await readIntegrationTools(ctx, integration ? { integration } : {}, extra.signal);
     if ("refused" in read)
       return listingRefused(ctx, "search_integration_tools", start, read.refused);
 
     const about = (id: string, text = "") =>
       tokens.length === 0 || searchScore(`${id} ${text}`, tokens) > 0;
     const notReadyShown = read.not_ready.filter((entry) =>
-      about(entry.integration, entry.display_name),
+      about(entry.integration_package_id, entry.display_name),
     );
-    const unlistedShown = read.unlisted.filter((entry) => about(entry.integration));
+    const unlistedShown = read.unlisted.filter((entry) => about(entry.integration_package_id));
     const matches = rankByKeywords(read.tools, tokens, (tool) => ({
       name: tool.name,
-      text: `${tool.integration} ${tool.description}`,
+      text: `${tool.integration_package_id} ${tool.description}`,
     }));
     const shown = matches.slice(0, limit);
+    const reached = new Set(shown.flatMap((tool) => tool.connection_ids));
     ctx.observe({
       tool: "search_integration_tools",
       durationMs: performance.now() - start,
@@ -184,10 +218,12 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
           (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
       );
     }
-    const truncated = read.truncated_catalogs.filter((entry) => about(entry.integration));
+    const truncated = read.truncated_catalogs.filter((entry) =>
+      about(entry.integration_package_id),
+    );
     for (const entry of truncated) {
       notes.push(
-        `${entry.integration}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
+        `${entry.integration_package_id}'s catalog is incomplete: only the first ${entry.listed_tools} ` +
           "tool(s) its server lists were read, and a tool listed after them is not offered. " +
           "Narrow with `integration`, or search the tool by name.",
       );
@@ -209,6 +245,9 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     return jsonResult({
       total: matches.length,
       tools: shown.map(listedTool),
+      ...(reached.size > 0
+        ? { connections: read.connections.filter((c) => reached.has(c.connection_id)) }
+        : {}),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
       ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
@@ -217,8 +256,10 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
             best_match: {
               ...listedTool(top),
               usage: top.usage,
-              input_schema: top.inputSchema,
-              ...(top.outputSchema ? { output_schema: top.outputSchema } : {}),
+              input_schema: top.input_schema,
+              ...(top.kind === "remote" && top.output_schema
+                ? { output_schema: top.output_schema }
+                : {}),
             },
           }
         : {}),
@@ -272,7 +313,7 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
         connection_id: {
           type: "string",
           description:
-            "The connection to call with, one of the tool's `connections[].connection_id`. " +
+            "The connection to call with, one of the tool's `connection_ids`. " +
             "Without it the proxy chooses as for an `api_call`, and refuses with the candidate " +
             "connections when several qualify. For an `api_call` tool, it applies to each " +
             "request that names no `connection_id` of its own.",
@@ -295,24 +336,30 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       });
       return refusalResult(refusal);
     };
-    for (const name of ["tool", "arguments"] as const) {
-      if (args[name] === undefined) {
-        return refuse({
-          code: "missing_argument",
-          error: `${name} is required.`,
-          arguments: [name],
-        });
-      }
-    }
     const call = callSchema.safeParse(args);
-    if (!call.success) return refuse(argumentsRefusal(call.error));
+    if (!call.success) return refuse(argumentsRefusal(call.error, args));
 
-    const read = await readIntegrationTools(ctx, {
-      name: call.data.tool,
-      ...(call.data.connection_id ? { connectionId: call.data.connection_id } : {}),
-    });
+    const read = await readIntegrationTools(
+      ctx,
+      {
+        name: call.data.tool,
+        ...(call.data.connection_id ? { connectionId: call.data.connection_id } : {}),
+      },
+      extra.signal,
+    );
     if ("refused" in read) return listingRefused(ctx, "call_integration_tool", start, read.refused);
-    const tool = read.tools.find((t) => t.name === call.data.tool);
+    const candidates = read.tools.filter((t) => t.name === call.data.tool);
+    if (candidates.length > 1) {
+      // Names are unique in a space: two tools under one name are never called by a guess.
+      return refuse({
+        code: "ambiguous_tool",
+        error: `${call.data.tool} names ${candidates.length} tools of ${[
+          ...new Set(candidates.map((t) => t.integration_package_id)),
+        ].join(", ")}; none is called.`,
+        arguments: ["tool"],
+      });
+    }
+    const tool = candidates[0];
     const unlisted = read.unlisted[0];
     if (!tool && unlisted) {
       // A remote server's listing was refused (connection, permission): the refusal says why.
@@ -332,24 +379,27 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       });
     }
 
-    const required: unknown[] = Array.isArray(tool.inputSchema.required)
-      ? tool.inputSchema.required
-      : [];
-    for (const name of required) {
-      if (typeof name !== "string") continue;
-      if (call.data.arguments[name] === undefined) {
-        return refuse({
-          code: "missing_argument",
-          error: `arguments.${name} is required.`,
-          arguments: [`arguments.${name}`],
-        });
-      }
-    }
     let toolArguments: unknown = call.data.arguments;
     if (tool.schema) {
       const parsed = tool.schema.safeParse(call.data.arguments);
-      if (!parsed.success) return refuse(argumentsRefusal(parsed.error, ["arguments"]));
+      if (!parsed.success) {
+        return refuse(argumentsRefusal(parsed.error, call.data.arguments, ["arguments"]));
+      }
       toolArguments = parsed.data;
+    } else {
+      // A typed tool: only the presence of its required arguments; its server validates the rest.
+      const required = Array.isArray(tool.input_schema.required) ? tool.input_schema.required : [];
+      const missing = required.filter(
+        (name): name is string =>
+          typeof name === "string" && call.data.arguments[name] === undefined,
+      );
+      if (missing.length > 0) {
+        return refuse({
+          code: "missing_argument",
+          error: missing.map((name) => `arguments.${name} is required.`).join(" "),
+          arguments: missing.map((name) => `arguments.${name}`),
+        });
+      }
     }
     const outcome = await tool.execute(toolArguments, extra, call.data.connection_id);
     if ("code" in outcome) return refuse(outcome);

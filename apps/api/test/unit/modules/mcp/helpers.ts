@@ -22,7 +22,9 @@ import {
 export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true, proxyOpen = true) {
   return buildMcpTools(
     ctx,
-    deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential, proxyOpen),
+    deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential, {
+      credentialProxyOpen: proxyOpen,
+    }),
   );
 }
 
@@ -32,7 +34,9 @@ export function instructionsFor(permissions: Iterable<string>, contextInjected =
   return buildServerInstructions(
     set,
     undefined,
-    deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, true),
+    deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, {
+      credentialProxyOpen: true,
+    }),
     contextInjected,
   );
 }
