@@ -20,12 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the release window**
   (#2197, #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools
-  it had, and nothing reports it. With the app stopped, after the schema migrations and before the
-  app serves traffic:
-  1. Back up, and note an instant after the app stopped, in RFC 3339 with `Z` or an offset: it is
-     `--before`, the same value on every re-run.
+  it had, and nothing reports it. Back up before the schema migrations. Then, with the app stopped,
+  after the schema migrations and before the app serves traffic:
+  1. Note an instant after the app stopped, in RFC 3339 with `Z` or an offset: it is `--before`,
+     the same value on every re-run.
   2. Dry run:
-     `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`.
+     `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
+     (on the embedded database, name it: `PGLITE_DATA_DIR=<dir> bun scripts/migration/…`).
   3. The same with `--apply`. It exits 1 while a malformed manifest remains: fix it by hand, then
      re-run with the same `--before`.
 
@@ -565,9 +566,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `LogEntry` and `LogLevel`.
 - **`memory.added`, `pinned.set` and `log.written` are no longer canonical run events**
   (#2199). Nothing emits them: `note`, `pin` and `log` write server-side. Ingestion writes no
-  row for such an envelope; `@appstrate/afps-runtime` drops them (and `LogWrittenEvent`) from
-  `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and the reducer, and the L4 conformance script
-  no longer contains them, and `appstrate run` no longer prints `+ memory:` lines.
+  row for such an envelope; `@appstrate/afps-runtime` removes its canonical-events module (see
+  its CHANGELOG) and its reducer reads `output.emitted` only; the L4 conformance script does not
+  contain them, and `appstrate run` prints no `+ memory:` line.
 - **The `_meta["dev.appstrate/events"]` channel is removed** (#2199). The runner's
   `output` and `publish_file` tools emit their event through the `emit` their
   handler receives, and the sidecar no longer strips the key from third-party tool results.

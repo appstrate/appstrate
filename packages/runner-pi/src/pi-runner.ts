@@ -565,11 +565,11 @@ export class PiRunner {
         return;
       }
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
-      // best-effort drain → reduce → stamp status/usage/cost → finalize). Usage
+      // best-effort settle → reduce → stamp status/usage/cost → finalize). Usage
       // + cost come from the session bridge when captured; a very early throw
-      // stamps explicit zero usage. The drain converges the bridge's pending
-      // fire-and-forget emits (`settlePending`) before finalize closes the sink;
-      // it emits nothing new, so reducing before vs after it is equivalent.
+      // stamps explicit zero usage. `settlePending` waits for the bridge's
+      // fire-and-forget emits before finalize closes the sink; it emits nothing
+      // new, so reducing before vs after it is equivalent.
       const bridge = bridgeRef.current;
       await finalizeThrownFailure({
         events,

@@ -1213,7 +1213,7 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("drops a second connection's tool too large once sanitised, sibling or not", async () => {
+  it("drops a second connection's tool too large once sanitised, although a sibling serves it", async () => {
     const [oversized] = sshTool("db");
     const properties = Object.fromEntries(
       Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),

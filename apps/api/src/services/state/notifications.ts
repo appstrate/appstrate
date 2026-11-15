@@ -120,7 +120,8 @@ export async function markRunNotificationsRead(
  *
  * Each recipient receives at most one `agent_message` per run: the
  * `(run, recipient, type)` unique index makes a second call a no-op. Returns how
- * many rows were written; `0` means the run already sent its message.
+ * many rows were written; `0` means the run already sent its message. `recipients`
+ * is not empty.
  */
 export async function createAgentMessageNotifications(
   scope: SpaceScope,

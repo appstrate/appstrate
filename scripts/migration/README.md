@@ -1483,7 +1483,8 @@ agent manifests (`package_versions.manifest`, `packages.draft_manifest`) so that
 Run: back up first (`pg_dump`; on the embedded database a copy of the stopped `PGLITE_DATA_DIR`),
 then
 `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
-is the dry run (rolled back); `--apply` commits. On the embedded database the platform applies the
+is the dry run (rolled back); `--apply` commits. On the embedded database, name it:
+`PGLITE_DATA_DIR=<dir> bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`. There the platform applies the
 schema migrations itself at boot, before the script, and a draft saved during that boot is newer
 than a `--before` taken earlier: take `--before` once that boot is stopped. Its counts are
 unmeasured: rehearse it on a restored production dump before the window and record them in the
@@ -1492,8 +1493,8 @@ Log.
 Verify: it prints its mode and the database it targets, then per store what it rewrites, how many
 of those gain the open `output.schema`, the malformed manifests it leaves, and after the rewrite how
 many still carry `runtime_tools` and how many written before `--before` still lack the dependency.
-Both "after" columns read 0, or count only listed malformed manifests. A second run with the same
-`--before` rewrites nothing.
+Both "after" columns read 0, or count only listed malformed manifests. An immediate second run with
+the same `--before` rewrites nothing.
 
 Malformed: a manifest with a field the rewrite merges into that is not an object is listed and left
 untouched, and its agent runs without the platform tools; the script exits 1 while one remains,

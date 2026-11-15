@@ -470,11 +470,15 @@ describe("run --local — several remote integrations", () => {
     const silent = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: async () => {
+      fetch: async (req) => {
         held += 1;
         maxHeld = Math.max(maxHeld, held);
         if (held === 2) release();
-        await released;
+        // A client that gave up frees its slot: connecting in turn never holds two.
+        const gaveUp = new Promise<void>((resolve) =>
+          req.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        await Promise.race([released, gaveUp]);
         held -= 1;
         return new Response(null, { status: 503 });
       },

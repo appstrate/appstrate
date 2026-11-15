@@ -59,8 +59,8 @@
  * manifest is written once, at publish) and a draft's `updated_at` (bumped by
  * every draft save). The `runtime_tools` arm needs no bound: the field is what
  * the script removes, whenever it was written. So every WHERE is the condition
- * it removes, and a second run with the same `--before`, at once or later,
- * rewrites nothing it already rewrote.
+ * it removes, and an immediate second run with the same `--before` rewrites
+ * nothing.
  *
  * A manifest the rewrite cannot merge into — `dependencies`,
  * `dependencies.integrations`, `integrations_configuration` or its
