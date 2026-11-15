@@ -4502,7 +4502,7 @@ export interface paths {
         put?: never;
         /**
          * Create a remote-backed run (caller executes the agent)
-         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
+         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
          *
          *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.
          *
@@ -4559,6 +4559,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest one signed CloudEvent (HMAC)
+         * @description Receives a single AFPS `RunEvent` CloudEvent from the run's HttpSink. Authenticated via Standard Webhooks HMAC-SHA256 (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers). Idempotent: duplicate `webhook-id` values inside the replay window return `200 { outcome: "replay" }` without reprocessing. Events with non-contiguous sequence numbers are buffered and drained in order on the next contiguous arrival or when a terminal event flushes the buffer.
+         */
+        post: operations["ingestRunEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/events/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Terminal RunResult — close the sink (HMAC, idempotent)
+         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
+         *
+         *     The runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.
+         */
+        post: operations["finalizeRemoteRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/events/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runner liveness keep-alive (HMAC)
+         * @description Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).
+         */
+        post: operations["heartbeatRemoteRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the run's input files (HMAC)
+         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{id}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
+         */
+        get: operations["fetchRunFilesManifest"];
+        put?: never;
+        /**
+         * Publish an agent-produced file (HMAC, streaming)
+         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         */
+        post: operations["publishRunFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch a single run input file (HMAC)
+         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
+         */
+        get: operations["fetchRunFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/logs": {
         parameters: {
             query?: never;
@@ -4599,113 +4705,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{runId}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest one signed CloudEvent (HMAC)
-         * @description Receives a single AFPS `RunEvent` CloudEvent from the run's HttpSink. Authenticated via Standard Webhooks HMAC-SHA256 (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers). Idempotent: duplicate `webhook-id` values inside the replay window return `200 { outcome: "replay" }` without reprocessing. Events with non-contiguous sequence numbers are buffered and drained in order on the next contiguous arrival or when a terminal event flushes the buffer.
-         */
-        post: operations["ingestRunEvent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/events/finalize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Terminal RunResult — close the sink (HMAC, idempotent)
-         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
-         *
-         *     The runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.
-         */
-        post: operations["finalizeRemoteRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/events/heartbeat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Runner liveness keep-alive (HMAC)
-         * @description Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).
-         */
-        post: operations["heartbeatRemoteRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the run's input files (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
-         */
-        get: operations["fetchRunFilesManifest"];
-        put?: never;
-        /**
-         * Publish an agent-produced file (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
-         */
-        post: operations["publishRunFile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/files/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch a single run input file (HMAC)
-         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
-         */
-        get: operations["fetchRunFile"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/sink/extend": {
+    "/api/runs/{id}/sink/extend": {
         parameters: {
             query?: never;
             header?: never;
@@ -4725,7 +4725,7 @@ export interface paths {
         patch: operations["extendRunSink"];
         trace?: never;
     };
-    "/api/runs/{runId}/workspace": {
+    "/api/runs/{id}/workspace": {
         parameters: {
             query?: never;
             header?: never;
@@ -4734,7 +4734,7 @@ export interface paths {
         };
         /**
          * Fetch the run bundle archive (HMAC)
-         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
+         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{id}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
          */
         get: operations["fetchRunWorkspace"];
         put?: never;
@@ -24970,91 +24970,6 @@ export interface operations {
             };
         };
     };
-    getRunLogs: {
-        parameters: {
-            query?: {
-                /** @description Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel="next"` pagination header. */
-                since?: number;
-                /** @description Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything). */
-                level?: "debug" | "info" | "warn" | "error";
-                /** @description Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor — page with it to read longer histories. */
-                limit?: number;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Log entries (list envelope) */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    Link: components["headers"]["Link"];
-                    RateLimit: components["headers"]["RateLimit"];
-                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["RunLog"][];
-                        /** @description True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel="next"` header carries the next page's URL. */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description `limit` outside its declared range (`param` names it). */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    markRunRead: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
-                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
-            };
-            path: {
-                /** @description Run id */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run marked read (idempotent — 204 even if it was already read) */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     ingestRunEvent: {
         parameters: {
             query?: never;
@@ -25067,7 +24982,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25145,7 +25060,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25237,7 +25152,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25299,7 +25214,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25375,7 +25290,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25494,7 +25409,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
                 name: string;
             };
             cookie?: never;
@@ -25541,6 +25456,91 @@ export interface operations {
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
+    getRunLogs: {
+        parameters: {
+            query?: {
+                /** @description Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel="next"` pagination header. */
+                since?: number;
+                /** @description Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything). */
+                level?: "debug" | "info" | "warn" | "error";
+                /** @description Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor — page with it to read longer histories. */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Log entries (list envelope) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    RateLimit: components["headers"]["RateLimit"];
+                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RunLog"][];
+                        /** @description True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel="next"` header carries the next page's URL. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description `limit` outside its declared range (`param` names it). */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    markRunRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path: {
+                /** @description Run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run marked read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     extendRunSink: {
         parameters: {
             query?: never;
@@ -25549,7 +25549,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25591,7 +25591,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };

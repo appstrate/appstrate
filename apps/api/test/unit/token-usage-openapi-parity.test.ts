@@ -91,7 +91,7 @@ describe("TokenUsage component ↔ parseTokenUsage", () => {
     expect(spec.components.schemas.Run!.properties.token_usage).toMatchObject({
       oneOf: [{ $ref: ref }, { type: "null" }],
     });
-    const finalize = spec.paths["/api/runs/{runId}/events/finalize"]!.post.requestBody;
+    const finalize = spec.paths["/api/runs/{id}/events/finalize"]!.post.requestBody;
     expect(finalize.content["application/json"]!.schema.properties.usage).toMatchObject({
       $ref: ref,
     });

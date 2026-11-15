@@ -798,7 +798,7 @@ The resolved result is then validated against the agent's `input` schema before 
 
 A remote run executes on the instance and outlives the CLI process by design — like closing a dashboard tab. What `SIGINT` / `SIGTERM` / `SIGHUP` does to that run depends on whether a human sent it:
 
-- **Interactive** (stdin is a TTY and `--json` is not set) — the signal **cancels** the run server-side (`POST /api/runs/{runId}/cancel`) and the CLI keeps polling until the run reaches a terminal status, so the final state still prints. Ctrl-C at a keyboard is a cancel intent.
+- **Interactive** (stdin is a TTY and `--json` is not set) — the signal **cancels** the run server-side (`POST /api/runs/{id}/cancel`) and the CLI keeps polling until the run reaches a terminal status, so the final state still prints. Ctrl-C at a keyboard is a cancel intent.
 - **Non-interactive** (`--json`, or stdin is not a TTY: CI, a supervisor, a background shell) — the signal **detaches**. No cancel is sent, the CLI stops tailing, and the run keeps going:
 
 ```

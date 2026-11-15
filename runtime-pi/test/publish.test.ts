@@ -78,7 +78,7 @@ beforeAll(() => {
 
       const bytes = new Uint8Array(await req.arrayBuffer());
       const sha256 = sha256Hex(bytes);
-      // Mirrors `POST /api/runs/:runId/files` in
+      // Mirrors `POST /api/runs/:id/files` in
       // `apps/api/src/routes/runs-events.ts`: the name header is a
       // percent-encoded UTF-8 filename, decoded STRICTLY (a malformed or
       // un-encoded value is a typed 400, never a guess) and then sanitized into

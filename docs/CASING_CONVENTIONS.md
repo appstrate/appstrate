@@ -285,7 +285,7 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 **Rule**: event envelopes and payloads are camelCase — `BaseEnvelope`: `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
 
-The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{runId}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
+The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{id}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
 
 **Why**: CloudEvents spec uses camelCase for context attributes; consistent producer/consumer across the runtime, the sidecar and the platform.
 

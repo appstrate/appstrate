@@ -2,7 +2,7 @@
 
 /**
  * Regression tests for the HMAC-signed event-ingestion path:
- * `POST /api/runs/:runId/events` + `POST /api/runs/:runId/events/finalize`.
+ * `POST /api/runs/:id/events` + `POST /api/runs/:id/events/finalize`.
  *
  * Protects two fixes introduced after the stdout-JSONL → HttpSink
  * transport swap:
@@ -163,7 +163,7 @@ function bufferedProgress(runId: string, message: string): RunEvent {
   return { type: "appstrate.progress", runId, timestamp: Date.now(), message };
 }
 
-describe("POST /api/runs/:runId/events — ingestion without Redis-specific coupling", () => {
+describe("POST /api/runs/:id/events — ingestion without Redis-specific coupling", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -790,7 +790,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   });
 });
 
-describe("POST /api/runs/:runId/events/finalize — complete result persistence", () => {
+describe("POST /api/runs/:id/events/finalize — complete result persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -1863,7 +1863,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 // (org) runs. Skipping the field collapses every run to "system" in a
 // subscriber's fallback and silently charges runs the platform never paid for.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", () => {
+describe("POST /api/runs/:id/events/finalize — terminal broadcast params", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -2322,7 +2322,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
 // `runs.error`, but the payload is still persisted on `runs.result` — the
 // deliverable is flagged, never dropped.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — output-schema validation persistence", () => {
+describe("POST /api/runs/:id/events/finalize — output-schema validation persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
