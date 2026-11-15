@@ -30,14 +30,17 @@ function recipientFilter(actor: Actor): SQL {
  * about it (`notifyRunFinished`, and the agent's own `notify` tool,
  * `createAgentMessageNotifications`). `null` when the run does not exist in
  * `scope`, otherwise the run and its recipients, possibly none:
- *  - an ephemeral run (chat, playground, direct inline call) → nobody: its
- *    result is already in front of the caller. Keyed on `packages.ephemeral`; a
- *    null join (shadow package already gone) is not ephemeral.
  *  - the member or end-user who launched it;
  *  - an actor-less run (owner-less org / system schedule) → the org's owners
  *    and admins. An actor-less run is readable only with `runs:read-all` (RBAC
  *    spec §3.4), which is why those are its recipients, and it bounds the row
  *    count.
+ *
+ * `run.ephemeral` is `packages.ephemeral` (chat, playground, direct inline
+ * call); a null join (shadow package already gone) is not ephemeral. The
+ * recipients are the same either way: what an ephemeral run skips is the
+ * automatic fan-out (`recordRunFinished`), not a message its agent chose to
+ * send.
  *
  * Bounded race: a member removed between this read and the insert gets a row
  * they can no longer see (org context refuses a non-member), reaped with the
@@ -48,7 +51,13 @@ export async function resolveRunRecipients(
   runId: string,
   executor: DbOrTx = db,
 ): Promise<{
-  run: { id: string; packageId: string | null; agentName: string | null; status: RunStatus };
+  run: {
+    id: string;
+    packageId: string | null;
+    agentName: string | null;
+    status: RunStatus;
+    ephemeral: boolean;
+  };
   recipients: Actor[];
 } | null> {
   const [row] = await executor
@@ -71,8 +80,13 @@ export async function resolveRunRecipients(
     )
     .limit(1);
   if (!row) return null;
-  const run = { id: runId, packageId: row.packageId, agentName: row.agentName, status: row.status };
-  if (row.packageEphemeral === true) return { run, recipients: [] };
+  const run = {
+    id: runId,
+    packageId: row.packageId,
+    agentName: row.agentName,
+    status: row.status,
+    ephemeral: row.packageEphemeral === true,
+  };
   if (row.userId) return { run, recipients: [{ type: "user", id: row.userId }] };
   if (row.endUserId) return { run, recipients: [{ type: "end_user", id: row.endUserId }] };
   const admins = await executor
@@ -95,7 +109,8 @@ export async function resolveRunRecipients(
  * its read state, so opening it marks it read. The primary key makes a re-fire
  * a no-op.
  *
- * An ephemeral run records nothing: it has no recipient (`resolveRunRecipients`).
+ * An ephemeral run records nothing: its result is already in front of the
+ * caller, so it is neither unread nor announced.
  *
  * Best-effort: it runs in a transaction of its own (a savepoint inside the
  * caller's), and a failure is logged, never thrown — it costs a missing unread
@@ -115,7 +130,7 @@ export async function recordRunFinished(
 
 async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx): Promise<void> {
   const target = await resolveRunRecipients(scope, runId, executor);
-  if (!target || target.recipients.length === 0) return;
+  if (!target || target.run.ephemeral || target.recipients.length === 0) return;
   await executor
     .insert(runReads)
     .values(

@@ -12,7 +12,14 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
-import { notifications, packagePersistence, packages, runLogs, runs } from "@appstrate/db/schema";
+import {
+  notifications,
+  organizationMembers,
+  packagePersistence,
+  packages,
+  runLogs,
+  runs,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
@@ -708,10 +715,29 @@ describe("run MCP server", () => {
       expect(await notificationsOf(run.id)).toHaveLength(0);
     });
 
-    it("refuses a run nobody can be notified for, writing nothing", async () => {
+    it("notifies the launcher of an inline run, naming the agent as stamped on the run", async () => {
       const inlineId = `@inline/r-${crypto.randomUUID()}`;
       await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
-      const run = await seedRunningRun({ packageId: inlineId });
+      const run = await seedRunningRun({ packageId: inlineId, agentName: "Invoice check" });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBeUndefined();
+      const rows = await notificationsOf(run.id);
+      expect(rows.map((r) => [r.recipientType, r.recipientId])).toEqual([["user", ctx.user.id]]);
+      expect(rows[0]!.payload).toEqual({
+        packageId: inlineId,
+        agent_name: "Invoice check",
+        title: "t",
+        message: "m",
+      });
+    });
+
+    it("refuses a run nobody can be notified for, writing nothing", async () => {
+      // An unattended run of an org whose only member is a plain member: no owner, no admin.
+      await db
+        .update(organizationMembers)
+        .set({ role: "member" })
+        .where(eq(organizationMembers.orgId, ctx.orgId));
+      const run = await seedRunningRun({ userId: null });
       const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain("nobody can be notified");

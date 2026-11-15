@@ -353,9 +353,7 @@ const RUN_TOOLS: RunTool[] = [
       const scope = { orgId: run.orgId, spaceId: run.spaceId };
       const target = await resolveRunRecipients(scope, run.id);
       if (!target || target.recipients.length === 0) {
-        return errorResult(
-          "notify: nobody can be notified for this run (an ephemeral run, or no recipient); nothing was sent.",
-        );
+        return errorResult("notify: nobody can be notified for this run; nothing was sent.");
       }
       const inserted = await createAgentMessageNotifications(scope, target.run, target.recipients, {
         title,

@@ -19460,6 +19460,8 @@ export interface operations {
                             payload: {
                                 /** @description The agent of the run that sent it; null when the run no longer references its agent. */
                                 packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted). */
+                                agent_name: string | null;
                                 /** @description Headline the agent wrote (`notify` tool). */
                                 title: string;
                                 /** @description Body the agent wrote (`notify` tool). */

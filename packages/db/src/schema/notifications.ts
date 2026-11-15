@@ -70,7 +70,12 @@ export interface NotificationPayloads {
   run_failed: { packageId: string | null; agent_name: string | null; status: RunAlertStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
   /** Sent by the agent of `runId` from inside the run (the `notify` tool). */
-  agent_message: { packageId: string | null; title: string; message: string };
+  agent_message: {
+    packageId: string | null;
+    agent_name: string | null;
+    title: string;
+    message: string;
+  };
 }
 
 export const notifications = pgTable(
