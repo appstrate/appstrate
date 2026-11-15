@@ -2,7 +2,6 @@
   "page.empty": "No files",
   "page.emptyHint": "Files uploaded in chat and produced by your agents will appear here.",
   "page.noMatch": "No documents match this filter.",
-  "page.loadMore": "Load more",
   "page.count_one": "{{count}} document",
   "page.count_other": "{{count}} documents",
   "page.countLoaded_one": "{{count}} document loaded",

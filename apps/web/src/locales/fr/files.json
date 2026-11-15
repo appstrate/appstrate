@@ -2,7 +2,6 @@
   "page.empty": "Aucun fichier",
   "page.emptyHint": "Les fichiers importés dans le chat et produits par vos agents apparaîtront ici.",
   "page.noMatch": "Aucun document ne correspond à ce filtre.",
-  "page.loadMore": "Charger plus",
   "page.count_one": "{{count}} document",
   "page.count_other": "{{count}} documents",
   "page.countLoaded_one": "{{count}} document chargé",

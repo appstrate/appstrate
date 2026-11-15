@@ -104,7 +104,7 @@ export function IntegrationsPage() {
   );
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
-    <NoMatchState message={t("integrations.empty.filtered")} />
+    <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
   ) : (
     <EmptyState
       icon={Boxes}

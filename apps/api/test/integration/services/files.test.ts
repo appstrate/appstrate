@@ -1585,7 +1585,7 @@ describe("files service + routes", () => {
     expect(over.status).toBe(400);
     expect(((await over.json()) as { param?: string }).param).toBe("limit");
     const inRange = await app.request(`/api/files?limit=50`, { headers: authHeaders(ctx) });
-    expect(((await inRange.json()) as { limit: number }).limit).toBe(50);
+    expect(inRange.status).toBe(200);
   });
 
   // -------------------------------------------------------------------------

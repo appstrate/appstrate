@@ -263,7 +263,7 @@ const canonicalRunsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`.",
         },
         "409": {
           description:
@@ -325,7 +325,8 @@ const canonicalRunsPaths = {
       operationId: "listAgentRuns",
       tags: ["Runs"],
       summary: "List runs for an agent",
-      description: "List runs for a specific agent (org-scoped, default limit 50).",
+      description:
+        "List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -334,9 +335,15 @@ const canonicalRunsPaths = {
         {
           name: "limit",
           in: "query",
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { $ref: "#/components/parameters/Offset" },
+        {
+          name: "startingAfter",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+        },
         { $ref: "#/components/parameters/RunStatusFilter" },
         { $ref: "#/components/parameters/RunSearch" },
       ],
@@ -367,8 +374,7 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+          description: "`limit` outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
@@ -814,7 +820,13 @@ const canonicalRunsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { $ref: "#/components/parameters/Offset" },
+        {
+          name: "startingAfter",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+        },
         {
           name: "kind",
           in: "query",
@@ -1131,8 +1143,7 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+          description: "`limit` outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

@@ -138,7 +138,7 @@ export function useWebhookDeliveries(webhookId: string) {
     queryKey: ["get", "/api/webhooks/{id}/deliveries", { params }] as const,
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/webhooks/{id}/deliveries", {
-        params: { ...params, query: { startingAfter: pageParam } },
+        params: { ...params, query: { limit: 25, startingAfter: pageParam } },
         signal,
       });
       if (!data) throw new Error("empty response");

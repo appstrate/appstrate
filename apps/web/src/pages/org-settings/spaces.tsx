@@ -104,7 +104,12 @@ export function OrgSettingsSpacesPage() {
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
+          <EmptyState
+            message={t("spaces.empty")}
+            hint={t("spaces.emptyHint")}
+            icon={AppWindow}
+            compact
+          >
             <EmptyStateAction action={create} />
           </EmptyState>
         }

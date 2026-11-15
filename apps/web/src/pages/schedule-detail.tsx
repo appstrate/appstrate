@@ -25,7 +25,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
@@ -311,14 +311,10 @@ function ScheduleHistory({
 
   const isActive = schedule.enabled;
 
-  // The same query ScopedRunList makes for its first page (12 rows), so React
-  // Query serves both from one fetch.
+  // The same query ScopedRunList makes (default page size), so React Query
+  // serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const runsQuery = usePaginatedRuns({
-    scheduleId: schedule.id,
-    limit: 12,
-    offset: 0,
-  });
+  const runsQuery = useFirstRunsPage({ scheduleId: schedule.id });
   const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 

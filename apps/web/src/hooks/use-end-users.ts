@@ -31,7 +31,7 @@ export function useEndUsers(params?: EndUserListParams) {
       params: {
         query: {
           limit: params?.limit,
-          search: params?.search,
+          q: params?.search,
         },
         header: scope.header,
       },
@@ -43,7 +43,7 @@ export function useEndUsers(params?: EndUserListParams) {
 /** The end-users, keyset-paged and searched server-side. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useEndUsers`. */
 export function useEndUsersPaged({ search }: { search?: string } = {}) {
   const scope = useEndUsersReadScope();
-  const query = { limit: 25, search: search?.trim() || undefined };
+  const query = { limit: 25, q: search?.trim() || undefined };
   return useInfiniteQuery({
     queryKey: ["get", "/api/end-users", "paged", { header: scope.header, query }] as const,
     queryFn: async ({ pageParam, signal }) => {

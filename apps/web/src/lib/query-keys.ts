@@ -58,7 +58,7 @@ export function invalidateRunDetails(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
-/** Cursor/offset-paginated run tables (runs page, agent runs tab). */
+/** Keyset-paged run lists (runs page, agent runs tab, schedule runs tab). */
 export const paginatedRunsKeys = {
   all: ["paginated-runs"] as const,
   list: (
@@ -71,7 +71,6 @@ export const paginatedRunsKeys = {
     unread: boolean | undefined,
     search: string | null | undefined,
     limit: number,
-    offset: number,
   ) =>
     [
       "paginated-runs",
@@ -83,9 +82,8 @@ export const paginatedRunsKeys = {
       status,
       unread,
       search,
-      // The OFFSET stays last: `placeholderData` keeps rows only when everything before it matched (paging vs a changed question).
+      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
       limit,
-      offset,
     ] as const,
 };
 

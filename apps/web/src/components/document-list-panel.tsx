@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
-import { EmptyState } from "./page-states";
+import { EmptyState, NoMatchState } from "./page-states";
 import { CardGrid } from "./card-grid";
 import { FileTile, FileTileSkeleton } from "./file-tile";
 import { ItemList } from "./item-list";
@@ -42,10 +42,11 @@ export function DocumentListPanel({
   documents: FileDto[];
   isLoading: boolean;
   error: unknown;
-  empty: { message: string; hint?: string; compact?: boolean };
+  /** `onReset` marks a filtered list that found nothing: the state offers to clear the filters. */
+  empty: { message: string; hint?: string; compact?: boolean; onReset?: () => void };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
-  /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
+  /** Rendered after the list: the gallery's load-more footer, a run's truncation notice. */
   footer?: ReactNode;
   /** The gallery offers cards or table; run surfaces keep their table or compact list. */
   display?: "cards" | "table" | "compact";
@@ -108,7 +109,9 @@ export function DocumentListPanel({
     onDelete,
   });
   const { columns, menu } = useColumnVisibility("documents", allColumns);
-  const emptyState = (
+  const emptyState = empty.onReset ? (
+    <NoMatchState message={empty.message} onReset={empty.onReset} />
+  ) : (
     <EmptyState message={empty.message} hint={empty.hint} compact={empty.compact} icon={FileText} />
   );
 

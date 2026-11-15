@@ -46,7 +46,6 @@ export function ScopedRunList({
       status={statuses}
       search={list.search}
       tableSurface="integrated"
-      countLabel={(total) => t("runs.count", { count: total })}
       toolbar={({ columns }) => (
         <ListToolbar
           columns={columns}

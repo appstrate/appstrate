@@ -42,6 +42,10 @@ import { useSpace } from "../../hooks/use-spaces";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { DataTable } from "../../components/data-table";
+import { ListFooter, ListToolbar } from "../../components/list-toolbar";
+import { useLocalListParams } from "../../lib/list-params";
+import { useSearchPlaceholder } from "../../lib/search-placeholder";
+import { matchesSearch } from "../../lib/strings";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
@@ -52,7 +56,7 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../../components/page-states";
 import { useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
@@ -77,6 +81,12 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { data, isLoading, error } = useSpaceMembers(spaceId, canRead);
   // Disabling a query does not remove previously cached rows after a role change.
   const members = canRead ? data : undefined;
+  // The page holds other lists and dialogs: its search stays local rather than writing `?q=`.
+  const list = useLocalListParams();
+  const searchPlaceholder = useSearchPlaceholder(t("spaceMembers.tabTitle"));
+  const shownMembers = (members ?? []).filter((member) =>
+    matchesSearch(list.search, [memberLabel(member), member.email]),
+  );
   const {
     options: roleOptions,
     roles,
@@ -207,23 +217,45 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       )}
 
       {canRead && (
+        <ListToolbar
+          search={{
+            value: list.search,
+            onChange: list.setSearch,
+            placeholder: searchPlaceholder,
+          }}
+        />
+      )}
+      {canRead && (
         <DataTable
           tableId="space-members"
           label={t("spaceMembers.tabTitle")}
           columns={columns}
-          rows={members ?? []}
+          rows={shownMembers}
           rowKey={(member) => member.userId}
           isLoading={isLoading}
           failure={error}
           empty={
-            <EmptyState
-              message={t("spaceMembers.empty")}
-              hint={t("spaceMembers.emptyHint")}
-              icon={Users}
-              compact
-            >
-              <EmptyStateAction action={add} />
-            </EmptyState>
+            list.search ? (
+              <NoMatchState message={t("spaceMembers.noMatch")} onReset={list.reset} />
+            ) : (
+              <EmptyState
+                message={t("spaceMembers.empty")}
+                hint={t("spaceMembers.emptyHint")}
+                icon={Users}
+                compact
+              >
+                <EmptyStateAction action={add} />
+              </EmptyState>
+            )
+          }
+        />
+      )}
+      {canRead && (
+        <ListFooter
+          count={
+            isLoading || error
+              ? undefined
+              : t("list.count", { ns: "agents", count: shownMembers.length })
           }
         />
       )}

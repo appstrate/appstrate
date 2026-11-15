@@ -2,7 +2,7 @@
 
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
-import { usePaginatedRuns } from "./use-paginated-runs";
+import { useFirstRunsPage } from "./use-paginated-runs";
 import { agentsKeys, paginatedRunsKeys, runKeys, scheduleKeys } from "../lib/query-keys";
 import { invalidateNotificationQueries } from "./use-notifications";
 
@@ -16,7 +16,7 @@ import { invalidateNotificationQueries } from "./use-notifications";
 
 /** The caller's unread runs in the space — the Runs badge. */
 export function useUnreadRunCount(): number {
-  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0 });
+  const { data } = useFirstRunsPage({ unread: true, limit: 1 });
   return data?.total ?? 0;
 }
 

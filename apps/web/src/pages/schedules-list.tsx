@@ -77,7 +77,7 @@ export function SchedulesListPage() {
 
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
-    <NoMatchState message={t("schedules.noMatch")} />
+    <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
   ) : (
     <EmptyState
       message={t("schedules.empty")}

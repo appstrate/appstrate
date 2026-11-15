@@ -12,8 +12,7 @@ import { SchedulesTable } from "../schedules-table";
 import { useScheduleColumns } from "../schedule-columns";
 import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play } from "lucide-react";
-import { EmptyState, EmptyStateAction } from "../page-states";
-import { TextSkeleton } from "../loading-skeletons";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
@@ -56,9 +55,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
 
-  if (!detail) return <TextSkeleton lines={3} />;
-
-  if (schemaHasFileFields(detail.input?.schema)) {
+  if (detail && schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
 
@@ -100,11 +97,11 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
         schedules={filteredSchedules}
         columns={columns}
         surface="integrated"
-        isLoading={schedulesQuery.isPending}
+        isLoading={!detail || schedulesQuery.isPending}
         isError={schedulesQuery.isError}
         empty={
           hasSchedules ? (
-            <EmptyState message={t("detail.schedulesTable.noMatch")} icon={CalendarClock} compact />
+            <NoMatchState message={t("detail.schedulesTable.noMatch")} onReset={list.reset} />
           ) : (
             <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
               {can("schedules:write") && (

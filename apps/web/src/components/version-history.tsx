@@ -8,7 +8,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
-import { EmptyState, EmptyStateAction } from "./page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
 import { useLocalListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
@@ -89,17 +89,17 @@ export function VersionHistory({
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState
-            icon={History}
-            message={t(search || states.length ? "version.noMatch" : "version.noVersions")}
-            compact
-          >
-            {onCreate && !search && !states.length && (
-              <EmptyStateAction
-                action={{ label: t("version.createVersion"), onSelect: onCreate }}
-              />
-            )}
-          </EmptyState>
+          search || states.length ? (
+            <NoMatchState message={t("version.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState icon={History} message={t("version.noVersions")} compact>
+              {onCreate && (
+                <EmptyStateAction
+                  action={{ label: t("version.createVersion"), onSelect: onCreate }}
+                />
+              )}
+            </EmptyState>
+          )
         }
         columns={[
           {

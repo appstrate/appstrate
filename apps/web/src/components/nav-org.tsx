@@ -17,7 +17,7 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadRunCount } from "../hooks/use-run-reads";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
 import { useCanReach, useReachReady } from "../hooks/use-can-reach";
 import {
@@ -50,11 +50,10 @@ export function NavOrg() {
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
-  const { data: runningInline } = usePaginatedRuns({
+  const { data: runningInline } = useFirstRunsPage({
     kind: "inline",
     status: ["running"],
     limit: 1,
-    offset: 0,
   });
   const hasRunning =
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;

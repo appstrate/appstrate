@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
@@ -8,12 +8,13 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
+import { keysetPaging } from "../lib/keyset-paging";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
 export type RunKindFilter = "all" | "package" | "inline";
 
-interface UsePaginatedRunsOptions {
+interface UseRunsOptions {
   packageId?: string;
   scheduleId?: string;
   user?: "me";
@@ -24,17 +25,22 @@ interface UsePaginatedRunsOptions {
   search?: string;
   /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
   unread?: boolean;
-  limit: number;
-  offset: number;
+  limit?: number;
 }
 
+/** One page of runs everywhere (runs page, agent tab, schedule tab). */
+export const RUNS_PAGE_SIZE = 25;
+
+/** What a runs query holds: the envelopes of the pages loaded so far, newest run first. */
+export type RunsPage = ListEnvelope<EnrichedRun> & { total: number };
+
 /**
- * Whether the previous page's rows stay on screen while the next loads: yes while PAGING and
- * SEARCHING, no when a filter changed. The key ends with `search, limit, offset`
- * (`paginatedRunsKeys.list`); the segments before them are the filters.
+ * Whether the previous rows stay on screen while a new key loads: yes while SEARCHING, no when a
+ * filter changed. The key ends with `search, limit` (`paginatedRunsKeys.list`); the segments
+ * before them are the filters.
  */
 export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
-  const filters = (key: readonly unknown[]) => [...key.slice(0, -3), key[key.length - 2]];
+  const filters = (key: readonly unknown[]) => [...key.slice(0, -2), key[key.length - 1]];
   const current = filters(currentKey);
   const previous = filters(previousKey);
   return (
@@ -42,7 +48,8 @@ export function keepsRunRows(previousKey: readonly unknown[], currentKey: readon
   );
 }
 
-export function usePaginatedRuns({
+/** The list: every page loaded so far, loaded on with `fetchNextPage`. */
+export function useRuns({
   packageId,
   scheduleId,
   user,
@@ -50,9 +57,8 @@ export function usePaginatedRuns({
   status,
   search,
   unread,
-  limit,
-  offset,
-}: UsePaginatedRunsOptions) {
+  limit = RUNS_PAGE_SIZE,
+}: UseRunsOptions) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const { can } = usePermissions();
@@ -80,19 +86,20 @@ export function usePaginatedRuns({
     unread,
     search,
     limit,
-    offset,
   );
 
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: currentKey,
     // `user`/`kind`/`unread` exist only on the global /api/runs view.
-    queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
+    queryFn: async ({ pageParam, signal }): Promise<RunsPage> => {
+      const q = search || undefined;
       if (scheduleId) {
         const { data } = await client.GET("/api/schedules/{id}/runs", {
           params: {
             path: { id: scheduleId },
-            query: { limit, offset, status: statusQuery, q: search || undefined },
+            query: { limit, startingAfter: pageParam, status: statusQuery, q },
           },
+          signal,
         });
         return data!;
       }
@@ -101,8 +108,9 @@ export function usePaginatedRuns({
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
           params: {
             path: { scope, name },
-            query: { limit, offset, status: statusQuery, q: search || undefined },
+            query: { limit, startingAfter: pageParam, status: statusQuery, q },
           },
+          signal,
         });
         return data!;
       }
@@ -110,19 +118,27 @@ export function usePaginatedRuns({
         params: {
           query: {
             limit,
-            offset,
+            startingAfter: pageParam,
             user,
             kind: kind && kind !== "all" ? kind : undefined,
             status: statusQuery,
-            q: search || undefined,
+            q,
             unread: unread || undefined,
           },
         },
+        signal,
       });
       return data!;
     },
+    ...keysetPaging,
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
     enabled: canRead && !!spaceId,
   });
+}
+
+/** Only the first page (a count, the latest run); the same cache entry as the list of the same shape. */
+export function useFirstRunsPage(options: UseRunsOptions) {
+  const query = useRuns(options);
+  return { ...query, data: query.data?.pages[0] };
 }
