@@ -2,7 +2,7 @@
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
 import { sql, type SQL } from "drizzle-orm";
-import { PENDING_RUNTIME_TOOLS_COUNT } from "../../../../scripts/migration/0053-migrate-runtime-tools.ts";
+import { PENDING_RUNTIME_TOOLS_COUNT } from "./pending-runtime-tools.ts";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -766,7 +766,7 @@ export async function unfoldedPackageShareCount(
 /**
  * Refuse to boot while a stored agent manifest (`package_versions.manifest`,
  * `packages.draft_manifest`) still carries `runtime_tools`
- * (`carriesRuntimeTools`, `scripts/migration/0053-migrate-runtime-tools.ts`): nothing reads the
+ * (`carriesRuntimeTools`, `./pending-runtime-tools.ts`): nothing reads the
  * field, so every such agent runs without the `@appstrate/platform` tools it had. Refuses rather
  * than warns, like {@link assertOAuthResourceColumnsPresent}.
  *

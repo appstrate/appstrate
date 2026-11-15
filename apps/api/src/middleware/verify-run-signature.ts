@@ -59,7 +59,7 @@ import {
  * event replay is an idempotent 200, a claimed-id replay is a refusal) and
  * must not be able to consume each other's message ids.
  */
-const CLAIMED_MSG_ID_KEY_PREFIX = "appstrate:run-upload:replay:";
+const CLAIMED_MSG_ID_KEY_PREFIX = "appstrate:run-claimed-msg-id:";
 
 /**
  * Build a run-authentication middleware: resolve the run sink from `:runId`,

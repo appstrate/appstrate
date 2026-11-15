@@ -361,7 +361,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
-  //    don't duplicate log rows or memories.
+  //    don't duplicate log rows.
   let status = result.status;
   let errorMessage: string | null = result.error?.message ?? null;
   let outputValidationErrors: string[] | null = null;
@@ -668,8 +668,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // used to lose the teardown outright — the run is terminal, so
   // `listOrphanRunIds()` never returns it and nothing ever replayed it.
 
-  // 7. Side effects — only the CAS winner reaches here, so memories and
-  //    log rows are written exactly once.
+  // 7. Side effects — only the CAS winner reaches here, so log rows are
+  //    written exactly once.
   if (outputValidationErrors) {
     // Post-CAS best-effort: the run is already terminal, a transient
     // log INSERT failure must not crash finalize. The validation

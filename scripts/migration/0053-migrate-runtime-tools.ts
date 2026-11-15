@@ -62,32 +62,20 @@
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
+import {
+  AGENT_MANIFEST_STORES,
+  carriesRuntimeTools,
+} from "../../apps/api/src/lib/pending-runtime-tools.ts";
 import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 import { table } from "./lib/report-table.ts";
 
 class DryRunRollback extends Error {}
 
-/** The two stores of an agent manifest: the column, and the label printed for its rows. */
-const STORES = [
-  { table: "package_versions", column: "manifest", label: "version" },
-  { table: "packages", column: "draft_manifest", label: "draft" },
-] as const;
+const STORES = AGENT_MANIFEST_STORES;
 
 type Store = (typeof STORES)[number];
 
 const PLATFORM = `'${PLATFORM_INTEGRATION_ID}'`;
-
-/**
- * THE predicate of what this script removes: a stored agent manifest that still carries
- * `runtime_tools`. The boot guard (`assertRuntimeToolsMigrated`) counts it.
- */
-export const carriesRuntimeTools = (m: string): string =>
-  `(${m} ->> 'type' = 'agent' AND ${m} -> 'runtime_tools' IS NOT NULL)`;
-
-/** The count of stored agent manifests {@link carriesRuntimeTools}, over both stores. */
-export const PENDING_RUNTIME_TOOLS_COUNT = `SELECT ${STORES.map(
-  (s) => `(SELECT count(*)::int FROM ${s.table} WHERE ${carriesRuntimeTools(s.column)})`,
-).join(" + ")} AS pending`;
 
 /** An agent manifest the rewrite targets: it carries `runtime_tools` or does not declare the integration. */
 const toMigrate = (m: string): string =>
@@ -192,6 +180,21 @@ export async function runMigrateRuntimeTools(options: {
         };
       }
       report(result).forEach(out);
+      // After: what the boot guard counts. A well-formed manifest still carrying the field
+      // means the rewrite missed it, and nothing is committed.
+      for (const store of STORES) {
+        const m = store.column;
+        const [left] = toRows<{ n: number }>(
+          await tx.execute(`SELECT count(*)::int AS n FROM ${store.table}
+            WHERE ${carriesRuntimeTools(m)} AND ${wellFormed(m)}`),
+        );
+        if (left!.n > 0) {
+          throw new Error(
+            `${left!.n} well-formed manifest(s) in ${store.table} still carry runtime_tools`,
+          );
+        }
+      }
+      out("still carrying runtime_tools: the malformed manifests listed above, and no other.");
       if (!apply) throw new DryRunRollback();
     });
   } catch (error) {
