@@ -19,7 +19,6 @@
 
 import {
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -36,6 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { Thread } from "./thread.tsx";
+import { createMessageQueue } from "./message-queue.ts";
 import {
   ChatTransportProvider,
   ChatHostProvider,
@@ -92,9 +92,7 @@ import {
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
-import { PackageAuthoringToggle } from "./package-authoring-toggle.tsx";
-import { SkillsPicker } from "./skills-picker.tsx";
-import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
+import { ComposerTools } from "./composer-tools.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
@@ -161,8 +159,6 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile?: OpenFile;
-  /** Optional host-owned controls beside the model picker. Pass a memoized node. */
-  composerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -182,6 +178,8 @@ export interface ChatPageProps {
   formatBytes: ChatHost["formatBytes"];
   /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
   onPackagesChanged: ChatHost["onPackagesChanged"];
+  /** The user's first name, greeted on a new conversation (see `ChatHost`). */
+  firstName?: ChatHost["firstName"];
 }
 
 export function ChatPage({
@@ -191,7 +189,6 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
@@ -201,6 +198,7 @@ export function ChatPage({
   modelCredentials,
   formatBytes,
   onPackagesChanged,
+  firstName,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -301,6 +299,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
+      firstName,
     }),
     [
       onOpenFile,
@@ -312,6 +311,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
+      firstName,
     ],
   );
 
@@ -331,33 +331,21 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const authorsPackages = canAuthorPackages(can);
   const composerSlot = useMemo(
     () => (
-      <div className="flex items-center gap-2">
-        {authorsPackages ? <PackageAuthoringToggle /> : null}
-        <ModelSelect
-          models={models}
-          selectedId={selectedModel}
-          onSelect={setSelectedModel}
-          generation={generation}
-          onGenerationChange={editGenerationSettings}
-          pending={modelsPending}
-          failed={modelsFailed}
-        />
-        {composerActions}
-      </div>
+      <ModelSelect
+        models={models}
+        selectedId={selectedModel}
+        onSelect={setSelectedModel}
+        generation={generation}
+        onGenerationChange={editGenerationSettings}
+        pending={modelsPending}
+        failed={modelsFailed}
+      />
     ),
-    [
-      authorsPackages,
-      models,
-      selectedModel,
-      generation,
-      composerActions,
-      modelsPending,
-      modelsFailed,
-    ],
+    [models, selectedModel, generation, modelsPending, modelsFailed],
   );
+  const authorsPackages = canAuthorPackages(can);
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
   // the memoised `Conversation` re-renders only when they change (a few times
@@ -387,6 +375,7 @@ export function ChatPage({
               onConversationChange={onConversationChange}
               attachments={attachments}
               composerSlot={composerSlot}
+              authorsPackages={authorsPackages}
               canPinSkills={canPinSkills(can)}
               canWrite={canWrite}
               serverGenerating={serverGenerating}
@@ -408,6 +397,7 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  authorsPackages: boolean;
   canPinSkills: boolean;
   /** `chat:write`: without the picker, the space's enforced skills are still named. */
   canWrite: boolean;
@@ -437,6 +427,7 @@ const Conversation = memo(function Conversation({
   transport,
   isPersisted,
   composerSlot,
+  authorsPackages,
   canPinSkills,
   canWrite,
   ...rest
@@ -478,18 +469,18 @@ const Conversation = memo(function Conversation({
   }, []);
   const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
   const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
-  const slot = useMemo(
+  const tools = useMemo(
     () => (
-      <div className="flex items-center gap-2">
-        {showPicker ? (
-          <SkillsPicker transport={transport} selection={skills} onChange={chooseSkills} />
-        ) : (
-          canWrite && <EnforcedSkillsIndicator transport={transport} />
-        )}
-        {composerSlot}
-      </div>
+      <ComposerTools
+        transport={transport}
+        selection={skills}
+        onSelectionChange={chooseSkills}
+        showPicker={showPicker}
+        authorsPackages={authorsPackages}
+        showEnforced={canWrite}
+      />
     ),
-    [transport, skills, chooseSkills, showPicker, canWrite, composerSlot],
+    [transport, skills, chooseSkills, showPicker, authorsPackages, canWrite],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -512,7 +503,8 @@ const Conversation = memo(function Conversation({
       transport={transport}
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
-      composerSlot={slot}
+      composerTools={tools}
+      composerSlot={composerSlot}
       getChosenSkills={getChosenSkills}
       {...rest}
     />
@@ -552,11 +544,13 @@ function ConversationInner({
   initialComposerDraft,
   onConversationChange,
   attachments,
+  composerTools,
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
-}: Omit<ConversationProps, "canPinSkills" | "canWrite"> & {
+}: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
+  composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
 }) {
@@ -764,17 +758,27 @@ function ConversationInner({
   // real user stop must also hit the dedicated server endpoint. Start that
   // independent request before aborting the local stream so it cannot be
   // mistaken for an ordinary disconnect.
+  //
+  // Every stop path (button, Escape) lands here, so this is also where the
+  // message queue learns the user stopped: its messages are then held, not sent.
+  const [messageQueue] = useState(createMessageQueue);
   const stop = useCallback(() => {
+    messageQueue.markStopped();
     if (transport) void stopSession(transport.request, id).catch(() => {});
     return chat.stop();
-  }, [chat, transport, id]);
+  }, [chat, transport, id, messageQueue]);
   const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
+      <Thread
+        composerTools={composerTools}
+        composerSlot={composerSlot}
+        initialComposerDraft={initialComposerDraft}
+        messageQueue={messageQueue}
+      />
     </AssistantRuntimeProvider>
   );
 }

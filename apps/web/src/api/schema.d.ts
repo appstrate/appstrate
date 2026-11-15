@@ -11258,6 +11258,8 @@ export interface operations {
             query?: {
                 /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
                 limit?: number;
+                /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
+                q?: string;
                 /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
                 startingAfter?: string;
             };

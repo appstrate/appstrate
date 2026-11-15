@@ -22,7 +22,14 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, Settings2Icon, Trash2Icon } from "lucide-react";
+import {
+  MessagesSquareIcon,
+  PlusIcon,
+  SearchIcon,
+  Settings2Icon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
@@ -48,6 +55,7 @@ import {
 import {
   SidebarGroup,
   SidebarGroupLabel,
+  SidebarInput,
   SidebarMenu,
   SidebarMenuSkeleton,
   SidebarMenuButton,
@@ -69,7 +77,30 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
+import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
+
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_MAX_LENGTH = 200;
+
+const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
+  today: "threads.group.today",
+  yesterday: "threads.group.yesterday",
+  week: "threads.group.week",
+  month: "threads.group.month",
+  older: "threads.group.older",
+};
+
+/** The trimmed search term, settled `delay` ms after the last keystroke (cleared at once). */
+function useDebouncedTerm(input: string, delay: number): string {
+  const term = input.trim();
+  const [settled, setSettled] = useState(term);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(term), delay);
+    return () => clearTimeout(timer);
+  }, [term, delay]);
+  return term === "" ? "" : settled;
+}
 
 /**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
@@ -132,6 +163,13 @@ export function ChatConversationList({
   can: ChatCan;
 }) {
   const select = useSelectConversation();
+  const [input, setInput] = useState("");
+  const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
+  const searching = term !== "";
+  // The plain list always runs (same key as the nav badge): it decides whether
+  // there is anything to search, and it is what the term falls back to.
+  const base = useSessions();
+  const found = useSessions(undefined, term);
   const {
     data: sessions,
     isLoading,
@@ -140,11 +178,26 @@ export function ChatConversationList({
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
-  } = useSessions();
+  } = searching ? found : base;
   const now = useNowTick();
   const list = sessions ?? [];
+  const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
   // Rename and delete are writes; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
+  const hasAny = (base.data?.length ?? 0) > 0;
+  const showSearch = hasAny || input !== "";
+
+  const row = (s: SessionSummary) => (
+    <ConversationRow
+      key={s.id}
+      session={s}
+      active={s.id === activeId}
+      unread={s.unread && s.id !== activeId}
+      now={now}
+      t={t}
+      canWrite={canWrite}
+    />
+  );
   return (
     <>
       {/* Starting a conversation is a write: a reader only rereads its own. */}
@@ -161,25 +214,63 @@ export function ChatConversationList({
         </SidebarGroup>
       )}
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
-        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
+        {showSearch && (
+          <div className="relative mb-1">
+            <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
+            <SidebarInput
+              type="search"
+              value={input}
+              maxLength={SEARCH_MAX_LENGTH}
+              placeholder={t("threads.search.placeholder")}
+              aria-label={t("threads.search.placeholder")}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && input !== "") {
+                  event.preventDefault();
+                  setInput("");
+                }
+              }}
+              className="h-7 pr-7 pl-7 text-xs [&::-webkit-search-cancel-button]:hidden"
+            />
+            {input !== "" && (
+              <button
+                type="button"
+                aria-label={t("threads.search.clear")}
+                title={t("threads.search.clear")}
+                onClick={() => setInput("")}
+                className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-0.5"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+        {(searching || groups.length === 0) && (
+          <SidebarGroupLabel>
+            {t(searching ? "threads.results" : "threads.title")}
+          </SidebarGroupLabel>
+        )}
+        {/* Grows only with rows to scroll: an empty list must not push its
+            empty state to the bottom of the sidebar. */}
+        <SidebarMenu
+          className={list.length > 0 || isLoading ? "min-h-0 flex-1 overflow-y-auto" : undefined}
+        >
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
                 <SidebarMenuSkeleton />
               </SidebarMenuItem>
             ))}
-          {list.map((s) => (
-            <ConversationRow
-              key={s.id}
-              session={s}
-              active={s.id === activeId}
-              unread={s.unread && s.id !== activeId}
-              now={now}
-              t={t}
-              canWrite={canWrite}
-            />
-          ))}
+          {searching
+            ? list.map(row)
+            : groups.map((group) => (
+                <li key={group.key} className="flex flex-col gap-1">
+                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-[11px]">
+                    {t(GROUP_LABEL_KEY[group.key])}
+                  </SidebarGroupLabel>
+                  <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
+                </li>
+              ))}
           {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
           {hasNextPage && (
@@ -204,10 +295,18 @@ export function ChatConversationList({
             </Button>
           </div>
         )}
-        {!isLoading && !isError && list.length === 0 && (
+        {!isLoading && !isError && list.length === 0 && searching && (
           <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
-            {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
+            {t("threads.noResults")}
           </p>
+        )}
+        {!isLoading && !isError && list.length === 0 && !searching && (
+          <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+            <MessagesSquareIcon className="text-sidebar-foreground/50 size-6" />
+            <p className="text-sidebar-foreground/70 text-xs">
+              {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
+            </p>
+          </div>
         )}
       </SidebarGroup>
     </>
@@ -258,8 +357,9 @@ function ConversationRow({
     // row; then drop the row. The server is already updated and the periodic
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    queryClient.setQueryData<SessionsCache>(
-      sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)),
+    // The prefix reaches the filtered (search) lists as well as the plain one.
+    queryClient.setQueriesData<SessionsCache>(
+      { queryKey: sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)) },
       (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);

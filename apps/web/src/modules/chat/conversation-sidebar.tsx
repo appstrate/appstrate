@@ -1,20 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Dispatch, ReactNode } from "react";
-import { ActivityIcon, ChevronRightIcon, FileIcon, FilesIcon, InfoIcon, XIcon } from "lucide-react";
+import { useRef, useState, type Dispatch, type ReactNode } from "react";
+import {
+  ActivityIcon,
+  CheckIcon,
+  CopyIcon,
+  FilesIcon,
+  InfoIcon,
+  PanelRightCloseIcon,
+  PanelRightIcon,
+  XIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { relativeAge } from "@appstrate/core/format";
+import { canReadRuns } from "@appstrate/core/permissions";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { $api } from "../../api/client";
+import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { FileArtifact } from "../../components/file-artifact";
+import { MimeIcon } from "../../components/file-badges";
 import { RunRow } from "../../components/run-row";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
@@ -22,7 +39,10 @@ import type {
   ConversationSidebarTab,
   SidebarFile,
 } from "./conversation-sidebar-state";
-import { TextSkeleton } from "../../components/loading-skeletons";
+import { ChatAccessSummary } from "./chat-access-summary";
+import { PanelResizeHandle } from "./panel-resize";
+import { usePanelWidth } from "./use-panel-width";
+import { useMediaQuery } from "./use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
@@ -55,40 +75,35 @@ function useConversationTabs(selected: ConversationSidebarTab) {
   };
 }
 
-export function ConversationContextActions({
-  state,
+/** The shell header's one control for the context panel, wherever it is drawn. */
+export function ConversationContextToggle({
+  expanded,
   dispatch,
 }: {
-  state: ConversationSidebarState;
+  expanded: boolean;
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const { tabs, activeTab } = useConversationTabs(state.activeTab);
-
+  const label = expanded ? t("context.hide") : t("context.show");
+  const Icon = expanded ? PanelRightCloseIcon : PanelRightIcon;
   return (
-    <Tabs
-      value={state.expanded ? activeTab.id : ""}
-      onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
-    >
-      <TabsList className="h-8" aria-label={t("context.label")}>
-        {tabs.map(({ id, Icon, label }) => (
-          <Tooltip key={id}>
-            <TooltipTrigger asChild>
-              <TabsTrigger
-                id={`conversation-context-${id}-tab`}
-                value={id}
-                className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
-                aria-label={label}
-                aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
-              >
-                <Icon className="size-4" />
-              </TabsTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{label}</TooltipContent>
-          </Tooltip>
-        ))}
-      </TabsList>
-    </Tabs>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          aria-label={label}
+          aria-expanded={expanded}
+          aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
+          onClick={() => dispatch({ type: "toggle" })}
+        >
+          <Icon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -207,26 +222,69 @@ function ConversationFiles({
         <button
           key={file.id}
           type="button"
-          className="hover:bg-muted/50 flex w-full items-center gap-3 px-3 py-3 text-left"
+          className="hover:bg-muted/40 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
           onClick={() => onSelect({ id: file.id, name: file.name })}
         >
-          <FileIcon className="text-muted-foreground size-4 shrink-0" />
+          <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
+            <MimeIcon mime={file.mime} className="text-muted-foreground size-4" />
+          </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{file.name}</span>
             <span className="text-muted-foreground block truncate text-xs">
-              {file.purpose === "user_upload"
-                ? t("context.files.attachment")
-                : t("context.files.output")}
+              {[
+                file.purpose === "user_upload"
+                  ? t("context.files.attachment")
+                  : t("context.files.output"),
+                formatBytes(file.size),
+                formatDateField(file.createdAt, "date"),
+              ].join(" · ")}
             </span>
           </span>
-          <ChevronRightIcon className="text-muted-foreground size-4 shrink-0" />
         </button>
       ))}
     </div>
   );
 }
 
-function ConversationInfo({
+/** « il y a 3 jours », in the interface's language; the age's units come from core. */
+function formatAge(iso: string, language: string): string {
+  const age = relativeAge(iso, Date.now());
+  if (!age) return "";
+  const rtf = new Intl.RelativeTimeFormat(language, { numeric: "auto" });
+  return age.unit === "now" ? rtf.format(0, "second") : rtf.format(-age.count, age.unit);
+}
+
+function InfoDate({ iso }: { iso: string }) {
+  const { i18n } = useTranslation();
+  return (
+    <>
+      <span>{formatAge(iso, i18n.language)}</span>
+      <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
+    </>
+  );
+}
+
+function ConversationId({ id }: { id: string }) {
+  const { t } = useTranslation(["chat", "common"]);
+  const { copy, copied } = useCopyToClipboard();
+  return (
+    <div className="text-muted-foreground flex items-center gap-1 text-xs">
+      <code className="min-w-0 flex-1 truncate font-mono">{id}</code>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        aria-label={`${t("common:btn.copy")} (${t("chat:context.info.id")})`}
+        onClick={() => void copy(id)}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </div>
+  );
+}
+
+function ConversationDetails({
   conversationId,
   active,
 }: {
@@ -238,25 +296,22 @@ function ConversationInfo({
   const query = $api.useQuery(
     "get",
     "/api/chat/sessions/{id}",
-    {
-      params: {
-        path: { id: conversationId ?? "" },
-        header: scope.header,
-      },
-    },
+    { params: { path: { id: conversationId ?? "" }, header: scope.header } },
     { enabled: scope.enabled && active && !!conversationId },
   );
 
-  if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <TextSkeleton className="p-4" />;
-  if (query.error || !query.data) return <PanelState>{t("context.error")}</PanelState>;
+  if (!conversationId) {
+    return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;
+  }
+  if (query.isLoading) return <TextSkeleton />;
+  if (query.error || !query.data) {
+    return <p className="text-muted-foreground text-sm">{t("context.error")}</p>;
+  }
 
   const session = query.data;
-  const rows = [
-    [t("context.info.title"), session.title || t("context.info.untitled")],
-    [t("context.info.id"), session.id],
-    [t("context.info.created"), formatDateField(session.createdAt)],
-    [t("context.info.updated"), formatDateField(session.updatedAt)],
+  const rows: [string, ReactNode][] = [
+    [t("context.info.created"), <InfoDate key="created" iso={session.createdAt} />],
+    [t("context.info.lastActivity"), <InfoDate key="activity" iso={session.updatedAt} />],
     [t("context.info.messages"), String(session.messages.length)],
     [
       t("context.info.status"),
@@ -265,14 +320,114 @@ function ConversationInfo({
   ];
 
   return (
-    <dl className="divide-y">
-      {rows.map(([label, value]) => (
-        <div key={label} className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 px-3 py-3 text-sm">
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className="min-w-0 break-words">{value}</dd>
-        </div>
+    <>
+      <h3 className="text-base font-semibold break-words">
+        {session.title || t("context.info.untitled")}
+      </h3>
+      <dl className="flex flex-col gap-3 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+}
+
+function ConversationInfo({
+  conversationId,
+  active,
+}: {
+  conversationId: string | null;
+  active: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-5 p-4">
+      <ConversationDetails conversationId={conversationId} active={active} />
+      <ChatAccessSummary />
+      {conversationId ? <ConversationId id={conversationId} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The panel's content, in the desktop column or in the phone's sheet. The tabs
+ * sit in a header band of their own (Radix wires the tab/tabpanel ARIA); a
+ * shown file replaces all of it with the file's frame.
+ */
+function ConversationContext({
+  conversationId,
+  state,
+  dispatch,
+}: {
+  conversationId: string | null;
+  state: ConversationSidebarState;
+  dispatch: Dispatch<ConversationSidebarAction>;
+}) {
+  // The desktop column stays mounted while closed (for its transition): its
+  // reads wait until it is open.
+  const active = state.expanded;
+  const { t } = useTranslation("chat");
+  const { tabs, activeTab } = useConversationTabs(state.activeTab);
+  // Read from the state, not the readable tabs: a file the thread opens shows
+  // even for a caller whose Files tab is not drawn.
+  const previewedFile = state.activeTab === "files" ? state.selectedFile : null;
+
+  if (previewedFile) {
+    return (
+      <ShownFile
+        file={previewedFile}
+        backToList={state.fileFromList}
+        onClose={() => dispatch({ type: "close-file" })}
+      />
+    );
+  }
+
+  return (
+    <Tabs
+      value={activeTab.id}
+      onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
+      className="flex h-full min-h-0 flex-col"
+    >
+      <AgentDetailPaneHeader className="gap-2">
+        <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
+          {tabs.map(({ id, Icon, label }) => (
+            <TabsTrigger key={id} value={id} className="gap-1.5">
+              <Icon className="size-4 shrink-0" />
+              <span className="truncate">{label}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-8 shrink-0"
+          aria-label={t("context.collapse")}
+          onClick={() => dispatch({ type: "toggle" })}
+        >
+          <XIcon />
+        </Button>
+      </AgentDetailPaneHeader>
+      {tabs.map(({ id }) => (
+        <TabsContent key={id} value={id} className="mt-0 min-h-0 flex-1 overflow-auto">
+          {id === "runs" ? (
+            <ConversationRuns conversationId={conversationId} active={active} />
+          ) : null}
+          {id === "files" ? (
+            <ConversationFiles
+              conversationId={conversationId}
+              active={active}
+              onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
+            />
+          ) : null}
+          {id === "info" ? (
+            <ConversationInfo conversationId={conversationId} active={active} />
+          ) : null}
+        </TabsContent>
       ))}
-    </dl>
+    </Tabs>
   );
 }
 
@@ -286,74 +441,61 @@ export function ConversationSidebar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const { activeTab } = useConversationTabs(state.activeTab);
-  const ActiveTabIcon = activeTab.Icon;
-  const showFromList = (file: SidebarFile) => dispatch({ type: "show-file", file, fromList: true });
-  const collapse = () => dispatch({ type: "toggle" });
-  // Read from the state, not the readable tabs: a file the thread opens shows
-  // even for a caller whose Files tab is not drawn.
-  const previewedFile = state.activeTab === "files" ? state.selectedFile : null;
+  const desktop = useMediaQuery("(min-width: 1024px)");
+  const panelRef = useRef<HTMLElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const size = usePanelWidth(panelRef);
 
-  return (
-    <>
-      {state.expanded ? (
-        <button
-          type="button"
-          className="absolute inset-0 z-20 bg-black/30 lg:hidden"
-          aria-label={t("context.collapse")}
-          onClick={collapse}
-        />
-      ) : null}
-      {state.expanded ? (
-        <aside
+  if (!desktop) {
+    return (
+      <Sheet
+        open={state.expanded}
+        onOpenChange={(open) => open !== state.expanded && dispatch({ type: "toggle" })}
+      >
+        <SheetContent
           id={CONVERSATION_CONTEXT_PANEL_ID}
-          role="tabpanel"
-          aria-labelledby={`conversation-context-${activeTab.id}-tab`}
-          aria-label={t("context.label")}
-          className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
+          side="right"
+          aria-describedby={undefined}
+          // The panel's header carries the one close control, as on desktop.
+          showCloseButton={false}
+          className="bg-card flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
         >
-          {previewedFile ? (
-            <ShownFile
-              file={previewedFile}
-              backToList={state.fileFromList}
-              onClose={() => dispatch({ type: "close-file" })}
-            />
-          ) : (
-            <>
-              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
-                  <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
-                  <span className="truncate">{activeTab.label}</span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0"
-                  aria-label={t("context.collapse")}
-                  onClick={collapse}
-                >
-                  <XIcon />
-                </Button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                {activeTab.id === "runs" ? (
-                  <ConversationRuns conversationId={conversationId} active />
-                ) : null}
-                {activeTab.id === "files" ? (
-                  <ConversationFiles
-                    conversationId={conversationId}
-                    active
-                    onSelect={showFromList}
-                  />
-                ) : null}
-                {activeTab.id === "info" ? (
-                  <ConversationInfo conversationId={conversationId} active />
-                ) : null}
-              </div>
-            </>
-          )}
-        </aside>
-      ) : null}
-    </>
+          <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
+          <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  // The column keeps its place in the layout and animates its width: closed,
+  // it is 0 wide and `inert` (out of the tab order and the accessibility tree).
+  // Its content keeps the full width so nothing reflows mid-transition.
+  return (
+    <aside
+      ref={panelRef}
+      id={CONVERSATION_CONTEXT_PANEL_ID}
+      aria-label={t("context.label")}
+      inert={!state.expanded}
+      className={cn(
+        "relative shrink-0 overflow-hidden",
+        !dragging && "duration-base ease-surface transition-[width] motion-reduce:transition-none",
+      )}
+      style={{ width: state.expanded ? size.width : 0 }}
+    >
+      <div className="bg-card absolute inset-y-0 right-0 border-l" style={{ width: size.width }}>
+        <PanelResizeHandle
+          controls={CONVERSATION_CONTEXT_PANEL_ID}
+          label={t("context.resize")}
+          width={size.width}
+          min={size.min}
+          max={size.max}
+          clamp={size.clamp}
+          onLive={size.setLive}
+          onCommit={size.commit}
+          onDraggingChange={setDragging}
+        />
+        <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
+      </div>
+    </aside>
   );
 }

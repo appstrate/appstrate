@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAuth } from "../hooks/use-auth";
+import { useFirstName } from "../hooks/use-first-name";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useFirstRunsPage } from "../hooks/use-paginated-runs";
@@ -11,7 +11,6 @@ import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 export function DashboardPage() {
-  const { profile, user } = useAuth();
   // Every query gates itself on its guard; `DashboardContent` draws a section only when its read is open and non-empty.
   const { ready } = usePermissions();
   const {
@@ -25,7 +24,7 @@ export function DashboardPage() {
   const agentName = useRunAgentName();
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
   const { data: schedules, isLoading: schedulesLoading } = useAllSchedules();
-  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
+  const firstName = useFirstName();
 
   // A disabled query is not loading, so an unresolved permission set must be.
   const isLoading = !ready || runsLoading || agentsLoading || schedulesLoading;

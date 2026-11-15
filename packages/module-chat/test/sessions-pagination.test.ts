@@ -126,4 +126,70 @@ describe("chat session list pagination", () => {
     expect(body.data).toHaveLength(100);
     expect(body.hasMore).toBe(true);
   });
+
+  describe("title search (?q=)", () => {
+    async function seedTitled(titles: (string | null)[]): Promise<string[]> {
+      const base = Date.parse("2026-09-01T00:00:00.000Z");
+      const rows = titles.map((title, i) => ({
+        id: `chs_${String(i).padStart(32, "0")}`,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        title,
+        updatedAt: new Date(base + i * 1000),
+      }));
+      await db.insert(chatSessions).values(rows);
+      return rows.map((r) => r.id);
+    }
+
+    async function titles(query: string): Promise<(string | null)[]> {
+      const body = (await (await get(`/api/chat/sessions${query}`)).json()) as {
+        data: { title: string | null }[];
+      };
+      return body.data.map((s) => s.title);
+    }
+
+    it("matches a substring of the title, case-insensitively", async () => {
+      await seedTitled(["Budget 2026", "Plan marketing", "BUDGET review"]);
+      expect(await titles("?q=budget")).toEqual(["BUDGET review", "Budget 2026"]);
+      expect(await titles("?q=%20%20MARK%20")).toEqual(["Plan marketing"]);
+    });
+
+    it("treats a blank q as no filter", async () => {
+      await seedTitled(["a", null]);
+      expect(await titles("?q=%20%20")).toHaveLength(2);
+    });
+
+    it("takes %, _ and backslash literally", async () => {
+      await seedTitled(["100% done", "1000 done", "a_b", "axb", "c\\d", "cd"]);
+      expect(await titles(`?q=${encodeURIComponent("100%")}`)).toEqual(["100% done"]);
+      expect(await titles(`?q=${encodeURIComponent("a_b")}`)).toEqual(["a_b"]);
+      expect(await titles(`?q=${encodeURIComponent("c\\d")}`)).toEqual(["c\\d"]);
+    });
+
+    it("never matches an untitled session", async () => {
+      await seedTitled([null, "x"]);
+      expect(await titles("?q=x")).toEqual(["x"]);
+      expect(await titles("?q=%25")).toEqual([]);
+    });
+
+    it("paginates a filtered list with the cursor and the Link header", async () => {
+      await seedTitled(Array.from({ length: 5 }, (_, i) => `match ${i}`).concat(["other"]));
+      const pages = await walkLinkPages<SessionPage>(
+        app,
+        "/api/chat/sessions?limit=2&q=match",
+        authHeaders(ctx),
+      );
+      expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
+      expect(pages.flatMap((p) => p.data)).toHaveLength(5);
+    });
+
+    it("rejects a q longer than 200 characters", async () => {
+      const res = await app.request(`/api/chat/sessions?q=${"a".repeat(201)}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { param?: string }).param).toBe("q");
+    });
+  });
 });

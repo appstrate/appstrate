@@ -2,17 +2,15 @@
 
 /**
  * "What can this assistant do for me": the caller's role and a verdict per chat
- * act. Lives in the SHELL (everything it reads is host state) and reaches the
- * composer through `composerActions`. A role preview (`X-View-As`) needs no logic
- * here: `/api/orgs` and `/api/spaces` already answer AS the persona; the chip
- * only marks it.
+ * act, as a section of the conversation's Info tab. Lives in the SHELL
+ * (everything it reads is host state). A role preview (`X-View-As`) needs no
+ * logic here: `/api/orgs` and `/api/spaces` already answer AS the persona; the
+ * summary only marks it.
  */
 
 import { useTranslation } from "react-i18next";
 import { BotOffIcon, CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
 import { usePackageAuthoringEnabled } from "@appstrate/module-chat/package-authoring";
-import { Button } from "@appstrate/ui/components/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
@@ -22,7 +20,7 @@ import { useSpaces } from "../../hooks/use-spaces";
 import { useViewAs } from "../../stores/view-as-store";
 import { resolveChatCapabilities, type ResolvedChatCapability } from "./chat-access";
 
-export function ChatAccessChip() {
+export function ChatAccessSummary() {
   const { t } = useTranslation(["chat", "settings"]);
   const { can, ready, orgRole } = usePermissions();
   const spaceGrant = useCurrentSpaceGrant();
@@ -32,57 +30,30 @@ export function ChatAccessChip() {
   const authoring = usePackageAuthoringEnabled();
 
   // `can` answers `false` while a set is in flight, which looks like a denial: hold the box.
-  if (!ready || orgRole === null) return <Skeleton className="h-7 w-24 rounded-md" />;
+  if (!ready || orgRole === null) return <Skeleton className="h-24 w-full rounded-md" />;
 
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
   const roleLabel = spaceRole ?? orgRoleLabel;
   const capabilities = resolveChatCapabilities({ can, spaceGrant, authoring });
+  const RoleIcon = persona ? EyeIcon : ShieldIcon;
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        {/* Same shape as the model picker it sits beside. */}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "text-foreground hover:text-foreground h-auto gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
-            "min-w-0",
-            persona && "border-primary/40 bg-primary/5",
-          )}
-          // The accessible name CONTAINS the visible text (WCAG 2.5.3).
-          aria-label={t("chat:access.triggerLabel", { role: roleLabel })}
-        >
-          {persona ? (
-            <EyeIcon className="text-muted-foreground size-3.5 shrink-0" />
-          ) : (
-            <ShieldIcon className="text-muted-foreground size-3.5 shrink-0" />
-          )}
-          <span className="max-w-40 truncate font-medium">{roleLabel}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={6}
-        collisionPadding={12}
-        className="w-[min(22rem,calc(100vw-1.5rem))] p-3"
-      >
-        <p className="text-sm font-medium">{t("chat:access.title")}</p>
-        <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
-
-        <ChatCapabilityList capabilities={capabilities} />
-
-        <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
-          {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
-        </p>
-        {persona ? (
-          <p className="text-muted-foreground mt-1 text-xs">{t("chat:access.previewing")}</p>
-        ) : null}
-      </PopoverContent>
-    </Popover>
+    <section className={cn("flex flex-col gap-2", persona && "text-foreground")}>
+      <h3 className="text-sm font-medium">{t("chat:context.info.access")}</h3>
+      <p className="text-muted-foreground text-xs">{t("chat:access.subtitle")}</p>
+      <div className="flex items-center gap-2 text-sm">
+        <RoleIcon aria-hidden="true" className="text-muted-foreground size-4 shrink-0" />
+        <span className="min-w-0 truncate font-medium">{roleLabel}</span>
+      </div>
+      <ChatCapabilityList capabilities={capabilities} />
+      <p className="text-muted-foreground border-t pt-2 text-xs">
+        {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
+      </p>
+      {persona ? (
+        <p className="text-muted-foreground text-xs">{t("chat:access.previewing")}</p>
+      ) : null}
+    </section>
   );
 }
 
@@ -94,7 +65,7 @@ export function ChatCapabilityList({
 }) {
   const { t } = useTranslation(["chat"]);
   return (
-    <ul className="mt-2 flex flex-col gap-1">
+    <ul className="flex flex-col gap-1">
       {capabilities.map((capability) => {
         const off = capability.verdict === "off";
         const granted = capability.verdict === "granted";

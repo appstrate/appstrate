@@ -42,6 +42,20 @@ describe("conversation sidebar state", () => {
     expect(collapsed.selectedFile).toEqual(file("file_a"));
   });
 
+  it("reopens on the tabs, never on the file shown before it collapsed", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: file("file_a"),
+    });
+    const collapsed = conversationSidebarReducer(shown, { type: "toggle" });
+
+    expect(conversationSidebarReducer(collapsed, { type: "toggle" })).toMatchObject({
+      expanded: true,
+      activeTab: "files",
+      selectedFile: null,
+    });
+  });
+
   it("reopens the panel on a header tab, showing that tab's own content", () => {
     const collapsed: ConversationSidebarState = {
       ...INITIAL_CONVERSATION_SIDEBAR_STATE,

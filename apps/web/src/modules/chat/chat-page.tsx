@@ -22,6 +22,7 @@ import {
 } from "@appstrate/module-chat/ui";
 import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authoring";
 import { useAuth } from "../../hooks/use-auth";
+import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -29,10 +30,9 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
-import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
+import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { useChatTransport, useChatTranslate } from "./use-chat-runtime";
-import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSettings } from "../../hooks/use-org-settings";
@@ -43,13 +43,11 @@ import {
 import { pickerCredentials } from "../../lib/model-picker";
 import { refreshPackageLists } from "../../hooks/use-mutations";
 
-// One element for the page's lifetime: it sits in the composer slot, which the
-// chat memoizes, and the chip keeps itself current through its own hooks.
-const COMPOSER_ACTIONS = <ChatAccessChip />;
-
 export function ChatModulePage() {
   // The package-authoring preference is per user: bind it before the composer paints.
-  const userId = useAuth().user?.id ?? null;
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const firstName = useFirstName();
   useLayoutEffect(() => bindPackageAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
@@ -138,8 +136,9 @@ export function ChatModulePage() {
   // The shell hands the chat a definite height (its inset never scrolls), so
   // the thread scrolls internally and the composer stays pinned at the bottom.
   // The context panel is a sibling of the thread, INSIDE the shell's content
-  // area: it belongs to the conversation, and it overlays it on narrow screens.
-  // Its tabs sit in the shell's header, portaled there for the page's lifetime.
+  // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
+  // One toggle sits in the shell's header, portaled there for the page's lifetime;
+  // the tabs live in the panel's own header.
   return (
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={onConversationChange}>
@@ -149,7 +148,7 @@ export function ChatModulePage() {
             t={translate}
             can={can}
           />
-          <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+          <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <div className="min-w-0 flex-1">
@@ -160,7 +159,6 @@ export function ChatModulePage() {
               initialComposerDraft={initialComposerDraft}
               onConversationChange={onConversationChange}
               onOpenFile={presentFile}
-              composerActions={COMPOSER_ACTIONS}
               downloadFile={onDownloadFile}
               useFileImageSrc={useFileImageSrc}
               uploadFile={uploadFile}
@@ -170,6 +168,7 @@ export function ChatModulePage() {
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
               onPackagesChanged={onPackagesChanged}
+              firstName={firstName || null}
             />
           </div>
           <ConversationSidebar

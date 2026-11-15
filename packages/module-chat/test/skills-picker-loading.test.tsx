@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The picker's trigger takes its tone and count badge from the enforced-skills
+ * The skills chip takes its count from the enforced-skills
  * read: while that read is in flight a skeleton holds the slot, not the button
  * in its default look. SSR only, like `oauth-connect-card-expiry.test.tsx`.
  */
@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
-import { SkillsPicker } from "../src/ui/skills-picker.tsx";
+import { SkillsChip } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 
 const host: ChatHost = {
@@ -33,10 +33,10 @@ function html(queryClient: QueryClient, transport: typeof scoped | undefined): s
     <QueryClientProvider client={queryClient}>
       <ChatHostProvider value={host}>
         <TooltipProvider>
-          <SkillsPicker
+          <SkillsChip
             transport={transport}
             selection={{ skillMode: "manual", pinnedSkills: [] }}
-            onChange={() => {}}
+            onClick={() => {}}
           />
         </TooltipProvider>
       </ChatHostProvider>
@@ -44,7 +44,7 @@ function html(queryClient: QueryClient, transport: typeof scoped | undefined): s
   );
 }
 
-describe("SkillsPicker trigger", () => {
+describe("SkillsChip", () => {
   it("draws a skeleton, not the button, while the enforced read is in flight", () => {
     const out = html(new QueryClient(), scoped);
     expect(out).not.toContain("skills-picker-trigger");
