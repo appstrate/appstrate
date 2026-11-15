@@ -40,7 +40,7 @@ import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import { breadcrumbStore } from "../../stores/breadcrumb-store";
-import { INTEGRATED_TABLE_SURFACE } from "../../components/data-table";
+import { INTEGRATED_TABLE_SURFACE } from "../../lib/table-surface";
 import {
   activeSettingsItem,
   firstSettingsPath,

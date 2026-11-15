@@ -6,7 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { ShellHeaderTabs } from "@/components/shell-header-slots";
-import { INTEGRATED_TABLE_SURFACE } from "@/components/data-table";
+import { INTEGRATED_TABLE_SURFACE } from "@/lib/table-surface";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {

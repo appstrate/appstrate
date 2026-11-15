@@ -176,9 +176,6 @@ function widthClass<T>(column: DataColumn<T>): string | undefined {
 }
 
 /** Opaque, so what scrolls behind it stays hidden; it follows the row's hover colour. */
-/** Spread on a surface that already frames its content: the tables inside draw no card of their own. */
-export const INTEGRATED_TABLE_SURFACE = { "data-table-surface": "integrated" } as const;
-
 const HELD = "sticky z-20 bg-(--dt-surface)";
 const HELD_HOVER = "transition-colors group-hover/row:bg-(--dt-surface-hover)";
 
