@@ -47,7 +47,7 @@ import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { extensionForMime } from "@appstrate/core/naming";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 import { loadPiCodingAgentSdk } from "./pi-sdk.ts";
-import type { RuntimeEventEmitter } from "./mcp-forward.ts";
+import type { RuntimeEventEmitter } from "./runtime-event.ts";
 
 /** Workspace-relative directory spilled resources land in. */
 const SPILL_DIR = "resources";

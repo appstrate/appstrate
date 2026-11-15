@@ -31,9 +31,8 @@ export interface RuntimeReadyPayload {
   /** True when a concrete `.afps`/`.afps-bundle` was loaded from disk. */
   bundleLoaded: boolean;
   /**
-   * Count of the extension factories wired when the runtime reports ready (the
-   * integration / sidecar-backed MCP tools in the container; the `api_call`
-   * tools in the CLI, whose remote MCP tools connect after the ready event).
+   * Count of the extension factories wired when the runtime reports ready:
+   * every integration tool, in the container and in the CLI alike.
    * Diagnostics only: run logs store it, nothing reads it back.
    */
   extensions: number;

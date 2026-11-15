@@ -50,8 +50,8 @@ import {
 } from "@appstrate/core/sidecar-types";
 import { resolveMcpServerForSpawn } from "../integration-service.ts";
 import { effectiveMcpServerType } from "@appstrate/core/mcp-server-meta";
+import { getIntegrationSourceKind } from "@appstrate/core/integration";
 import {
-  getIntegrationSourceKind,
   getLocalServerRef,
   getAppstrateConnectMeta,
   runnerEgressFor,

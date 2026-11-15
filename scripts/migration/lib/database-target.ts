@@ -14,3 +14,15 @@ export function exitUnlessDatabaseNamed(): void {
   );
   process.exit(2);
 }
+
+/** The line naming the database a script writes to, printed before any write (`0048`, `0051`, `0053`). */
+export async function describeDatabaseTarget(): Promise<string> {
+  // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
+  const { db, toRows } = await import("@appstrate/db/client");
+  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
+    await db.execute(
+      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
+    ),
+  );
+  return `database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`;
+}

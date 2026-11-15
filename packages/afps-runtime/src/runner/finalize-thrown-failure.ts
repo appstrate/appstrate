@@ -11,8 +11,8 @@
  *   1. if the run was aborted, RETHROW immediately — the caller's
  *      `finally` owns cancellation cleanup, the runner must NOT finalize;
  *   2. surface the failure as a live `appstrate.error` event;
- *   3. best-effort final drain of the events the runner still holds
- *      pending from before the throw (e.g. `output` the agent produced mid-run);
+ *   3. best-effort final drain: settle the fire-and-forget emits the runner
+ *      still has in flight (an emit the runner awaited is already captured);
  *   4. reduce the captured events into a {@link TerminalRunResult}, stamp
  *      the failure error + terminal status + the runner's own token-usage
  *      snapshot, and `finalize` it.

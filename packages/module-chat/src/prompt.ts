@@ -16,7 +16,7 @@
  */
 
 import type { Context } from "hono";
-import { CONTEXT_FREE_FILENAMES_PHRASE, normaliseMcpToolNamespace } from "@appstrate/core/naming";
+import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
@@ -29,7 +29,7 @@ import type { PrincipalKind } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
-  PLATFORM_INTEGRATION_ID,
+  platformToolName,
   type ConnectionResolutionWarningCode,
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
@@ -49,7 +49,7 @@ type InjectedSkillMap = InjectedSkills["skills"];
 const warningCode = (code: ConnectionResolutionWarningCode) => `\`${code}\``;
 
 /** The name a run's agent sees for the platform `log` tool. */
-const PLATFORM_LOG_TOOL = `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__log`;
+const PLATFORM_LOG_TOOL = platformToolName("log");
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
 type SpaceRoleRefLike =

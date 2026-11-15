@@ -1482,21 +1482,42 @@ the stored agent manifests (`package_versions.manifest`, `packages.draft_manifes
 `runtime_tools`, or that predate `--before` and do not declare `@appstrate/platform`: it declares
 the integration and keeps the tools each agent had. Its header is the authority on the rewrite,
 on why `--before` bounds only the missing-dependency arm, and on which timestamp each store is
-read by; a manifest it cannot merge into is listed and left, to fix by hand.
+read by. Until it runs, every stored agent runs without the platform tools it had, and an agent
+that selected `output` without an `output.schema` also has no `output` tool. Such an agent gains
+the open object schema: it keeps the `output` tool and the one corrective turn a run that ends
+without calling it already got, and the platform prompt now tells the model it MUST call
+`output` exactly once, as its final action; the schema requires no property, so a run that never
+calls it still succeeds.
+
+`--before` is an RFC 3339 instant with `Z` or a numeric offset (`2026-11-15T09:30:00Z`), after
+the app stopped and before it restarts (the `pg_dump` time, for example), and the SAME value on
+every re-run. Too early, and the agents saved after it without the old field keep no
+`recall_memory` / `run_history`; a later value on a re-run adds `@appstrate/platform` back to
+agents whose authors removed it after the release. Any other form (a date alone, no offset, a
+future instant) exits 2.
 
 Rehearse it on a restored production dump before the window: its counts are unmeasured. In the
 window of the release that ships #2199, once no run is `running` (a container started before the
 deploy posts its notes, pins and logs in a finalize body the new release does not read), app
-stopped, `pg_dump` first, after the migrations:
-`set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <deploy time, ISO 8601>`
-is the dry run; `--apply` commits. It exits 2 without `--before`, with one in the future, or with
-neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set (an embedded database is named, the platform
-stopped). Per store it prints what it rewrites, how many of those gain the open `output.schema`,
-the malformed manifests it leaves, and how many still carry `runtime_tools` after the rewrite.
-A second run rewrites nothing it already rewrote.
+stopped, `pg_dump` first, after the migrations (on the embedded database the platform applies
+them itself: start it once, then stop it):
+`set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
+is the dry run; `--apply` commits. It needs the platform's whole environment, since
+`@appstrate/db/client` validates it, and refuses to run with neither `DATABASE_URL` nor
+`PGLITE_DATA_DIR` set (an embedded database is named, the platform stopped). It prints the
+database it targets, then one table: per store, what it rewrites, how many of those gain the
+open `output.schema`, the malformed manifests it leaves, and after the rewrite how many still
+carry `runtime_tools` and how many written before `--before` still lack the dependency (each of
+those is a listed malformed manifest). A second run with the same `--before` rewrites nothing.
 
-Rollback: none; the removed key is read by nothing, the added dependency only grants the tools the
-agent had, and the added schema only keeps the `output` tool it had.
+A malformed manifest (a field the rewrite merges into that is not an object) is listed and left
+untouched, and its agent runs without the platform tools. While one remains the script exits 1,
+in both modes; with `--apply` the rewrite of the others stays committed. Fix each by hand, then
+re-run with the same `--before`.
+
+Rollback: not supported without restoring the `pg_dump`. The previous release reads the tools an
+agent selects from `runtime_tools`, which `0053` removes, so it would serve the rewritten agents
+none of `log`, `note`, `pin` or `output`; for the same reason, do not serve it beside this one.
 
 ## Log
 
@@ -1551,4 +1572,4 @@ agent had, and the added schema only keeps the `output` tool it had.
 | 0050 | not yet             | READ-ONLY report (#2043): the schedules, enabled or not, whose `connection_overrides` name `[]` or a strict subset of the set an admin pin (else an enforced org default) imposes on the integration — each binds the WHOLE imposed set after the deploy — with the override, the imposed set and the imposing layer — **run before deploying the release where an override can no longer narrow an imposed set**; nothing is rewritten, the schedule owner is told                                                                                                                                                                                                                          | read-only — prints the table and the enabled / disabled totals, or `0 schedules — nothing widens.`; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0053 | not yet             | every stored agent manifest that carries `runtime_tools`, or predates `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, an open `output.schema` for an agent that selected `output` without one, `runtime_tools` removed), malformed manifests listed and left — **rehearse on a production dump first; run in the window of the release that ships #2199, once no run is `running`, app stopped**; `.ts`, `--before <deploy time>` required, dry run by default, `--apply` to write, PostgreSQL or PGlite                                         | prints, per store, rewritten / of which `output.schema` added / malformed and left / still carrying `runtime_tools`; a second run rewrites 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 0053 | not yet             | every stored agent manifest that carries `runtime_tools`, or predates `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, an open `output.schema` for an agent that selected `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the window of the release that ships #2199, once no run is `running`, app stopped**; `.ts`, `--before <RFC 3339 instant>` required, the same on every run, dry run by default, `--apply` to write, PostgreSQL or PGlite     | prints the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` (both = the malformed rows); a second run rewrites 0                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

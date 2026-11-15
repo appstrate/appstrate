@@ -105,14 +105,29 @@ export async function serveStatelessPost(
 }
 
 /**
- * Answer one POST of an authenticated endpoint with `server` on a fresh
- * stateless transport: no session, a JSON answer unless a request asks for
- * progress, and the SDK's Host-header allowlist off — it would reject
- * reverse-proxied hosts, and the DNS-rebinding attack it guards against (a
- * browser driving a localhost server) needs an endpoint that answers without
- * the caller's credential. `body` holds the request's bytes, already read by
- * the caller, and `post` their {@link parseMcpPost} parse; the SDK reads the
- * bytes itself only when they did not parse.
+ * A fresh stateless transport for one request: no session, a JSON answer
+ * unless a request of `post` asks for progress, and the SDK's Host-header
+ * allowlist off — it would reject reverse-proxied hosts, so each caller
+ * authenticates the request or checks its host itself.
+ */
+export function createStatelessTransport(
+  post: McpPost | null,
+): WebStandardStreamableHTTPServerTransport {
+  return new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: !post?.requestsProgress,
+    enableDnsRebindingProtection: false,
+  });
+}
+
+/**
+ * Answer one POST of an authenticated endpoint with `server` on a
+ * {@link createStatelessTransport}: the DNS-rebinding attack the Host
+ * allowlist guards against (a browser driving a localhost server) needs an
+ * endpoint that answers without the caller's credential. `body` holds the
+ * request's bytes, already read by the caller, and `post` their
+ * {@link parseMcpPost} parse; the SDK reads the bytes itself only when they
+ * did not parse.
  */
 export function serveAuthenticatedStatelessPost(
   server: Server,
@@ -120,15 +135,10 @@ export function serveAuthenticatedStatelessPost(
   body: ArrayBuffer,
   post: McpPost | null,
 ): Promise<Response> {
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: !post?.requestsProgress,
-    enableDnsRebindingProtection: false,
-  });
   const forwarded = new Request(request.url, {
     method: request.method,
     headers: request.headers,
     body,
   });
-  return serveStatelessPost(server, transport, forwarded, post);
+  return serveStatelessPost(server, createStatelessTransport(post), forwarded, post);
 }

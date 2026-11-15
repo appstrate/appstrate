@@ -33,6 +33,8 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
+  getIntegrationSourceKind,
+  getRemoteSource,
   isRuntimeBoundIntegration,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
@@ -71,9 +73,7 @@ import {
   type IntegrationManifestCache,
 } from "./integration-service.ts";
 import {
-  getIntegrationSourceKind,
   getLocalServerRef,
-  getRemoteSource,
   renderRemoteSource,
   getAppstrateConnectMeta,
   renderCredentialTemplate,

@@ -27,8 +27,8 @@
  * allocation does not depend on which server answers first. An integration whose server cannot be
  * reached, does not answer the connection and `tools/list` within
  * {@link REMOTE_MCP_STARTUP_TIMEOUT_MS}, fails its `tools/list` or exposes no admitted tool is
- * returned in `unavailable` with the platform's wording ({@link UNAVAILABLE_INTEGRATION_REASONS}):
- * the run starts without it.
+ * returned in `unavailable` with the platform's wording ({@link UNAVAILABLE_INTEGRATION_REASONS}),
+ * and the cause in `detail`: the run starts without it.
  */
 
 import {
@@ -46,7 +46,10 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
 import { parseManifestIntegrations, isToolsWildcard } from "@appstrate/core/dependencies";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
+  getIntegrationSourceKind,
+  getRemoteSource,
   isRuntimeBoundIntegration,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
@@ -70,14 +73,20 @@ export interface RemoteMcpExtensions {
   factories: ExtensionFactory[];
   /** Integrations at least one tool was wired for: the ones the agent can call. */
   integrationIds: ReadonlySet<string>;
-  /** Integrations the run starts without, worded for the prompt. */
-  unavailable: Array<{ id: string; reason: string }>;
+  /** Integrations the run starts without: `reason` worded for the prompt, `detail` the cause. */
+  unavailable: UnavailableIntegration[];
   /** Closes every connection opened; the run's cleanup calls it once. */
   close(): Promise<void>;
 }
 
+interface UnavailableIntegration {
+  id: string;
+  reason: string;
+  detail?: string;
+}
+
 /** The run's MCP server on the instance it reports to, and the run secret signing its requests. */
-export interface RunToolsMcp {
+interface RunToolsMcp {
   url: string;
   runSecret: string;
 }
@@ -90,7 +99,7 @@ interface BuildRemoteMcpExtensionsOptions {
    * Exposed names the run's other tools already hold (its `{ns}__api_call…` tools): neither
    * they nor their namespaces are given to a remote integration's tool.
    */
-  takenToolNames?: ReadonlySet<string>;
+  takenToolNames: ReadonlySet<string>;
   runId: string;
   /** Workspace root the tools' resources spill under. */
   workspace: string;
@@ -123,7 +132,7 @@ export async function buildRemoteMcpExtensions(
   );
   const factories: ExtensionFactory[] = [];
   const integrationIds = new Set<string>();
-  const unavailable: Array<{ id: string; reason: string }> = [];
+  const unavailable: UnavailableIntegration[] = [];
   const clients: AppstrateMcpClient[] = [];
   const toolNames = new Set(opts.takenToolNames);
   // `{namespace}__{body}`: a normalised namespace never holds `__`.
@@ -136,17 +145,17 @@ export async function buildRemoteMcpExtensions(
   // In declaration order whatever the order the servers answer in.
   const outcomes = await Promise.all(
     targets.map(async ({ ref, target }): Promise<ConnectionOutcome> => {
-      if ("reason" in target) return { ref, reason: target.reason };
+      if ("reason" in target) return { ref, unavailable: target };
       const connected = await connectAndList(target, opts);
       return "reason" in connected
-        ? { ref, reason: connected.reason }
+        ? { ref, unavailable: connected }
         : { ref, target, ...connected };
     }),
   );
 
   for (const outcome of outcomes) {
-    if ("reason" in outcome) {
-      unavailable.push({ id: outcome.ref.name, reason: outcome.reason });
+    if ("unavailable" in outcome) {
+      unavailable.push({ id: outcome.ref.name, ...outcome.unavailable });
       continue;
     }
     const { ref, target, client, tools } = outcome;
@@ -174,7 +183,11 @@ export async function buildRemoteMcpExtensions(
     }
     if (factories.length === before) {
       await client.close().catch(() => {});
-      unavailable.push({ id: ref.name, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error });
+      unavailable.push({
+        id: ref.name,
+        reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+        detail: "its server exposes none of the selected tools",
+      });
       continue;
     }
     namespaces.add(namespace);
@@ -192,11 +205,14 @@ export async function buildRemoteMcpExtensions(
   };
 }
 
+/** Why an integration is unavailable: `reason` for the prompt, `detail` for the person. */
+type Unavailability = Omit<UnavailableIntegration, "id">;
+
 type ConnectionOutcome =
-  | { ref: IntegrationRef; reason: string }
+  | { ref: IntegrationRef; unavailable: Unavailability }
   | {
       ref: IntegrationRef;
-      target: Exclude<RemoteTarget, { reason: string }>;
+      target: Exclude<RemoteTarget, Unavailability>;
       client: AppstrateMcpClient;
       tools: Tool[];
     };
@@ -212,7 +228,7 @@ type RemoteTarget =
       allowlist: ReadonlySet<string> | null;
       hidden: ReadonlySet<string>;
     }
-  | { reason: string };
+  | Unavailability;
 
 /**
  * The server, request signer and tool filters of `ref` when it is an unauthenticated remote
@@ -227,9 +243,9 @@ function remoteTarget(
 ): RemoteTarget | undefined {
   const manifest = readIntegrationManifest(bundle, ref) as IntegrationManifest | undefined;
   if (!manifest || typeof manifest !== "object") return undefined;
-  const source = manifest.source as
-    { kind?: unknown; remote?: { url?: unknown; transport?: unknown } } | undefined;
-  if (source?.kind !== "remote" || !isUnauthenticatedIntegration(manifest)) return undefined;
+  if (getIntegrationSourceKind(manifest) !== "remote" || !isUnauthenticatedIntegration(manifest)) {
+    return undefined;
+  }
   const selection = resolveEffectiveToolSelection(agentSelection, manifest);
   const wildcard = isToolsWildcard(selection);
   if (!wildcard && !selection?.length) return undefined;
@@ -252,21 +268,22 @@ function remoteTarget(
     return { url, signRequest, ...filters };
   }
 
-  if (typeof source.remote?.url !== "string") {
-    return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_source_invalid };
-  }
+  const source = getRemoteSource(manifest);
+  if (!source) return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_source_invalid };
   // An unauthenticated integration binds no connection, so a `{$variable.<name>}` template
   // (AFPS §7.12) has no value to render.
-  const url = renderUrlTemplate(source.remote.url, {});
+  const url = renderUrlTemplate(source.url, {});
   if (url === null) {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_unrenderable };
   }
   if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_source_invalid };
   }
-  // The CLI client speaks Streamable HTTP only; an SSE server is reached by the sidecar alone.
-  if (source.remote?.transport !== "streamable-http") {
-    return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error };
+  if (source.transport !== "streamable-http") {
+    return {
+      reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+      detail: "the CLI speaks Streamable HTTP only; an SSE server is reached by the sidecar alone",
+    };
   }
   return { url, ...filters };
 }
@@ -275,7 +292,7 @@ function remoteTarget(
 async function connectAndList(
   { url, signRequest }: { url: string; signRequest?: RequestSigner },
   opts: BuildRemoteMcpExtensionsOptions,
-): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | { reason: string }> {
+): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | Unavailability> {
   const declaredHost = new URL(url).hostname;
   const guardedFetch = mcpFetch(async (input, init) => {
     const { response } = await guardedFetchChain(
@@ -305,27 +322,28 @@ async function connectAndList(
         err instanceof SsrfBlockedError
           ? UNAVAILABLE_INTEGRATION_REASONS.remote_url_blocked
           : UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+      detail: getErrorMessage(err),
     };
   }
   try {
     const { tools } = await client.listTools({ signal });
     return { client, tools };
-  } catch {
+  } catch (err) {
     await client.close().catch(() => {});
-    return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error };
+    return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error, detail: getErrorMessage(err) };
   }
 }
 
 const SIGNATURE_HEADERS = ["webhook-id", "webhook-timestamp", "webhook-signature"] as const;
 
-/**
- * `init` with the signature headers of its body; a request without a body (a GET or DELETE of the
- * MCP client) is signed over the empty body.
- */
-function signed(init: RequestInit | undefined, signRequest: RequestSigner): RequestInit {
-  const body = init?.body ?? "";
-  if (typeof body !== "string") throw new TypeError("a signed MCP request carries a string body");
-  const headers = new Headers(init?.headers);
-  for (const [name, value] of Object.entries(signRequest(body))) headers.set(name, value);
+/** `init` with the signature headers of its string body. */
+function signed(
+  init: RequestInit | undefined,
+  signRequest: RequestSigner,
+): RequestInit | undefined {
+  // The server answers a bodiless GET or DELETE 405 before checking any signature.
+  if (typeof init?.body !== "string") return init;
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(signRequest(init.body))) headers.set(name, value);
   return { ...init, headers };
 }

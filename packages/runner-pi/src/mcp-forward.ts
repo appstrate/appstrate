@@ -3,14 +3,15 @@
 
 /**
  * Adapters shared by every Pi tool that forwards to an MCP server: the
- * runtime container's integration tools (`runtime-pi/mcp/direct.ts`), the
- * `{ns}__api_call` bridge and the CLI's remote MCP tools.
+ * runtime container's integration tools (`runtime-pi/mcp/direct.ts`) and the
+ * CLI's remote MCP tools.
  */
 
 import type { AppstrateMcpClient, CallToolResult, Tool } from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "./pi-tool-result.ts";
 import { unsafeSchema, type ExtensionFactory } from "./pi-sdk.ts";
 import { spillResourcesToWorkspace } from "./resource-spill.ts";
+import type { RuntimeEventEmitter } from "./runtime-event.ts";
 
 /**
  * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi
@@ -60,14 +61,6 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
     isError: result.isError === true,
   });
 }
-
-/**
- * Event emitter signature shared across the runner-pi runtime (the
- * `{ns}__api_call` bridge, the resource-spill helper, and the runtime container's `mcp/direct.ts`).
- * Generic shape so callers can route events into any sink (CloudEvents,
- * console, in-memory test recorder, …).
- */
-export type RuntimeEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 /** What one call sends: its arguments and how its result is finished, or an error it ends with. */
 export type McpToolCallPlan =
@@ -119,20 +112,28 @@ export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFac
             timestamp: Date.now(),
           });
         const args = (params as Record<string, unknown>) ?? {};
-        const call = opts.plan ? await opts.plan(args) : { args };
-        if ("error" in call) {
+        const outcome = await (async () => {
+          const call = opts.plan ? await opts.plan(args) : { args };
+          if ("error" in call) return call;
+          // Requesting progress makes the client's per-call timeout an idle one, restarted by each
+          // notification: a long call that reports progress is kept alive within Pi's `signal`.
+          const result = await mcp.callTool(
+            { name: opts.upstreamName ?? tool.name, arguments: call.args },
+            { ...(signal ? { signal } : {}), onProgress: () => {} },
+          );
+          return { call, result };
+        })().catch((err: unknown) => {
+          completed(true);
+          throw err;
+        });
+        if ("error" in outcome) {
           completed(true);
           return callToolResultToPi({
-            content: [{ type: "text", text: call.error }],
+            content: [{ type: "text", text: outcome.error }],
             isError: true,
           });
         }
-        // Requesting progress makes the client's per-call timeout an idle one, restarted by each
-        // notification: a long call that reports progress is kept alive within Pi's `signal`.
-        const result = await mcp.callTool(
-          { name: opts.upstreamName ?? tool.name, arguments: call.args },
-          { ...(signal ? { signal } : {}), onProgress: () => {} },
-        );
+        const { call, result } = outcome;
         completed(result.isError === true);
         if (call.finish) return call.finish(result, toolCallId);
         // Resources become workspace files before the adapter flattens them: embedded `resource`

@@ -399,9 +399,16 @@ export class McpHost {
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     // A slot served by several connections puts the selector on every tool it
     // holds, so none of them may declare `connection` itself.
-    const admitted = tools.filter(
-      (tool) => toolExclusion(tool.name, allowlist, hiddenSet) === null,
-    );
+    const admitted = tools.filter((tool) => {
+      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
+      if (exclusion === null) return true;
+      this.options.onLog?.({
+        source: `host:${normalisedNs}`,
+        level: "info",
+        data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
+      });
+      return false;
+    });
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
     if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
       const conflicting = [
@@ -482,26 +489,24 @@ export class McpHost {
       });
       return true;
     };
-    for (const tool of tools) {
+    for (const tool of admitted) {
       // Trusted first-party upstreams (our own in-process api_call server) are neither sanitised
       // nor renamed: their audited docs and canonical names (`api_call__primary`) reach the agent.
-      const exposure = exposeTool(tool, {
-        namespace: normalisedNs,
-        allowlist,
-        hidden: hiddenSet,
-        isTaken: (name) => this.toolToNamespace.has(name),
-        trusted,
-        claim,
-      });
-      if ("exclusion" in exposure) {
-        const { exclusion } = exposure;
-        if (exclusion === "allowlist" || exclusion === "hidden_tools") {
-          this.options.onLog?.({
-            source: `host:${normalisedNs}`,
-            level: "info",
-            data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
-          });
-        } else if (exclusion !== "claimed") {
+      let descriptor: Tool;
+      if (trusted) {
+        if (claim(tool.name)) continue;
+        descriptor = { ...tool, name: `${normalisedNs}__${tool.name}` };
+      } else {
+        const exposure = exposeTool(tool, {
+          namespace: normalisedNs,
+          allowlist: null,
+          hidden: null,
+          isTaken: (name) => this.toolToNamespace.has(name),
+        });
+        if ("exclusion" in exposure) {
+          const { exclusion } = exposure;
+          // A claimed tool needs no name of its own.
+          if (exclusion === "name_collision" && claim(tool.name)) continue;
           this.options.onLog?.({
             source: `host:${normalisedNs}`,
             level: "warn",
@@ -512,10 +517,11 @@ export class McpHost {
               originalName: tool.name,
             },
           });
+          continue;
         }
-        continue;
+        if (claim(tool.name)) continue;
+        descriptor = exposure.descriptor;
       }
-      const { descriptor } = exposure;
       const finalName = descriptor.name;
       if (finalName !== `${normalisedNs}__${tool.name}`) {
         this.options.onLog?.({

@@ -42,9 +42,9 @@
  */
 
 import type { Hono } from "hono";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   createMcpServer,
+  createStatelessTransport,
   parseMcpPost,
   serveStatelessPost,
   type McpPost,
@@ -554,10 +554,14 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
- * Build the `{ns}__api_call` and `{ns}__api_upload` MCP tool factories.
- * Both are implemented in-process: `{ns}__api_call` calls
- * {@link executeApiCall} directly via {@link ApiCallToolDeps.proxyDeps},
- * without a Hono HTTP envelope.
+ * Build the `api_call` (+ optional `api_upload`) {@link AppstrateToolDefinition}s
+ * for one integration, named UNPREFIXED (`api_call` / `api_upload`). The
+ * caller registers them on the McpHost, which applies the `{ns}__` prefix
+ * (yielding the `{ns}__api_call` name) + tool-name validation.
+ *
+ * Both run in-process: `api_call` calls {@link executeApiCall} directly via
+ * {@link ApiCallToolDeps.proxyDeps}, without a Hono HTTP envelope, with the
+ * integration's credential adapters injected per call.
  *
  * When an `api_call` upstream response is binary, exceeds the
  * per-call token cap, or would push the run-level cumulative budget
@@ -565,11 +569,11 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
  * block instead of an inline text body.
  */
-function buildSidecarTools(options: ApiCallToolDeps): {
-  makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
-  makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
-} {
-  const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
+export function createApiCallToolDefs(
+  integ: ApiCallIntegrationConfig,
+  deps: ApiCallToolDeps,
+): AppstrateToolDefinition[] {
+  const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = deps;
   const { config } = proxyDeps;
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
@@ -766,10 +770,7 @@ function buildSidecarTools(options: ApiCallToolDeps): {
   // package id and integration-backed credentials. The integration is
   // implied by the tool name, so the request schema carries no integration
   // identifier.
-  //
-  // Built lazily (per `/mcp` request) by `mountMcp` because the set of
-  // integrations is only known after the background bootstrap finishes.
-  const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
+  const makeApiCallTool = (): AppstrateToolDefinition => {
     const toolName = apiCallToolKey(integ);
     const ctx = {
       proxyDeps: {
@@ -786,7 +787,7 @@ function buildSidecarTools(options: ApiCallToolDeps): {
     };
     return {
       descriptor: {
-        name: `${integ.namespace}__${toolName}`,
+        name: toolName,
         description:
           `Make an authenticated request through the "${integ.integrationId}" integration's ` +
           "credential-injecting proxy. The sidecar injects the integration's resolved " +
@@ -825,7 +826,7 @@ function buildSidecarTools(options: ApiCallToolDeps): {
   // directly against the sidecar (instead of via the agent extension),
   // the handler returns a structured tool-level error rather than
   // attempting an impossible no-workspace upload.
-  const makeApiUploadTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition | null => {
+  const makeApiUploadTool = (): AppstrateToolDefinition | null => {
     const protocols = (integ.uploadProtocols ?? []).filter(
       (p): p is string => typeof p === "string" && p.length > 0,
     );
@@ -834,7 +835,7 @@ function buildSidecarTools(options: ApiCallToolDeps): {
     const uploadToolName = apiUploadToolNameFor(apiCallKey);
     return {
       descriptor: {
-        name: `${integ.namespace}__${uploadToolName}`,
+        name: uploadToolName,
         description:
           `Upload a workspace file (>5 MB friendly) to the "${integ.integrationId}" integration's ` +
           "API over a chunked resumable protocol. Bytes flow through the credential-injecting " +
@@ -1030,7 +1031,8 @@ function buildSidecarTools(options: ApiCallToolDeps): {
     }
   }
 
-  return { makeApiCallTool, makeApiUploadTool };
+  const upload = makeApiUploadTool();
+  return upload ? [makeApiCallTool(), upload] : [makeApiCallTool()];
 }
 
 /**
@@ -1345,29 +1347,10 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
 }
 
 /**
- * Mount the MCP endpoint on the supplied Hono app.
- *
- * Per-request transport (stateless mode requirement): the SDK's
- * `WebStandardStreamableHTTPServerTransport` constructed with
- * `sessionIdGenerator: undefined` records `_hasHandledRequest = true`
- * after its first call and throws on the second — "Stateless transport
- * cannot be reused across requests. Create a new transport per
- * request." Reusing the same transport across `/mcp` calls would cap
- * the agent at one MCP call per sidecar lifetime, which is unusable.
- *
- * The tool definitions are computed once (pure data — they reference
- * `app.request()` lazily, not `app` state). The `Server` and
- * `WebStandardStreamableHTTPServerTransport` are constructed fresh for
- * each request. Construction is pure-memory and `server.connect()` on
- * the web-standard transport is synchronous in practice, so the
- * per-request cost is negligible compared to the upstream HTTP hop the
- * tool then performs.
- */
-/**
  * One `api_call` wiring: one auth of one bound connection.
  * The credential adapters are built by the sidecar boot from the
- * connection's live credentials source; `mountMcp` threads them into a
- * per-tool `ApiCallDeps` so the generic tool reuses the
+ * connection's live credentials source; {@link createApiCallToolDefs}
+ * threads them into a per-tool `ApiCallDeps` so the generic tool reuses the
  * shared credential-proxy core.
  */
 export interface ApiCallIntegrationConfig {
@@ -1409,7 +1392,7 @@ export interface ApiCallIntegrationConfig {
 
 /**
  * Credential-proxy core deps needed to build one integration's `api_call`
- * (+ optional `api_upload`) tool definitions outside of `mountMcp`. The
+ * (+ optional `api_upload`) tool definitions. The
  * sidecar boot (`integrations-boot.ts`) builds these once per run and
  * passes them in so the api_call tools can be hosted as a trusted
  * in-process MCP server registered on the McpHost — same pipeline as
@@ -1420,32 +1403,6 @@ export interface ApiCallToolDeps {
   blobStore?: BlobStore;
   tokenBudget: TokenBudget;
   apiCallLimit?: LimitFunction;
-}
-
-/**
- * Build the `api_call` (+ optional `api_upload`) {@link AppstrateToolDefinition}s
- * for one integration, named UNPREFIXED (`api_call` / `api_upload`). The
- * caller registers them on the McpHost, which applies the `{ns}__` prefix
- * (yielding the `{ns}__api_call` name) + tool-name validation. The
- * handlers reuse the exact credential-proxy core (`credentialProxyInner`)
- * via {@link buildSidecarTools}, with the integration's credential adapters
- * injected per-call.
- */
-export function createApiCallToolDefs(
-  integ: ApiCallIntegrationConfig,
-  deps: ApiCallToolDeps,
-): AppstrateToolDefinition[] {
-  const { makeApiCallTool, makeApiUploadTool } = buildSidecarTools(deps);
-  const apiCallKey = apiCallToolKey(integ);
-  const out: AppstrateToolDefinition[] = [];
-  const call = makeApiCallTool(integ);
-  out.push({ ...call, descriptor: { ...call.descriptor, name: apiCallKey } });
-  const upload = makeApiUploadTool(integ);
-  if (upload) {
-    const name = apiUploadToolNameFor(apiCallKey);
-    out.push({ ...upload, descriptor: { ...upload.descriptor, name } });
-  }
-  return out;
 }
 
 /**
@@ -1495,6 +1452,11 @@ interface MountMcpOptions {
   toolsProvider?: () => AppstrateToolDefinition[];
 }
 
+/**
+ * Mount the MCP endpoint on the supplied Hono app. A stateless transport
+ * serves one request only, so each request gets a fresh `Server` and
+ * transport over the tools {@link MountMcpOptions.toolsProvider} lists then.
+ */
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   app.all("/mcp", async (c) => {
@@ -1572,19 +1534,8 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       { name: "appstrate-sidecar", version: "1" },
       resources ? { resources } : {},
     );
-    // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
-    // disables session tracking. Combined with per-request construction,
-    // there is no state to leak between agent invocations, no map to
-    // bound, and no SDK contract to violate.
-    //
-    // DNS-rebinding defence is enforced above by `validateMcpHostHeader`
-    // (port-tolerant, supports dynamic-port deployments). The SDK's own
-    // host/origin check is therefore disabled.
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: !post?.requestsProgress,
-      enableDnsRebindingProtection: false,
-    });
+    // DNS-rebinding defence is `validateMcpHostHeader` above.
+    const transport = createStatelessTransport(post);
     // Only a POST may stream; a GET's standalone stream would otherwise stay open for the run.
     if (method === "POST") return serveStatelessPost(server, transport, forwarded, post);
     try {

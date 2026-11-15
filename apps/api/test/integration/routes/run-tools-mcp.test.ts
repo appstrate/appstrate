@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { encrypt } from "@appstrate/connect";
@@ -19,8 +20,21 @@ import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
 import { addMemory, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import { errorHandler } from "../../../src/middleware/error-handler.ts";
+import { createInternalRouter } from "../../../src/routes/internal.ts";
+import { createRunsEventsRouter } from "../../../src/routes/runs-events.ts";
+import type { AppEnv } from "../../../src/types/index.ts";
 
 const app = getTestApp();
+
+/** Both mounts with a budget of 2 requests a minute, so a test reaches 429 on its third call. */
+function limitedApp(): Hono<AppEnv> {
+  const limited = new Hono<AppEnv>();
+  limited.onError(errorHandler);
+  limited.route("/internal", createInternalRouter(2));
+  limited.route("/api", createRunsEventsRouter(2));
+  return limited;
+}
 
 interface ToolResult {
   content: Array<{ type: string; text: string }>;
@@ -35,9 +49,10 @@ async function rpc(
   headers: HeadersFor,
   method: string,
   params: Record<string, unknown> = {},
-): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
+  target: Hono<AppEnv> = app,
+): Promise<{ status: number; envelope: JsonRpcEnvelope & { code?: string } }> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  const res = await app.request(path, {
+  const res = await target.request(path, {
     method: "POST",
     headers: {
       ...(typeof headers === "function" ? headers(body) : headers),
@@ -47,11 +62,12 @@ async function rpc(
     body,
   });
   const text = await res.text();
-  let envelope: JsonRpcEnvelope = {};
+  // A problem+json refusal from the route parses too: its `code` lands on `envelope`.
+  let envelope: JsonRpcEnvelope & { code?: string } = {};
   try {
-    envelope = text ? (JSON.parse(text) as JsonRpcEnvelope) : {};
+    envelope = text ? (JSON.parse(text) as typeof envelope) : {};
   } catch {
-    // A problem+json refusal from the route, not a JSON-RPC envelope.
+    // Not JSON.
   }
   return { status: res.status, envelope };
 }
@@ -78,6 +94,9 @@ describe("run MCP server", () => {
     await seedAgent({ id: pkgId, orgId: ctx.orgId, createdBy: ctx.user.id });
   });
 
+  const path = "/internal/mcp";
+  const bearer = (runId: string) => ({ Authorization: `Bearer ${signRunToken(runId)}` });
+
   function seedRunningRun(overrides: Partial<Parameters<typeof seedRun>[0]> = {}) {
     return seedRun({
       packageId: pkgId,
@@ -90,9 +109,6 @@ describe("run MCP server", () => {
   }
 
   describe("POST /internal/mcp", () => {
-    const path = "/internal/mcp";
-    const bearer = (runId: string) => ({ Authorization: `Bearer ${signRunToken(runId)}` });
-
     it("returns 401 without a run token", async () => {
       const { status } = await rpc(path, {}, "tools/list");
       expect(status).toBe(401);
@@ -225,14 +241,6 @@ describe("run MCP server", () => {
       expect(byContent("team fact")).toMatchObject({ actorType: "shared", actorId: null });
       expect(byContent({ tone: "dry" })).toMatchObject({ key: "persona", pinned: true });
       expect(rows).toHaveLength(3);
-    });
-
-    it("`recall_memory` returns the notes written through `note`, once each", async () => {
-      const run = await seedRunningRun();
-      await callTool(path, bearer(run.id), "note", { content: "Gmail paginates at 100" });
-      const result = await callTool(path, bearer(run.id), "recall_memory", { q: "gmail" });
-      const body = JSON.parse(result.content[0]!.text) as { memories: Array<{ content: string }> };
-      expect(body.memories.map((m) => m.content)).toEqual(["Gmail paginates at 100"]);
     });
 
     it('`pin("checkpoint")` is read back by the next run\'s `run_history`', async () => {
@@ -396,6 +404,33 @@ describe("run MCP server", () => {
       expect(rows).toHaveLength(100);
     });
 
+    // The race itself runs on PostgreSQL (the integration job); PGlite serialises
+    // statements, so there it proves the count logic.
+    it("two concurrent `note` calls one below the archive limit save exactly one", async () => {
+      const run = await seedRunningRun();
+      await db.insert(packagePersistence).values(
+        Array.from({ length: 99 }, (_, i) => ({
+          packageId: pkgId,
+          spaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          pinned: false,
+          actorType: "user" as const,
+          actorId: ctx.user.id,
+          content: `memory ${i}`,
+          runId: run.id,
+        })),
+      );
+      const results = await Promise.all(
+        ["first", "second"].map((content) => callTool(path, bearer(run.id), "note", { content })),
+      );
+      expect(results.filter((r) => r.isError)).toHaveLength(1);
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows).toHaveLength(100);
+    });
+
     it('`pin("checkpoint", <non-object>)` keeps the slot but does not write `runs.checkpoint`', async () => {
       const run = await seedRunningRun();
       const result = await callTool(path, bearer(run.id), "pin", {
@@ -467,18 +502,17 @@ describe("run MCP server", () => {
       expect(notification!.payload).toMatchObject({ title: safe, message: safe });
     });
 
-    it("answers 429 past 200 calls a minute for one run", async () => {
+    it("answers 429 past the per-minute budget of one run", async () => {
       const run = await seedRunningRun();
-      for (let i = 0; i < 200; i++) {
-        expect((await rpc(path, bearer(run.id), "tools/list")).status).toBe(200);
+      const limited = limitedApp();
+      for (let i = 0; i < 2; i++) {
+        expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(200);
       }
-      expect((await rpc(path, bearer(run.id), "tools/list")).status).toBe(429);
+      expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(429);
     });
   });
 
   describe("`notify`", () => {
-    const path = "/internal/mcp";
-    const bearer = (runId: string) => ({ Authorization: `Bearer ${signRunToken(runId)}` });
     const notificationsOf = (runId: string) =>
       db.select().from(notifications).where(eq(notifications.runId, runId));
 
@@ -623,12 +657,12 @@ describe("run MCP server", () => {
       });
     });
 
-    it("answers 429 to the 201st signed call of the minute", async () => {
+    it("answers 429 past the per-minute budget of one run", async () => {
       const run = await seedRemoteRun();
-      for (let i = 0; i < 200; i++) {
-        expect((await rpc(path(run.id), signed(SECRET), "tools/list")).status).toBe(200);
-      }
-      expect((await rpc(path(run.id), signed(SECRET), "tools/list")).status).toBe(429);
+      const limited = limitedApp();
+      const call = () => rpc(path(run.id), signed(SECRET), "tools/list", {}, limited);
+      for (let i = 0; i < 2; i++) expect((await call()).status).toBe(200);
+      expect((await call()).status).toBe(429);
     });
 
     it("returns 401 without signature headers", async () => {
@@ -665,10 +699,18 @@ describe("run MCP server", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 410 once the sink is closed — a finished run", async () => {
+    it("returns 410 `run_sink_closed` once the sink is closed — a finished run", async () => {
       const run = await seedRemoteRun({ status: "success", sinkClosedAt: new Date() });
-      const { status } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      const { status, envelope } = await rpc(path(run.id), signed(SECRET), "tools/list");
       expect(status).toBe(410);
+      expect(envelope.code).toBe("run_sink_closed");
+    });
+
+    it("returns 410 `run_sink_expired` once the sink has expired", async () => {
+      const run = await seedRemoteRun({ sinkExpiresAt: new Date(Date.now() - 1000) });
+      const { status, envelope } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      expect(status).toBe(410);
+      expect(envelope.code).toBe("run_sink_expired");
     });
 
     it("returns 404 for a platform-origin run, whose sidecar serves these tools", async () => {

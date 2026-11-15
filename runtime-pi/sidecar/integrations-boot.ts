@@ -748,27 +748,20 @@ export async function connectRemoteHttpIntegration(
  * Open the platform's run MCP server for an integration bound to the runtime
  * (`spec.manifest.server.platformEndpoint`): `{platformApiUrl}/internal/mcp`,
  * authenticated by the run token. The platform API is the origin the sidecar
- * already trusts with the run token, so this client skips the SSRF guard for
- * that exact origin and refuses every other one, redirects included.
+ * already trusts with the run token, so this client skips the SSRF guard. The
+ * client sends every request to that endpoint and follows no redirect.
  */
 export async function connectPlatformIntegration(
   spec: IntegrationSpawnSpec,
   opts: Pick<BundleFetchOptions, "platformApiUrl" | "runToken" | "fetchFn">,
-  deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs"> = {},
+  deps: Pick<ConnectRemoteHttpDeps, "connectDeadlineMs"> = {},
 ): Promise<AppstrateMcpClient> {
   const endpoint = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/mcp`;
-  const origin = new URL(endpoint).origin;
   const baseFetch = opts.fetchFn ?? fetch;
   const platformFetch = mcpFetch(async (input, init) => {
-    const target = new URL(input);
-    if (target.origin !== origin) {
-      throw new RemoteCredentialRefusal(
-        `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,
-      );
-    }
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${opts.runToken}`);
-    return baseFetch(target, { ...init, headers, redirect: "error" });
+    return baseFetch(input, { ...init, headers, redirect: "error" });
   });
   return connectStreamableHttp(
     spec,

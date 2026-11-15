@@ -440,6 +440,7 @@ export {
 } from "./client.ts";
 
 export {
+  createStatelessTransport,
   parseMcpPost,
   serveAuthenticatedStatelessPost,
   serveStatelessPost,

@@ -74,6 +74,30 @@ describe("mcpToolForwardFactory", () => {
     expect(events.at(-1)).toMatchObject({ type: "integration_tool.completed", isError: true });
   });
 
+  it("completes a call as an error when the server or the plan throws", async () => {
+    const failing = forward(text("unused"), {
+      mcp: {
+        callTool: async () => {
+          throw new Error("connection reset");
+        },
+        readResource: async () => ({ contents: [] }),
+      },
+    });
+    await expect(failing.tool.execute("call_5", {})).rejects.toThrow("connection reset");
+    const planFailing = forward(text("unused"), {
+      plan: async () => {
+        throw new Error("plan broke");
+      },
+    });
+    await expect(planFailing.tool.execute("call_6", {})).rejects.toThrow("plan broke");
+    for (const { events } of [failing, planFailing]) {
+      expect(events.map((e) => [e.type, e.isError])).toEqual([
+        ["integration_tool.called", undefined],
+        ["integration_tool.completed", true],
+      ]);
+    }
+  });
+
   it("sends the plan's arguments and finishes with its result", async () => {
     const { tool, calls } = forward(text("raw"), {
       plan: async (args) => ({

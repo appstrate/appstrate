@@ -19,14 +19,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `scripts/migration/README.md`.
 
 - **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the window** (#2197,
-  #2199). Wait for zero `running` runs (a container started before the deploy posts its notes,
-  pins and logs in a finalize body this release does not read), stop the app, `pg_dump`, run
-  the migrations, then
-  `bun scripts/migration/0053-migrate-runtime-tools.ts --before <deploy time, ISO 8601>` (dry
-  run) and the same with `--apply`, with the platform's `DATABASE_URL` or with
-  `PGLITE_DATA_DIR` naming an embedded database, and start the app. Until it runs, every stored
-  agent runs without the `@appstrate/platform` tools it had, and nothing reports it. Detail in
-  `scripts/migration/README.md`.
+  #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools it had,
+  an agent that selected `output` without an `output.schema` has no `output` tool, and nothing
+  reports it. In order:
+  1. Rehearse it on a restored production dump.
+  2. Wait for zero `running` runs (a container started before the deploy posts its notes, pins
+     and logs in a finalize body this release does not read), stop the app, `pg_dump`.
+  3. Run the migrations (on the embedded database, start the platform once and stop it).
+  4. With the platform's whole environment loaded (`set -a && . ./.env && set +a`;
+     `PGLITE_DATA_DIR` names an embedded database):
+     `bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>` (dry run), then
+     the same with `--apply`. `--before` is an RFC 3339 instant with `Z` or an offset, after the
+     app stopped and before it restarts (the `pg_dump` time, for example), and the SAME value on
+     every re-run. Too early, and the agents saved after it without the old field keep no
+     `recall_memory` / `run_history`; a later value on a re-run adds `@appstrate/platform` back
+     to agents whose authors removed it after the release.
+  5. While it lists a malformed manifest it exits 1: that agent is left untouched and runs
+     without the tools (the other rewrites stay committed). Fix each by hand and re-run with the
+     same `--before`.
+  6. Start the app.
+
+  An agent that selected `output` without a schema gains the open object schema: it keeps the
+  `output` tool and its corrective turn, and the platform prompt now tells the model it MUST
+  call `output` exactly once, last; nothing is required, so a run that never calls it still
+  succeeds. Rollback: restore the `pg_dump`. Detail in `scripts/migration/README.md`.
 
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
@@ -145,26 +161,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
 - **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). The key binds an
-  integration to the runtime that executes the run, which authenticates to it with the run token,
-  so only a system package may declare it: creating, updating, forking or importing an
-  integration that carries it answers `400`, and a bundle is refused when any of its non-system
-  packages carries it, dependencies included.
+  integration to the runtime that executes the run: the platform serves its tools with the run's
+  authority (the run token is never sent to the integration's own endpoint), so only a system
+  package may declare it. Creating or updating an organization integration that carries it (its
+  manifest or its `manifest.json` file), forking one, and importing a bundle in which any
+  non-system package carries it, dependencies included, answer `400`.
 
 - **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
   to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP
   integrations, with the run's MCP server on the instance (`/api/runs/{runId}/mcp`) as its
   target, each request signed with the run's sink secret like its events. A run that reports to no
-  instance starts without it (`no connection is bound to this run`). The CLI emits the
-  runtime-ready event, which moves the reported run to `running`, before it connects its
-  remote MCP integrations.
+  instance starts without it (`no connection is bound to this run`).
 
 - **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
   inline manifest gets the `@appstrate/platform` dependency unless `dependencies.integrations`
   already names it, and its `log` tool selected in `integrations_configuration` unless either
   `dependencies.integrations` or `integrations_configuration` names it (the dependency alone
-  keeps its `default_tools`); the caller's own entries are kept.
-  `integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. An
-  inline manifest without `output` gets the open object output schema. The
+  keeps its `default_tools`); the caller's own entries are kept, so a caller selects the tools
+  it wants there (`{ tools: [] }` gives a run without the platform tools). An inline manifest
+  without `output` gets the open object output schema. The
   `runtime_tools` default and the `manifest.runtime_tools` argument are gone. The chat
   prompt and the `run_and_wait` descriptions say so. The default "Hello World"
   agent declares `@appstrate/platform`.
@@ -174,8 +189,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   whatever the manifest declares, and a CLI run has none.
 
 - **BREAKING: `output` is injected from `output.schema`** (#2197). A run has the `output` tool
-  exactly when its agent declares a non-empty `output.schema`, and must then call it; without a
-  schema there is no `output` tool. The `PiRunner`
+  exactly when its agent declares a non-empty `output.schema`; without a schema there is no
+  `output` tool. A run that ends without calling it gets one corrective turn, then is failed at
+  finalize unless the schema validates `{}` (it requires no property). The `PiRunner`
   builds the tool in the agent container and in the CLI; the sidecar does not host it
   (`OUTPUT_SCHEMA` is not part of the sidecar env). Inline runs keep their open object output
   schema, so they keep `output`. The runner, the platform prompt's `## Output Format` section
@@ -603,8 +619,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   events, over the exact request body, so the credential lasts as long as the run's sink, not
   a session: a bad signature answers 401, a replayed `webhook-id` 409, a closed sink 410, and a
   platform-origin run 404 (its sidecar serves these tools, restricted to the agent's selection).
-  Each mount allows 200 POSTs a minute per run (429 beyond), refuses a JSON-RPC batch with 400,
-  and answers 405 (`Allow: POST`) to every other verb, GET included.
+  `/internal/mcp` allows 200 requests a minute per run token (429 beyond), every verb counted;
+  `/api/runs/{runId}/mcp` allows 200 signed POSTs a minute per run. Both refuse a JSON-RPC batch
+  with 400 and answer 405 (`Allow: POST`) to every other verb, GET included.
 
 - **`notify`: an agent sends an in-app notification from inside its run** (#2200).
   A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100

@@ -18,11 +18,7 @@ import {
 
 /** Why an upstream tool is not exposed by {@link exposeTool}. */
 export type ToolExposureExclusion =
-  | "allowlist"
-  | "hidden_tools"
-  | "schema_too_large_after_sanitisation"
-  | "claimed"
-  | "name_collision";
+  "allowlist" | "hidden_tools" | "schema_too_large_after_sanitisation" | "name_collision";
 
 export interface ToolExposureOptions {
   namespace: string;
@@ -30,15 +26,11 @@ export interface ToolExposureOptions {
   hidden: ReadonlySet<string> | null;
   /** Whether an exposed name is held already. */
   isTaken: (name: string) => boolean;
-  /** A first-party descriptor: kept verbatim, exposed as `{namespace}__{name}`. */
-  trusted?: boolean;
-  /** `true` takes an admitted tool over before it is named (`claimed`). */
-  claim?: (upstreamName: string) => boolean;
 }
 
 /**
  * The descriptor the model sees for the upstream `tool`, or why it is not exposed: excluded by
- * the selection, too large once sanitised, claimed by the caller, or left without a free name.
+ * the selection, too large once sanitised, or left without a free name.
  */
 export function exposeTool(
   tool: Tool,
@@ -46,16 +38,13 @@ export function exposeTool(
 ): { descriptor: Tool } | { exclusion: ToolExposureExclusion } {
   const excluded = toolExclusion(tool.name, opts.allowlist, opts.hidden);
   if (excluded) return { exclusion: excluded };
-  const sanitised = opts.trusted ? tool : sanitiseToolDescriptor(tool);
+  const sanitised = sanitiseToolDescriptor(tool);
   if (!sanitised) return { exclusion: "schema_too_large_after_sanitisation" };
-  if (opts.claim?.(tool.name)) return { exclusion: "claimed" };
-  let name = `${opts.namespace}__${tool.name}`;
-  if (!opts.trusted) {
-    try {
-      name = allocateMcpToolName(opts.namespace, tool.name, opts.isTaken);
-    } catch {
-      return { exclusion: "name_collision" };
-    }
+  let name: string;
+  try {
+    name = allocateMcpToolName(opts.namespace, tool.name, opts.isTaken);
+  } catch {
+    return { exclusion: "name_collision" };
   }
   return { descriptor: exposedToolDescriptor(sanitised, opts.namespace, name) };
 }

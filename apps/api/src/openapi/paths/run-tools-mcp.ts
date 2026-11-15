@@ -5,7 +5,7 @@
  * shared by its two mounts: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`.
  */
 
-import { jsonRpcErrorContent, jsonRpcTransportError, problemContent } from "../responses.ts";
+import { jsonRpcErrorContent, mcpTransportResponses, problemContent } from "../responses.ts";
 
 export const RUN_TOOLS_MCP_DESCRIPTION =
   "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the " +
@@ -17,25 +17,6 @@ export const RUN_TOOLS_MCP_DESCRIPTION =
   "run. Rate-limited to 200 " +
   "requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) " +
   "is refused with 400 (`-32600`).";
-
-export const runToolsMcpRequestBody = {
-  required: true,
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        description: "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
-        properties: {
-          jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { type: ["string", "number", "null"] },
-          method: { type: "string" },
-          params: { type: "object", additionalProperties: true },
-        },
-        required: ["jsonrpc", "method"],
-      },
-    },
-  },
-} as const;
 
 /** What the MCP transport and the platform's request pipeline answer on either mount. */
 export const runToolsMcpResponses = {
@@ -63,16 +44,7 @@ export const runToolsMcpResponses = {
       ...problemContent,
     },
   },
-  "406": jsonRpcTransportError(
-    "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
-  ),
-  "413": {
-    description:
-      "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
-      "(enforced by the body-limit middleware, before the MCP transport).",
-    content: problemContent,
-  },
-  "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
+  ...mcpTransportResponses,
   "429": { $ref: "#/components/responses/RateLimited" },
 } as const;
 

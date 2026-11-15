@@ -21,7 +21,7 @@ import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
-import { rateLimitByBearer } from "../middleware/rate-limit.ts";
+import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { recordRunDegradedIntegration } from "../services/state/runs.ts";
 import {
   getRunEffectiveAgent,
@@ -214,14 +214,14 @@ const EMPTY_CREDENTIALS_WIRE = {
   expiresAtEpochMs: {},
 };
 
-export function createInternalRouter() {
+export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const router = new Hono();
 
-  // Rate limit all internal endpoints: 200 req/min per run token and per
-  // concrete path (`limiterPath` falls back to the path under a `*` pattern),
-  // so `/internal/mcp` has a budget of its own, apart from the credential and
+  // Rate limit all internal endpoints per run token and per concrete path
+  // (`limiterPath` falls back to the path under a `*` pattern), so
+  // `/internal/mcp` has a budget of its own, apart from the credential and
   // token fetches — the figure the remote mount of the same server has.
-  router.use("/*", rateLimitByBearer(200));
+  router.use("/*", rateLimitByBearer(ratePerMin));
 
   // POST /internal/mcp — the run MCP server (`@appstrate/platform` tools) for
   // the sidecar. The run token names the run; `verifyRunToken` refuses a run

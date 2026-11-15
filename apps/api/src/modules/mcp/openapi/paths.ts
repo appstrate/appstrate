@@ -9,26 +9,11 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-import { jsonRpcErrorContent, jsonRpcTransportError } from "../../../openapi/responses.ts";
-
-const jsonRpcRequestBody = {
-  required: true,
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        description: "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
-        properties: {
-          jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { type: ["string", "number", "null"] },
-          method: { type: "string" },
-          params: { type: "object", additionalProperties: true },
-        },
-        required: ["jsonrpc", "method"],
-      },
-    },
-  },
-} as const;
+import {
+  jsonRpcErrorContent,
+  jsonRpcRequestBody,
+  mcpTransportResponses,
+} from "../../../openapi/responses.ts";
 
 const orgPathParameter = {
   name: "org",
@@ -139,18 +124,7 @@ const orgEndpoint = {
       },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
-      "406": jsonRpcTransportError(
-        "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
-      ),
-      "413": {
-        description:
-          "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
-          "(enforced by the body-limit middleware, before the MCP transport).",
-        content: {
-          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-        },
-      },
-      "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
+      ...mcpTransportResponses,
     },
   },
   get: {

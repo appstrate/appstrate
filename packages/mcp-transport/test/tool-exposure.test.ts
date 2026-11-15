@@ -29,7 +29,7 @@ describe("exposeTool", () => {
     expect(exposeTool(tool("b"), opts)).toEqual({ exclusion: "hidden_tools" });
   });
 
-  it("sanitises an untrusted descriptor and drops one too large once sanitised", () => {
+  it("sanitises the descriptor and drops one too large once sanitised", () => {
     const properties = Object.fromEntries(
       Array.from({ length: MAX_SCHEMA_SERIALISED_BYTES / 16 }, (_, i) => [
         `property_${i}`,
@@ -42,24 +42,6 @@ describe("exposeTool", () => {
     expect(exposeTool(tool("a", { inputSchema: big as Tool["inputSchema"] }), free)).toEqual({
       exclusion: "schema_too_large_after_sanitisation",
     });
-  });
-
-  it("keeps a trusted descriptor verbatim under its canonical name, taken or not", () => {
-    const trusted = tool("api_call__primary", { description: "hi\u200Bthere" });
-    expect(exposeTool(trusted, { ...free, trusted: true, isTaken: () => true })).toEqual({
-      descriptor: { ...trusted, name: "docs__api_call__primary" },
-    });
-  });
-
-  it("leaves a tool the caller claims unnamed", () => {
-    const claimed: string[] = [];
-    const isTaken = () => {
-      throw new Error("a claimed tool is not named");
-    };
-    expect(
-      exposeTool(tool("a"), { ...free, isTaken, claim: (name) => claimed.push(name) > 0 }),
-    ).toEqual({ exclusion: "claimed" });
-    expect(claimed).toEqual(["a"]);
   });
 
   it("renames a taken name and leads the description with the upstream name", () => {

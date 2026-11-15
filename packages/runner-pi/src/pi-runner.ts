@@ -683,17 +683,25 @@ export class PiRunner {
     });
 
     // Harness tool events (`output`, `publish_file`) go into the run's sink
-    // stamped here, like every event the bridge emits, and a sink failure is
-    // swallowed as the bridge swallows it: the event is already recorded for
-    // the reducer, which `run()` reads at finalize. The tool awaits the write,
-    // so no harness emit is still in flight when the session settles.
+    // stamped here, like every event the bridge emits. A sink failure is logged,
+    // not thrown: the event is already recorded for the reducer, which `run()`
+    // reads at finalize. The tool awaits the write, so no harness emit is still
+    // in flight when the session settles.
     const emitHarnessEvent = (event: HarnessToolEvent): Promise<void> =>
       internalSink
         .emit({ ...event, runId: context.runId, timestamp: Date.now() } as RunEvent)
-        .catch(() => {});
+        .catch((err: unknown) => {
+          process.stderr.write(
+            formatLogLine("warn", "[pi-runner] harness event not written to the sink", {
+              type: event.type,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
     const { outputSchema, fileUploader } = this.opts;
+    const outputRequired = outputSchema !== undefined;
     const harnessExtensions: ExtensionFactory[] = [
-      ...(outputSchema ? [buildOutputExtension(outputSchema, emitHarnessEvent)] : []),
+      ...(outputRequired ? [buildOutputExtension(outputSchema, emitHarnessEvent)] : []),
       ...(fileUploader ? [buildPublishFileExtension(fileUploader, emitHarnessEvent)] : []),
     ];
     const temperatureExtension: ExtensionFactory[] =
@@ -748,7 +756,6 @@ export class PiRunner {
     // for why this placement is the cheap one.
     enableSearchTools(session);
 
-    const outputRequired = this.opts.outputSchema !== undefined;
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       outputRequired,
       contextWindow: budget.contextWindow,
@@ -1366,7 +1373,7 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
 /**
  * Some provider adapters normalize an AbortError into stopReason "error"
  * instead of "aborted". Keep this deliberately narrow: it is only consulted
- * after a terminal tool completed successfully.
+ * after `output` completed successfully.
  */
 function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   if (typeof errorMessage !== "string") return false;
@@ -1379,7 +1386,7 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 
 /**
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
- * runner's OWN stop rather than a provider failure: a terminal tool succeeded
+ * runner's OWN stop rather than a provider failure: `output` succeeded
  * or ran out of attempts, and the runner aborted the SDK loop to stop paying
  * for turns nobody will read. Extracted so all three readers — the live
  * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
@@ -1395,7 +1402,7 @@ function isRunnerEarlyStopAbort(
 }
 
 /**
- * How many calls a terminal tool may refuse before the run is failed. A refusal
+ * How many calls `output` may refuse before the run is failed. A refusal
  * invites a retry, which never ends for a payload the model cannot fix (an
  * output schema no value satisfies).
  */
@@ -1437,17 +1444,16 @@ export function installSessionBridge(
   options: SessionBridgeOptions = {},
 ): SessionBridgeHandle {
   const outputRequired = options.outputRequired === true;
-  // Set once `output`, the terminal tool, has executed successfully.
+  // Set once `output` has executed successfully.
   // From that point the run is semantically complete: the early-stop abort
   // the runner fires may surface as a trailing `stopReason: "aborted"`
   // assistant turn, which must NOT be read as a terminal failure. Exposed
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
-  let terminalToolRejections = 0;
-  let terminalToolExhausted: RunError | undefined;
-  const runnerStoppedLoop = (): boolean =>
-    terminalToolCompleted || terminalToolExhausted !== undefined;
+  let outputRejections = 0;
+  let outputExhausted: RunError | undefined;
+  const runnerStoppedLoop = (): boolean => terminalToolCompleted || outputExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
   let totalUsage: TokenUsage = zeroTokenUsage();
@@ -1559,7 +1565,7 @@ export function installSessionBridge(
         // turn leaves it standing instead of blanking it.
         // Also skips the runner's own early-stop abort, mirroring
         // `getTerminalError()`: that turn is a success artefact, and latching
-        // it would make a watchdog firing afterwards (a terminal tool ran, then
+        // it would make a watchdog firing afterwards (`output` ran, then
         // the output re-prompt hung) blame a provider that never failed. The
         // suppression is applied HERE, at latch time, not at read time: a
         // benign abort must not be recorded, but neither may it ERASE a real
@@ -1626,7 +1632,7 @@ export function installSessionBridge(
         // recovers from also logs here (harmless — the trail does not
         // drive status).
         // Suppress the verdict for the abort we raced ourselves after a
-        // terminal tool completed — the run is already semantically done
+        // `output` completed — the run is already semantically done
         // (mirrored in `getTerminalError()` so log trail and stamped
         // status stay consistent).
         if (
@@ -1762,15 +1768,15 @@ export function installSessionBridge(
           options.onTerminalTool?.();
           break;
         }
-        terminalToolRejections += 1;
-        if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
-          terminalToolExhausted = {
+        outputRejections += 1;
+        if (outputRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
+          outputExhausted = {
             code: "terminal_tool_rejected",
             message:
-              `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
+              `The \`${tool}\` tool refused ${outputRejections} calls from the agent, so the ` +
               "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
           };
-          fire(buildError({ runId, timestamp: Date.now() }, terminalToolExhausted.message));
+          fire(buildError({ runId, timestamp: Date.now() }, outputExhausted.message));
           options.onTerminalTool?.();
         }
         break;
@@ -1797,12 +1803,12 @@ export function installSessionBridge(
       return reportedCost();
     },
     getTerminalError(): RunError | undefined {
-      if (terminalToolExhausted) return terminalToolExhausted;
+      if (outputExhausted) return outputExhausted;
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
       // `terminalErrorMessage` are shared with the live `appstrate.error`
       // emit above, so the stamped status and the `run_logs` trail can
       // never disagree on what counts as a terminal failure.
-      // A trailing "aborted" turn AFTER a successful terminal tool is the
+      // A trailing "aborted" turn AFTER a successful `output` is the
       // runner's own early-stop, not a failure.
       if (
         isRunnerEarlyStopAbort(

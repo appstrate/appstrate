@@ -157,7 +157,7 @@ console.log(snapshot().output); // { done: true }
 | `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
 | `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |
 | `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                                |
-| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `CanonicalRunEvent`, …                                               |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, …                                                                    |
 
 ## Conformance
 

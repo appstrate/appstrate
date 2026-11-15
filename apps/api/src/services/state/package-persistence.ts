@@ -29,11 +29,10 @@ import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 
 /**
- * Validate any JSON value bound for `package_persistence.content` against
- * the shared Zod schema (JSON-safe + soft 64 KB cap). Throws `invalidRequest`
- * (400) with a path-prefixed message, the one error the writers below raise
- * for a refused value, so a caller can tell it from a database failure.
- * Strings are passed through unchanged — the `note` tool stores plain text.
+ * Validate a pinned slot's value against the shared Zod schema (JSON-safe +
+ * soft 64 KB cap). Throws `invalidRequest` (400), the one error
+ * `upsertPinned` raises for a refused value, so a caller can tell it from a
+ * database failure.
  */
 function assertValidContent(value: unknown, label: string): void {
   const parsed = packagePersistenceContentSchema.safeParse(value);
@@ -52,7 +51,7 @@ const MAX_MEMORIES_PER_SCOPE = 100;
 /** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
-/** Pattern enforced on agent-supplied pinned slot keys; the `pin` tool's `pinArgs` reads it too. */
+/** Pattern of a pinned slot key, enforced by the `pin` tool's argument schema. */
 export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
 export const MAX_PINNED_KEY_LENGTH = 64;
 
@@ -186,8 +185,6 @@ export async function getCheckpoint(
  * expression-based conflict target, and the `ON CONFLICT` columns must
  * match the index byte-for-byte.
  *
- * `key` is validated against {@link PINNED_KEY_PATTERN} so a malformed
- * agent payload fails loud here rather than silently corrupting storage.
  * `key === "checkpoint"` is the carry-over slot snapshotted onto runs.checkpoint;
  * every other key is a Letta-style named pinned block.
  */
@@ -200,17 +197,6 @@ export async function upsertPinned(
   content: unknown,
   runId: string | null,
 ): Promise<void> {
-  if (
-    typeof key !== "string" ||
-    key.length === 0 ||
-    key.length > MAX_PINNED_KEY_LENGTH ||
-    !PINNED_KEY_PATTERN.test(key)
-  ) {
-    throw invalidRequest(
-      `Invalid pinned slot key "${key}" — must match ${PINNED_KEY_PATTERN} and be ≤${MAX_PINNED_KEY_LENGTH} chars`,
-    );
-  }
-
   assertValidContent(content, key === CHECKPOINT_KEY ? "checkpoint" : "pinned slot");
 
   const { actorType, actorId } = storageActor(scope);
@@ -359,8 +345,7 @@ export async function listMemories(
  * archive rows.
  *
  * Sorted `createdAt DESC` so the agent sees the most recent learnings
- * first; capped at `RECALL_LIMIT_MAX` (50) to bound the prompt-injection
- * cost when an agent passes a runaway limit.
+ * first. `RECALL_LIMIT_MAX` bounds the `recall_memory` tool's `limit`.
  */
 export const RECALL_LIMIT_DEFAULT = 10;
 export const RECALL_LIMIT_MAX = 50;
@@ -371,8 +356,6 @@ export async function recallMemories(
   scope: PersistenceScope,
   opts: { query?: string; limit?: number } = {},
 ): Promise<Memory[]> {
-  const limit = Math.max(1, Math.min(opts.limit ?? RECALL_LIMIT_DEFAULT, RECALL_LIMIT_MAX));
-
   const conditions = [
     eq(packagePersistence.packageId, packageId),
     eq(packagePersistence.spaceId, spaceId),
@@ -380,11 +363,12 @@ export async function recallMemories(
     eq(packagePersistence.pinned, false),
     buildVisibilityFilter(scope)!,
   ];
-  if (opts.query && opts.query.trim().length > 0) {
+  const query = opts.query?.trim();
+  if (query) {
     // jsonb stringified for ILIKE: matches both string and structured
     // content without a separate index. Cheap on the modest row counts
     // we cap memories at; replace with FTS / pgvector if cardinality grows.
-    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${opts.query.trim()}%`));
+    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${query}%`));
   }
 
   const rows = await db
@@ -400,7 +384,7 @@ export async function recallMemories(
     .from(packagePersistence)
     .where(and(...conditions))
     .orderBy(desc(packagePersistence.createdAt), desc(packagePersistence.id))
-    .limit(limit);
+    .limit(opts.limit ?? RECALL_LIMIT_DEFAULT);
 
   return rows as Memory[];
 }
@@ -408,9 +392,9 @@ export async function recallMemories(
 /**
  * Append one archive memory (`pinned=false`) for a scope — the `note` tool's
  * write. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per `(package, space,
- * scope)` and trimmed to {@link MAX_MEMORY_CONTENT} characters. Returns
- * `false`, writing nothing, when the scope is full. A per-scope advisory lock
- * serialises the count and the insert, so parallel calls cannot pass the cap.
+ * scope)`. Returns `false`, writing nothing, when the scope is full. A
+ * per-scope advisory lock serialises the count and the insert, so parallel
+ * calls cannot pass the cap.
  */
 export async function addMemory(
   packageId: string,
@@ -421,10 +405,6 @@ export async function addMemory(
   runId: string,
 ): Promise<boolean> {
   const { actorType, actorId } = storageActor(scope);
-  // Sanitised after the trim: the slice can split a surrogate pair.
-  const trimmed = toPgSafe(content.slice(0, MAX_MEMORY_CONTENT));
-  assertValidContent(trimmed, "memory");
-
   return db.transaction(async (tx) => {
     const lockKey = `package-memories:${packageId}:${spaceId}:${actorType}:${actorId ?? ""}`;
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
@@ -448,7 +428,7 @@ export async function addMemory(
       pinned: false,
       actorType,
       actorId,
-      content: trimmed,
+      content: toPgSafe(content),
       runId,
     });
     return true;

@@ -130,14 +130,14 @@ function defineTool<S extends z.ZodObject>(spec: {
   });
 }
 
-const persistenceScope = (description: string) =>
+const scopeArg = (description: string) =>
   z.enum(["actor", "shared"]).optional().describe(description);
 
 /**
- * Bound of a `log` message, in characters; the live frame of a run log carries
- * 2 000 bytes of it (`notify_run_log_insert`, `@appstrate/db/notify`), so a
- * longer message, or a shorter multi-byte one, is shown cut while the run is
- * watched and stored in full.
+ * Bound of a `log` message, in characters; a longer one is refused. The live
+ * frame of a run log carries 2 000 bytes of it (`notify_run_log_insert`,
+ * `@appstrate/db/notify`), so a multi-byte message near the bound is shown cut
+ * while the run is watched, and stored in full.
  */
 const LOG_MESSAGE_MAX = 2000;
 
@@ -185,7 +185,7 @@ const RUN_TOOLS: RunTool[] = [
         .min(1)
         .max(MAX_MEMORY_CONTENT)
         .describe(`Memory text to save (max ${MAX_MEMORY_CONTENT} characters)`),
-      scope: persistenceScope(
+      scope: scopeArg(
         'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
       ),
     }),
@@ -224,7 +224,7 @@ const RUN_TOOLS: RunTool[] = [
           'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is the carry-over slot.',
         ),
       content: z.unknown().describe("Arbitrary JSON value stored under the pinned slot."),
-      scope: persistenceScope(
+      scope: scopeArg(
         'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
       ),
     }),
@@ -275,10 +275,9 @@ const RUN_TOOLS: RunTool[] = [
         ),
     }),
     run: async ({ q, limit }, { run, actorScope }) => {
-      const query = q?.trim();
       const memories = await recallMemories(run.packageId, run.spaceId, actorScope, {
-        ...(query ? { query } : {}),
-        limit: limit ?? RECALL_LIMIT_DEFAULT,
+        query: q,
+        limit,
       });
       return textResult(
         JSON.stringify({

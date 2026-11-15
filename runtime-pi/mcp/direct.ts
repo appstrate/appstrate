@@ -48,9 +48,11 @@ interface BuildMcpDirectFactoriesOptions {
 
 /**
  * Build one Pi extension factory per tool the sidecar's MCP host advertises,
- * forwarding to `mcp.callTool` verbatim. This is how `{namespace}__{tool}`
- * entries of the run's integrations (including the generic `{ns}__api_call`
- * tool) become callable from the LLM side. The set is built once per agent.
+ * forwarding to `mcp.callTool`: verbatim, except an `api_call` tool, whose
+ * body is resolved agent-side first, and an `api_upload` tool, run agent-side
+ * through its `api_call` sibling. This is how the `{namespace}__{tool}`
+ * entries of the run's integrations become callable from the LLM side. The
+ * set is built once per agent.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,

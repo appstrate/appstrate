@@ -169,7 +169,7 @@ Without `agents:read`, run responses return `input: null` for registered agents,
 
 The `output` tool takes one argument, `data`, the object to return. When `output.schema` is declared, it is the schema of `data`, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
 
-The `output` tool exists exactly when `output.schema` is declared, and the run must then call it. A run with no output schema has no `output` tool and finishes without a structured result.
+The `output` tool exists exactly when `output.schema` is declared, as a non-empty object: an empty schema (`{}`) declares none. The prompt's **Output Format** then tells the model to call it exactly once, as its final action. A run that ends without calling it gets one corrective turn, and is then validated as if it had returned `{}`: it is `failed` when the schema requires a property, `success` when it requires none. A run with no output schema has no `output` tool and finishes without a structured result.
 
 ## Capabilities
 

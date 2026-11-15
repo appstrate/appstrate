@@ -15,14 +15,18 @@ import { packages, packageVersions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { runMigrateRuntimeTools } from "../../../../../scripts/migration/0053-migrate-runtime-tools.ts";
+import {
+  parseBefore,
+  runMigrateRuntimeTools,
+} from "../../../../../scripts/migration/0053-migrate-runtime-tools.ts";
 
 /** `--before`: rows stamped `WRITTEN` predate it, rows left at their default stamp (now) do not. */
 const BEFORE = new Date("2026-06-01T00:00:00Z");
 const WRITTEN = new Date("2026-01-01T00:00:00Z");
 const PLATFORM = "@appstrate/platform";
 const DEFAULT_TOOLS = ["recall_memory", "run_history"];
-const OPEN_SCHEMA = { type: "object", properties: {}, additionalProperties: true };
+/** The `output` an agent that selected `output` without a schema receives. */
+const OPEN_OUTPUT = { schema: { type: "object", properties: {}, additionalProperties: true } };
 
 type Manifest = Record<string, unknown>;
 
@@ -70,7 +74,8 @@ interface Rewrite {
   extra: Manifest;
   dependencies?: Manifest;
   configuration?: Manifest;
-  output?: Manifest;
+  /** The stored `output`, absent when undefined; `OPEN_OUTPUT` when the rewrite added it. */
+  output?: unknown;
 }
 
 const REWRITES: Rewrite[] = [
@@ -108,14 +113,24 @@ const REWRITES: Rewrite[] = [
   {
     name: "output selected with an empty schema gains the open schema",
     extra: { runtime_tools: ["output"], output: { schema: {} } },
-    output: { schema: OPEN_SCHEMA },
+    output: OPEN_OUTPUT,
   },
   {
     name: "output selected with no output gains the open schema",
     extra: { runtime_tools: ["output"] },
-    output: { schema: OPEN_SCHEMA },
+    output: OPEN_OUTPUT,
+  },
+  {
+    name: "an output that is not an object is not checked when output is not selected",
+    extra: { runtime_tools: ["log"], output: "oops" },
+    configuration: { tools: ["log", ...DEFAULT_TOOLS] },
+    output: "oops",
   },
   { name: "an agent that never carried runtime_tools declares the integration", extra: {} },
+  {
+    name: "a range that is not a string declares nothing, and is replaced",
+    extra: { dependencies: { integrations: { [PLATFORM]: null } } },
+  },
 ];
 
 /** Each object the rewrite merges into, present but not an object. */
@@ -124,7 +139,7 @@ const MALFORMED: [string, Manifest][] = [
   ["dependencies.integrations", { dependencies: { integrations: [] } }],
   ["integrations_configuration", { integrations_configuration: "oops" }],
   ["its platform entry", { integrations_configuration: { [PLATFORM]: "oops" } }],
-  ["output", { output: "oops" }],
+  ["output, when the rewrite adds its schema", { runtime_tools: ["output"], output: "oops" }],
 ];
 
 describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform", () => {
@@ -140,9 +155,10 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     const result = await run(true);
     for (const counts of [result.draft, result.version]) {
       expect(counts.rewritten).toBe(1);
-      expect(counts.outputSchemaAdded).toBe(c.output?.schema === OPEN_SCHEMA ? 1 : 0);
+      expect(counts.outputSchemaAdded).toBe(c.output === OPEN_OUTPUT ? 1 : 0);
       expect(counts.malformed).toEqual([]);
       expect(counts.carryingAfter).toBe(0);
+      expect(counts.withoutPlatformAfter).toBe(0);
     }
     for (const m of await storedOf(id)) {
       expect(m).not.toHaveProperty("runtime_tools");
@@ -150,7 +166,7 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
       expect(m.integrations_configuration).toEqual({
         [PLATFORM]: c.configuration ?? { tools: DEFAULT_TOOLS },
       });
-      if (c.output) expect(m.output).toEqual(c.output);
+      if (c.output !== undefined) expect(m.output).toEqual(c.output);
       else expect(m).not.toHaveProperty("output");
     }
   });
@@ -193,17 +209,20 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
       rewritten: 0,
       malformed: ids.map((id) => `${id}@1.0.0`),
       carryingAfter: MALFORMED.length,
+      withoutPlatformAfter: MALFORMED.length,
     });
     expect(result.draft).toMatchObject({
       rewritten: 0,
       malformed: ids.map((id) => `${id} (draft)`),
       carryingAfter: MALFORMED.length,
+      withoutPlatformAfter: MALFORMED.length,
     });
     for (const [id, manifest] of Object.entries(seeded)) {
       expect(await storedOf(id)).toEqual([manifest, manifest]);
     }
     expect(lines).toContain("malformed (fix by hand):");
     expect(lines).toContain(`  ${ids[0]} (draft)`);
+    expect(lines.some((l) => l.includes("re-run with the same --before"))).toBe(true);
   });
 
   it("writes nothing on a dry run, and nothing on a second apply", async () => {
@@ -213,11 +232,39 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
 
     const dry = await run(false);
     expect(dry.draft.rewritten).toBe(1);
+    expect(dry.version.rewritten).toBe(1);
     expect(await storedOf(id)).toEqual(before);
 
     await run(true);
     const again = await run(true);
     expect(again.draft.rewritten).toBe(0);
     expect(again.version.rewritten).toBe(0);
+  });
+});
+
+describe("scripts/migration/0053 — --before", () => {
+  const NOW = Date.parse("2026-11-15T12:00:00Z");
+
+  it.each([
+    ["missing", undefined],
+    ["garbage", "yesterday"],
+    ["a bare number", "1"],
+    ["a date alone", "2026-11-15"],
+    ["no offset", "2026-11-15T09:30:00"],
+    ["no seconds", "2026-11-15T09:30Z"],
+    ["an impossible date", "2026-02-30T09:30:00Z"],
+    ["a future instant", "2026-11-15T12:00:01Z"],
+  ])("refuses %s", (_, value) => {
+    expect(parseBefore(value, NOW)).toHaveProperty("refusal");
+  });
+
+  it.each([
+    ["Z", "2026-11-15T09:30:00Z", "2026-11-15T09:30:00.000Z"],
+    ["a fraction", "2026-11-15T09:30:00.25Z", "2026-11-15T09:30:00.250Z"],
+    ["a positive offset", "2026-11-15T10:30:00+01:00", "2026-11-15T09:30:00.000Z"],
+    ["a negative offset", "2026-11-15T04:30:00-05:00", "2026-11-15T09:30:00.000Z"],
+  ])("accepts %s", (_, value, instant) => {
+    const parsed = parseBefore(value, NOW);
+    expect("before" in parsed && parsed.before.toISOString()).toBe(instant);
   });
 });

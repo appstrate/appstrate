@@ -48,6 +48,7 @@ import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/z
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
@@ -1098,6 +1099,52 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(400);
       expect(JSON.stringify(await res.json())).toContain("reserved for system packages");
+    });
+
+    it("refuses the runtime binding key on an update", async () => {
+      const id = "@pkgorg/bound-later";
+      // The binding is legal only without auths: only the reserved-key rule can refuse it.
+      const { auths: _auths, ...unauthenticated } = remoteIntegrationManifest(id);
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: unauthenticated }),
+      });
+      expect(createRes.status).toBe(201);
+
+      const res = await app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(createRes)),
+        }),
+        body: JSON.stringify({
+          manifest: { ...unauthenticated, _meta: { "dev.appstrate/platform": {} } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      expect(body).toContain("dev.appstrate/platform");
+      expect(body).toContain("reserved for system packages");
+    });
+
+    it("refuses a fork of the runtime-bound system integration", async () => {
+      const restore = await installRuntimeBoundSystemPackages();
+      try {
+        const res = await app.request("/api/packages/@appstrate/platform/fork", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({}),
+        });
+
+        expect(res.status).toBe(400);
+        const body = JSON.stringify(await res.json());
+        expect(body).toContain("dev.appstrate/platform");
+        expect(body).toContain("reserved for system packages");
+      } finally {
+        restore();
+      }
     });
 
     it("updates an integration manifest under If-Match", async () => {

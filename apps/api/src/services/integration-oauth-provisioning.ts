@@ -23,7 +23,11 @@ import {
   renderUrlTemplate,
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
-import { acquiresByConnectLogin, type IntegrationManifest } from "@appstrate/core/integration";
+import {
+  acquiresByConnectLogin,
+  getRemoteSource,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   clientMetadataDocumentUrl,
@@ -46,7 +50,6 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { isSystemPackage } from "./system-packages.ts";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
-  getRemoteSource,
   hasPerConnectionAuthServer,
   renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,

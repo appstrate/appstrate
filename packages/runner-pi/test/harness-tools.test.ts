@@ -91,6 +91,7 @@ describe("output — validation", () => {
     await expect(tool.execute("call-1", { data: { count: "not a number" } })).rejects.toThrow(
       "validation failed",
     );
+    expect(emitted).toHaveLength(0);
   });
 
   it("accepts valid data and emits output.emitted", async () => {

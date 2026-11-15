@@ -49,7 +49,7 @@ import {
   isBareAuthSchemePrefix,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { normaliseMcpToolBody, normaliseMcpToolNamespace } from "@appstrate/afps-shared/mcp-naming";
 import { isPlainObject } from "./safe-json.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { variableRefs } from "@appstrate/afps-shared/connection-variables";
@@ -89,10 +89,11 @@ const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/")
  * contacted by a runtime that honours the key; a runtime that does not know the key leaves the
  * integration unbound.
  *
- * Shape: `{}` (AFPS `_meta` values are objects; the key's presence is the declaration). Legal
- * only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
- * (`integrationManifestSchema`). Only a system package may carry it: every org write
- * path refuses it (`findRuntimeBinding`), because the runtime hands its run token to that endpoint.
+ * Shape: `{}`. The declaration is a JSON object under the key (AFPS §10.1); any other value binds
+ * nothing. Legal only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
+ * (`integrationManifestSchema`). Only a system package may carry it: every org write path refuses
+ * it (`findRuntimeBinding`), because a bound integration receives the platform's own run tools,
+ * called as the run.
  */
 export const PLATFORM_META_KEY = "dev.appstrate/platform";
 
@@ -105,6 +106,11 @@ export const PLATFORM_META_KEY = "dev.appstrate/platform";
  * {@link isRuntimeBoundIntegration} decides.
  */
 export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
+
+/** The exposed name of `tool` of {@link PLATFORM_INTEGRATION_ID}, as the agent sees it. */
+export function platformToolName(tool: string): string {
+  return `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
+}
 
 /** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
 export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
@@ -800,6 +806,31 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
  * above adds cross-field validation without changing the shape).
  */
 export type IntegrationManifest = AfpsIntegrationManifest;
+
+export function getIntegrationSourceKind(
+  manifest: IntegrationManifest,
+): "local" | "remote" | "none" | undefined {
+  const source = (manifest as { source?: { kind?: string } }).source;
+  const kind = source?.kind;
+  return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
+}
+
+/**
+ * `transport` is checked against AFPS §7.1's enum so no caller is tempted to coerce an unknown one
+ * to HTTP. The schema parse already refuses it; this keeps the type honest, it is not the gate.
+ */
+export function getRemoteSource(
+  manifest: IntegrationManifest,
+): { url: string; transport: "streamable-http" | "sse" } | null {
+  const source = (
+    manifest as { source?: { kind?: string; remote?: { url?: unknown; transport?: unknown } } }
+  ).source;
+  if (source?.kind !== "remote" || !source.remote) return null;
+  const { url, transport } = source.remote;
+  if (typeof url !== "string") return null;
+  if (transport !== "streamable-http" && transport !== "sse") return null;
+  return { url, transport };
+}
 
 /**
  * Narrowed view of a single auth method's `delivery` (AFPS §7.6). The

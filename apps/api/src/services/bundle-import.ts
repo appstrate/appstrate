@@ -757,9 +757,9 @@ function assertBundleScopesNotReserved(bundle: Bundle): void {
 }
 
 /**
- * Refuse a runtime-bound integration anywhere in the bundle, dependencies included: the runtime
- * hands its run token to that integration's endpoint, so only a system package may carry the key
- * (`findRuntimeBinding`). Unlike the root-only gates, a dependency is judged too — no stored
+ * Refuse a runtime-bound integration anywhere in the bundle, dependencies included: the binding
+ * makes the platform serve the integration's tools with the run's authority, so only a system
+ * package may carry the key (`findRuntimeBinding`). Unlike the root-only gates, a dependency is judged too — no stored
  * package can carry the key, so the refusal never blocks a bundle of already-published copies.
  */
 function assertBundleRuntimeBindingsSystemOnly(bundle: Bundle): void {

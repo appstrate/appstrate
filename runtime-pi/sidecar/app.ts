@@ -534,26 +534,6 @@ function platformLlmUpstream(
 }
 
 /**
- * Build the sidecar's HTTP surface.
- *
- *   - `GET  /health`     — readiness probe.
- *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
- *                          platform's metered LLM proxy, or the OAuth
- *                          subscription provider). The Pi SDK (in-container)
- *                          calls `${MODEL_BASE_URL}/v1/chat/completions` (or
- *                          equivalent) over HTTP — MCP `tools/call` is
- *                          unsuitable for a streamed completion the SDK
- *                          consumes natively. The sidecar replaces the
- *                          placeholder in the SDK's auth header with its own
- *                          upstream auth, then streams the upstream response
- *                          back to the agent without buffering. The agent
- *                          never sees a credential.
- *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
- *                          Exposes `{ns}__api_call` (backed by the
- *                          credential-proxy core in `credential-proxy.ts`)
- *                          and every integration tool as MCP tools.
- */
-/**
  * Run-scoped singletons of the in-process `api_call` MCP server, built once
  * and handed to `bootIntegrations`. Its blob store also goes to `createApp`,
  * whose `/mcp` reads back what that server spilled.
@@ -572,11 +552,6 @@ export interface SidecarRuntimeDeps {
 }
 
 /**
- * Build the run-scoped runtime deps from {@link AppDeps}. Pure
- * construction (no I/O beyond reading env vars + one info log). Called
- * once in `server.ts`.
- */
-/**
  * Blob-store cap for production sidecars. MUST stay well below the
  * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
  * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): a cap at
@@ -588,6 +563,11 @@ export interface SidecarRuntimeDeps {
  */
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 
+/**
+ * Build the run-scoped runtime deps from {@link AppDeps}. Pure
+ * construction (no I/O beyond reading env vars + one info log). Called
+ * once in `server.ts`.
+ */
 export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const blobStore = new BlobStore(deps.runId ?? "unknown", {
     maxTotalBytes: RUN_BLOB_STORE_MAX_BYTES,
@@ -629,6 +609,26 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   return { blobStore, tokenBudget, apiCallLimit, proxyDeps };
 }
 
+/**
+ * Build the sidecar's HTTP surface.
+ *
+ *   - `GET  /health`     — readiness probe.
+ *   - `ALL  /llm/*`      — reverse proxy to the run's LLM upstream (the
+ *                          platform's metered LLM proxy, or the OAuth
+ *                          subscription provider). The Pi SDK (in-container)
+ *                          calls `${MODEL_BASE_URL}/v1/chat/completions` (or
+ *                          equivalent) over HTTP — MCP `tools/call` is
+ *                          unsuitable for a streamed completion the SDK
+ *                          consumes natively. The sidecar replaces the
+ *                          placeholder in the SDK's auth header with its own
+ *                          upstream auth, then streams the upstream response
+ *                          back to the agent without buffering. The agent
+ *                          never sees a credential.
+ *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
+ *                          Exposes `{ns}__api_call` (backed by the
+ *                          credential-proxy core in `credential-proxy.ts`)
+ *                          and every integration tool as MCP tools.
+ */
 export function createApp(deps: AppDeps): Hono {
   const { config } = deps;
   const platformUpstream =

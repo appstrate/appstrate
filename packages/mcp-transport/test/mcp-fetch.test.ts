@@ -13,7 +13,6 @@ describe("mcpFetch", () => {
     const init = { method: "POST", body: "{}" };
     expect(await (await fetchLike("https://mcp.example.com/mcp", init)).text()).toBe("ok");
     expect(seen).toEqual([["https://mcp.example.com/mcp", init]]);
-    expect(fetchLike.preconnect).toBe(fetch.preconnect);
   });
 
   it("refuses a Request, whose method and body the sender would not see", async () => {

@@ -16,7 +16,7 @@ import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
-import type { RuntimeEventEmitter } from "./mcp-forward.ts";
+import type { RuntimeEventEmitter } from "./runtime-event.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,

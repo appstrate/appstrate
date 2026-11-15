@@ -81,11 +81,8 @@ export { startSinkHeartbeat, type SinkHeartbeatHandle } from "./sink-heartbeat.t
 
 export { piToolResultOrThrow } from "./pi-tool-result.ts";
 
-export {
-  callToolResultToPi,
-  mcpToolForwardFactory,
-  type McpToolCallPlan,
-  type RuntimeEventEmitter,
-} from "./mcp-forward.ts";
+export { callToolResultToPi, mcpToolForwardFactory, type McpToolCallPlan } from "./mcp-forward.ts";
+
+export type { RuntimeEventEmitter } from "./runtime-event.ts";
 
 export { spillResourcesToWorkspace } from "./resource-spill.ts";

@@ -28,6 +28,13 @@ describe("createReducerSink", () => {
     expect(snapshot().output).toEqual([1, 2, 3]);
   });
 
+  it("ignores an output.emitted without data", async () => {
+    const { sink, snapshot } = createReducerSink();
+    await sink.handle(event("output.emitted", { data: { x: 1 } }));
+    await sink.handle(event("output.emitted"));
+    expect(snapshot().output).toEqual({ x: 1 });
+  });
+
   it("ignores third-party event types in the snapshot", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("custom.thing", { payload: 42 }));

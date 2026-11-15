@@ -47,9 +47,43 @@ export const jsonRpcErrorContent = {
 } as const;
 
 /** A refusal the MCP SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
-export function jsonRpcTransportError(description: string) {
+function jsonRpcTransportError(description: string) {
   return { description, content: jsonRpcErrorContent } as const;
 }
+
+/** The body of an MCP Streamable HTTP POST. */
+export const jsonRpcRequestBody = {
+  required: true,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        description: "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
+        properties: {
+          jsonrpc: { type: "string", enum: ["2.0"] },
+          id: { type: ["string", "number", "null"] },
+          method: { type: "string" },
+          params: { type: "object", additionalProperties: true },
+        },
+        required: ["jsonrpc", "method"],
+      },
+    },
+  },
+} as const;
+
+/** The refusals of an MCP Streamable HTTP POST that no tool reaches. */
+export const mcpTransportResponses = {
+  "406": jsonRpcTransportError(
+    "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+  ),
+  "413": {
+    description:
+      "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
+      "(enforced by the body-limit middleware, before the MCP transport).",
+    content: problemContent,
+  },
+  "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
+} as const;
 
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.

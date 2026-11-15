@@ -17808,11 +17808,7 @@
         "tags": ["Internal"],
         "summary": "Run MCP server of a platform run (GET)",
         "description": "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
-        "security": [
-          {
-            "bearerExecToken": []
-          }
-        ],
+        "security": [],
         "responses": {
           "405": {
             "description": "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",

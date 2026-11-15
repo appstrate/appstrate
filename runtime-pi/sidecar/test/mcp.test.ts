@@ -16,6 +16,7 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 import { McpHost } from "../mcp-host.ts";
+import { buildMcpDirectFactories } from "../../mcp/direct.ts";
 import {
   createInProcessPair,
   createMcpHttpClient,
@@ -192,6 +193,33 @@ describe("POST /mcp — tools/list", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(500);
+  });
+
+  // An integration that finishes booting after the agent connected brings the malformed one.
+  it("fails the agent's tool wiring when its server cannot be built", async () => {
+    const malformed: AppstrateToolDefinition = {
+      ...echoTool,
+      descriptor: { name: "not a valid name!", inputSchema: { type: "object" } },
+    };
+    let booted = false;
+    const app = createTestApp(
+      makeDeps({ mcpToolsProvider: () => (booted ? [echoTool, malformed] : [echoTool]) }),
+    );
+    const agent = await createMcpHttpClient("http://localhost/mcp", {
+      fetch: ((input: URL | Request | string, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        headers.set("Host", "localhost");
+        return app.request(new URL(String(input)).pathname, { ...init, headers });
+      }) as typeof fetch,
+    });
+    booted = true;
+    try {
+      await expect(
+        buildMcpDirectFactories({ mcp: agent, runId: "run_1", workspace: "/tmp", emit: () => {} }),
+      ).rejects.toThrow();
+    } finally {
+      await agent.close();
+    }
   });
 });
 

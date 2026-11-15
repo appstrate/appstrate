@@ -26,7 +26,11 @@ import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { invalidRequest, methodNotAllowed, notFound, conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
+import {
+  RUN_ROUTE_RATE_PER_MIN,
+  rateLimitByRunId,
+  rateLimitRunFiles,
+} from "../middleware/rate-limit.ts";
 import {
   verifyRunCallSignature,
   verifyRunSignature,
@@ -219,7 +223,7 @@ function getRemoteRunEventLimits(): { rate_per_sec: number; burst: number } {
   return { rate_per_sec: rate, burst };
 }
 
-export function createRunsEventsRouter() {
+export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const router = new Hono<AppEnv>();
   const limits = getRemoteRunEventLimits();
   // rate-limiter-flexible uses points-per-window; `burst` tokens per
@@ -234,11 +238,11 @@ export function createRunsEventsRouter() {
   const fileLimiter = rateLimitRunFiles(30, 6);
   // The run MCP server gets a per-minute budget of its own: one point per
   // POST, which carries one MCP message (`initialize`, `tools/list`, a tool
-  // call; `serveRunMcp` refuses batches), 200 a minute —
-  // the figure the sidecar's mount of the same server has (`/internal/mcp`,
-  // `rateLimitByBearer(200)`). The 60 s window keeps its bucket apart from the
-  // 1 s event budget above, which is sized for telemetry, not tool calls.
-  const mcpLimiter = rateLimitByRunId(200, 60);
+  // call; `serveRunMcp` refuses batches) — the figure the sidecar's mount of
+  // the same server has (`/internal/mcp`). The 60 s window keeps its bucket
+  // apart from the 1 s event budget above, which is sized for telemetry, not
+  // tool calls.
+  const mcpLimiter = rateLimitByRunId(mcpRatePerMin, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
   // the per-run limiter second. Both limiters key on the `:runId` from the

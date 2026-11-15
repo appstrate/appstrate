@@ -363,3 +363,15 @@ export async function runAgainstStub(opts: {
     await rm(scratch, { recursive: true, force: true });
   }
 }
+
+/** Names of the tools the first model request offered. */
+export async function offeredTools(
+  runner: Partial<Omit<PiRunnerOptions, "model">> = {},
+): Promise<string[]> {
+  const { requests } = await runAgainstStub({
+    model: stubGatewayModel("openai-completions"),
+    runner: { modelRetry: false, ...runner },
+  });
+  const body = JSON.parse(requests[0]!.body) as { tools?: Array<{ function?: { name?: string } }> };
+  return (body.tools ?? []).map((t) => t.function?.name ?? "");
+}

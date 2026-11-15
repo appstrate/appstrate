@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionConflictContent, problemContent } from "../responses.ts";
+import { connectionConflictContent, jsonRpcRequestBody, problemContent } from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
   runToolsMcpMethodNotAllowed,
-  runToolsMcpRequestBody,
   runToolsMcpResponses,
 } from "./run-tools-mcp.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
@@ -1987,7 +1986,7 @@ const canonicalRunsPaths = {
         { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
       ],
       security: [],
-      requestBody: runToolsMcpRequestBody,
+      requestBody: jsonRpcRequestBody,
       responses: {
         ...runToolsMcpResponses,
         "401": runSinkUnauthorized,

@@ -96,6 +96,7 @@ import {
   buildFileResourceProvider,
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
+  INLINE_LOG_INSTRUCTION,
   INLINE_MANIFEST_RULE,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   WARNING_CODES_PHRASE,
@@ -219,9 +220,7 @@ export function buildServerInstructions(
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  const inlineShortcut = inline
-    ? ` ${INLINE_MANIFEST_RULE} The chat shows ONLY lines the run emits via \`log\`, so instruct it in the top-level \`prompt\` to log meaningful steps whenever that tool is selected.`
-    : "";
+  const inlineShortcut = inline ? ` ${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION}` : "";
   // Authoring a package means an inline run writing it; without that grant
   // only the validation half of the bullet is true.
   const packageFiles = inline

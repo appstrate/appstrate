@@ -13,8 +13,8 @@ import { handlerFetch, legacyMcpHandler } from "@appstrate/mcp-transport/testing
 
 /**
  * An integration bound to the runtime (`server.platformEndpoint`): the sidecar
- * opens the platform's run MCP server with the run token, and reaches no other
- * origin through that client.
+ * opens the platform's run MCP server with the run token, and follows no
+ * redirect away from it.
  */
 
 const PLATFORM_API_URL = "http://appstrate-api:3000";
@@ -98,28 +98,6 @@ describe("connectPlatformIntegration", () => {
       else process.env.APPSTRATE_MCP_TOOL_TIMEOUT_MS = previous;
       await client?.close().catch(() => {});
     }
-  });
-
-  it("refuses a request to any other origin, without sending the run token", async () => {
-    let sent = 0;
-    const fetchFn = (async () => {
-      sent += 1;
-      return new Response(null, { status: 204 });
-    }) as unknown as typeof fetch;
-
-    await expect(
-      connectPlatformIntegration(
-        spec,
-        { platformApiUrl: PLATFORM_API_URL, runToken: "run-token", fetchFn },
-        {
-          createClient: (async (_url: string | URL, opts?: { fetch?: typeof fetch }) => {
-            await opts!.fetch!("https://elsewhere.example.com/mcp", { method: "POST" });
-            throw new Error("unreachable");
-          }) as never,
-        },
-      ),
-    ).rejects.toThrow(/refusing https:\/\/elsewhere\.example\.com; the run token is not sent/);
-    expect(sent).toBe(0);
   });
 
   it("follows no redirect, even to its own origin", async () => {

@@ -804,6 +804,28 @@ describe("launchRunAndWait launch body", () => {
     }
   });
 
+  it("kind:inline leaves a non-object integrations_configuration as written, for validation to refuse", async () => {
+    for (const integrations_configuration of ["log", ["log"]]) {
+      const { fetchImpl, captured } = captureLaunch();
+
+      await launchRunAndWait(
+        {
+          kind: "inline",
+          manifest: { display_name: "Malformé", integrations_configuration },
+          prompt: "do it",
+        },
+        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      );
+
+      const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+        ?.manifest;
+      expect(manifest?.integrations_configuration).toEqual(integrations_configuration);
+      expect(manifest?.dependencies).toEqual({
+        integrations: { "@appstrate/platform": "^1.0.0" },
+      });
+    }
+  });
+
   it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {
     const { fetchImpl, captured } = captureLaunch();
 

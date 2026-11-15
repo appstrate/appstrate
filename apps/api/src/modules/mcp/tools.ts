@@ -1086,6 +1086,11 @@ export const INLINE_MANIFEST_RULE =
   "`output.schema`; the run has the `output` tool exactly when its manifest declares an " +
   "`output.schema`.";
 
+/** What a caller composing an inline run tells it about the `log` tool. */
+export const INLINE_LOG_INSTRUCTION =
+  "The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level " +
+  "`prompt` to log meaningful steps whenever that tool is selected.";
+
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -1175,9 +1180,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
-        ? `${INLINE_MANIFEST_RULE} The chat ` +
-          "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        ? `${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION} ` +
+          "Never use an id or a generic display name such as `one-shot`. "
         : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +

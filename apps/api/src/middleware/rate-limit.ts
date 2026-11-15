@@ -213,10 +213,18 @@ export const rateLimitByIp = createRateLimitMiddleware({
 });
 
 /**
- * Per-run rate limiter for the unified-runner event ingestion routes
- * (`POST /api/runs/:runId/events` + `/finalize`). The runId path param IS
- * the identity — a misbehaving sink cannot evade the limit by rotating
- * API keys, and a single run's traffic cannot affect another run's budget.
+ * Requests a minute one run may send to each of its own routes: every
+ * `/internal/*` path, and the run MCP server of a remote run.
+ */
+export const RUN_ROUTE_RATE_PER_MIN = 200;
+
+/**
+ * Per-run rate limiter for the run-HMAC routes: event ingestion
+ * (`POST /api/runs/:runId/events` + `/finalize`) and the run MCP server
+ * (`POST /api/runs/:runId/mcp`). The runId path param IS the identity — a
+ * misbehaving sink cannot evade the limit by rotating API keys, and a single
+ * run's traffic cannot affect another run's budget. Each window has its own
+ * Redis prefix, so routes limited over different windows never share a bucket.
  */
 export const rateLimitByRunId = createRateLimitMiddleware({
   category: "run-event",

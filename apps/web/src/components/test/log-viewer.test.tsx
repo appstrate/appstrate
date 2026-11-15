@@ -51,13 +51,14 @@ describe("LogViewer — an empty journal", () => {
 });
 
 describe("LogEntryInspector — a platform tool's result", () => {
+  const result = { content: [{ type: "text", text: '{"memories":[]}' }] };
   const recall = (tool: string): ExecutionEntry => ({
     id: "tool_1",
     kind: "tool",
     tool,
     status: "success",
     args: { query: "relevé" },
-    result: { content: [{ type: "text", text: '{"memories":[]}' }] },
+    result,
   });
 
   it("reads appstrate_platform__recall_memory as the memories it returned", () => {
@@ -71,6 +72,7 @@ describe("LogEntryInspector — a platform tool's result", () => {
     const html = render(
       <LogEntryInspector entry={recall("acme_docs__search")} onClose={() => {}} />,
     );
+    expect(html).toContain(JSON.stringify(result, null, 2));
     expect(html).not.toContain(agentsFr["log.recalledNone"]);
   });
 });

@@ -19,7 +19,9 @@ import {
 import { verify } from "@appstrate/afps-runtime/events";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { forgetProtocolEras, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
+import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
 import { buildRemoteMcpExtensions } from "../src/commands/run/remote-mcp.ts";
+import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
 import { cliPromptInputs } from "../src/commands/run.ts";
 
 const DOCS = "@acme/docs";
@@ -113,6 +115,7 @@ type WireOptions = Parameters<typeof buildRemoteMcpExtensions>[0];
 /** The options of a run, `bundle` aside, that no test here looks at. */
 const runOptions = (bundle: Bundle, options: Partial<WireOptions> = {}): WireOptions => ({
   bundle,
+  takenToolNames: new Set(),
   runId: "run_test",
   workspace: os.tmpdir(),
   emit: () => {},
@@ -202,7 +205,11 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     expect(tools).toEqual([]);
     expect(extensions.integrationIds.size).toBe(0);
     expect(extensions.unavailable).toEqual([
-      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error },
+      {
+        id: DOCS,
+        reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+        detail: expect.any(String),
+      },
     ]);
     const prompt = renderPlatformPrompt(
       cliPromptInputs(
@@ -213,6 +220,7 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       ),
     );
     expect(prompt).toContain(`- **${DOCS}**: ${UNAVAILABLE_INTEGRATION_REASONS.resolve_error}`);
+    expect(prompt).not.toContain(extensions.unavailable[0]!.detail!);
   });
 
   it("refuses a redirect to a blocked network range off the declared host", async () => {
@@ -228,7 +236,11 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       );
       expect(tools).toEqual([]);
       expect(extensions.unavailable).toEqual([
-        { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_blocked },
+        {
+          id: DOCS,
+          reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_blocked,
+          detail: expect.stringContaining("169.254.169.254"),
+        },
       ]);
     } finally {
       redirector.stop(true);
@@ -278,10 +290,35 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       expect(Date.now() - started).toBeLessThan(5_000);
       expect(extensions.factories).toEqual([]);
       expect(extensions.unavailable).toEqual([
-        { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error },
+        {
+          id: DOCS,
+          reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+          detail: expect.any(String),
+        },
       ]);
     } finally {
       silent.stop(true);
+    }
+  });
+});
+
+describe("run --local --integrations none", () => {
+  // The mode picks how credentials resolve; an unauthenticated integration needs none.
+  it("still wires an unauthenticated remote integration", async () => {
+    const bundle = makeBundle();
+    const apiCall = await buildApiCallExtensionFactory({
+      bundle,
+      integrationResolver: buildIntegrationResolver("none", null),
+      runId: "run_test",
+      workspace: os.tmpdir(),
+      emitEvent: () => {},
+    });
+    const { extensions, tools } = await wire(bundle, { takenToolNames: apiCall.toolNames });
+    try {
+      expect(apiCall.factories).toEqual([]);
+      expect(tools.map((t) => t.name)).toEqual(["acme_docs__a", "acme_docs__b"]);
+    } finally {
+      await extensions.close();
     }
   });
 });
@@ -414,6 +451,8 @@ describe("run --local — integration bound to the runtime", () => {
           authorization: req.headers.get("authorization"),
           verified,
         });
+        // As the platform: any other verb is a 405, before any signature check.
+        if (req.method !== "POST") return new Response(null, { status: 405 });
         if (!verified) return new Response("invalid signature", { status: 401 });
         return handler(req);
       },
@@ -442,12 +481,15 @@ describe("run --local — integration bound to the runtime", () => {
     } finally {
       await extensions.close();
     }
-    expect(seen.length).toBeGreaterThan(1);
-    expect(seen.every((request) => request.verified && request.authorization === null)).toBe(true);
-    // The client's GET (its server-to-client stream) is signed over the empty body.
-    expect(seen.map((request) => request.method)).toContain("GET");
+    const posts = seen.filter((request) => request.method === "POST");
+    expect(posts.length).toBeGreaterThan(1);
+    expect(posts.every((request) => request.verified && request.authorization === null)).toBe(true);
+    // A bodiless request (the client's GET stream) is sent no signature.
+    expect(seen.filter((request) => request.method !== "POST").every((r) => r.msgId === null)).toBe(
+      true,
+    );
     // A fresh message id per request.
-    expect(new Set(seen.map((request) => request.msgId)).size).toBe(seen.length);
+    expect(new Set(posts.map((request) => request.msgId)).size).toBe(posts.length);
   });
 
   it("refuses the integration when the signature is made with another secret", async () => {
@@ -455,8 +497,13 @@ describe("run --local — integration bound to the runtime", () => {
       runToolsMcp: { url: runServerUrl, runSecret: "another-secret" },
     });
     expect(tools).toEqual([]);
+    // The refusal reaches the person, not the agent.
     expect(extensions.unavailable).toEqual([
-      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error },
+      {
+        id: DOCS,
+        reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+        detail: expect.stringContaining("401"),
+      },
     ]);
   });
 

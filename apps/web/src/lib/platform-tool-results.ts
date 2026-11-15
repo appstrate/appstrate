@@ -7,13 +7,9 @@
  * shape, the caller keeps the raw JSON.
  */
 
-import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";
+import { platformToolName } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
-import { normaliseMcpToolNamespace } from "@appstrate/afps-shared/mcp-naming";
-
-const platformToolName = (tool: string) =>
-  `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
 
 /** The names the agent (and so a tool row) sees: `appstrate_platform__<tool>`. */
 export const RECALL_MEMORY_TOOL = platformToolName("recall_memory");

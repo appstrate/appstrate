@@ -36,7 +36,10 @@
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
-import { listSystemIntegrationIds } from "./integration-client-registry.ts";
+import {
+  isOfferedSystemIntegration,
+  listSystemIntegrationIds,
+} from "./integration-client-registry.ts";
 import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 
 /** The catalog columns the rule reads — every caller already has them. */
@@ -54,14 +57,11 @@ export interface ActivatablePackage {
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
   if (pkg.type === "integration") {
-    return offeredIntegrationIds().includes(pkg.id);
+    return (
+      isOfferedSystemIntegration(pkg.id) || listRuntimeBoundSystemIntegrationIds().includes(pkg.id)
+    );
   }
   return pkg.source === "system";
-}
-
-/** The integrations the deployment switches on without a row. */
-function offeredIntegrationIds(): string[] {
-  return [...listSystemIntegrationIds(), ...listRuntimeBoundSystemIntegrationIds()];
 }
 
 /**
@@ -87,7 +87,7 @@ export function isActiveHere(
  * twin instead of approximating it with `source = 'system'`.
  */
 export function activeHereSql() {
-  const offered = offeredIntegrationIds();
+  const offered = [...listSystemIntegrationIds(), ...listRuntimeBoundSystemIntegrationIds()];
   const systemDefault = or(
     and(ne(packages.type, "integration"), eq(packages.source, "system")),
     and(

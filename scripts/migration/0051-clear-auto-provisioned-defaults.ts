@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { and, eq, sql } from "drizzle-orm";
 import { integrationOauthClients } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
+import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 /** Exactly the rows this script rewrites, so a second run matches none. */
 const FLAGGED_AUTO_CLIENT = and(
@@ -39,13 +39,8 @@ export async function runClearAutoProvisionedDefaults(options: {
 }): Promise<void> {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
-  const { db, toRows } = await import("@appstrate/db/client");
-  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
-    await db.execute(
-      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
-    ),
-  );
-  out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
+  const { db } = await import("@appstrate/db/client");
+  out(await describeDatabaseTarget());
 
   const flagged = () =>
     db

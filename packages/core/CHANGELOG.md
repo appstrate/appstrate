@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/integration`**: `platformToolName(tool)`, the exposed name of a tool of
+  `@appstrate/platform`; `getIntegrationSourceKind` and `getRemoteSource`, the readers of an
+  integration manifest's `source`.
+
 - **`PLATFORM_INTEGRATION_ID`** and **`PLATFORM_INTEGRATION_RANGE`**
   (`@appstrate/core/integration`, #2199): `"@appstrate/platform"`, the id of the system
   integration that ships the run tools, and `"^1.0.0"`, the range under which the manifests the

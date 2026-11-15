@@ -956,11 +956,11 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // image-trio tag rule refuses at boot except where it is blind: a floating
   // tag rebuilt on one side, a digest-pinned ref, a platform with no build
   // identity.
-  it("ignores a retired report field on the finalize body", async () => {
+  it("strips an unknown top-level key from the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
       output: null,
-      report: "# Legacy report",
+      not_a_finalize_field: { anything: true },
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
     });

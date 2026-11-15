@@ -12,7 +12,7 @@
  * stamps the event's `runId` and `timestamp` and writes it to the run's event
  * sink; a successful call awaits it before returning, so the event is settled
  * before the run can finalize. A refused call throws (Pi's tool-error signal,
- * see `pi-tool-result.ts`) and emits nothing, so the terminal-tool early stop
+ * see `pi-tool-result.ts`) and emits nothing, so the `output` early stop
  * never fires on it.
  */
 
@@ -22,7 +22,7 @@ import type { RunAndWaitFile } from "@appstrate/core/run-and-wait-client";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { PiToolResult } from "./pi-tool-result.ts";
 
-/** Name of the `output` tool, the run's terminal tool. */
+/** Name of the `output` tool. */
 export const OUTPUT_TOOL_NAME = "output";
 
 /**
