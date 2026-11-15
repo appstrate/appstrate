@@ -449,7 +449,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                 <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
               )}
             </DetailTabPanel>
-            <DetailTabPanel value="settings" flush>
+            <DetailTabPanel value="settings" framed>
               <AgentSettingsView
                 versions={versionsProps}
                 packageId={packageId}
@@ -459,7 +459,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                 inputWrapperOverride={historicalInputWrapper}
               />
             </DetailTabPanel>
-            <DetailTabPanel value="memory" flush>
+            <DetailTabPanel value="memory" framed>
               {tabReads.memory ? (
                 <AgentMemoryTab packageId={packageId} />
               ) : (
@@ -491,7 +491,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
             </DetailTabPanel>
 
             {(type === "skill" || type === "mcp-server") && (
-              <DetailTabPanel value="settings" flush>
+              <DetailTabPanel value="settings" framed>
                 <PackageSettingsView
                   versions={versionsProps}
                   type={type}

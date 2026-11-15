@@ -508,7 +508,7 @@ export function IntegrationDetailPage() {
       </DetailTabPanel>
 
       {/* Configuration is admin-only; package files stay readable for every member. */}
-      <DetailTabPanel value="configuration" flush>
+      <DetailTabPanel value="configuration" framed>
         {/* Its rail (definition, versions) depends on the package's source. */}
         {pkgLoading ? (
           <SettingsSkeleton className="p-6" />
