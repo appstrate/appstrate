@@ -56,6 +56,7 @@ function sheet(options: { pinnedVersion?: string; latest?: string }): string {
     <CataloguePreview
       item={PACKAGE}
       type="skill"
+      icon={null}
       spaces={SPACES}
       placement={cataloguePlacement(PACKAGE, "spc_on")}
       gateOf={() => ({ allowed: true, refusal: null })}

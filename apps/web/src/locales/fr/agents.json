@@ -748,7 +748,7 @@
   "manifest.support": "Support",
   "manifest.privacyPolicy": "Politique de confidentialité",
   "manifest.depSkills": "Skills",
-  "manifest.depMcpServers": "Serveurs MCP locaux",
+  "manifest.depMcpServers": "Serveurs MCP",
   "manifest.depIntegrations": "Intégrations",
   "manifest.tools": "Outils",
   "manifest.server": "Serveur",

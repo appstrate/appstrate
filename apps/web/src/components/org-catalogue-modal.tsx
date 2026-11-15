@@ -159,6 +159,22 @@ export function OrgCatalogueModal({
   const { data: agentsHere, isLoading: agentsHerePending } = useAgents();
   const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
+  // One tile per package, the card's and the sheet's alike; it waits for the read that carries it.
+  const iconPending =
+    (active === "agent" && agentsHerePending) ||
+    (active === "integration" && integrationsQuery.isLoading);
+  const tileOf = (id: string, name: string) =>
+    iconPending ? (
+      <Skeleton className="size-10 rounded-[10px]" />
+    ) : (
+      <PackageIcon
+        type={active}
+        id={id}
+        name={name}
+        icon={active === "agent" ? agentLook.get(id)?.icon : integrationById.get(id)?.manifest.icon}
+        color={agentLook.get(id)?.color}
+      />
+    );
   const librarySpaces = library?.spaces ?? [];
   // The current space leads (not the server's default-first order): it is the first space
   // column a reader sees before scrolling sideways.
@@ -279,20 +295,7 @@ export function OrgCatalogueModal({
     if (layout !== "cards") return row;
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const iconPending =
-      (active === "agent" && agentsHerePending) ||
-      (active === "integration" && integrationsQuery.isLoading);
-    const icon = iconPending ? (
-      <Skeleton className="size-10 rounded-[10px]" />
-    ) : (
-      <PackageIcon
-        type={active}
-        id={item.id}
-        name={row.displayName}
-        icon={active === "agent" ? look?.icon : integrationById.get(item.id)?.manifest.icon}
-        color={look?.color}
-      />
-    );
+    const icon = tileOf(item.id, row.displayName);
     // Spaces where it already runs (ticked, so nothing vanishes after a click) or where this reader may add it.
     const addable = spaces
       .map((space) => ({
@@ -526,6 +529,7 @@ export function OrgCatalogueModal({
         <CataloguePreview
           item={previewed}
           type={active}
+          icon={tileOf(previewed.id, previewed.name || previewed.id)}
           spaces={librarySpaces}
           placement={placementOf(previewed)}
           gateOf={(targetSpaceId, next) => activationGate(previewed, targetSpaceId, next)}

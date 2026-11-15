@@ -376,7 +376,7 @@ function RunDetailBody() {
           />
         </DetailTabPanel>
 
-        <DetailTabPanel value="journal" flush>
+        <DetailTabPanel value="journal" framed>
           <RunExecutionView
             run={enrichedRun}
             logs={allLogs}
@@ -393,7 +393,7 @@ function RunDetailBody() {
           />
         </DetailTabPanel>
 
-        <DetailTabPanel value="results" flush>
+        <DetailTabPanel value="results" framed>
           <RunResultsView
             run={enrichedRun}
             packageId={packageId}

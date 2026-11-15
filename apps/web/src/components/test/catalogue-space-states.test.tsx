@@ -102,6 +102,7 @@ describe("the sheet", () => {
     <CataloguePreview
       item={PACKAGE}
       type="skill"
+      icon={null}
       spaces={SPACES}
       placement={PLACEMENT}
       gateOf={() => ALLOWED}

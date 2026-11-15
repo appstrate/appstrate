@@ -152,7 +152,7 @@ export function ScheduleDetailPage() {
           <ScheduleParams schedule={schedule} />
         </DetailTabPanel>
 
-        <DetailTabPanel value="settings" flush>
+        <DetailTabPanel value="settings" framed>
           {/* The settings seed their fields once: never from a list row that may be stale. */}
           {scheduleQuery.isPlaceholderData ? (
             <div className="p-6">
