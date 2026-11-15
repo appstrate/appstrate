@@ -20,7 +20,7 @@
  *
  * One semantic, five shapes: the read-all test itself; per-space grants and
  * the WHERE fragment over them, for the queries listing one space or several;
- * the request-space WHERE fragment, `undefined` when nothing narrows; an
+ * the one-space WHERE fragment, `undefined` when nothing narrows; an
  * ownership test for a loaded row; and the assertion that turns it into the
  * 404 a handler throws. Nothing re-derives ownership on its own.
  */
@@ -114,10 +114,17 @@ export function runReadCondition(
   return or(...reach) ?? sql`false`;
 }
 
-/** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
+/**
+ * WHERE fragment narrowing `runs` to what `actor` may read with `permissions`,
+ * its effective set in one space; `undefined` = no narrowing.
+ */
+export function runVisibilityIn(permissions: ReadonlySet<string>, actor: Actor): SQL | undefined {
+  return canReadEveryRun(permissions) ? undefined : ownRunsFilter(actor);
+}
+
+/** {@link runVisibilityIn} for the request's own space. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  if (canReadEveryRun(callerPermissions(c))) return undefined;
-  return ownRunsFilter(getActor(c));
+  return runVisibilityIn(callerPermissions(c), getActor(c));
 }
 
 /**

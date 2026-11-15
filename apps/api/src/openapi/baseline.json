@@ -852,6 +852,7 @@
                   "data": [
                     {
                       "id": "@acme/email-sorter",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": "lucide:mail",
                       "color": "blue",
                       "display_name": "Email Sorter",
@@ -874,6 +875,125 @@
                     },
                     {
                       "id": "@appstrate/code-reviewer",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "icon": null,
+                      "color": null,
+                      "display_name": "Code Reviewer",
+                      "description": "Reviews pull requests and suggests improvements",
+                      "schema_version": "0.1",
+                      "author": "Appstrate",
+                      "keywords": ["code", "review", "github"],
+                      "source": "system",
+                      "scope": "@appstrate",
+                      "version": "2.0.0",
+                      "published": true,
+                      "type": "agent",
+                      "running_runs": 0,
+                      "unread_count": 0,
+                      "dependencies": {
+                        "skills": {
+                          "@appstrate/summarize": "^1.0.0"
+                        },
+                        "mcp_servers": {
+                          "@appstrate/filesystem-mcp": "^1.0.0"
+                        },
+                        "integrations": {
+                          "@appstrate/github": "^2.0.0"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/agents": {
+      "get": {
+        "operationId": "listOrgAgents",
+        "tags": ["Agents"],
+        "summary": "List agents across the organization's spaces",
+        "description": "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, grouped by space. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentListItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
+                    {
+                      "id": "@acme/email-sorter",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "icon": "lucide:mail",
+                      "color": "blue",
+                      "display_name": "Email Sorter",
+                      "description": "Automatically sorts and labels incoming emails",
+                      "schema_version": "0.1",
+                      "author": "Acme Corp",
+                      "keywords": ["email", "automation"],
+                      "source": "local",
+                      "scope": "@acme",
+                      "version": "1.2.0",
+                      "published": true,
+                      "type": "agent",
+                      "running_runs": 1,
+                      "unread_count": 2,
+                      "dependencies": {
+                        "skills": {},
+                        "mcp_servers": {},
+                        "integrations": {}
+                      }
+                    },
+                    {
+                      "id": "@appstrate/code-reviewer",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": null,
                       "color": null,
                       "display_name": "Code Reviewer",
@@ -2920,7 +3040,7 @@
         "operationId": "listOrgRuns",
         "tags": ["Runs"],
         "summary": "List runs across the organization's spaces",
-        "description": "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`, plus `spaceId`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
+        "description": "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
         "parameters": [
           {
             "name": "orgId",
@@ -2929,9 +3049,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "$ref": "#/components/parameters/OrgSpaceFilter"
           },
           {
             "name": "user",
@@ -5156,9 +5273,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "$ref": "#/components/parameters/OrgSpaceFilter"
           }
         ],
         "responses": {
@@ -5195,9 +5309,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -18948,6 +19059,212 @@
         }
       }
     },
+    "/api/orgs/{orgId}/packages/skills": {
+      "get": {
+        "operationId": "listOrgSkills",
+        "tags": ["Packages"],
+        "summary": "List skills across the organization's spaces",
+        "description": "Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OrgPackageItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "hasMore": false,
+                  "data": [
+                    {
+                      "id": "@acme/summarize",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "name": "Summarize",
+                      "description": "Summarizes long text into key points",
+                      "icon": "lucide:file-text",
+                      "keywords": ["summary", "text"],
+                      "source": "local",
+                      "version": "1.0.0",
+                      "created_by": "usr_cm3abc123",
+                      "used_by_agents": 2,
+                      "auto_installed": false,
+                      "forked_from": null,
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_writable": true,
+                      "home_deletable": true,
+                      "home_shareable": true,
+                      "createdAt": "2026-01-10T08:00:00Z",
+                      "updatedAt": "2026-01-10T08:00:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/packages/integrations": {
+      "get": {
+        "operationId": "listOrgIntegrations",
+        "tags": ["Packages"],
+        "summary": "List integration packages across the organization's spaces",
+        "description": "Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration package list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/IntegrationIndexItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/packages/mcp-servers": {
+      "get": {
+        "operationId": "listOrgMcpServerPackages",
+        "tags": ["Packages"],
+        "summary": "List MCP-server packages across the organization's spaces",
+        "description": "Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP-server package list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OrgPackageItem"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/api/packages/import-bundle": {
       "post": {
         "operationId": "importBundle",
@@ -19901,6 +20218,7 @@
                   "data": [
                     {
                       "id": "@acme/summarize",
+                      "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "name": "Summarize",
                       "description": "Summarizes long text into key points",
                       "icon": "lucide:file-text",
@@ -26620,7 +26938,7 @@
         "operationId": "listOrgFiles",
         "tags": ["Files"],
         "summary": "List files across the organization's spaces",
-        "description": "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`, plus `spaceId`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "description": "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
             "name": "orgId",
@@ -26629,9 +26947,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "$ref": "#/components/parameters/OrgSpaceFilter"
           },
           {
             "name": "purpose",
@@ -32588,15 +32903,6 @@
           "example": ["failed", "timeout"]
         }
       },
-      "OrgSpaceFilter": {
-        "name": "spaceId",
-        "in": "query",
-        "required": false,
-        "description": "Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing.",
-        "schema": {
-          "type": "string"
-        }
-      },
       "RunSearch": {
         "name": "q",
         "in": "query",
@@ -33887,11 +34193,17 @@
           "scope",
           "keywords",
           "version",
-          "published"
+          "published",
+          "spaceId"
         ],
         "properties": {
           "id": {
             "type": "string"
+          },
+          "spaceId": {
+            "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "The space whose index lists this row (spc_ prefix): the agent is ACTIVE there, and the row's counters and dependency summary follow the caller's role there. A list spanning spaces lists an agent once per space it is active in."
           },
           "icon": {
             "type": ["string", "null"],
@@ -35203,11 +35515,17 @@
           "home_space_id",
           "home_writable",
           "home_deletable",
-          "home_shareable"
+          "home_shareable",
+          "spaceId"
         ],
         "properties": {
           "id": {
             "type": "string"
+          },
+          "spaceId": {
+            "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in."
           },
           "orgId": {
             "type": ["string", "null"],
@@ -35300,12 +35618,18 @@
           "home_writable",
           "home_deletable",
           "home_shareable",
+          "spaceId",
           "source_kind",
           "server"
         ],
         "properties": {
           "id": {
             "type": "string"
+          },
+          "spaceId": {
+            "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in."
           },
           "orgId": {
             "type": ["string", "null"],

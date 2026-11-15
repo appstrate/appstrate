@@ -33,7 +33,7 @@ import type { AgentManifest } from "../types/index.ts";
 import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
-import { runVisibilityFilter } from "../lib/run-visibility.ts";
+import { runVisibilityIn } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { readAgentAppearance } from "@appstrate/core/validation";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -41,7 +41,9 @@ import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { getSpaceScope } from "../lib/scope.ts";
+import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
+import { callerPermissions } from "../lib/permissions.ts";
+import type { Actor } from "@appstrate/connect";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   assertExplicitModelExists,
@@ -54,12 +56,12 @@ import {
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
 import {
-  agentReadIsSummary,
   assertCatalogPackageAccess,
   assertDraftSelectorAllowed,
   assertPackageCopyAllowed,
   defaultDefinitionSelector,
   packageAccessSpaces,
+  readsAgentContent,
   requireAgentRead,
 } from "../lib/package-access.ts";
 import {
@@ -197,73 +199,87 @@ async function requireBundleDependencyReadPermissions(
   }
 }
 
+/**
+ * The agents INDEX of one space as `actor` reads it there with `permissions`,
+ * its effective set in that space: the summary-vs-content rule and the run
+ * counters follow those, never the request's own space. `GET /api/agents` is
+ * the request's space; `GET /api/orgs/{orgId}/agents` calls it per space.
+ *
+ * Single query: the activation rule (`activeHereSql` — placed here AND
+ * switched on, or a system agent with no row) via LEFT JOIN. This page answers
+ * "what can I launch here?", so every row on it is launchable; an agent placed
+ * here but switched off (or never switched on) lives on the space library
+ * instead (`GET /api/spaces/{spaceId}/library`), which carries its origin, its
+ * state and the switch.
+ */
+export async function listSpaceAgents(
+  scope: SpaceScope,
+  permissions: ReadonlySet<string>,
+  actor: Actor,
+) {
+  const summaryOnly = !readsAgentContent(permissions);
+  const visibility = runVisibilityIn(permissions, actor);
+  const [rows, runningCounts, unreadCounts] = await Promise.all([
+    listActivePackages(scope, "agent"),
+    getRunningRunCounts(scope, visibility),
+    getUnreadRunCountsByAgent(scope, actor, visibility),
+  ]);
+
+  return rows.map((row) => {
+    const manifest = asRecord(row.draftManifest) as AgentManifest;
+    const parsed = parseScopedName(manifest.name);
+    const appearance = readAgentAppearance(manifest as Record<string, unknown>);
+    return {
+      id: row.id,
+      spaceId: scope.spaceId,
+      ...appearance,
+      display_name: manifest.display_name,
+      description: manifest.description,
+      schema_version: manifest.schema_version,
+      author: manifest.author,
+      keywords: manifest.keywords ?? [],
+      // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
+      // one thing in this list a summary read withholds. `integrations` says
+      // which SaaS it talks to, which is what a launcher connects, so it
+      // answers every caller. Everything else is how the launcher names and
+      // picks an agent, which `agents:run` is entitled to.
+      dependencies: {
+        ...(summaryOnly
+          ? {}
+          : {
+              skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+              mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+            }),
+        integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
+      },
+      running_runs: runningCounts[row.id] ?? 0,
+      // The caller's own unread runs of this agent (per recipient, like a
+      // schedule's `unread_count`).
+      unread_count: unreadCounts[row.id] ?? 0,
+      source: row.source ?? "local",
+      // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
+      // list output is directly usable as `{scope}` path-param input — one
+      // operation's output must be valid input for the next.
+      scope: parsed ? `@${parsed.scope}` : null,
+      // `version` from the manifest may be absent on a partial draft; the DB
+      // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
+      version: manifest.version ?? null,
+      // The draft manifest's `version` above says nothing about publication:
+      // `published` is whether omitting the version selector at launch resolves.
+      published: isPublished(row),
+      type: row.type,
+    };
+  });
+}
+
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list agents accessible to the current space
+  // GET /api/agents — the agents index of the current space
   router.get("/", requireAgentRead, async (c) => {
-    const scope = getSpaceScope(c);
-    const summaryOnly = agentReadIsSummary(c);
-
-    // Single query: the activation rule (`activeHereSql` — placed here AND
-    // switched on, or a system agent with no row) via LEFT JOIN. This page
-    // answers "what can I launch here?", so every row on it is launchable;
-    // an agent placed here but switched off (or never switched on) lives on the
-    // space library instead (`GET /api/spaces/{spaceId}/library`), which
-    // carries its origin, its state and the switch.
-    const visibility = runVisibilityFilter(c);
-    const [rows, runningCounts, unreadCounts] = await Promise.all([
-      listActivePackages(scope, "agent"),
-      getRunningRunCounts(scope, visibility),
-      getUnreadRunCountsByAgent(scope, getActor(c), visibility),
-    ]);
-
-    const agentList = rows.map((row) => {
-      const manifest = asRecord(row.draftManifest) as AgentManifest;
-      const parsed = parseScopedName(manifest.name);
-      const appearance = readAgentAppearance(manifest as Record<string, unknown>);
-      return {
-        id: row.id,
-        ...appearance,
-        display_name: manifest.display_name,
-        description: manifest.description,
-        schema_version: manifest.schema_version,
-        author: manifest.author,
-        keywords: manifest.keywords ?? [],
-        // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
-        // one thing in this list a summary read withholds. `integrations` says
-        // which SaaS it talks to, which is what a launcher connects, so it
-        // answers every caller. Everything else is how the launcher names and
-        // picks an agent, which `agents:run` is entitled to.
-        dependencies: {
-          ...(summaryOnly
-            ? {}
-            : {
-                skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-                mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
-              }),
-          integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
-        },
-        running_runs: runningCounts[row.id] ?? 0,
-        // The caller's own unread runs of this agent (per recipient, like a
-        // schedule's `unread_count`).
-        unread_count: unreadCounts[row.id] ?? 0,
-        source: row.source ?? "local",
-        // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
-        // list output is directly usable as `{scope}` path-param input — one
-        // operation's output must be valid input for the next.
-        scope: parsed ? `@${parsed.scope}` : null,
-        // `version` from the manifest may be absent on a partial draft; the DB
-        // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
-        version: manifest.version ?? null,
-        // The draft manifest's `version` above says nothing about publication:
-        // `published` is whether omitting the version selector at launch resolves.
-        published: isPublished(row),
-        type: row.type,
-      };
-    });
-
-    return c.json(listResponse(agentList));
+    return c.json(
+      listResponse(await listSpaceAgents(getSpaceScope(c), callerPermissions(c), getActor(c))),
+    );
   });
 
   // PUT /api/agents/:scope/:name/input-settings — save the agent's stored

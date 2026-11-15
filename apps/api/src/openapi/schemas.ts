@@ -244,9 +244,16 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     "home_writable",
     "home_deletable",
     "home_shareable",
+    "spaceId",
   ],
   properties: {
     id: { type: "string" },
+    spaceId: {
+      type: "string",
+      pattern: SPACE_ID_RE.source,
+      description:
+        "The space whose index lists this row (spc_ prefix): the package is ACTIVE there. A list spanning spaces lists a package once per space it is active in.",
+    },
     orgId: {
       type: ["string", "null"],
       description: "Owning organization ID (null for system packages)",
@@ -990,9 +997,16 @@ export const schemas = {
       "keywords",
       "version",
       "published",
+      "spaceId",
     ],
     properties: {
       id: { type: "string" },
+      spaceId: {
+        type: "string",
+        pattern: SPACE_ID_RE.source,
+        description:
+          "The space whose index lists this row (spc_ prefix): the agent is ACTIVE there, and the row's counters and dependency summary follow the caller's role there. A list spanning spaces lists an agent once per space it is active in.",
+      },
       ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },

@@ -57,6 +57,7 @@ import {
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type ManifestIssue, type PackageType } from "@appstrate/core/validation";
+import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional-request.ts";
@@ -663,40 +664,45 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
 
 // --- Handler factories ---
 
+/**
+ * The INDEX of one package type in one space: its ACTIVE set, and only it —
+ * the page answers "what can I launch here?". The ONE activation rule decides
+ * (`services/package-activation.ts`, applied in SQL by `listOrgItems`): the
+ * placement row when there is one and the package is placed here, the
+ * deployment's default when there is not. That is the same rule the
+ * integration resolver, the run gate and the caller-context hints state, the
+ * env-backed system integrations active without a row included, so no type
+ * needs a correction pass behind this listing. What is merely PLACED here — a
+ * package switched off — belongs to the space library
+ * (`GET /api/spaces/{spaceId}/library`).
+ *
+ * `accessible` is the caller's reach (`packageAccessSpaces`), from which
+ * `home_space_id` / `home_*` are computed (RBAC spec §6.9); nothing on a row
+ * depends on the caller's role in the listed space. `GET /api/packages/{type}`
+ * is the request's space; `GET /api/orgs/{orgId}/packages/{type}` calls it per
+ * space.
+ */
+export async function listSpacePackages(
+  type: PackageType,
+  scope: SpaceScope,
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+) {
+  const items = await listOrgItems(scope.orgId, CONFIG_BY_TYPE[type], scope.spaceId);
+  const enriched = await enrichWithCreatorNames(items);
+  return enriched.map(({ homeSpaceId, ...item }) => ({
+    ...item,
+    spaceId: scope.spaceId,
+    ...homeWireForCaller({ type, source: item.source, homeSpaceId }, accessible),
+  }));
+}
+
 function makeListHandler(rcfg: PackageRouteConfig) {
-  return async (c: Context<AppEnv>) => {
-    const orgId = c.get("orgId");
-    const spaceId = c.get("spaceId");
-    // The ACTIVE set of this space, and only it — the index page answers "what
-    // can I launch here?". The ONE activation rule decides
-    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`): the
-    // placement row when there is one and the package is placed here, the
-    // deployment's default when there is not. That is the same rule the
-    // integration resolver, the run gate and the caller-context hints state,
-    // the env-backed system integrations active without a row included, so no
-    // type needs a correction pass behind this listing.
-    //
-    // What is merely PLACED here — a package switched off —
-    // belongs to the space library (`GET /api/spaces/{spaceId}/library`), which
-    // carries the per-placement state and the switch that repairs it.
-    const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
-    const enriched = await enrichWithCreatorNames(items);
-    // `home_space_id` / `home_writable` are computed HERE, not in
-    // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
-    // a service has no access to. One `packageAccessSpaces` read for the page.
-    const accessible = await packageAccessSpaces(c);
-    return c.json(
+  return async (c: Context<AppEnv>) =>
+    c.json(
       listResponse(
-        enriched.map(({ homeSpaceId, ...item }) => ({
-          ...item,
-          ...homeWireForCaller(
-            { type: rcfg.cfg.type, source: item.source, homeSpaceId },
-            accessible,
-          ),
-        })),
+        await listSpacePackages(rcfg.cfg.type, getSpaceScope(c), await packageAccessSpaces(c)),
       ),
     );
-  };
 }
 
 function makeCreateHandler(rcfg: PackageRouteConfig) {

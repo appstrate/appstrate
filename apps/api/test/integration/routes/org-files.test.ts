@@ -21,14 +21,15 @@
  * | member session                               | Trois (read-all, no `files:delete`)            | the owner's run file, `capabilities.delete` false         |
  * | member session                               | Deux / Default (no read-all)                   | own rows only                                             |
  * | member session                               | Quatre (no `files:read`)                       | none, own rows included                                   |
- * | member session                               | Fermé / Privé                                  | none; `spaceId` = it → the same 400 as a nonexistent id   |
+ * | member session                               | Fermé / Privé                                  | none                                                      |
  * | member session                               | `runId` of a run in Fermé whose input names an own file | that file is NOT added: the run is looked up in the listed spaces only |
  * | member session                               | `context_chat_session_id` of own session (Deux) | its attachment                                           |
  * | member session                               | `startingAfter` + `limit`                      | one keyset order across spaces                            |
+ * | member session                               | `spaceId` (not a filter of this list)          | 400, as any unknown query key                             |
  * | owner session                                | every team space (preset `admin`)              | every row                                                 |
  * | guest session                                | no row anywhere                                | empty page, 200                                           |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)      | the owner's own rows of Default                           |
- * | API key pinned to Un, scopes `files:read` + `runs:read-all` | Un only, ceiling applied        | every Un row, `capabilities.delete` false; `spaceId` = Deux → 400 |
+ * | API key pinned to Un, scopes `files:read` + `runs:read-all` | Un only, ceiling applied        | every Un row, `capabilities.delete` false                 |
  * | API key without `files:read` in scopes       | —                                              | 403 (ceiling guard)                                       |
  * | API key + `Appstrate-User` (end-user)        | —                                              | 403, malformed query included                             |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling     | ceiling `files:read` → own rows only                      |
@@ -280,11 +281,7 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(seen).toEqual([...seen].sort((a, b) => order.indexOf(b) - order.indexOf(a)));
   });
 
-  it("narrows to the spaces spaceId names, and composes the filters of GET /api/files", async () => {
-    expect(ids(await list(session(member), `?spaceId=${s.deux}`))).toEqual(
-      pick("deuxMemberOutput", "deuxMemberChat"),
-    );
-    expect(ids(await list(session(member), `?spaceId=${s.quatre}`))).toEqual([]);
+  it("composes the filters of GET /api/files and takes no space filter", async () => {
     expect(ids(await list(session(member), "?purpose=user_upload"))).toEqual(pick("unOwnerUpload"));
     expect(
       ids(await list(session(member), `?context_chat_session_id=${memberChatSession}`)),
@@ -292,12 +289,8 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(
       ids(await list(session(member), `?context_chat_session_id=${ownerChatSession}`)),
     ).toEqual([]);
-    const strict = await app.request(path("?spaceIds=x"), { headers: session(member) });
+    const strict = await app.request(path(`?spaceId=${s.deux}`), { headers: session(member) });
     expect(strict.status).toBe(400);
-    // An empty segment is dropped.
-    expect(ids(await list(session(member), `?spaceId=${s.deux},`))).toEqual(
-      pick("deuxMemberOutput", "deuxMemberChat"),
-    );
   });
 
   it("looks a runId up in the listed spaces only", async () => {
@@ -307,19 +300,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(ids(await list(session(owner), `?runId=${fermeRunNamingOwnFile}`))).toEqual(
       pick("defaultMemberOutput"),
     );
-  });
-
-  it("answers a space the caller does not reach exactly as one that does not exist", async () => {
-    const problem = async (spaceId: string) => {
-      const res = await app.request(path(`?spaceId=${spaceId}`), { headers: session(member) });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as Record<string, unknown>;
-      return { param: body.param, detail: String(body.detail).replace(spaceId, "<id>") };
-    };
-    const unknown = await problem("spc_00000000000000000000000000");
-    expect(unknown.param).toBe("spaceId");
-    expect(await problem(s.ferme)).toEqual(unknown);
-    expect(await problem(s.prive)).toEqual(unknown);
   });
 
   it("serves the owner every row of every team space, private included", async () => {
@@ -354,8 +334,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
     );
     // No `files:delete` in its scopes: no lifecycle, not even on the creator's rows.
     expect(page.data.every((file) => !file.capabilities.delete)).toBe(true);
-    const outside = await app.request(path(`?spaceId=${s.deux}`), { headers });
-    expect(outside.status).toBe(400);
     const otherOrg = await app.request(path("", foreignOrgId), { headers });
     expect(otherOrg.status).toBe(403);
   });

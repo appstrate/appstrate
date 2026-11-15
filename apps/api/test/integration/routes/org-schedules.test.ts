@@ -14,11 +14,11 @@
  * | member session                               | Deux (`schedules:read` only)                          | listed    | 1 (own run)    |
  * | member session                               | Trois (`runs:read-all`, no `schedules:read`)          | none      | —              |
  * | member session                               | Default (open, implicit `operator`)                   | listed    | 1 (own run)    |
- * | member session                               | Fermé (`closed`, not joined) / Privé (not a member)   | none; `spaceId` = it → the same 400 as a nonexistent id | — |
+ * | member session                               | Fermé (`closed`, not joined) / Privé (not a member)   | none      | —              |
  * | owner session                                | every team space (preset `admin`)                     | all       | 2 everywhere   |
  * | guest session                                | no row anywhere                                       | empty list, 200 | —        |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)             | Default   | 1 (own run)    |
- * | API key pinned to Un, scopes `schedules:read`| Un only, ceiling applied                              | Un        | 1 (own run); `spaceId` = Deux → 400 |
+ * | API key pinned to Un, scopes `schedules:read`| Un only, ceiling applied                              | Un        | 1 (own run)    |
  * | API key without `schedules:read` in scopes   | —                                                     | 403 (ceiling guard) | —    |
  * | API key + `Appstrate-User` (end-user)        | —                                                     | 403       | —              |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling            | ceiling without `runs:read-all` → Un counts own run only | |
@@ -169,33 +169,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     expect(byId.get(sched.deux!)!.agent_name).toBe(`Agent of ${s.deux}`);
   });
 
-  it("narrows to the spaces spaceId names", async () => {
-    expect((await list({ Cookie: member.cookie }, `?spaceId=${s.deux}`)).counters).toEqual(
-      expected({ deux: 1 }),
-    );
-    // Reached, but no `schedules:read` there: nothing, not a 400.
-    expect((await list({ Cookie: member.cookie }, `?spaceId=${s.trois}`)).counters).toEqual({});
-    // An empty segment is dropped.
-    expect((await list({ Cookie: member.cookie }, `?spaceId=${s.deux},`)).counters).toEqual(
-      expected({ deux: 1 }),
-    );
-  });
-
-  it("answers a space the caller does not reach exactly as one that does not exist", async () => {
-    const problem = async (spaceId: string) => {
-      const res = await app.request(path(`?spaceId=${spaceId}`), {
-        headers: { Cookie: member.cookie },
-      });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as Record<string, unknown>;
-      return { param: body.param, detail: String(body.detail).replace(spaceId, "<id>") };
-    };
-    const unknown = await problem("spc_00000000000000000000000000");
-    expect(unknown.param).toBe("spaceId");
-    expect(await problem(s.ferme)).toEqual(unknown);
-    expect(await problem(s.prive)).toEqual(unknown);
-  });
-
   it("serves the owner every schedule of every team space, private included", async () => {
     expect((await list({ Cookie: owner.cookie })).counters).toEqual(
       expected({ default: 2, un: 2, deux: 2, trois: 2, ferme: 2, prive: 2 }),
@@ -223,8 +196,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     const headers = { Authorization: `Bearer ${key.rawKey}` };
     // The creator's own run only: `runs:read-all` is outside the key's scopes.
     expect((await list(headers)).counters).toEqual(expected({ un: 1 }));
-    const outside = await app.request(path(`?spaceId=${s.deux}`), { headers });
-    expect(outside.status).toBe(400);
     const otherOrg = await app.request(path("", foreignOrgId), { headers });
     expect(otherOrg.status).toBe(403);
   });

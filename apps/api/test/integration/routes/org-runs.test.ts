@@ -9,14 +9,14 @@
  * | member session                             | custom role holding `runs:read-all` (Un)      | every run of Un                       |
  * | member session                             | custom role holding `runs:read` only (Deux)   | the member's own runs of Deux         |
  * | member session                             | open space, default role `operator` (Default) | the member's own runs of Default      |
- * | member session                             | custom role without run read (Trois)          | none; `spaceId` = it → empty page     |
- * | member session                             | `closed` space, not joined (Fermé)            | none; `spaceId` = it → 400            |
- * | member session                             | `private` space, not a member (Privé)         | none; `spaceId` = it → the same 400   |
+ * | member session                             | custom role without run read (Trois)          | none                                  |
+ * | member session                             | `closed` space, not joined (Fermé)            | none                                  |
+ * | member session                             | `private` space, not a member (Privé)         | none                                  |
  * | owner session                              | every team space (preset `admin`)             | every run                             |
  * | guest session                              | explicit `runs:read` row (Un)                 | the guest's own runs of Un            |
  * | guest session                              | no row anywhere                               | empty page, 200                       |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)   | the owner's own runs of Default       |
- * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un; `spaceId` = Deux → 400 |
+ * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un                       |
  * | API key without a run-read scope           | —                                             | 403 (ceiling guard)                   |
  * | API key + `Appstrate-User` (end-user)      | —                                             | 403, malformed query included         |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
@@ -209,35 +209,6 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     );
   });
 
-  it("narrows to the spaces spaceId names, comma-separated", async () => {
-    expect(ids(await list(session(member), `?spaceId=${deux}`))).toEqual([r.deuxMember!]);
-    expect(ids(await list(session(member), `?spaceId=${un},${deux}`))).toEqual(
-      sorted(r.unOwner!, r.unMember!, r.deuxMember!),
-    );
-    // Empty reads as absent, and an empty segment is dropped.
-    expect((await list(session(member), "?spaceId=")).total).toBe(4);
-    expect(ids(await list(session(member), `?spaceId=${deux},`))).toEqual([r.deuxMember!]);
-    // Reached, but no run read there: nothing, not a 400.
-    expect(await list(session(member), `?spaceId=${trois}`)).toMatchObject({ data: [], total: 0 });
-  });
-
-  it("answers a space the caller does not reach exactly as one that does not exist", async () => {
-    const problem = async (spaceId: string) => {
-      const res = await app.request(path(`?spaceId=${spaceId}`), { headers: session(member) });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as Record<string, unknown>;
-      return {
-        code: body.code,
-        param: body.param,
-        detail: String(body.detail).replace(spaceId, "<id>"),
-      };
-    };
-    const unknown = await problem("spc_00000000000000000000000000");
-    expect(unknown.param).toBe("spaceId");
-    expect(await problem(ferme)).toEqual(unknown);
-    expect(await problem(prive)).toEqual(unknown);
-  });
-
   it("composes the filters of GET /api/runs and refuses an unknown value", async () => {
     expect((await list(session(member), "?status=failed")).total).toBe(0);
     const bad = await app.request(path("?kind=inlinee"), { headers: session(member) });
@@ -275,8 +246,6 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     });
     const headers = { Authorization: `Bearer ${key.rawKey}` };
     expect(ids(await list(headers))).toEqual(sorted(r.unOwner!, r.unMember!));
-    const outside = await app.request(path(`?spaceId=${deux}`), { headers });
-    expect(outside.status).toBe(400);
     const otherOrg = await app.request(path("", foreignOrgId), { headers });
     expect(otherOrg.status).toBe(403);
   });

@@ -238,7 +238,169 @@ const servedSkillErrors = {
   "429": { $ref: "#/components/responses/RateLimited" },
 } as const;
 
+/** The responses of both skill indexes: one space's, and the one spanning spaces. */
+const skillListResponses = {
+  "200": {
+    description: "Skill list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OrgPackageItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+        example: {
+          object: "list",
+          hasMore: false,
+          data: [
+            {
+              id: "@acme/summarize",
+              spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              name: "Summarize",
+              description: "Summarizes long text into key points",
+              icon: "lucide:file-text",
+              keywords: ["summary", "text"],
+              source: "local",
+              version: "1.0.0",
+              created_by: "usr_cm3abc123",
+              used_by_agents: 2,
+              auto_installed: false,
+              forked_from: null,
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              home_writable: true,
+              home_deletable: true,
+              home_shareable: true,
+              createdAt: "2026-01-10T08:00:00Z",
+              updatedAt: "2026-01-10T08:00:00Z",
+            },
+          ],
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
+/** The responses of both integration package indexes: one space's, and the one spanning spaces. */
+const integrationPackageListResponses = {
+  "200": {
+    description: "Integration package list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/IntegrationIndexItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
+/** The responses of both MCP-server package indexes: one space's, and the one spanning spaces. */
+const mcpServerPackageListResponses = {
+  "200": {
+    description: "MCP-server package list",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OrgPackageItem" },
+            },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+};
+
+/**
+ * The description of a package index spanning the spaces of an organization;
+ * `noun` names the type, `permission` its read grant.
+ */
+function orgPackageIndexDescription(noun: string, single: string, permission: string): string {
+  return (
+    `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. ` +
+    "Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. " +
+    "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. " +
+    "No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`."
+  );
+}
+
+const orgIdPathParameter = {
+  name: "orgId",
+  in: "path",
+  required: true,
+  schema: { type: "string" },
+};
+
 export const packagesPaths = {
+  "/api/orgs/{orgId}/packages/skills": {
+    get: {
+      operationId: "listOrgSkills",
+      tags: ["Packages"],
+      summary: "List skills across the organization's spaces",
+      description: orgPackageIndexDescription("skills", "GET /api/packages/skills", "skills:read"),
+      parameters: [orgIdPathParameter],
+      responses: skillListResponses,
+    },
+  },
+  "/api/orgs/{orgId}/packages/integrations": {
+    get: {
+      operationId: "listOrgIntegrations",
+      tags: ["Packages"],
+      summary: "List integration packages across the organization's spaces",
+      description: orgPackageIndexDescription(
+        "integration packages",
+        "GET /api/packages/integrations",
+        "integrations:read",
+      ),
+      parameters: [orgIdPathParameter],
+      responses: integrationPackageListResponses,
+    },
+  },
+  "/api/orgs/{orgId}/packages/mcp-servers": {
+    get: {
+      operationId: "listOrgMcpServerPackages",
+      tags: ["Packages"],
+      summary: "List MCP-server packages across the organization's spaces",
+      description: orgPackageIndexDescription(
+        "MCP-server packages",
+        "GET /api/packages/mcp-servers",
+        "mcp-servers:read",
+      ),
+      parameters: [orgIdPathParameter],
+      responses: mcpServerPackageListResponses,
+    },
+  },
   "/api/packages/import-bundle": {
     post: {
       operationId: "importBundle",
@@ -909,55 +1071,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: {
-        "200": {
-          description: "Skill list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "@acme/summarize",
-                    name: "Summarize",
-                    description: "Summarizes long text into key points",
-                    icon: "lucide:file-text",
-                    keywords: ["summary", "text"],
-                    source: "local",
-                    version: "1.0.0",
-                    created_by: "usr_cm3abc123",
-                    used_by_agents: 2,
-                    auto_installed: false,
-                    forked_from: null,
-                    home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                    home_writable: true,
-                    home_deletable: true,
-                    home_shareable: true,
-                    createdAt: "2026-01-10T08:00:00Z",
-                    updatedAt: "2026-01-10T08:00:00Z",
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: skillListResponses,
     },
     post: {
       operationId: "createSkill",
@@ -2294,30 +2408,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: {
-        "200": {
-          description: "Integration package list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/IntegrationIndexItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: integrationPackageListResponses,
     },
     post: {
       operationId: "createIntegrationPackage",
@@ -2747,30 +2838,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: {
-        "200": {
-          description: "MCP-server package list",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
+      responses: mcpServerPackageListResponses,
     },
     post: {
       operationId: "createMcpServerPackage",

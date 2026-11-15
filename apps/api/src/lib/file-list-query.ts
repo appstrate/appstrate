@@ -23,18 +23,14 @@ const listFilesQuerySchema = z
   .strict();
 
 /**
- * The gallery filters of `query` — `c.req.query()` for `GET /api/files`; for
- * `GET /api/orgs/{orgId}/files`, the same without the `spaceId` the route reads.
+ * The gallery filters of `GET /api/files` and `GET /api/orgs/{orgId}/files`.
  * Query-param casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b):
  * `runId`, `packageId` and the `startingAfter` pagination param are camelCase;
  * `chat_session_id` is a snake_case domain field. Strict: an unknown or
  * misspelled filter is a 400, never a silently widened listing.
  */
-export function parseListFilesQuery(
-  c: Context<AppEnv>,
-  query: Record<string, string> = c.req.query(),
-): ListFilesFilters {
-  const parsed = parseBody(listFilesQuerySchema, query);
+export function parseListFilesQuery(c: Context<AppEnv>): ListFilesFilters {
+  const parsed = parseBody(listFilesQuerySchema, c.req.query());
   const filters: ListFilesFilters = {};
   if (parsed.purpose) filters.purpose = parsed.purpose;
   if (parsed.runId) filters.runId = parsed.runId;
