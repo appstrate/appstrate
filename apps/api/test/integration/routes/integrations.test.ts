@@ -39,6 +39,7 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 
 const app = getTestApp();
 
@@ -341,6 +342,23 @@ describe("GET /api/integrations/:packageId", () => {
       { name: "search", description: "Search threads" },
       { name: "send" },
     ]);
+  });
+
+  it("describes each tool of the platform integration, whose server is the platform", async () => {
+    const restore = await installRuntimeBoundSystemPackages();
+    try {
+      const res = await app.request("/api/integrations/@appstrate/platform", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        tool_catalog: Array<{ name: string; description?: string }>;
+      };
+      expect(body.tool_catalog.map((tool) => tool.name)).toContain("log");
+      for (const tool of body.tool_catalog) expect(tool.description).toBeTruthy();
+    } finally {
+      restore();
+    }
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {

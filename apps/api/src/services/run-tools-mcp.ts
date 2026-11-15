@@ -28,6 +28,10 @@ import {
   type CallToolResult,
 } from "@appstrate/mcp-transport";
 import { listResponse } from "@appstrate/core/list-query";
+import {
+  isRuntimeBoundIntegration,
+  type IntegrationToolCatalogEntry,
+} from "@appstrate/core/integration";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { actorFromIds } from "../lib/actor.ts";
@@ -74,7 +78,9 @@ interface ToolContext {
   scopeFor: (scope: "actor" | "shared" | undefined) => PersistenceScope;
 }
 
-type RunTool = (ctx: ToolContext) => AppstrateToolDefinition;
+type RunTool = ((ctx: ToolContext) => AppstrateToolDefinition) & {
+  descriptor: AppstrateToolDefinition["descriptor"];
+};
 
 function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
@@ -104,7 +110,7 @@ function defineTool<S extends z.ZodObject>(spec: {
     description: spec.description,
     inputSchema: inputSchema as AppstrateToolDefinition["descriptor"]["inputSchema"],
   };
-  return (ctx) => ({
+  const bind = (ctx: ToolContext): AppstrateToolDefinition => ({
     descriptor,
     handler: async (raw) => {
       const parsed = spec.args.safeParse(raw ?? {});
@@ -129,6 +135,7 @@ function defineTool<S extends z.ZodObject>(spec: {
       }
     },
   });
+  return Object.assign(bind, { descriptor });
 }
 
 const scopeArg = (description: string) =>
@@ -370,6 +377,26 @@ const RUN_TOOLS: RunTool[] = [
     },
   }),
 ];
+
+/**
+ * An integration resource with each tool of the runtime-bound integration described: its server
+ * is this module, which lists the tools only to a run, so its catalog has no description of them.
+ */
+export function withRunToolDescriptions<
+  T extends { manifest: unknown; tool_catalog: IntegrationToolCatalogEntry[] },
+>(detail: T): T {
+  if (!isRuntimeBoundIntegration(detail.manifest)) return detail;
+  const descriptions = new Map(
+    RUN_TOOLS.map(({ descriptor }) => [descriptor.name, descriptor.description]),
+  );
+  return {
+    ...detail,
+    tool_catalog: detail.tool_catalog.map((entry) => ({
+      ...entry,
+      description: descriptions.get(entry.name),
+    })),
+  };
+}
 
 /** The tools bound to `run`. The run's actor decides the default persistence scope. */
 function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
