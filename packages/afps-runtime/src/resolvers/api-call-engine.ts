@@ -19,6 +19,7 @@ import {
   assertHttpFieldValue,
   InvalidHeaderValueError,
 } from "@appstrate/afps-shared/delivery-http";
+import { hasUserinfo } from "@appstrate/afps-shared/connection-variables";
 import {
   hostLiterallyAllowlisted,
   matchesAuthorizedUriSpec,
@@ -244,6 +245,13 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
   const fields = opts.credentialFields;
   const { authorizedUris, declaredUris, allowAllUris } = opts;
   if (!URL.canParse(opts.url)) throw new ApiCallRefusedError("ssrf", "Invalid target URL");
+  // Never echo the URL: its userinfo may be a substituted credential.
+  if (hasUserinfo(opts.url)) {
+    throw new ApiCallRefusedError(
+      "not_authorized",
+      "The target URL carries userinfo (user:password@host); the proxy injects the credential, remove it from the URL",
+    );
+  }
   const gated = !allowAllUris;
   const inAllowlist = (url: URL) =>
     authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
