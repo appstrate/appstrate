@@ -34,6 +34,7 @@ import type {
 } from "../../../src/services/credential-proxy/integration-tools.ts";
 import {
   apiIntegrationManifest,
+  localIntegrationManifest,
   twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
@@ -241,6 +242,22 @@ describe("GET /api/credential-proxy/tools", () => {
       expect(body.not_ready[0]!.refusal!.connect_url).toStartWith("http");
     });
 
+    it("leaves out an integration that offers no tool outside a run: a local server, an API without `api_call`", async () => {
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({ name: "@acme/shell", auths: { key: { type: "api_key" } } }),
+      );
+      await seedProxyIntegration(
+        ctx,
+        apiIntegrationManifest({
+          name: "@acme/plain",
+          auths: { api: { type: "api_key", authorizedUris: ["https://api.example.com/**"] } },
+        }) as IntegrationManifest,
+      );
+      const { body } = await list();
+      expect(body.not_ready.map((entry) => entry.integration_package_id)).toEqual([ID]);
+    });
+
     it("lists a connected integration's tool, and the integration not in `not_ready`", async () => {
       const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: "t" });
       const { body } = await list({}, OFFERS);
@@ -257,6 +274,27 @@ describe("GET /api/credential-proxy/tools", () => {
         }),
       ]);
       expect(body.connections).toEqual([expect.objectContaining({ connection_id: connectionId })]);
+    });
+
+    it("closes a manifest description left without a full stop, kept as is otherwise", async () => {
+      const open = "@acme/open-desc";
+      const closed = "@acme/closed-desc";
+      await seedProxyIntegration(
+        ctx,
+        keyManifest(open, { display_name: "Open", description: "Scrapes any website " }),
+      );
+      await seedProxyIntegration(
+        ctx,
+        keyManifest(closed, { display_name: "Closed", description: "Scrapes it all!" }),
+      );
+      for (const id of [open, closed]) {
+        await seedProxyConnection(ctx, id, "api", { api_key: "a" });
+      }
+      const { body } = await list();
+      const described = (id: string) =>
+        body.tools.find((tool) => tool.integration_package_id === id)!.description;
+      expect(described(open)).toBe("Open. Scrapes any website.");
+      expect(described(closed)).toBe("Closed. Scrapes it all!");
     });
 
     it("omits an integration switched off in the space", async () => {

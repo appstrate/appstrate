@@ -145,7 +145,8 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       "can flag the connection for reconnection. " +
       "`total` counts every match; `note` says when more matched than are shown, or when a " +
       "server's catalog was read incomplete. Present when not empty, filtered like the tools: " +
-      "`not_ready`, the integrations active here you have no usable connection of, each with " +
+      "`not_ready`, the integrations active here you have no usable connection of and whose " +
+      "tools can be called outside a run, each with " +
       "its `proxy_connection` verdict (`status`, `imposed`) and, when a selection refusal " +
       "explains it, that `refusal`, whose `connect_url` is a single-use link to hand to the " +
       "user, which connects the integration as them; `unlisted`, the remote integrations whose " +

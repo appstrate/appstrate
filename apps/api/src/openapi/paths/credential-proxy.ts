@@ -802,7 +802,8 @@ export const credentialProxyPaths = {
         "is contacted. `connections` lists the connections the tools reach, each once, as " +
         "`GET /api/credential-proxy/connections` lists them; each tool names its own " +
         "(`connection_ids`). `not_ready` lists the " +
-        "integrations active in the space the caller has no usable connection of, with the " +
+        "integrations active in the space the caller has no usable connection of and that offer " +
+        "a tool outside a run (an `api_call` tool, or a remote server's), with the " +
         "verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a " +
         "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
         "whose server the proxy refused to list (connection selection, permission, " +

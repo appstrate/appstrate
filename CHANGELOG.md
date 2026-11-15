@@ -618,7 +618,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/api/credential-proxy/proxy` outside a run, each with its own rate-limit
   bucket, and both kept out of the MCP operation catalog like `/proxy`.
   `search_integration_tools` also lists, in `not_ready`, the integrations
-  active in the space the caller has no usable connection of, each with the
+  active in the space the caller has no usable connection of and that offer a
+  tool outside a run, each with the
   `proxy_connection` verdict of a call naming none (`none`,
   `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
   the selection's `refusal` item, whose `connect_url` (run launch's minter and

@@ -23,7 +23,8 @@ export function searchScore(text: string, tokens: readonly string[]): number {
 
 /**
  * `items` matching `tokens` (all of them when there are none), best first: an item whose name is
- * the query itself, then by {@link searchScore}, ties kept in the order given.
+ * the query itself, then by the tokens its name holds, then by those its text holds, then the
+ * shorter name (the one the tokens cover most), ties kept in the order given.
  */
 export function rankByKeywords<T>(
   items: readonly T[],
@@ -38,10 +39,19 @@ export function rankByKeywords<T>(
         item,
         order,
         exact: tokens.length > 0 && name.toLowerCase() === query,
-        score: searchScore(`${name} ${text}`, tokens),
+        inName: searchScore(name, tokens),
+        inText: searchScore(text, tokens),
+        length: name.length,
       };
     })
-    .filter(({ score }) => tokens.length === 0 || score > 0)
-    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score || a.order - b.order)
+    .filter(({ inName, inText }) => tokens.length === 0 || inName + inText > 0)
+    .sort(
+      (a, b) =>
+        Number(b.exact) - Number(a.exact) ||
+        b.inName - a.inName ||
+        b.inText - a.inText ||
+        (tokens.length > 0 ? a.length - b.length : 0) ||
+        a.order - b.order,
+    )
     .map(({ item }) => item);
 }

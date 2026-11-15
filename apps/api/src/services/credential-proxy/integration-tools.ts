@@ -308,8 +308,10 @@ interface ListedIntegration {
 function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
   const { id, namespace, manifest, connections } = entry;
   const configs = getApiCallConfigs(manifest);
+  const described = typeof manifest.description === "string" ? manifest.description.trim() : "";
+  // A sentence follows it: a description left open is closed.
   const about = `${manifest.display_name ?? manifest.name}.${
-    typeof manifest.description === "string" ? ` ${manifest.description}` : ""
+    described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
     const name = apiCallToolName(namespace, config.toolName);
@@ -504,6 +506,11 @@ async function remoteTools(
  * the remote ones the proxy refused to list. Read under `reach`, activation checked before any
  * connection is selected; servers are waited for until {@link listingDeadline}.
  */
+/** Connecting it gives a tool to call outside a run: an `api_call` tool, or a remote server's. */
+function offersToolsOutsideRun(manifest: IntegrationManifest): boolean {
+  return manifest.source?.kind === "remote" || getApiCallConfigs(manifest).length > 0;
+}
+
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,
   query: IntegrationToolQuery,
@@ -520,7 +527,13 @@ export async function listIntegrationTools(
   const [reachable, notReady] = await Promise.all([
     connectionsOutsideRun(scope, actor, reach, manifests),
     query.name === undefined
-      ? integrationsOutsideRun(scope, actor, reach, connectOffers, manifests)
+      ? integrationsOutsideRun(
+          scope,
+          actor,
+          reach,
+          connectOffers,
+          new Map([...manifests].filter(([, manifest]) => offersToolsOutsideRun(manifest))),
+        )
       : [],
   ]);
 

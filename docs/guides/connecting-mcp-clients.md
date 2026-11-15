@@ -421,7 +421,9 @@ role. Runs keep their connections there:
   listing's `truncated_catalogs` gives the tools read, `listed_tools`, and a
   tool the server lists after those is not offered.
   `not_ready`, apart from the tools and present when not empty, lists the
-  integrations active in the space you have no usable connection of, filtered
+  integrations active in the space you have no usable connection of and that
+  offer a tool outside a run (an `api_call` tool, or a remote server's: an
+  integration whose server runs in the sandbox is reached in a run only), filtered
   by `query` and `integration` like the tools: each `integration_package_id` with its
   `display_name`, the `proxy_connection` verdict of a call naming no
   connection (`status`: `none`, `needs_reconnection`, `not_permitted`,

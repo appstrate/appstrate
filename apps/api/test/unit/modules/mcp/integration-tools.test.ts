@@ -1163,6 +1163,38 @@ describe("search_integration_tools — what a search says it leaves out", () => 
     expect((payload.best_match as { tool: string }).tool).toBe("acme_items__folder");
   });
 
+  it("ranks a tool whose name holds the query's words above one whose description does", async () => {
+    const payload = await search(
+      { query: "workspace hierarchy" },
+      {
+        listing: listingOf([
+          named("acme_items__get_custom_fields", "Fields of a workspace, at any hierarchy level."),
+          named("acme_items__get_workspace_hierarchy", "The tree of spaces."),
+        ]),
+      },
+    );
+    expect((payload.tools as { tool: string }[]).map((tool) => tool.tool)).toEqual([
+      "acme_items__get_workspace_hierarchy",
+      "acme_items__get_custom_fields",
+    ]);
+    expect((payload.best_match as { tool: string }).tool).toBe(
+      "acme_items__get_workspace_hierarchy",
+    );
+  });
+
+  it("ranks the shorter of two names holding the same words first", async () => {
+    const payload = await search(
+      { query: "create task" },
+      {
+        listing: listingOf([
+          named("acme_items__create_task_comment"),
+          named("acme_items__create_task"),
+        ]),
+      },
+    );
+    expect((payload.best_match as { tool: string }).tool).toBe("acme_items__create_task");
+  });
+
   it("says when more tools match than are shown, naming the integration filter", async () => {
     const tools = Array.from({ length: 4 }, (_, i) => named(`acme_items__t${i}`));
     const payload = await search({ limit: 2 }, { listing: listingOf(tools) });
