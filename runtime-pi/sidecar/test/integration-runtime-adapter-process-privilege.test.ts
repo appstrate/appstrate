@@ -47,7 +47,7 @@ function localSpec(): IntegrationSpawnSpec {
     manifest: {
       name: "@orga/third-party",
       version: "1.0.0",
-      server: { type: "bun", entry_point: "server.ts", packageId: "@orga/third-party-mcp" },
+      server: { type: "bun", entry_point: "server.ts", packageId: "@orga/third-party" },
     },
     spawnEnv: {},
   } as IntegrationSpawnSpec;
@@ -96,7 +96,7 @@ describe("process adapter — privilege-drop gate", () => {
     // already established this promise rejects, so narrow to the rejection.
     const error = (await spawn.catch((err: unknown) => err)) as Error;
     expect(error.message).toContain("@orga/third-party");
-    expect(error.message).toContain("@orga/third-party-mcp");
+    expect(error.message).toContain("@orga/third-party: refusing");
     expect(error.message).toContain("APPSTRATE_RUNNER_EXEC");
     expect(error.message).toContain("RUN_ADAPTER=docker");
     expect(error.message).toContain("RUN_ADAPTER=firecracker");

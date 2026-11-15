@@ -311,6 +311,16 @@ To also hand a certificate to the server as a file, add a `client_cert` field to
 
 Import the archive as described under "Pack, import, publish" below, then activate the integration and connect an account.
 
+### From and to an MCP Bundle (`.mcpb`)
+
+A server already packaged as an [MCP Bundle](https://github.com/anthropics/mcpb) imports as it is: drop the `.mcpb` file into the import dialog (or `POST /api/packages/import`). Appstrate builds the integration from the bundle's `manifest.json`, named `@<your-org>/<bundle name>`, and keeps every payload file:
+
+- each `user_config` entry marked `sensitive` becomes a field of one custom auth, delivered to the server in the environment variable the bundle's `mcp_config.env` named;
+- a non-sensitive entry with a `default` is written in as a literal; one without a default is refused, since an integration has nowhere to store it;
+- the auth allows every host (`allow_all_uris`), because a bundle says nothing about where its server connects. Narrow it to the hosts the server needs with `authorized_uris` before you publish.
+
+The other way, a local integration's menu offers **Export as .mcpb** (`GET /api/packages/integrations/{scope}/{name}/mcpb`), which any MCPB host such as Claude Desktop can install. The export carries the credentials delivered in environment variables as `user_config`. An integration that delivers its credential as a file or over HTTP, declares several auths or uses connection variables has no faithful bundle form, and the export is refused rather than losing the credential.
+
 ## Tools and scopes in agents
 
 Agents pick tools from `tools_policy` (remote sources) or `source.server.tools` (local sources), or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/integrations/how-integrations-work#scopes).
