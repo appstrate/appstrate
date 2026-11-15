@@ -1166,6 +1166,42 @@ describe("typed tools of a remote MCP integration", () => {
     expect(callTool(made.calls)).toBeUndefined();
   });
 
+  it("treats a closed schema without properties as allowing no key", async () => {
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, {
+      listing: listingOf([
+        remoteTool({ input_schema: { type: "object", additionalProperties: false } }),
+      ]),
+    });
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(parseResult(result)).toMatchObject({
+      code: "unknown_argument",
+      arguments: ["arguments.q"],
+    });
+    expect(callTool(made.calls)).toBeUndefined();
+  });
+
+  it.each([
+    ["allOf", { allOf: [{ properties: { q: { type: "string" } } }] }],
+    ["$ref", { $ref: "#/$defs/args", $defs: { args: { properties: { q: { type: "string" } } } } }],
+  ])("leaves a closed schema declaring properties through %s to the server", async (_k, extra) => {
+    const made = makeTools(
+      CALL_OWN,
+      () => Response.json({ result: { content: [{ type: "text", text: "ok" }] } }),
+      true,
+      {
+        listing: listingOf([
+          remoteTool({ input_schema: { type: "object", additionalProperties: false, ...extra } }),
+        ]),
+      },
+    );
+    await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(callTool(made.calls)).toBeDefined();
+  });
+
   it("leaves unknown keys to the server when the schema does not close its properties", async () => {
     const made = makeTools(
       CALL_OWN,

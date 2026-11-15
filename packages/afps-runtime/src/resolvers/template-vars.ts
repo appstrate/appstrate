@@ -82,9 +82,10 @@ export function templateHost(template: string): string {
 }
 
 /**
- * The target `template` names, as a message echoes it: origin and path, each `{{key}}` written
- * as `{{key}}`, userinfo, query and fragment dropped. A leading `{{key}}` standing for a whole
- * base URL stays bare (`{{site_url}}/wp-json/x`). Unparseable: as {@link templateHost}.
+ * The target `template` names, as a message echoes it: origin and WHATWG-normalised path (dot
+ * segments resolved, `\` read as `/`), each `{{key}}` written as `{{key}}`, userinfo, query and
+ * fragment dropped. A leading `{{key}}` standing for a whole base URL stays bare
+ * (`{{site_url}}/wp-json/x`). Unparseable: as {@link templateHost}.
  */
 export function templateTarget(template: string): string {
   const parsed = parseTemplate(template);
