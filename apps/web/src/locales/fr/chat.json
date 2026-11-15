@@ -161,6 +161,7 @@
   "threads.new": "Nouvelle conversation",
   "threads.delete.title": "Supprimer cette conversation ?",
   "threads.delete.description": "« {{title}} », ses messages et ses fichiers seront définitivement supprimés. Un fichier encore utilisé par un run est conservé.",
+  "threads.delete.error": "La conversation n’a pas pu être supprimée. Réessayez.",
   "threads.title": "Conversations",
   "threads.showMore": "Afficher plus",
   "threads.generating": "Opération en cours",
@@ -180,5 +181,9 @@
   "turn.error.needsReconnectionOwn": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Si c'est le vôtre, reconnectez-le dans vos préférences, puis réessayez ; sinon, demandez à un administrateur de l'organisation de le reconnecter.",
   "turn.error.needsReconnectionMember": "L'abonnement qui sert le modèle sélectionné a expiré ou a été révoqué. Demandez à un administrateur de l'organisation de le reconnecter.",
   "threads.error": "Les conversations n'ont pas pu être chargées.",
+  "threads.settings.title": "Paramètres de la conversation",
+  "threads.settings.description": "Le nom apparaît dans la liste des conversations et en haut de la page.",
+  "threads.settings.name": "Nom",
+  "threads.settings.openFor": "Paramètres de « {{title}} »",
   "model.loadFailed": "Modèles indisponibles"
 }

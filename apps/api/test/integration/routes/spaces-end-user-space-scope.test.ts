@@ -2,7 +2,7 @@
 
 /**
  * Issue #1313 — a credential PINNED to one space must not reach another space
- * through a `/api/spaces/:spaceId/*` path param.
+ * through a `/api/spaces/:id/*` path param.
  *
  * The API-key half of that invariant is covered in `spaces.test.ts` (issue #172
  * extension). This file covers the OIDC end-user half: a token that pins a

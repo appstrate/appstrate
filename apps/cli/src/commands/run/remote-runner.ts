@@ -8,13 +8,13 @@
  * and the platform spawns a Pi container (same path as the dashboard
  * "Run" button). The CLI then tails the run by polling two endpoints:
  *
- *   - `GET /api/runs/:runId/logs?since=<lastId>` — append-only run-log
+ *   - `GET /api/runs/:id/logs?since=<lastId>` — append-only run-log
  *     entries with `id > since`. The cursor is required for bounded
  *     per-poll cost: without it the server returns the run's full
  *     history every tick and per-poll wire size grows linearly with run
  *     length. We track the highest log id we've rendered and pass it as
  *     `?since=` on the next request.
- *   - `GET /api/runs/:runId` — terminal-status detection + the final
+ *   - `GET /api/runs/:id` — terminal-status detection + the final
  *     RunResult/error/cost reconciliation.
  *
  * Polling (rather than SSE) is the v1 transport because the realtime

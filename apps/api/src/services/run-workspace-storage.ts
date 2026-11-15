@@ -7,11 +7,11 @@
  * delivered separately by nature:
  *
  *   - **Bundle** (`agent-package.afps` = manifest + prompt + skills): small and
- *     constant. Stored verbatim, fetched via `GET /api/runs/:runId/workspace`,
+ *     constant. Stored verbatim, fetched via `GET /api/runs/:id/workspace`,
  *     and written straight to the workspace root.
  *   - **Input files** (user uploads): large and variable. Each is stored as
- *     its own object and fetched via `GET /api/runs/:runId/files/:name`,
- *     enumerated through the manifest at `GET /api/runs/:runId/files`. The
+ *     its own object and fetched via `GET /api/runs/:id/files/:name`,
+ *     enumerated through the manifest at `GET /api/runs/:id/files`. The
  *     agent streams each straight to `files/<name>` on disk, so it never
  *     buffers the whole payload — bounding agent memory regardless of upload
  *     size.

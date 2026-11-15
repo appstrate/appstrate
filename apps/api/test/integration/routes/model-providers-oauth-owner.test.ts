@@ -84,7 +84,7 @@ function redeem(token: string, accessToken = "redeemed-access") {
 /** Mint then redeem; returns the credential the pairing produced. */
 async function pair(ctx: TestContext, body: Record<string, unknown> = {}): Promise<string> {
   const minted = await mint(ctx, body);
-  expect(minted.status).toBe(200);
+  expect(minted.status).toBe(201);
   const res = await redeem(((await minted.json()) as { token: string }).token);
   expect(res.status).toBe(200);
   return ((await res.json()) as { credentialId: string }).credentialId;
@@ -110,7 +110,7 @@ async function listedCredential(ctx: TestContext, id: string): Promise<Credentia
 
 async function mintToken(ctx: TestContext, body: Record<string, unknown> = {}): Promise<string> {
   const minted = await mint(ctx, body);
-  expect(minted.status).toBe(200);
+  expect(minted.status).toBe(201);
   return ((await minted.json()) as { token: string }).token;
 }
 
@@ -125,7 +125,7 @@ function setOrgRole(ctx: TestContext, role: OrgRole) {
 
 async function mintPairing(ctx: TestContext): Promise<{ id: string; token: string }> {
   const minted = await mint(ctx, { owner_type: "org" });
-  expect(minted.status).toBe(200);
+  expect(minted.status).toBe(201);
   return (await minted.json()) as { id: string; token: string };
 }
 
@@ -195,7 +195,7 @@ describe("subscription pairings — owner_type", () => {
     it("is the default, and needs model-provider-credentials:write", async () => {
       expect((await mint(member)).status).toBe(403);
       expect((await mint(member, { owner_type: "org" })).status).toBe(403);
-      expect((await mint(admin)).status).toBe(200);
+      expect((await mint(admin)).status).toBe(201);
     });
 
     it("redeems into an organization credential, recorded as such in the audit trail", async () => {
@@ -274,7 +274,7 @@ describe("subscription pairings — owner_type", () => {
         "personal_credential_custom_endpoint",
       );
       expect((await mint(admin, { providerId: "claude-code", owner_type: "org" })).status).toBe(
-        200,
+        201,
       );
     });
 
@@ -340,7 +340,7 @@ describe("subscription pairings — owner_type", () => {
             ownerUserId,
           });
         const cases = [
-          { id: (await seed(null)).id, on: manages(role), policyOff: manages(role) ? 200 : 404 },
+          { id: (await seed(null)).id, on: manages(role), policyOff: manages(role) ? 201 : 404 },
           { id: (await seed(caller.user.id)).id, on: true, policyOff: 403 },
           { id: (await seed(member.user.id)).id, on: false, policyOff: 404 },
         ];
@@ -349,14 +349,14 @@ describe("subscription pairings — owner_type", () => {
           const offered =
             (await listedCredential(caller, id))?.allowed_actions.includes("reconnect") ?? false;
           expect(offered).toBe(on);
-          expect((await mint(caller, { credentialId: id })).status).toBe(on ? 200 : 404);
+          expect((await mint(caller, { credentialId: id })).status).toBe(on ? 201 : 404);
         }
 
         await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
         for (const { id, policyOff } of cases) {
           const offered =
             (await listedCredential(caller, id))?.allowed_actions.includes("reconnect") ?? false;
-          expect(offered).toBe(policyOff === 200);
+          expect(offered).toBe(policyOff === 201);
           expect((await mint(caller, { credentialId: id })).status).toBe(policyOff);
         }
       });

@@ -205,18 +205,18 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },
-  { path: "/api/runs/{runId}/events", why: "runner ingestion — HMAC `verifyRunSignature`" },
-  { path: "/api/runs/{runId}/events/*", why: "runner ingestion — HMAC `verifyRunSignature`" },
-  // NOT `/api/runs/{runId}*`: `sink/extend` carries `agents:run`.
+  { path: "/api/runs/{id}/events", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{id}/events/*", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  // NOT `/api/runs/{id}*`: `sink/extend` carries `agents:run`.
   {
-    path: "/api/runs/{runId}/files",
+    path: "/api/runs/{id}/files",
     why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
   },
   {
-    path: "/api/runs/{runId}/files/*",
+    path: "/api/runs/{id}/files/*",
     why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
   },
-  { path: "/api/runs/{runId}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{id}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
   { path: "/api/oauth/logout", why: "ends the session its own cookie names" },
   { path: "/api/uploads/_content", why: "HMAC upload sink — skips the auth pipeline outright" },
   // Only with `@appstrate/module-ee` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
@@ -251,8 +251,8 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["GET"], "/api/library"],
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
-    [["POST"], "/api/spaces/{spaceId}/packages"],
-    [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+    [["POST"], "/api/spaces/{id}/packages"],
+    [["PATCH", "DELETE"], "/api/spaces/{id}/packages/{scope}/{name}"],
   ]),
   ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
     [["GET"], "/api/realtime/runs"],

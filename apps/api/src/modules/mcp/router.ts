@@ -234,7 +234,7 @@ export function buildServerInstructions(
 `
     : "";
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
   const integrationListing = listsIntegrations

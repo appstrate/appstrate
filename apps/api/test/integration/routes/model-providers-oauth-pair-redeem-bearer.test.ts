@@ -36,7 +36,7 @@ async function mintPairing(ctx: TestContext, providerId = "test-oauth") {
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
     body: JSON.stringify({ providerId }),
   });
-  expect(res.status).toBe(200);
+  expect(res.status).toBe(201);
   return (await res.json()) as {
     id: string;
     token: string;

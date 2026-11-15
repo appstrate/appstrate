@@ -32,7 +32,7 @@ function ArtifactHeader({ className, ...props }: React.HTMLAttributes<HTMLDivEle
   return (
     <div
       className={cn(
-        "bg-muted/50 flex min-w-0 shrink-0 items-center justify-between gap-3 border-b px-3 py-2",
+        "bg-muted/40 flex min-w-0 shrink-0 items-center justify-between gap-3 border-b px-3 py-2",
         className,
       )}
       {...props}

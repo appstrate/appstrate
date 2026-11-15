@@ -13,7 +13,7 @@ import type { ListEnvelope } from "@appstrate/shared-types";
 import type { AppEnv } from "../types/index.ts";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { notFound, parseBody } from "../lib/errors.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListPagination } from "@appstrate/core/list-query";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import {

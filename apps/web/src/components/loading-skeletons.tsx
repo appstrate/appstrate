@@ -22,10 +22,11 @@ import { RunOverviewSkeleton } from "./run-detail/run-snapshot-inspector";
 import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
@@ -34,6 +35,8 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useListView } from "../stores/list-view-store";
 import { CardGridSkeleton } from "./card-grid";
+import { FileTileSkeleton } from "./file-tile";
+import { ShellHeaderActions } from "./shell-header-slots";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
@@ -50,8 +53,6 @@ export function Waiting({ className, children }: { className?: string; children:
     </div>
   );
 }
-
-const NO_CRUMBS: BreadcrumbEntry[] = [];
 
 const LINE_WIDTHS = ["w-full", "w-11/12", "w-4/5", "w-full", "w-3/4"];
 
@@ -82,14 +83,25 @@ export function TextSkeleton({ lines = 3, className }: { lines?: number; classNa
  * replaces it in place. Publishes the part of the trail the page already knows
  * from its address.
  */
-function HeaderBlocks({ breadcrumbs }: { breadcrumbs: BreadcrumbEntry[] }) {
+function HeaderBlocks({
+  breadcrumbs,
+  actions = true,
+  description = false,
+}: {
+  breadcrumbs: BreadcrumbEntry[];
+  /** A page with no deed draws no placeholder where its menu will not land. */
+  actions?: boolean;
+  /** The page draws one line under its title (`PageHeader`'s `description`). */
+  description?: boolean;
+}) {
   usePageBreadcrumb(breadcrumbs);
   return (
     <div data-page-header className="mb-4">
       <div className="flex min-h-9 items-center justify-between gap-4">
         <Skeleton className="h-7 w-44" />
-        <Skeleton className="h-8 w-24 shrink-0" />
+        {actions && <Skeleton className="h-8 w-24 shrink-0" />}
       </div>
+      {description && <SkeletonLine className="mt-1 w-56 text-sm" />}
     </div>
   );
 }
@@ -132,9 +144,77 @@ export function DetailPageSkeleton({
   return (
     <Waiting>
       <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
-      {/* `DetailTabPanel`'s frame. */}
-      <Card className="overflow-hidden p-6 shadow-sm">{panel ?? <CardBlocks count={3} />}</Card>
+      {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
+      {panel ?? <CardBlocks count={3} />}
     </Waiting>
+  );
+}
+
+/** The detail tab the address opens on (`useTabWithHash`): its skeleton is the one to draw. */
+function useOpenTab(): string {
+  return useLocation().hash.replace(/^#/, "");
+}
+
+/** A list tab (runs, connections, usage): its toolbar over the table's own card. */
+function ListTabBlocks() {
+  return (
+    <>
+      <ToolbarBlocks columns />
+      <TableBlocks framed />
+    </>
+  );
+}
+
+/**
+ * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
+ * in the tab panel's card.
+ */
+function RailPanelBlocks() {
+  return (
+    <Card className="@container/split overflow-hidden">
+      <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
+        <div className="bg-card hidden flex-col gap-2 border-r p-3 @xl/split:flex">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-7 w-full" />
+          ))}
+        </div>
+        <div className="min-w-0">
+          {/* Below the rail's breakpoint, `PhoneNavigation`'s menu button stands in for it. */}
+          <div className="p-4 pb-0 @xl/split:hidden">
+            <Skeleton className="h-11 w-full" />
+          </div>
+          <div className="p-6">
+            {/* The open section's `SettingsHeading` (title over its hint), then its rows. */}
+            <header className="mb-6">
+              <SkeletonLine className="w-32 text-xl font-semibold" />
+              <div className="mt-1 max-w-2xl">
+                <SkeletonLine className="w-full text-sm leading-relaxed" />
+                <SkeletonLine className="w-1/3 text-sm leading-relaxed" />
+              </div>
+            </header>
+            <SettingsSkeleton />
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** A framed one-pane tab (memory): the panel's card around its padded content. */
+function FramedPanelBlocks() {
+  return (
+    <Card className="overflow-hidden p-6">
+      <SettingsSkeleton />
+    </Card>
+  );
+}
+
+/** A run's journal: the log viewer's ruled head and rows, in the tab panel's card. */
+function JournalPanelBlocks() {
+  return (
+    <Card className="overflow-hidden">
+      <TableBlocks framed={false} />
+    </Card>
   );
 }
 
@@ -165,6 +245,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const packageId = scope && name ? `${scope}/${name}` : undefined;
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
+  const tab = useOpenTab();
   return (
     <DetailPageSkeleton
       title={title}
@@ -172,7 +253,13 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
       panel={
-        type === "agent" ? (
+        tab === "settings" ? (
+          <RailPanelBlocks />
+        ) : tab === "memory" ? (
+          <FramedPanelBlocks />
+        ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
+          <ListTabBlocks />
+        ) : type === "agent" ? (
           <AgentOverviewSkeleton />
         ) : type === "integration" ? (
           <IntegrationOverviewSkeleton />
@@ -188,6 +275,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
 export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
   const { scope, name } = useParams();
   const listCrumb = usePackageListCrumb("agent");
+  const tab = useOpenTab();
   return (
     <DetailPageSkeleton
       trail={
@@ -197,7 +285,15 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
       }
       tabCount={3}
       meta={false}
-      panel={<RunOverviewSkeleton />}
+      panel={
+        tab === "journal" ? (
+          <JournalPanelBlocks />
+        ) : tab === "results" ? (
+          <RailPanelBlocks />
+        ) : (
+          <RunOverviewSkeleton />
+        )
+      }
     />
   );
 }
@@ -205,66 +301,169 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
 /** A schedule's page, under the schedules list. */
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");
+  const tab = useOpenTab();
   return (
     <DetailPageSkeleton
       trail={[{ label: t("common:nav.schedules"), href: "/schedules" }]}
       tabCount={3}
       meta={false}
-      panel={<ScheduleOverviewSkeleton />}
+      panel={
+        tab === "settings" ? (
+          <RailPanelBlocks />
+        ) : tab === "runs" ? (
+          <ListTabBlocks />
+        ) : (
+          <ScheduleOverviewSkeleton />
+        )
+      }
     />
   );
 }
 
 /**
  * A collection page: title, toolbar, then the table's frame with its header and rows — or the
- * card grid, when `list` names a screen the reader (or its default) shows as cards.
+ * card grid, when `list` names a screen the reader (or its default) shows as cards. The count
+ * footer is not drawn: it stays silent until the list answers.
  */
-export function ListPageSkeleton({ list }: { list?: string }) {
+export function ListPageSkeleton({
+  list,
+  titleKey,
+  actions = true,
+  tabs = false,
+  views = false,
+}: {
+  list?: string;
+  /** The namespaced key of the page's title, published as its crumb like the page does. */
+  titleKey?: string;
+  /** Whether the page has an Actions menu (`/files` has none). */
+  actions?: boolean;
+  /** `CollectionTabs` lead the bar (integrations). */
+  tabs?: boolean;
+  /** The bar ends with the cards-or-table switch. */
+  views?: boolean;
+}) {
+  const { t } = useTranslation(["common", "settings", "agents"]);
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={NO_CRUMBS} />
-      {list ? <ViewedCollectionBlocks list={list} /> : <CollectionBlocks />}
+      <HeaderBlocks breadcrumbs={titleKey ? [{ label: t(titleKey) }] : []} actions={actions} />
+      {list ? (
+        <ViewedCollectionBlocks list={list} tabs={tabs} views={views} />
+      ) : (
+        <CollectionBlocks columns />
+      )}
     </Waiting>
   );
 }
 
-function ViewedCollectionBlocks({ list }: { list: string }) {
+function ViewedCollectionBlocks({
+  list,
+  tabs,
+  views,
+}: {
+  list: string;
+  tabs: boolean;
+  views: boolean;
+}) {
   const [view] = useListView(list);
-  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent"} />;
+  return (
+    <CollectionBlocks
+      cards={view === "cards"}
+      runnable={list === "agent"}
+      files={list === "documents"}
+      tabs={tabs}
+      views={views}
+    />
+  );
 }
 
-/** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
+/** `ListToolbar`'s bar: optional tabs, an `h-8` search, the filter and columns buttons, the view switch. */
+function ToolbarBlocks({
+  tabs = false,
+  filters = true,
+  columns = false,
+  views = false,
+}: {
+  tabs?: boolean;
+  /** The filter button: absent on a list that only searches. */
+  filters?: boolean;
+  columns?: boolean;
+  views?: boolean;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      {tabs && <Skeleton className="h-8 w-44 shrink-0" />}
+      <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
+      {filters && <Skeleton className="h-8 w-[5.5rem]" />}
+      {columns && <Skeleton className="h-8 w-[6.5rem]" />}
+      {views && <Skeleton className="ml-auto h-9 w-[4.5rem]" />}
+    </div>
+  );
+}
+
+/**
+ * `DataTable`'s head and rows: in its own card on a page, frameless (the head ruled above and
+ * below) on an integrated surface.
+ */
+function TableBlocks({ framed }: { framed: boolean }) {
+  const body = (
+    <>
+      <div
+        className={cn(
+          "border-border flex h-10 items-center px-3",
+          framed ? "border-b" : "border-y",
+        )}
+      >
+        <Skeleton className="h-3 w-1/3" />
+      </div>
+      {Array.from({ length: 3 }, (_, i) => (
+        <div
+          key={i}
+          className={cn(
+            "border-border/60 flex h-12 items-center border-b px-3",
+            framed && "last:border-b-0",
+          )}
+        >
+          <Skeleton className="h-3.5 w-full" />
+        </div>
+      ))}
+    </>
+  );
+  return framed ? <Card className="overflow-hidden">{body}</Card> : body;
+}
+
+/** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows — or its cards. */
 function CollectionBlocks({
   cards = false,
   runnable = false,
+  files = false,
+  tabs = false,
+  views = false,
+  columns = false,
+  frameless = false,
 }: {
+  /** Inside a surface that is already framed (an overlay), the table draws no card of its own. */
+  frameless?: boolean;
   cards?: boolean;
   /** The cards carry a run button (agents). */
   runnable?: boolean;
+  /** The cards are file tiles (the gallery). */
+  files?: boolean;
+  tabs?: boolean;
+  views?: boolean;
+  /** The table's column menu (a table view only). */
+  columns?: boolean;
 }) {
   return (
     <>
-      {/* `ListToolbar`: an `h-8` search of at most 280px, then its filter button. */}
-      <div className="mb-3 flex items-center gap-2">
-        <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
-        <Skeleton className="h-8 w-20" />
-      </div>
+      <ToolbarBlocks tabs={tabs} views={views} columns={!cards && (columns || views)} />
       {cards ? (
-        <CardGridSkeleton placeholder={<PackageCardSkeleton runnable={runnable} />} />
+        files ? (
+          <CardGridSkeleton min="12rem" placeholder={<FileTileSkeleton />} />
+        ) : (
+          <CardGridSkeleton placeholder={<PackageCardSkeleton runnable={runnable} />} />
+        )
       ) : (
-        <Card className="overflow-hidden">
-          <div className="border-border flex h-10 items-center border-b px-3">
-            <Skeleton className="h-3 w-1/3" />
-          </div>
-          {Array.from({ length: 3 }, (_, i) => (
-            <div
-              key={i}
-              className="border-border/60 flex h-12 items-center border-b px-3 last:border-b-0"
-            >
-              <Skeleton className="h-3.5 w-full" />
-            </div>
-          ))}
-        </Card>
+        <TableBlocks framed={!frameless} />
       )}
     </>
   );
@@ -311,25 +510,33 @@ export function EditorPanelSkeleton() {
 
 /**
  * A settings page that is a table (`DataTable` on the panel's integrated surface: no frame, the
- * head ruled above and below), with the list's toolbar when it has one.
+ * head ruled above and below), with what leads it: an intro (a heading line over its hint, or a
+ * lone hint paragraph) and the list's toolbar.
  */
-export function SettingsTableSkeleton({ toolbar = false }: { toolbar?: boolean }) {
+export function SettingsTableSkeleton({
+  toolbar = false,
+  columns = false,
+  intro,
+}: {
+  /** The list's search bar. */
+  toolbar?: boolean;
+  /** The bar also holds the column menu. */
+  columns?: boolean;
+  intro?: "heading" | "hint";
+}) {
   return (
     <Waiting>
-      {toolbar && (
-        <div className="mb-3 flex items-center gap-2">
-          <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
-          <Skeleton className="h-8 w-20" />
+      {intro === "heading" && (
+        <div className="mb-4">
+          <SkeletonLine className="w-40 text-sm font-medium" />
+          <SkeletonLine className="mt-1 w-80 max-w-full text-xs" />
         </div>
       )}
-      <div className="border-border flex h-10 items-center border-y px-3">
-        <Skeleton className="h-3 w-1/3" />
-      </div>
-      {Array.from({ length: 3 }, (_, i) => (
-        <div key={i} className="border-border/60 flex h-12 items-center border-b px-3">
-          <Skeleton className="h-3.5 w-full" />
-        </div>
-      ))}
+      {intro === "hint" && (
+        <SkeletonLine className="mb-6 w-full max-w-2xl text-sm leading-relaxed" />
+      )}
+      {toolbar && <ToolbarBlocks filters={false} columns={columns} />}
+      <TableBlocks framed={false} />
     </Waiting>
   );
 }
@@ -369,7 +576,7 @@ function DashboardSectionHeadingSkeleton() {
 /** The dashboard's `MetricCard`: label, figure, detail. */
 function MetricCardSkeleton() {
   return (
-    <Card className="flex min-h-32 flex-col justify-between rounded-xl p-4">
+    <Card className="flex min-h-32 flex-col justify-between p-4">
       <SkeletonLine className="w-20 text-xs font-medium" />
       <div>
         <SkeletonLine className="w-12 text-3xl font-semibold" />
@@ -460,6 +667,20 @@ export function DashboardBodySkeleton() {
   );
 }
 
+/**
+ * The dashboard while its route's code loads: the greeting's box (collection title, a line under
+ * it, the actions menu), then the body.
+ */
+export function DashboardSkeleton() {
+  const { t } = useTranslation("common");
+  return (
+    <div>
+      <HeaderBlocks breadcrumbs={[{ label: t("nav.dashboard") }]} description />
+      <DashboardBodySkeleton />
+    </div>
+  );
+}
+
 /** A panel page's title row (`settings/layout.tsx`): `mb-6 min-h-9` around an `text-xl` title. */
 export function PanelTitleBlock() {
   return (
@@ -490,7 +711,7 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
         <PanelTitleBlock />
         {list ? (
           <Waiting>
-            <CollectionBlocks />
+            <CollectionBlocks frameless columns />
           </Waiting>
         ) : (
           <SettingsSkeleton />
@@ -522,6 +743,21 @@ function ComposerBlock() {
 }
 
 /**
+ * The chat's header actions (`ChatModulePage`): the context tabs (one `size-7` tab per readable
+ * pane in a `p-1` list), and for a stored conversation the writer's settings button.
+ */
+function ChatHeaderActionsBlocks({ conversation }: { conversation: boolean }) {
+  const { can } = usePermissions();
+  const tabs = 1 + Number(canReadRuns(can)) + Number(can("files:read"));
+  return (
+    <ShellHeaderActions>
+      {conversation && can("chat:write") && <Skeleton className="size-8 rounded-md" />}
+      <Skeleton className="h-8 rounded-md" style={{ width: tabs * 28 + 8 }} />
+    </ShellHeaderActions>
+  );
+}
+
+/**
  * `/chat` while its code loads: `ThreadWelcome` — the title and hint, the composer, then the
  * suggestions (a writer's only), centred in the thread's 42rem column. The module's own wait for
  * a stored conversation is {@link ChatConversationSkeleton}'s shape.
@@ -530,6 +766,7 @@ export function ChatPanelSkeleton() {
   const canWrite = usePermissions().can("chat:write");
   return (
     <Waiting className="flex h-full flex-col items-center justify-center px-4">
+      <ChatHeaderActionsBlocks conversation={false} />
       <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
         <div className="flex flex-col items-center">
           <div className="flex h-7 items-center">
@@ -565,9 +802,12 @@ export function ChatConversationSkeleton() {
   const { t } = useTranslation("common");
   const canWrite = usePermissions().can("chat:write");
   return (
-    <ConversationSkeleton
-      label={t("loading")}
-      placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
-    />
+    <>
+      <ChatHeaderActionsBlocks conversation />
+      <ConversationSkeleton
+        label={t("loading")}
+        placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
+      />
+    </>
   );
 }

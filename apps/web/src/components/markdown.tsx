@@ -10,10 +10,6 @@ import { lazy, Suspense } from "react";
  * layout flash.
  */
 const MarkdownImpl = lazy(() => import("./markdown-impl").then((m) => ({ default: m.Markdown })));
-const InlineMarkdownImpl = lazy(() =>
-  import("./markdown-impl").then((m) => ({ default: m.InlineMarkdown })),
-);
-
 interface MarkdownProps {
   children: string;
   className?: string;
@@ -33,14 +29,6 @@ export function Markdown({ children, className, inert }: MarkdownProps) {
       <MarkdownImpl className={className} inert={inert}>
         {children}
       </MarkdownImpl>
-    </Suspense>
-  );
-}
-
-export function InlineMarkdown({ children, className }: MarkdownProps) {
-  return (
-    <Suspense fallback={<span className={className}>{children}</span>}>
-      <InlineMarkdownImpl className={className}>{children}</InlineMarkdownImpl>
     </Suspense>
   );
 }

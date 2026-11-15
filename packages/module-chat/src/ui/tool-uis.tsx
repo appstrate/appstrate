@@ -224,7 +224,7 @@ export function ToolCallCard({
           layout change. */}
       <button
         type="button"
-        className="hover:bg-muted/40 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
+        className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         onClick={() => setOpen(true)}
       >
         <LeadIcon phase={phase} Icon={Icon} />
@@ -443,7 +443,7 @@ function CreatedPackageLink({
   return (
     <a
       href={packagePageHref(created)}
-      className="text-primary hover:bg-muted/40 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
+      className="text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
     >
       <ArrowUpRightIcon className="size-3.5 shrink-0" />
       {t("tool.packageCreated.open")}

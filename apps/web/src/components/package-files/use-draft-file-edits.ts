@@ -6,7 +6,6 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -102,7 +101,6 @@ export function useDraftFileEdits({
       // Start again from what the server now holds, not from the staged tree.
       await invalidatePaths(queryClient, ["/api/packages/{scope}/{name}/files"], "all");
       discard();
-      toast.success(t("files.saved"));
     } catch (error) {
       const key = packageFilesErrorKey(error);
       setSaveError(

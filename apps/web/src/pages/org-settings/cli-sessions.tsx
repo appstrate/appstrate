@@ -72,6 +72,7 @@ export function OrgSettingsCliSessionsPage() {
             icon={Laptop}
             message={t("devices.emptyTitle")}
             hint={t("orgCliSessions.emptyDescription")}
+            compact
           />
         }
       />

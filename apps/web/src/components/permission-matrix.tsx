@@ -82,7 +82,7 @@ export function PermissionMatrix<Column extends string>({
                 <TableRow className="hover:bg-transparent">
                   <TableCell
                     colSpan={columns.length + 1}
-                    className="bg-muted/50 sticky left-0 py-1.5 text-xs font-semibold"
+                    className="bg-muted/40 sticky left-0 py-1.5 text-xs font-semibold"
                   >
                     {label}
                   </TableCell>

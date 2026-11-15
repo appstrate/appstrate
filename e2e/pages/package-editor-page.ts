@@ -10,7 +10,7 @@ const SETTINGS_ADDRESS: Record<string, [param: string, tab: string]> = {
   agents: ["agentSettings", "settings"],
   skills: ["packageSettings", "settings"],
   "mcp-servers": ["packageSettings", "settings"],
-  integrations: ["integrationSettings", "configuration"],
+  integrations: ["integrationSettings", "settings"],
 };
 
 /**

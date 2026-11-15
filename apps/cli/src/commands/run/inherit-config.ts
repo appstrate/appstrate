@@ -4,7 +4,7 @@
  * Fetch the per-space run-config (model / generation / proxy /
  * stored input layer) for `<spaceId, packageId>` and
  * merge it with the user's CLI flags + env vars. Source of truth lives server-side at
- * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
+ * `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
  * targets the same model the dashboard would. Version is not inherited:
  * a package runs the version the `@spec` names, and the latest published
@@ -70,7 +70,7 @@ export class RunConfigFetchError extends Error {
 }
 
 /**
- * Call `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
+ * Call `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`
  * and return the parsed payload. Returns `null` on 404 (no inheritance);
  * any other non-2xx surfaces as `RunConfigFetchError`, as does a 200 whose
  * body the reader cannot use.

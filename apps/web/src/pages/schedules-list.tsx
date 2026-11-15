@@ -77,7 +77,7 @@ export function SchedulesListPage() {
 
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
-    <NoMatchState message={t("schedules.noMatch")} />
+    <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
   ) : (
     <EmptyState
       message={t("schedules.empty")}
@@ -95,7 +95,7 @@ export function SchedulesListPage() {
         title={t("common:nav.schedules")}
         variant="collection"
         breadcrumbs={[{ label: t("common:nav.schedules") }]}
-        actions={can("schedules:write") ? <PageActionsMenu actions={[createAction]} /> : undefined}
+        actions={<PageActionsMenu actions={[createAction]} />}
       />
 
       <ListToolbar

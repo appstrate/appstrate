@@ -3,7 +3,7 @@
 /**
  * Finalize ingest tolerance for the `artifacts` summary.
  *
- * `POST /api/runs/:runId/events/finalize` reports the outcome of an
+ * `POST /api/runs/:id/events/finalize` reports the outcome of an
  * ALREADY-FINISHED run: the agent loop is over, there is no retry left. A 400
  * there is not a validation win, it is a lost run - the container cannot
  * finalize, the row stays `running`, and the watchdog eventually synthesises a

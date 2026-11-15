@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { invalidatePaths } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -31,7 +31,7 @@ export function useEndUsers(params?: EndUserListParams) {
       params: {
         query: {
           limit: params?.limit,
-          search: params?.search,
+          q: params?.search,
         },
         header: scope.header,
       },
@@ -43,9 +43,9 @@ export function useEndUsers(params?: EndUserListParams) {
 /** The end-users, keyset-paged and searched server-side. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useEndUsers`. */
 export function useEndUsersPaged({ search }: { search?: string } = {}) {
   const scope = useEndUsersReadScope();
-  const query = { limit: 25, search: search?.trim() || undefined };
+  const query = { limit: 25, q: search?.trim() || undefined };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/end-users", "paged", { header: scope.header, query }] as const,
+    queryKey: pagedQueryKey("/api/end-users", { params: { header: scope.header, query } }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/end-users", {
         params: { query: { ...query, startingAfter: pageParam }, header: scope.header },

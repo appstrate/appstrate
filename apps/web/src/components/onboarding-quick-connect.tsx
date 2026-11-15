@@ -88,7 +88,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
           "border-border bg-card group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
           alreadyConnected
             ? "cursor-default opacity-70"
-            : "hover:border-primary/40 hover:bg-accent/40 cursor-pointer",
+            : "hover:border-primary/40 hover:bg-muted/50 cursor-pointer",
           working && "cursor-wait opacity-70",
         )}
       >

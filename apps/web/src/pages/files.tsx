@@ -8,7 +8,6 @@
  */
 
 import { Alert } from "@appstrate/ui/components/alert";
-import { PendingButton } from "@/components/app-ui/pending-button";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
@@ -20,7 +19,7 @@ import { PageHeader } from "../components/page-header";
 import { ListViewTabs } from "../components/list-view-tabs";
 import { useListView } from "../stores/list-view-store";
 import { DocumentListPanel } from "../components/document-list-panel";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { KeysetListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -74,10 +73,8 @@ function DocumentsCollection({
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
   const query = useDebouncedValue(search);
 
-  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
-    search: query,
-    purpose: effectivePurpose,
-  });
+  const filesQuery = useFilesPaged({ search: query, purpose: effectivePurpose });
+  const { data, isLoading, error, hasNextPage } = filesQuery;
   const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
   const filtering = purposes.length > 0 || query.trim() !== "";
@@ -140,23 +137,17 @@ function DocumentsCollection({
         )}
         empty={
           filtering
-            ? { message: t("page.noMatch"), compact: true }
+            ? { message: t("page.noMatch"), compact: true, onReset }
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
         showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
         footer={
-          <ListFooter count={isLoading || error ? undefined : footerLabel}>
-            {hasNextPage && (
-              <PendingButton
-                variant="outline"
-                size="sm"
-                pending={isFetchingNextPage}
-                onClick={() => void fetchNextPage()}
-              >
-                {t("page.loadMore")}
-              </PendingButton>
-            )}
-          </ListFooter>
+          <KeysetListFooter
+            query={filesQuery}
+            loaded={files.length}
+            count={footerLabel}
+            ready={!isLoading && !error}
+          />
         }
       />
     </div>

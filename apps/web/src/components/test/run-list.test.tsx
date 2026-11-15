@@ -30,10 +30,9 @@ function failedQuery(data: ListEnvelope<EnrichedRun> | undefined): QueryClient {
     undefined,
     undefined,
     undefined,
-    15,
-    0,
+    25,
   );
-  if (data) queryClient.setQueryData(key, data);
+  if (data) queryClient.setQueryData(key, { pages: [data], pageParams: [undefined] });
   const query = queryClient.getQueryCache().build(queryClient, { queryKey: key });
   query.setState({ status: "error", error: new Error("refetch failed"), fetchFailureCount: 1 });
   return queryClient;

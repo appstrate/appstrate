@@ -51,8 +51,8 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
   // The current space's library, whose row carries the served verdict; a null
   // verdict is a row with no cell for this space.
   qc.setQueryData(
-    $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-      params: { path: { spaceId: SPACE_ID }, header: orgHeader },
+    $api.queryOptions("get", "/api/spaces/{id}/library", {
+      params: { path: { id: SPACE_ID }, header: orgHeader },
     }).queryKey,
     {
       object: "library",
@@ -110,15 +110,16 @@ function activateButton(html: string): { tag: string; disabled: boolean } {
 
 describe("the activation button", () => {
   it("is live when the server allows the act", () => {
-    const button = activateButton(cardFor("allowed"));
-    expect(button.disabled).toBe(false);
-    expect(button.tag).not.toContain(i18n.t("library.cannotActivate", { ns: "common" }));
+    const html = cardFor("allowed");
+    expect(activateButton(html).disabled).toBe(false);
+    expect(html).not.toContain(i18n.t("library.cannotActivate", { ns: "common" }));
   });
 
   it("CONTROL: is dead, with the refusal on it, when the server forbids it", () => {
-    const button = activateButton(cardFor("forbidden"));
-    expect(button.disabled).toBe(true);
-    expect(button.tag).toContain(i18n.t("library.cannotActivate", { ns: "common" }));
+    const html = cardFor("forbidden");
+    expect(activateButton(html).disabled).toBe(true);
+    // The reason rides on the tooltip's wrapper, as screen-reader text.
+    expect(html).toContain(i18n.t("library.cannotActivate", { ns: "common" }));
   });
 
   it("CONTROL: is dead for a package that cannot be shared here", () => {

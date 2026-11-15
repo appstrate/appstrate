@@ -154,7 +154,7 @@ export function InviteAcceptPage() {
           })}
         </p>
       </div>
-      <div className="bg-muted/50 rounded-lg border p-4">
+      <div className="bg-muted/40 rounded-lg border p-4">
         <div className="text-muted-foreground text-xs">{t("login.email")}</div>
         <div className="text-sm font-medium">{info.email}</div>
         <div className="text-muted-foreground mt-2 text-xs">{t("roles.colRole")}</div>

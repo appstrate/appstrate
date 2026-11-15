@@ -6,7 +6,7 @@
  * credentials the caller plugs into `HttpSink` to post signed telemetry
  * events back.
  *
- * `PATCH /api/runs/:runId/sink/extend` — extend `sink_expires_at` for a
+ * `PATCH /api/runs/:id/sink/extend` — extend `sink_expires_at` for a
  * long-running remote run.
  *
  * Both routes authenticate via JWT bearer (interactive CLI) or API key
@@ -481,17 +481,17 @@ export function createRunsRemoteRouter() {
     },
   );
 
-  // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
+  // PATCH /api/runs/:id/sink/extend — push out sink_expires_at for a
   // long-running remote run. Same auth as creation: agents:run. Runs are
   // space-scoped but this route resolves the run by id (not space path), so
   // tenancy AND run visibility are both predicates on the UPDATE below.
   router.patch(
-    "/runs/:runId/sink/extend",
+    "/runs/:id/sink/extend",
     rateLimit(30),
     requirePermission("agents", "run"),
     async (c) => {
-      const runId = c.req.param("runId");
-      if (!runId) throw invalidRequest("runId path parameter is required", "runId");
+      const runId = c.req.param("id");
+      if (!runId) throw invalidRequest("id path parameter is required", "id");
 
       const body = await readJsonBody(c, ExtendSinkBodySchema);
 

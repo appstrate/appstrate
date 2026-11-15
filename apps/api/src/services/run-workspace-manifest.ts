@@ -42,7 +42,7 @@ export interface RunFileMeta {
 }
 
 /**
- * The files manifest served at `GET /api/runs/:runId/files`.
+ * The files manifest served at `GET /api/runs/:id/files`.
  *
  * ONE key, written and read: the platform validates its runtime image tags against its own
  * version at boot, so the container reading this manifest is never older than

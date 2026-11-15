@@ -22,6 +22,8 @@ interface UpsertMemberPinInput {
 
 export function useUpsertMemberIntegrationPin() {
   return useMutation({
+    // The connections modal shows a refusal under its fields.
+    meta: { errorHandledByCaller: true },
     mutationFn: async (input: UpsertMemberPinInput) => {
       const { data } = await client.PUT(MEMBER_PIN_PATH, {
         params: {
@@ -45,6 +47,7 @@ interface DeleteMemberPinInput {
 export function useDeleteMemberIntegrationPin() {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (input: DeleteMemberPinInput) => {
       const { data } = await client.DELETE(MEMBER_PIN_PATH, {
         params: {

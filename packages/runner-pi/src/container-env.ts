@@ -82,7 +82,7 @@ export interface RuntimePiEnvOptions {
   /** Hosts excluded from the forward proxy (names the sidecar's own host) → `NO_PROXY`. */
   noProxy: string;
   sink?: {
-    /** POST target for each {@link RunEvent} — typically `…/api/runs/{runId}/events`. */
+    /** POST target for each {@link RunEvent} — typically `…/api/runs/{id}/events`. */
     url: string;
     /** POST target for the terminal `RunResult` — typically `…/events/finalize`. */
     finalizeUrl: string;

@@ -23,7 +23,7 @@ test("keywords and authorization URIs retain their distinct blur, separator and 
     { "If-Match": initial.headers()["etag"]! },
   );
   expect(authored.status(), await authored.text()).toBe(200);
-  await page.goto(`/integrations/${id}?integrationSettings=identity#configuration`);
+  await page.goto(`/integrations/${id}?integrationSettings=identity#settings`);
   const keywords = page.getByPlaceholder("Ajouter un mot-clé (Entrée ou virgule)");
   const group = keywords.locator("..");
   await keywords.fill("  alpha  ");
@@ -46,7 +46,7 @@ test("keywords and authorization URIs retain their distinct blur, separator and 
   const detail = await apiClient.get(`/packages/integrations/${id}`);
   expect((await detail.json()).manifest.keywords).toEqual(["beta"]);
 
-  await page.goto(`/integrations/${id}?integrationSettings=auth-methods#configuration`);
+  await page.goto(`/integrations/${id}?integrationSettings=auth-methods#settings`);
   const uris = page.getByPlaceholder("https://api.example.com/**");
   const uriGroup = uris.locator("..");
   await uris.fill("  https://second.example/**  ");

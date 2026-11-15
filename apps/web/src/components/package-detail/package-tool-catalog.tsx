@@ -7,7 +7,7 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar } from "../list-toolbar";
-import { EmptyState } from "../page-states";
+import { EmptyState, NoMatchState } from "../page-states";
 import { CellEmpty } from "../table-cells";
 import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
@@ -144,13 +144,12 @@ export function PackageToolCatalog({
         columns={columns}
         rows={rows}
         rowKey={(tool) => tool.name}
-        surface="integrated"
         empty={
-          <EmptyState
-            icon={Wrench}
-            message={t(tools.length ? "packageTools.noMatch" : "packageTools.empty")}
-            compact
-          />
+          tools.length ? (
+            <NoMatchState message={t("packageTools.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState icon={Wrench} message={t("packageTools.empty")} compact />
+          )
         }
       />
     </>

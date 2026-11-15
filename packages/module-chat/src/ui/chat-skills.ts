@@ -5,15 +5,11 @@
 import { z } from "zod";
 import { parseScopedName } from "@appstrate/core/naming";
 import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
-import type { GetHeaders } from "./runtime-context.ts";
+import type { ChatRequest } from "./runtime-context.ts";
 
 /** The space's active skills, the ones the picker chooses from. */
-export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Promise<SkillHint[]> {
-  const res = await fetch("/api/packages/skills", {
-    credentials: "include",
-    headers: { ...getHeaders?.() },
-  });
-  if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
+export async function fetchSkills(request: ChatRequest): Promise<SkillHint[]> {
+  const res = await request("/api/packages/skills");
   return parseSkillList(await res.json());
 }
 
@@ -23,14 +19,8 @@ const enforcedSkillsSchema = z.object({
 });
 
 /** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
-export async function fetchEnforcedSkills(
-  getHeaders: GetHeaders | null | undefined,
-): Promise<SkillHint[]> {
-  const res = await fetch("/api/chat/enforced-skills", {
-    credentials: "include",
-    headers: { ...getHeaders?.() },
-  });
-  if (!res.ok) throw new Error(`Failed to load the enforced skills (HTTP ${res.status})`);
+export async function fetchEnforcedSkills(request: ChatRequest): Promise<SkillHint[]> {
+  const res = await request("/api/chat/enforced-skills");
   // Strict: a policy read that drifted must fail loudly, never read as "nothing imposed".
   const parsed = enforcedSkillsSchema.safeParse(await res.json());
   if (!parsed.success) throw new Error("Unexpected enforced skills response");

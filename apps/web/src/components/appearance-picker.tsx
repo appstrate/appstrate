@@ -218,7 +218,7 @@ export function AppearancePicker({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="border-border bg-muted/20 flex items-center gap-3 rounded-lg border p-3">
+      <div className="border-border bg-muted/40 flex items-center gap-3 rounded-lg border p-3">
         <IdentityTile
           icon={value.icon}
           color={value.color}

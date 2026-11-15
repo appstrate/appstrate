@@ -237,14 +237,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "PATCH",
-    path: "/api/runs/{runId}/sink/extend",
+    path: "/api/runs/{id}/sink/extend",
     jsonSchema: toJsonSchema(ExtendSinkBodySchema),
     description: "Extend a remote run's event-sink lease",
   },
 
   {
     method: "POST",
-    path: "/api/runs/{runId}/events",
+    path: "/api/runs/{id}/events",
     jsonSchema: toJsonSchema(CloudEventEnvelopeSchema),
     description: "Ingest a run CloudEvent",
   },
@@ -455,13 +455,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Space Packages ────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/spaces/{spaceId}/packages",
+    path: "/api/spaces/{id}/packages",
     jsonSchema: toJsonSchema(activatePackageSchema),
     description: "Activate a package in a space",
   },
   {
     method: "PATCH",
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
+    path: "/api/spaces/{id}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Configure a space package",
   },
@@ -757,11 +757,11 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
   // The finalize body (conditional `usage`, `.catch`-degrading fields) is not a
   // comparable Zod object. See routes/runs-events.ts.
-  "POST /api/runs/{runId}/events/finalize":
+  "POST /api/runs/{id}/events/finalize":
     "strict outcome fields (status; usage required on success) plus cosmetic fields that degrade to absent — conditional requirement, not field-comparable",
 
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
-  "POST /api/runs/{runId}/events/heartbeat":
+  "POST /api/runs/{id}/events/heartbeat":
     "empty body — the HMAC covers the zero-length payload; the handler reads nothing",
 
   // ─── Not ours to validate: framework- or provider-owned wire ────────────
