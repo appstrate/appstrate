@@ -48,7 +48,6 @@ interface RunListProps {
    * The page still owns WHAT the bar says.
    */
   toolbar?: (bar: { columns: ColumnMenuSpec }) => React.ReactNode;
-  tableSurface?: "framed" | "integrated";
 }
 
 export function RunList({
@@ -62,7 +61,6 @@ export function RunList({
   status,
   search,
   toolbar,
-  tableSurface = "framed",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
@@ -114,7 +112,6 @@ export function RunList({
         error={errorBody}
         empty={emptyBody}
         banner={banner}
-        surface={tableSurface}
       />
 
       {/* Silent until the first page answers: a count on a loading or failed list would claim "0 run". */}

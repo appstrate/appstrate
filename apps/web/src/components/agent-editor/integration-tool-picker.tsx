@@ -103,7 +103,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
   if (!detail) {
     return (
-      <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
+      <div className="bg-muted/40 text-muted-foreground mt-2 rounded-lg border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.detailUnavailable")}
       </div>
     );
@@ -284,20 +284,20 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
-        <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
+        <div className="bg-muted/40 mt-2 flex flex-col gap-3 rounded-lg border p-3">
           {wildcardControl}
         </div>
       );
     }
     return (
-      <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
+      <div className="bg-muted/40 text-muted-foreground mt-2 rounded-lg border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.noCatalog")}
       </div>
     );
   }
 
   return (
-    <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
+    <div className="bg-muted/40 mt-2 flex flex-col gap-3 rounded-lg border p-3">
       {selectsNothing && (
         <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}

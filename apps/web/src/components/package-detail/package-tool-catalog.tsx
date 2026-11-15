@@ -144,7 +144,6 @@ export function PackageToolCatalog({
         columns={columns}
         rows={rows}
         rowKey={(tool) => tool.name}
-        surface="integrated"
         empty={
           tools.length ? (
             <NoMatchState message={t("packageTools.noMatch")} onReset={list.reset} />

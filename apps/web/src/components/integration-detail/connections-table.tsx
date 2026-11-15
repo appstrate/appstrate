@@ -145,7 +145,6 @@ export function ConnectionsTable({
       />
       <DataTable
         tableId="integration-connections"
-        surface="integrated"
         label={t("integration.connection.tableLabel")}
         columns={columns}
         rows={rows}

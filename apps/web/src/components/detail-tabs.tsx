@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { ShellHeaderTabs } from "@/components/shell-header-slots";
+import { INTEGRATED_TABLE_SURFACE } from "@/components/data-table";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {
@@ -144,7 +145,8 @@ export function DetailTabPanel({
   return (
     <TabsContent
       value={value}
-      className={cn("mt-0", framed && "bg-card overflow-hidden rounded-lg border shadow-sm")}
+      className={cn("mt-0", framed && "bg-card overflow-hidden rounded-lg border")}
+      {...(framed ? INTEGRATED_TABLE_SURFACE : {})}
     >
       {children}
     </TabsContent>

@@ -329,7 +329,7 @@ function ActivationHint({ packageId }: { packageId: string }) {
   const { mayActivate, activate, pending } = usePackageActivation(packageId);
   return (
     <div
-      className="border-border bg-muted/30 rounded-md border p-6 text-center"
+      className="border-border bg-muted/40 rounded-lg border p-6 text-center"
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>

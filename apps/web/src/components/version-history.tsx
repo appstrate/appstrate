@@ -85,7 +85,6 @@ export function VersionHistory({
         label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}
-        surface="integrated"
         isLoading={isLoading}
         failure={error}
         empty={

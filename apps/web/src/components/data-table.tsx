@@ -100,8 +100,6 @@ interface DataTableProps<T> extends CollectionState {
   banner?: ReactNode;
   /** Names the table for screen readers (never drawn). */
   label: string;
-  /** Remove the second frame when the table already lives on a white surface. */
-  surface?: "framed" | "integrated";
 }
 
 /** The row's end (« … »): no head to name it. */
@@ -178,6 +176,9 @@ function widthClass<T>(column: DataColumn<T>): string | undefined {
 }
 
 /** Opaque, so what scrolls behind it stays hidden; it follows the row's hover colour. */
+/** Spread on a surface that already frames its content: the tables inside draw no card of their own. */
+export const INTEGRATED_TABLE_SURFACE = { "data-table-surface": "integrated" } as const;
+
 const HELD = "sticky z-20 bg-(--dt-surface)";
 const HELD_HOVER = "transition-colors group-hover/row:bg-(--dt-surface-hover)";
 
@@ -267,7 +268,6 @@ export function DataTable<T>({
   rowState,
   banner,
   label,
-  surface = "framed",
   ...state
 }: DataTableProps<T>) {
   const verdict = collectionVerdict(state, rows.length);
@@ -287,18 +287,17 @@ export function DataTable<T>({
     else if (rowAction && (rowActionable?.(row) ?? true)) rowAction(row);
   };
 
+  // One frame per table: its own card on a page, none inside a surface that is already framed
+  // (`INTEGRATED_TABLE_SURFACE`: the settings dialog, a framed detail tab), whose card it shares.
   const frameClass = cn(
     "@container/table overflow-hidden",
-    surface === "integrated"
-      ? "bg-transparent [--dt-surface:var(--color-background)]"
-      : "bg-card rounded-lg border [--dt-surface:var(--color-card)] [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent",
+    "bg-card rounded-lg border [--dt-surface:var(--color-card)] [[data-table-surface=integrated]_&]:rounded-none [[data-table-surface=integrated]_&]:border-0 [[data-table-surface=integrated]_&]:bg-transparent",
     "[--dt-surface-hover:color-mix(in_oklab,var(--color-muted)_50%,var(--dt-surface))]",
   );
 
-  // The frame's border is the head's top rule; only a frameless table (an integrated surface, or
-  // one inside an integrated settings section) draws its own, or the head would stack two lines.
-  const headTopRule =
-    surface === "integrated" ? "border-t" : "[[data-settings-table-surface=integrated]_&]:border-t";
+  // The frame.s border is the head.s top rule; only a frameless table draws its own, or the head
+  // would stack two lines.
+  const headTopRule = "[[data-table-surface=integrated]_&]:border-t";
 
   // A failure always draws something, whether or not the caller wrote the
   // sentence: folded into `empty` at the call site, a 500 would read as

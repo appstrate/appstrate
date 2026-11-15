@@ -138,7 +138,7 @@ export function DetailPageSkeleton({
     <Waiting>
       <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
       {/* `DetailTabPanel`'s frame. */}
-      <Card className="overflow-hidden p-6 shadow-sm">{panel ?? <CardBlocks count={3} />}</Card>
+      <Card className="overflow-hidden p-6">{panel ?? <CardBlocks count={3} />}</Card>
     </Waiting>
   );
 }

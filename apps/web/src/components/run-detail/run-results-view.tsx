@@ -219,7 +219,6 @@ export function RunResultsContent({
               message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
               compact: true,
             }}
-            tableSurface="integrated"
             footer={
               producedUnfinished && (
                 <PendingButton

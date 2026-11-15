@@ -37,7 +37,6 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
         items={items.filter((item) =>
           matchesSearch(list.search, [item.displayName, item.id, item.description]),
         )}
-        surface="integrated"
         isLoading={isLoading}
         failure={error}
         empty={

@@ -36,7 +36,6 @@ export function DocumentListPanel({
   display = "table",
   toolbar,
   tableLabel,
-  tableSurface = "framed",
 }: {
   documents: FileDto[];
   isLoading: boolean;
@@ -52,8 +51,6 @@ export function DocumentListPanel({
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Integrated rails already provide the surrounding surface. */
-  tableSurface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation("files");
   const download = useFileDownload();
@@ -158,7 +155,6 @@ export function DocumentListPanel({
             tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}
             rowAction={(doc) => preview.open(doc.id)}

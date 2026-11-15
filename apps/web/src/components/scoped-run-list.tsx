@@ -45,7 +45,6 @@ export function ScopedRunList({
         : { scheduleId: scope.scheduleId, fixedAgentName: scope.agentName })}
       status={statuses}
       search={list.search}
-      tableSurface="integrated"
       toolbar={({ columns }) => (
         <ListToolbar
           columns={columns}

@@ -27,6 +27,14 @@ they start with `packages/` or `e2e/`.
 - **Surfaces**: the page is `bg-canvas` (off-white), cards and dialogs are
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
+- **One frame per block**: a card (`Card`, `DetailSectionCard`, a `DataTable`) is
+  `bg-card rounded-lg border`, with no shadow (shadows are for what floats:
+  popovers, menus, dialogs). A table draws its own card on a page, a detail tab
+  included; inside a surface that is already framed (the settings dialog, a
+  `framed` `DetailTabPanel`) it draws none, because that surface spreads
+  `INTEGRATED_TABLE_SURFACE`. Never choose a table's frame at the call site.
+  A static inset inside content (notice, hint, nested group) is
+  `bg-muted/40 rounded-lg border`.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
   `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from

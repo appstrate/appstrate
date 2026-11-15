@@ -96,7 +96,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       <SchedulesTable
         schedules={filteredSchedules}
         columns={columns}
-        surface="integrated"
         isLoading={!detail || schedulesQuery.isPending}
         isError={schedulesQuery.isError}
         empty={

@@ -263,7 +263,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
     onRemoveItem,
   } = buttonsProps;
   return (
-    <div className="border-border bg-muted/30 relative flex flex-col gap-2 rounded-md border p-3">
+    <div className="border-border bg-muted/40 relative flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex flex-col gap-3">{children}</div>
       {hasToolbar && (hasMoveUp || hasMoveDown || hasRemove) && !disabled && (
         <div className="flex justify-end gap-1">
