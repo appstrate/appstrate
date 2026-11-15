@@ -8,27 +8,42 @@
  *     bun scripts/migration/0054-fold-mcp-servers.ts [--apply]
  *
  * A local MCP server is now declared INLINE on its integration (`source.server = { type,
- * entry_point, mcp_config, tools }`, payload in the integration's own files) and the
- * `mcp-server` package type is gone. Run after the release's migrations, BEFORE the app starts
- * (`pg_dump` first): the platform refuses to boot while a `type = 'mcp-server'` row exists
- * (`assertMcpServersFolded`). Dry run by default (rolled back, no storage write); `--apply`
- * commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2
- * with neither (`lib/database-target.ts`). The storage is the platform's (`S3_BUCKET`, else
- * `FS_STORAGE_PATH`): load the platform's env.
+ * entry_point, mcp_config, tools }`, payload in the integration's own files) and the `mcp-server`
+ * package type is gone. Run after the release's migrations, BEFORE the app starts, with `pg_dump`
+ * AND a snapshot of object storage taken first (README, step 3): the platform refuses to boot while
+ * a `type = 'mcp-server'` row, or an org integration still on `source.server.name`, exists
+ * (`assertMcpServersFolded`, removal tracked in #2229). Dry run by default (rolled back, no storage
+ * write); `--apply` commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
+ * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`). The storage is the platform's
+ * (`S3_BUCKET`, else `FS_STORAGE_PATH`): load the platform's env. Both targets are printed first.
+ * Exit 2 as well, before planning, when server versions exist but no server archive is readable
+ * (the classic cause: the storage env was not loaded and the default `./data/storage` was read).
  *
- * Per ORG-owned integration whose draft or version still reads `source.server = { name, version }`:
- * the referenced server (same organization or system) is resolved — the server's DRAFT for the
- * integration's draft, the highest non-yanked server version satisfying the range for each
- * integration version. The manifest becomes `source.server = { ...server.server, tools:
- * server.tools }`, the server's `dev.appstrate/mcp-server` and `dev.appstrate/workspace` `_meta`
- * keys move across, every `mcp_config.env[V] = "${user_config.K}"` becomes
- * `delivery.env[V] = { value, sensitive }` copied from the auth entry whose
- * `user_config_key ?? envKey` is `K` (V leaves `mcp_config.env`), and every `user_config_key` is
- * dropped. A placeholder with no matching entry is printed and dropped (the old substitution read
- * `delivery.env` only, so the server never received a value for it). The server's files, but its
- * `manifest.json`, are copied into the integration's draft files / version archive and the
- * version's `integrity` and `artifact_size` recomputed. A draft or version whose referenced server
- * or archive cannot be found is printed and left as it is.
+ * Per ORG-owned integration whose draft or version still reads `source.server = { name, version }`
+ * the referenced server (same organization first, then system) is resolved as the runtime did:
+ * a SYSTEM server is its highest version; an org server by the pin, exact version (yanked included)
+ * then dist-tag name then semver range (yanked excluded), a missing pin meaning the `latest`
+ * dist-tag. A draft folds the server's PUBLISHED version resolved by its own pin; only a server
+ * with no published version at all falls back to its draft manifest and draft files. The manifest
+ * becomes `source.server = { ...server.server, tools }`, the server's `dev.appstrate/mcp-server`
+ * and `dev.appstrate/workspace` `_meta` keys move across, every `mcp_config.env[V]` carrying
+ * `${user_config.K}` placeholders becomes `delivery.env[V] = { value, sensitive }` (each placeholder
+ * replaced by the value of the auth entry whose `user_config_key ?? envKey` is `K`, `sensitive`
+ * if any matched entry is) and every `user_config_key` is dropped. An existing `delivery.env[V]`
+ * is never overwritten (the old rule: the integration's direct `delivery.env` wins). The server's
+ * files, but its `manifest.json`, join the integration's draft files / version archive and the
+ * version's `integrity` and `artifact_size` are recomputed.
+ *
+ * Two kinds of output lines. UNFOLDED: a draft or version that would still read the reference
+ * shape after planning (server not found, pin matching no version, server archive or draft payload
+ * missing, the integration's own version archive missing, a placeholder embedded in a larger
+ * value with no matching entry, a path both hold with different bytes). NOTES: informational (a
+ * whole-value placeholder with no matching entry is dropped, the old runtime delivered nothing for
+ * it; an identical-bytes path collision; an already-present `delivery.env[V]`). With `--apply`, any
+ * UNFOLDED line makes the script print them all, write NOTHING (no DB write, no upload) and exit
+ * 1; a dry run prints them and says so. Before the commit `--apply` verifies, in the transaction,
+ * that no org draft or version still has `source.server.name` and no `mcp-server` row is left;
+ * otherwise it throws and rolls back.
  *
  * Then every ORG agent / skill / integration draft or version carrying `dependencies.mcp_servers`
  * loses that key (it never launched anything), its archive and integrity rewritten for a version.
@@ -36,28 +51,29 @@
  * `system-packages/` holds — is deleted with its versions, dist tags, dependency rows,
  * `space_packages` rows and (through the deletion outbox, same transaction) its storage objects.
  * An org server no integration references is printed (id, organization): it ran nowhere.
- * `package_version_dependencies` rows of type `mcp-server` are removed. System integrations are
- * not rewritten: boot re-syncs them from `system-packages/`. But boot only registers the versions
- * `system-packages/` holds and never deletes, and its registry has no bytes for a superseded one:
- * every SYSTEM integration version still on the retired shape (`source.server.name`) is deleted
- * (printed `<id>@<version>`) with its dist tags and dependency rows, its archive queued on the
- * deletion outbox; the `packages` row stays (boot registers the new version on it). A `latest`
- * tag that pointed at a deleted version is re-pointed to the highest remaining version (none left:
- * boot sync sets it when it registers the new one).
+ * System integrations are not rewritten: boot re-syncs them from `system-packages/`. But boot only
+ * registers the versions `system-packages/` holds and never deletes, and its registry has no bytes
+ * for a superseded one: every SYSTEM integration version still on the retired shape
+ * (`source.server.name`) is deleted (printed `<id>@<version>`) with its dist tags and dependency
+ * rows, its archive queued on the deletion outbox; the `packages` row stays. A `latest` tag that
+ * pointed at a deleted version is re-pointed to the highest remaining version.
  *
  * Ordering. Everything is computed first, from reads. With `--apply` the DB writes run in one
- * transaction, the rewritten archives are uploaded INSIDE it, then it commits. A failure before the
- * commit rolls the DB back but may leave rewritten archives in storage (same keys): the next run
- * recomputes from the unchanged DB rows and rewrites byte-identical archives (payload already
- * present is not a collision, zips are deterministic), so re-running repairs it. A crash between
- * the last upload and the commit is the same case.
+ * transaction, the rewritten archives are uploaded INSIDE it (the transaction stays open during the
+ * uploads), then it commits. A failure before the commit rolls the DB back but may leave rewritten
+ * archives in storage (same keys): the next run recomputes from the unchanged DB rows and rewrites
+ * byte-identical archives (payload already present is identical bytes, zips are deterministic), so
+ * re-running repairs it. The archives are overwritten in place, so only a storage snapshot undoes
+ * a committed run.
  */
 
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { sql } from "drizzle-orm";
+import { getEnv } from "../../packages/env/src/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { matchVersion } from "@appstrate/core/semver";
+import { compareVersionsDesc, matchVersion, resolveVersionString } from "@appstrate/core/semver";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
 import { downloadFile, uploadFile } from "@appstrate/db/storage";
 import { prefixedId } from "@appstrate/db/ids";
@@ -82,20 +98,26 @@ const serverDraftKey = (ownerNamespace: string, id: string) =>
 
 class DryRunRollback extends Error {}
 
+/** Server versions exist but no server archive is readable: the storage read is the wrong one. */
+export class StorageUnreadable extends Error {}
+
 type Json = Record<string, unknown>;
 type Files = Record<string, Uint8Array>;
 
 const MANIFEST_FILE = "manifest.json";
 const META_KEYS = ["dev.appstrate/mcp-server", "dev.appstrate/workspace"] as const;
 const PLACEHOLDER = /^\$\{user_config\.([^}]+)\}$/;
+const PLACEHOLDERS = /\$\{user_config\.([^}]+)\}/g;
 const encoder = new TextEncoder();
 const isObject = (v: unknown): v is Json => !!v && typeof v === "object" && !Array.isArray(v);
 const clone = <T>(v: T): T => structuredClone(v);
 
 export interface FoldedManifest {
   manifest: Json;
-  /** What could not be translated, printed in the report. */
+  /** Informational: something dropped or skipped on purpose. */
   notes: string[];
+  /** The manifest would still lose a value the old runtime delivered: blocks `--apply`. */
+  unfolded: string[];
 }
 
 /** The `source.server` reference of the retired shape: `{ name, version, vendored? }`. */
@@ -105,7 +127,8 @@ export function oldServerRef(manifest: unknown): { name: string; version: string
   if (source.kind !== "local" || !isObject(source.server)) return null;
   const { name, version } = source.server;
   if (typeof name !== "string") return null;
-  return { name, version: typeof version === "string" ? version : "*" };
+  // An absent pin is resolved as the `latest` dist-tag, as the runtime did (empty string).
+  return { name, version: typeof version === "string" ? version : "" };
 }
 
 function hasMcpServersDependency(manifest: unknown): boolean {
@@ -138,6 +161,7 @@ function deliveryEnvs(manifest: Json): Array<[auth: string, env: Json]> {
 export function foldLocalIntegrationManifest(integration: Json, server: Json): FoldedManifest {
   const manifest = clone(integration);
   const notes: string[] = [];
+  const unfolded: string[] = [];
   const pending: Array<[Json, string, Json]> = [];
   stripMcpServersDependency(manifest);
 
@@ -152,7 +176,8 @@ export function foldLocalIntegrationManifest(integration: Json, server: Json): F
   for (const key of META_KEYS) if (key in serverMeta) meta[key] = clone(serverMeta[key]);
   if (Object.keys(meta).length > 0) manifest._meta = meta;
 
-  // The `${user_config.K}` bridge: the old renderer read the value from `delivery.env` only.
+  // The `${user_config.K}` bridge: the old renderer substituted each placeholder, anywhere in the
+  // value, from `delivery.env` only (an unmatched one became the empty string).
   const mcpConfig = isObject(folded.mcp_config) ? folded.mcp_config : null;
   const env = mcpConfig && isObject(mcpConfig.env) ? mcpConfig.env : null;
   if (mcpConfig && env) {
@@ -160,27 +185,46 @@ export function foldLocalIntegrationManifest(integration: Json, server: Json): F
     for (const [name, raw] of Object.entries(env)) {
       if (typeof raw !== "string" || !raw.includes("${user_config.")) continue;
       delete env[name];
-      const key = PLACEHOLDER.exec(raw)?.[1];
-      if (key === undefined) {
-        notes.push(
-          `mcp_config.env.${name} = ${JSON.stringify(raw)}: not a whole-value placeholder`,
-        );
+      const keys = [...raw.matchAll(PLACEHOLDERS)].map((m) => m[1]!);
+      const wholeValue = PLACEHOLDER.test(raw);
+      // Per auth: the entry each placeholder names, when every placeholder has one.
+      const targets: Array<[Json, Json[]]> = [];
+      for (const [, delivery] of deliveries) {
+        const entries: Json[] = [];
+        for (const key of keys) {
+          const found = Object.entries(delivery)
+            .map(([envKey, entry]): [string, Json] => [
+              envKey,
+              isObject(entry) ? entry : { value: entry },
+            ])
+            .find(([envKey, entry]) => (entry.user_config_key ?? envKey) === key);
+          if (found) entries.push(found[1]);
+        }
+        if (entries.length === keys.length) targets.push([delivery, entries]);
+      }
+      if (targets.length === 0) {
+        const why = `mcp_config.env.${name} = ${JSON.stringify(raw)}: a placeholder matches no delivery.env entry`;
+        if (wholeValue) notes.push(`${why} — dropped, the old runtime delivered nothing`);
+        else unfolded.push(why);
         continue;
       }
-      let matched = false;
-      for (const [, delivery] of deliveries) {
-        for (const [envKey, entry] of Object.entries(delivery)) {
-          const entryObject = isObject(entry) ? entry : { value: entry };
-          if ((entryObject.user_config_key ?? envKey) !== key) continue;
-          matched = true;
-          const copy: Json = { value: entryObject.value };
-          if (entryObject.sensitive !== undefined) copy.sensitive = entryObject.sensitive;
-          // Collected after the walk so the iteration above is not mutated.
-          pending.push([delivery, name, copy]);
+      for (const [delivery, entries] of targets) {
+        if (name in delivery) {
+          notes.push(`delivery.env.${name} already set — kept, mcp_config.env.${name} dropped`);
+          continue;
         }
-      }
-      if (!matched) {
-        notes.push(`mcp_config.env.${name}: \${user_config.${key}} matches no delivery.env entry`);
+        if (entries.some((entry) => typeof entry.value !== "string")) {
+          unfolded.push(`mcp_config.env.${name}: a matched delivery.env entry has no string value`);
+          continue;
+        }
+        let index = 0;
+        const value = raw.replace(PLACEHOLDERS, () => entries[index++]!.value as string);
+        const copy: Json = { value };
+        if (entries.some((entry) => entry.sensitive !== undefined)) {
+          copy.sensitive = entries.some((entry) => entry.sensitive === true);
+        }
+        // Collected after the walk so the iteration above is not mutated.
+        pending.push([delivery, name, copy]);
       }
     }
     for (const [delivery, name, copy] of pending.splice(0)) delivery[name] = copy;
@@ -191,7 +235,7 @@ export function foldLocalIntegrationManifest(integration: Json, server: Json): F
       if (isObject(entry)) delete entry.user_config_key;
     }
   }
-  return { manifest, notes };
+  return { manifest, notes, unfolded };
 }
 
 /** A manifest copy without `dependencies.mcp_servers`. */
@@ -207,14 +251,25 @@ function sortedFiles(files: Files): Files {
 
 const bytesEqual = (a: Uint8Array, b: Uint8Array) => Buffer.compare(a, b) === 0;
 
-/** `files` plus the server payload (all but its manifest); a path both hold keeps the integration's. */
-function withPayload(files: Files, payload: Files, collisions: string[]): Files {
+/**
+ * `files` plus the server payload (all but its manifest). A path both hold with the same bytes is
+ * a note; with different bytes it is unfolded (the server would run with the other file).
+ */
+function withPayload(
+  files: Files,
+  payload: Files,
+  target: string,
+  notes: string[],
+  unfolded: string[],
+): Files {
   const merged: Files = { ...files };
   for (const [path, bytes] of Object.entries(payload)) {
     if (path === MANIFEST_FILE) continue;
     const existing = merged[path];
     if (existing === undefined) merged[path] = bytes;
-    else if (!bytesEqual(existing, bytes)) collisions.push(path);
+    else if (bytesEqual(existing, bytes))
+      notes.push(`${target}: ${path} exists in both, identical`);
+    else unfolded.push(`${target}: ${path} exists in both with different content`);
   }
   return merged;
 }
@@ -270,8 +325,12 @@ export interface McpServersFold {
   dependenciesStripped: string[];
   /** Org servers no integration referenced — deleted. */
   orphanServers: Array<{ id: string; orgId: string }>;
-  /** Things left untranslated: `<target>: <why>`. */
-  unresolved: string[];
+  /** Drafts / versions that would still read the reference shape: `<target>: <why>`. `--apply` refuses. */
+  unfolded: string[];
+  /** Informational lines: `<target>: <what>`. */
+  notes: string[];
+  /** `--apply` found unfolded lines and wrote nothing. */
+  refused: boolean;
   serversDeleted: number;
   systemServersDeleted: number;
   dependencyRowsDeleted: number;
@@ -295,12 +354,22 @@ export async function runFoldMcpServers(options: {
     ),
   );
   out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
+  const env = getEnv();
+  out(
+    `storage: ${
+      env.S3_BUCKET
+        ? `s3 bucket ${env.S3_BUCKET}${env.S3_ENDPOINT ? ` at ${env.S3_ENDPOINT}` : ""}`
+        : `filesystem ${resolve(env.FS_STORAGE_PATH)}`
+    }`,
+  );
 
   const result: McpServersFold = {
     integrationsFolded: [],
     dependenciesStripped: [],
     orphanServers: [],
-    unresolved: [],
+    unfolded: [],
+    notes: [],
+    refused: false,
     serversDeleted: 0,
     systemServersDeleted: 0,
     dependencyRowsDeleted: 0,
@@ -330,6 +399,11 @@ export async function runFoldMcpServers(options: {
     manifest: r.manifest,
     yanked: r.yanked,
   }));
+  const serverTags = toRows<{ package_id: string; tag: string; version: string }>(
+    await db.execute(sql`SELECT t.package_id, t.tag, v.version
+      FROM package_dist_tags t JOIN package_versions v ON v.id = t.version_id
+      JOIN packages p ON p.id = t.package_id WHERE p.type = 'mcp-server'`),
+  );
   const drafts = toRows<{
     id: string;
     type: string;
@@ -375,16 +449,86 @@ export async function runFoldMcpServers(options: {
     `mcp-server packages: ${servers.length} (${servers.filter((s) => s.orgId === null).length} system), versions: ${serverVersions.length}`,
   );
 
+  // A server archive must be readable somewhere, or the storage read is not the platform's.
+  if (serverVersions.length > 0) {
+    let readable = false;
+    for (const v of serverVersions) {
+      if (await downloadFile(AGENT_PACKAGES_BUCKET, versionZipKey(v.packageId, v.version))) {
+        readable = true;
+        break;
+      }
+    }
+    if (!readable) {
+      throw new StorageUnreadable(
+        `${serverVersions.length} mcp-server version(s) in the database but no server archive is ` +
+          "readable in the storage above. The platform's storage env (S3_BUCKET, S3_ENDPOINT, " +
+          "FS_STORAGE_PATH, credentials) was probably not loaded and the default ./data/storage " +
+          "was read",
+      );
+    }
+  }
+
   const referenced = new Set<string>();
   const writes: Write[] = [];
-  const unresolved = (target: string, why: string) => {
-    result.unresolved.push(`${target}: ${why}`);
+  const unfolded = (target: string, why: string) => {
+    result.unfolded.push(`${target}: ${why}`);
+  };
+  const note = (target: string, what: string) => {
+    result.notes.push(`${target}: ${what}`);
   };
 
   /** The server a reference names: the integration's organization first, then system. */
   const findServer = (name: string, orgId: string) =>
     servers.find((s) => s.id === name && s.orgId === orgId) ??
     servers.find((s) => s.id === name && s.orgId === null);
+
+  /**
+   * The manifest and payload of the server version the runtime resolved for `pin`: a system server
+   * is its highest version; an org server goes exact (yanked visible) → dist-tag → range, an absent
+   * pin meaning `latest`. A server with no published version folds its draft, when `draftFallback`.
+   */
+  const loadServer = async (
+    server: ServerRow,
+    pin: string,
+    draftFallback: boolean,
+  ): Promise<{ manifest: Json; payload: Files } | { why: string }> => {
+    const rows = serverVersions.filter((v) => v.packageId === server.id);
+    if (rows.length === 0) {
+      if (!draftFallback) return { why: `server ${server.id} has no published version` };
+      if (!server.draftManifest) {
+        return { why: `server ${server.id} has no published version and no draft manifest` };
+      }
+      const payload = await readZip(
+        PACKAGE_ITEMS_BUCKET,
+        serverDraftKey(server.orgId ?? SYSTEM_STORAGE_NAMESPACE, server.id),
+      );
+      if (!payload) return { why: `draft payload of server ${server.id} missing` };
+      return { manifest: server.draftManifest, payload };
+    }
+    const live = rows.filter((v) => !v.yanked).map((v) => v.version);
+    let version: string | null;
+    if (server.orgId === null) {
+      version = [...(live.length > 0 ? live : rows.map((v) => v.version))].sort(
+        compareVersionsDesc,
+      )[0]!;
+    } else {
+      const tags: Record<string, string> = {};
+      for (const t of serverTags) {
+        if (t.package_id === server.id && live.includes(t.version)) tags[t.tag] = t.version;
+      }
+      version = resolveVersionString(
+        pin.trim() || "latest",
+        rows.map((v) => v.version),
+        live,
+        tags,
+      );
+    }
+    const row = rows.find((v) => v.version === version);
+    if (!row) return { why: `server ${server.id}@${pin.trim() || "latest"} matches no version` };
+    const payload = await readZip(AGENT_PACKAGES_BUCKET, versionZipKey(server.id, row.version));
+    if (!payload) return { why: `archive of ${server.id}@${row.version} missing` };
+    return { manifest: row.manifest, payload };
+  };
 
   // ── Integration drafts and versions with a server reference ─────────────
   for (const row of drafts) {
@@ -393,26 +537,21 @@ export async function runFoldMcpServers(options: {
     if (ref === null) continue;
     const server = findServer(ref.name, row.org_id);
     if (!server) {
-      unresolved(target, `server ${ref.name} not found`);
+      unfolded(target, `server ${ref.name} not found`);
       continue;
     }
     referenced.add(`${server.orgId ?? "_"}:${server.id}`);
-    if (!server.draftManifest) {
-      unresolved(target, `server ${ref.name} has no draft manifest`);
+    const loaded = await loadServer(server, ref.version, true);
+    if ("why" in loaded) {
+      unfolded(target, loaded.why);
       continue;
     }
-    const folded = foldLocalIntegrationManifest(row.draft_manifest!, server.draftManifest);
-    for (const note of folded.notes) unresolved(target, note);
-    const payload =
-      (await readZip(
-        PACKAGE_ITEMS_BUCKET,
-        serverDraftKey(server.orgId ?? SYSTEM_STORAGE_NAMESPACE, server.id),
-      )) ?? {};
+    const folded = foldLocalIntegrationManifest(row.draft_manifest!, loaded.manifest);
+    for (const line of folded.notes) note(target, line);
+    for (const line of folded.unfolded) unfolded(target, line);
     const key = packageItemKey("integrations", row.org_id, row.id);
     const own = (await readZip(PACKAGE_ITEMS_BUCKET, key)) ?? {};
-    const collisions: string[] = [];
-    const files = withPayload(own, payload, collisions);
-    for (const path of collisions) unresolved(target, `${path} exists in both, integration kept`);
+    const files = withPayload(own, loaded.payload, target, result.notes, result.unfolded);
     const bytes = archive(files, folded.manifest);
     writes.push({
       kind: "draft",
@@ -432,44 +571,35 @@ export async function runFoldMcpServers(options: {
     if (ref === null && !stale) continue;
     let manifest: Json;
     let payload: Files = {};
-    const collisions: string[] = [];
     if (ref !== null) {
       const server = findServer(ref.name, row.org_id);
-      const candidates = serverVersions.filter((v) => v.packageId === ref.name);
-      const live = candidates.filter((v) => !v.yanked);
-      const best = matchVersion(
-        (live.length > 0 ? live : candidates).map((v) => v.version),
-        ref.version,
-      );
-      const serverVersion = candidates.find((v) => v.version === best);
-      if (!server || !serverVersion) {
-        unresolved(target, `server ${ref.name}@${ref.version} not found`);
+      if (!server) {
+        unfolded(target, `server ${ref.name} not found`);
         continue;
       }
       referenced.add(`${server.orgId ?? "_"}:${server.id}`);
-      const folded = foldLocalIntegrationManifest(row.manifest, serverVersion.manifest);
-      for (const note of folded.notes) unresolved(target, note);
-      manifest = folded.manifest;
-      const serverZip = await readZip(
-        AGENT_PACKAGES_BUCKET,
-        versionZipKey(server.id, serverVersion.version),
-      );
-      if (!serverZip) {
-        unresolved(target, `archive of ${server.id}@${serverVersion.version} missing`);
+      const loaded = await loadServer(server, ref.version, false);
+      if ("why" in loaded) {
+        unfolded(target, loaded.why);
         continue;
       }
-      payload = serverZip;
+      const folded = foldLocalIntegrationManifest(row.manifest, loaded.manifest);
+      for (const line of folded.notes) note(target, line);
+      for (const line of folded.unfolded) unfolded(target, line);
+      manifest = folded.manifest;
+      payload = loaded.payload;
     } else {
       manifest = stripMcpServers(row.manifest);
     }
     const key = versionZipKey(row.package_id, row.version);
     const own = await readZip(AGENT_PACKAGES_BUCKET, key);
     if (!own) {
-      unresolved(target, "version archive missing");
+      // Only a reference-shape integration blocks `--apply`; a mere dependency key is left in place.
+      if (ref !== null) unfolded(target, "version archive missing");
+      else note(target, "version archive missing — dependencies.mcp_servers left as it is");
       continue;
     }
-    const files = withPayload(own, payload, collisions);
-    for (const path of collisions) unresolved(target, `${path} exists in both, integration kept`);
+    const files = withPayload(own, payload, target, result.notes, result.unfolded);
     const bytes = archive(files, manifest);
     writes.push({
       kind: "version",
@@ -523,7 +653,21 @@ export async function runFoldMcpServers(options: {
       result.orphanServers.push({ id: server.id, orgId: server.orgId });
     }
   }
-  for (const line of result.unresolved) out(`  unresolved ${line}`);
+  for (const line of result.notes) out(`  note ${line}`);
+  for (const line of result.unfolded) out(`  UNFOLDED ${line}`);
+  if (result.unfolded.length > 0 && apply) {
+    out(
+      `0054: REFUSED — ${result.unfolded.length} unfolded line(s) above. Nothing written (no database ` +
+        "write, no upload). Resolve them (restore the missing archive or server, fix the pin), then re-run.",
+    );
+    result.refused = true;
+    return result;
+  }
+  if (result.unfolded.length > 0) {
+    out(
+      `0054: ${result.unfolded.length} UNFOLDED line(s): --apply would refuse until they are resolved.`,
+    );
+  }
 
   // ── Write ───────────────────────────────────────────────────────────────
   try {
@@ -583,8 +727,11 @@ export async function runFoldMcpServers(options: {
             ON CONFLICT DO NOTHING`);
         }
         result.storageObjectsQueued += staleSystem.length;
-        // Boot sync registers `latest` for a package with none, but re-point to what remains
-        // here so the tag never dangles in between: the highest remaining non-yanked version.
+        // Boot registers a missing `latest` only when it registers a NEW version
+        // (`createPackageVersion`); `syncVersion` skips a version already stored with the same
+        // integrity, so a package whose current source version is already a remaining row would
+        // keep no `latest` at all, and runs resolving it would fail. Re-point to the highest
+        // remaining non-yanked version.
         for (const packageId of new Set(latest)) {
           const rows = toRows<{ id: number; version: string }>(
             await tx.execute(sql`SELECT id, version FROM package_versions
@@ -619,6 +766,27 @@ export async function runFoldMcpServers(options: {
       result.serversDeleted = servers.length;
       result.systemServersDeleted = servers.filter((s) => s.orgId === null).length;
 
+      // Nothing may still read the reference shape, nor any server row remain: roll back otherwise.
+      const [left] = toRows<{ drafts: number; versions: number; servers: number }>(
+        await tx.execute(sql`SELECT
+          (SELECT count(*)::int FROM packages
+            WHERE org_id IS NOT NULL AND type <> 'mcp-server'
+              AND draft_manifest -> 'source' ->> 'kind' = 'local'
+              AND draft_manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL) AS drafts,
+          (SELECT count(*)::int FROM package_versions pv JOIN packages p ON p.id = pv.package_id
+            WHERE p.org_id IS NOT NULL AND p.type <> 'mcp-server'
+              AND pv.manifest -> 'source' ->> 'kind' = 'local'
+              AND pv.manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL) AS versions,
+          (SELECT count(*)::int FROM packages WHERE type = 'mcp-server') AS servers`),
+      );
+      // (A dry run with unfolded lines leaves them by definition: it only reports.)
+      if (result.unfolded.length === 0 && left!.drafts + left!.versions + left!.servers !== 0) {
+        throw new Error(
+          `verification failed: ${left!.drafts} draft(s), ${left!.versions} version(s) still on ` +
+            `source.server.name, ${left!.servers} mcp-server row(s) left — rolled back`,
+        );
+      }
+
       // Uploaded last and inside the transaction: a failed upload rolls the database back.
       if (apply) {
         for (const write of writes) {
@@ -645,7 +813,8 @@ function report(result: McpServersFold, out: (line: string) => void): void {
     ["integrations folded (drafts + versions)", String(result.integrationsFolded.length)],
     ["manifests losing dependencies.mcp_servers", String(result.dependenciesStripped.length)],
     ["orphan org servers deleted", String(result.orphanServers.length)],
-    ["unresolved (left as is / dropped)", String(result.unresolved.length)],
+    ["unfolded (--apply refuses)", String(result.unfolded.length)],
+    ["notes", String(result.notes.length)],
     ["stale system integration versions deleted", String(result.systemVersionsDeleted.length)],
     ["mcp-server packages deleted", String(result.serversDeleted)],
     ["  of which system", String(result.systemServersDeleted)],
@@ -671,9 +840,10 @@ if (import.meta.main) {
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0054 — ${apply ? "APPLY" : "DRY RUN"}`);
-    await runFoldMcpServers({ apply, out });
-    code = 0;
+    const result = await runFoldMcpServers({ apply, out });
+    code = result.refused ? 1 : 0;
   } catch (error) {
+    if (error instanceof StorageUnreadable) code = 2;
     process.stdout.write(`0054: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
   } finally {
     await closeDb?.();

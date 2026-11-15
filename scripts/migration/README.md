@@ -1479,45 +1479,70 @@ the same reason, do not serve the previous release beside this one. It also read
 inline (`source.server = { type, entry_point, mcp_config, tools }`), its payload (`server/**`) sits in
 the integration's own files and archive, the credential reaches it through the auth's `delivery.env`,
 and `dependencies.mcp_servers` no longer exists (#2220). The `mcp-server` label stays in the
-`package_type` enum for now (Postgres cannot drop a value in place; a follow-up does, as for
-`package_shares`). The release refuses to boot while a `packages` row has `type = 'mcp-server'`
-(`assertMcpServersFolded`, `apps/api/src/lib/boot.ts`). `pg_dump` taken BEFORE the deploy, the app
-stopped:
+`package_type` enum for now (Postgres cannot drop a value in place; #2229 drops it with the guard,
+as for `package_shares`). The release refuses to boot while a `packages` row has `type = 'mcp-server'`
+or an org integration draft or version still has `source.server.name`
+(`assertMcpServersFolded`, `apps/api/src/lib/boot.ts`, removal tracked in #2229). The app stays
+stopped from step 1 to step 5:
 
-1. Run the migrations alone (`bun run db:migrate`, or the migrate service); the app stays stopped.
-2. `set -a && . ./.env && set +a && bun scripts/migration/0054-fold-mcp-servers.ts` is the dry run
-   (rolled back, no storage written); read the table and every `unresolved` / `orphan server` line.
-3. `0054 --apply`, app still stopped. Per ORG integration still reading `source.server = { name,
-version }`: its draft takes the referenced server's draft, each version the highest non-yanked
-   server version satisfying its range (same organization first, then system). The manifest receives
-   the server's `server` block and `tools`, and its `dev.appstrate/mcp-server` / `dev.appstrate/workspace`
-   `_meta`; each `mcp_config.env[V] = "${user_config.K}"` becomes `delivery.env[V] = { value, sensitive }`
-   copied from the auth entry whose `user_config_key ?? envKey` is `K`, and `user_config_key` is
-   dropped everywhere. A placeholder matching no entry is printed and dropped: the old substitution read
-   `delivery.env` only, so the server never received it. The server's files (all but `manifest.json`)
-   join the integration's draft files and version archive (a path both hold keeps the integration's and
-   is printed); each rewritten version's `integrity` and `artifact_size` are recomputed. Every
-   org agent, skill and integration draft or version carrying `dependencies.mcp_servers` loses it, with
-   archive and integrity. Then every `mcp-server` package, system ones included, is deleted with its
-   versions, dist tags, `space_packages` rows and `mcp-server` dependency rows; its storage objects
-   are queued on the deletion outbox in the same transaction. An organization server referenced by no
-   integration is printed (id, organization) and deleted: it ran nowhere. A draft or version whose
-   server or archive is missing is printed and left as it is. System integrations are not rewritten:
-   boot re-syncs them from `system-packages/`. But boot never deletes a version and holds no bytes for
-   a superseded one, so every system integration version still on the retired shape (`ssh` 1.0.3,
-   `github-git` 1.0.4) is deleted, printed `<id>@<version>`, with its dist tags, dependency rows and
-   archive (outbox); the `packages` row stays. A `latest` tag that pointed at one is re-pointed to the
-   highest remaining version (none left: boot sync sets it with the new release).
-4. Start the app.
+1. `pg_dump` the database.
+2. Run the migrations alone (`bun run db:migrate`, or the migrate service).
+3. **Snapshot object storage.** `--apply` overwrites in place the archive of every rewritten
+   integration, agent and skill version (bucket `agent-packages`, keys `{packageId}/{version}.afps`)
+   and every rewritten integration draft (bucket `library-packages`, `{org}/integrations/{id}.afps`),
+   and queues the deletion of the server archives (`agent-packages` `{packageId}/{version}.afps`,
+   `library-packages` `{org or system}/mcp-servers/{id}.afps`). `pg_dump` cannot undo any of that:
+   copy both buckets whole (S3: `aws s3 sync` or the provider's bucket versioning; filesystem: the
+   `FS_STORAGE_PATH` directory) and keep the copy until the release is verified.
+4. `set -a && . ./.env && set +a && bun scripts/migration/0054-fold-mcp-servers.ts` is the dry run
+   (rolled back, no storage written). It prints the database and the storage target first: check
+   both (a script run without the platform's storage env reads `./data/storage`; it exits 2 when
+   server versions exist and no server archive is readable). Read the table, every `note`, `orphan
+server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` line must be
+   resolved before `--apply`, which refuses anyway (prints them, writes nothing, exits 1).
+   `UNFOLDED` means a draft or version would still read `source.server = { name, version }`: server
+   not found, pin matching no version, server archive or draft payload missing, the integration's
+   own archive missing, a `${user_config.K}` embedded in a larger value with no matching entry, or a
+   path both hold with different bytes.
+5. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
+   is resolved as the runtime did: a system server is its highest version; an org server goes by
+   the pin, exact version (yanked included), then dist-tag name, then semver range, a missing pin
+   meaning the `latest` dist-tag. A draft takes the server's published version resolved by its own
+   pin (the server's draft only when the server has no published version). The manifest receives
+   the server's `server` block and `tools`, and its `dev.appstrate/mcp-server` /
+   `dev.appstrate/workspace` `_meta`; each `mcp_config.env[V]` carrying `${user_config.K}`
+   placeholders becomes `delivery.env[V] = { value, sensitive }`, each placeholder replaced by the
+   value of the auth entry whose `user_config_key ?? envKey` is `K` (`sensitive` if any is), and
+   `user_config_key` is dropped everywhere. A whole-value placeholder matching no entry is dropped
+   with a note (the old runtime delivered nothing); an existing `delivery.env[V]` is kept. The
+   server's files (all but `manifest.json`) join the integration's draft files and version archive
+   (identical bytes at a shared path: a note); each rewritten version's `integrity` and
+   `artifact_size` are recomputed. Every org agent, skill and integration draft or version carrying
+   `dependencies.mcp_servers` loses it, with archive and integrity. Then every `mcp-server` package,
+   system ones included, is deleted with its versions, dist tags, `space_packages` rows and
+   `mcp-server` dependency rows; its storage objects are queued on the deletion outbox in the same
+   transaction. An organization server referenced by no integration is printed (id, organization)
+   and deleted: it ran nowhere. System integrations are not rewritten: boot re-syncs them from
+   `system-packages/`. But boot never deletes a version and holds no bytes for a superseded one, so
+   every system integration version still on the retired shape (`ssh` 1.0.3, `github-git` 1.0.4) is
+   deleted, printed `<id>@<version>`, with its dist tags, dependency rows and archive (outbox); the
+   `packages` row stays. A `latest` tag that pointed at one is re-pointed to the highest remaining
+   version (boot only sets `latest` when it registers a new version, not for one already stored).
+   Before the commit the script verifies, in the transaction, that no org draft or version still has
+   `source.server.name` and no `mcp-server` row is left, and rolls back otherwise.
+6. Start the app.
 
 Ordering of the writes: the database changes run in one transaction and the rewritten archives are
-uploaded inside it, just before the commit. A failure before the commit rolls the database back but
-may leave rewritten archives in storage under the same keys; re-running recomputes from the
-unchanged rows and writes byte-identical archives, so a re-run repairs it. A second `--apply` on a
-folded database writes nothing.
+uploaded inside it, just before the commit, so the transaction (and its locks) stays open for the
+whole upload: check `idle_in_transaction_session_timeout` on the database role. A failure before the
+commit rolls the database back but may leave rewritten archives in storage under the same keys;
+re-running recomputes from the unchanged rows and writes byte-identical archives, so a re-run
+repairs it. A second `--apply` on a folded database writes nothing.
 
-Rollback: restore the `pg_dump` (and the storage archives rewritten under it, versions included: an
-integrity mismatch is what a restored row against a rewritten archive reads as).
+Rollback: restore the `pg_dump` AND the storage snapshot of step 3, together. The archives are
+overwritten in place, so restoring the database alone leaves rewritten archives under rows whose
+`integrity` no longer matches them (an integrity mismatch at run time), and the server archives
+queued for deletion are gone once the outbox has run.
 
 ## Log
 
@@ -1572,4 +1597,4 @@ integrity mismatch is what a restored row against a rewritten archive reads as).
 | 0050 | not yet             | READ-ONLY report (#2043): the schedules, enabled or not, whose `connection_overrides` name `[]` or a strict subset of the set an admin pin (else an enforced org default) imposes on the integration — each binds the WHOLE imposed set after the deploy — with the override, the imposed set and the imposing layer — **run before deploying the release where an override can no longer narrow an imposed set**; nothing is rewritten, the schedule owner is told                                                                                                                                                                                                                          | read-only — prints the table and the enabled / disabled totals, or `0 schedules — nothing widens.`; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, after the migrations**                                                                                                                                                                                                                                                                                                                                                                                |
+| 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, after the migrations**                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the `mcp-server` packages, the integrations folded, the `note` / `UNFOLDED` lines and the storage target; `--apply` refuses (exit 1, nothing written) on any `UNFOLDED` line, else commits in one transaction after verifying none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                         |

@@ -5,7 +5,9 @@
  * integration's draft and versions take their referenced mcp-server's `server` block, tools, `_meta`
  * and payload files, the `${user_config.K}` bridge becomes `delivery.env` entries, an agent loses
  * `dependencies.mcp_servers`, every `mcp-server` package (orphans and system ones included) is
- * deleted, a dry run writes nothing and a second `--apply` finds nothing.
+ * deleted, a dry run writes nothing and a second `--apply` finds nothing. Resolution reproduces the
+ * runtime (dist-tag / yanked / system / `latest`), an unfoldable draft or version makes `--apply`
+ * refuse and write nothing, and the boot guard refuses a leftover reference-shape integration.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -14,8 +16,12 @@ import { db, toRows } from "@appstrate/db/client";
 import { deleteFile, downloadFile, uploadFile } from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
-import { runFoldMcpServers } from "../migration/0054-fold-mcp-servers.ts";
-import { assertMcpServersFolded, unfoldedMcpServerCount } from "../../apps/api/src/lib/boot.ts";
+import {
+  foldLocalIntegrationManifest,
+  runFoldMcpServers,
+  StorageUnreadable,
+} from "../migration/0054-fold-mcp-servers.ts";
+import { assertMcpServersFolded } from "../../apps/api/src/lib/boot.ts";
 import {
   PACKAGE_ITEMS_BUCKET,
   packageItemKey,
@@ -174,7 +180,9 @@ const versionOf = (id: string, version = "1.0.0") =>
     sql`SELECT manifest, integrity, artifact_size FROM package_versions
       WHERE package_id = ${id} AND version = ${version}`,
   );
-const serverCount = async () => unfoldedMcpServerCount();
+const serverCount = async () =>
+  (await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM packages WHERE type = 'mcp-server'`))
+    .n;
 
 describe("0054 — mcp-server packages folded into their integrations", () => {
   beforeEach(async () => {
@@ -220,7 +228,8 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
       "dev.appstrate/workspace": { mount: "rw" },
     });
     expect(draft.dependencies?.mcp_servers).toBeUndefined();
-    expect(fold.unresolved.join("\n")).toContain("ORPHANED");
+    expect(fold.notes.join("\n")).toContain("ORPHANED");
+    expect(fold.unfolded).toEqual([]);
 
     const draftFiles = unzipArtifact(
       new Uint8Array(
@@ -230,7 +239,8 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
         ))!,
       ),
     );
-    expect(dec.decode(draftFiles["server/index.ts"])).toBe("// draft");
+    // A draft folds the server's PUBLISHED version resolved by its pin (^1.0.0 → 1.1.0), not its draft.
+    expect(dec.decode(draftFiles["server/index.ts"])).toBe("// v1.1.0");
     expect(JSON.parse(dec.decode(draftFiles["manifest.json"]))).toEqual(draft);
     expect(dec.decode(draftFiles["INTEGRATION.md"])).toBe("# doc");
 
@@ -295,9 +305,15 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     ).toBe(fold.storageObjectsQueued);
     expect(fold.storageObjectsQueued).toBe(3 + 3);
 
-    // The guard passes, and a second apply writes nothing.
+    // The guard passes, and a second apply writes nothing: same bytes, same integrity.
     expect(await assertMcpServersFolded(null)).toBeUndefined();
+    const keyOf = versionZipKey(INTEGRATION, "1.0.0");
+    const bytesBefore = Buffer.from((await downloadFile(AGENT_PACKAGES_BUCKET, keyOf))!);
     const again = await run(true);
+    expect(
+      Buffer.compare(bytesBefore, Buffer.from((await downloadFile(AGENT_PACKAGES_BUCKET, keyOf))!)),
+    ).toBe(0);
+    expect((await versionOf(INTEGRATION)).integrity).toBe(version.integrity);
     expect(again.integrationsFolded).toEqual([]);
     expect(again.dependenciesStripped).toEqual([]);
     expect(again.serversDeleted).toBe(0);
@@ -356,6 +372,286 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     await expect(assertMcpServersFolded(null)).rejects.toThrow(/0054-fold-mcp-servers\.ts --apply/);
     await run(true);
     expect(await assertMcpServersFolded(null)).toBeUndefined();
+  });
+});
+
+// ─── Resolution, refusal, bridge ────────────────────────────────────────────
+
+const S2 = "@t0054/s2";
+const I2 = "@t0054/i2";
+
+const refManifest = (pin: string | undefined, delivery?: object) => ({
+  name: I2,
+  version: "1.0.0",
+  type: "integration",
+  source: { kind: "local", server: pin === undefined ? { name: S2 } : { name: S2, version: pin } },
+  auths: {
+    api: {
+      type: "api_key",
+      delivery: {
+        env: delivery ?? {
+          API_TOKEN: { value: "{$credential.token}", sensitive: true, user_config_key: "token" },
+        },
+      },
+    },
+  },
+});
+const srv2 = (version: string) => ({
+  name: S2,
+  version,
+  type: "mcp-server",
+  server: { type: "node", entry_point: "server/index.ts", mcp_config: { command: "bun" } },
+  tools: [{ name: `tool_${version}`, description: "x" }],
+});
+
+interface Srv2Version {
+  version: string;
+  yanked?: boolean;
+  /** `null`: the archive is missing from storage. */
+  files?: Record<string, string> | null;
+}
+async function mkServer(
+  orgId: string | null,
+  versions: Srv2Version[],
+  tags: Record<string, string> = {},
+  draft?: { files: Record<string, string> | null },
+) {
+  await seedServer(S2, orgId, srv2("9.9.9"), orgId === null ? null : ctx.defaultSpaceId);
+  if (draft?.files) await put(PACKAGE_ITEMS_BUCKET, `${orgId}/mcp-servers/${S2}.afps`, draft.files);
+  for (const v of versions) {
+    await db.execute(sql`INSERT INTO package_versions (package_id, version, integrity, artifact_size, manifest, yanked)
+      VALUES (${S2}, ${v.version}, 'sha256-x', 1, ${JSON.stringify(srv2(v.version))}::jsonb, ${v.yanked === true})`);
+    if (v.files !== null) {
+      await put(
+        AGENT_PACKAGES_BUCKET,
+        versionZipKey(S2, v.version),
+        v.files ?? { "manifest.json": "{}", "server/index.ts": `// ${v.version}` },
+      );
+    }
+  }
+  for (const [tag, version] of Object.entries(tags)) {
+    await db.execute(sql`INSERT INTO package_dist_tags (package_id, tag, version_id)
+      SELECT package_id, ${tag}, id FROM package_versions WHERE package_id = ${S2} AND version = ${version}`);
+  }
+}
+async function mkIntegration(
+  pin: string | undefined,
+  opts: { draft?: boolean; version?: boolean; files?: Record<string, string> } = {},
+) {
+  const own = { "manifest.json": "{}", "INTEGRATION.md": "# doc", ...opts.files };
+  await seedPackage({
+    id: I2,
+    orgId: ctx.orgId,
+    type: "integration",
+    ...(opts.draft ? { draftManifest: refManifest(pin) } : {}),
+  });
+  if (opts.draft) {
+    await put(PACKAGE_ITEMS_BUCKET, packageItemKey("integrations", ctx.orgId, I2), own);
+  }
+  if (opts.version ?? true) {
+    await seedPackageVersion({ packageId: I2, version: "1.0.0", manifest: refManifest(pin) });
+    await put(AGENT_PACKAGES_BUCKET, versionZipKey(I2, "1.0.0"), own);
+  }
+}
+const storedBytes = async (bucket: string, key: string) =>
+  Buffer.from((await downloadFile(bucket, key))!);
+const toolOf = async (id: string) =>
+  ((await versionOf(id)).manifest.source.server.tools as Array<{ name: string }>)[0]!.name;
+const deletionJobs = async () =>
+  (await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM storage_deletion_jobs`)).n;
+
+describe("0054 — resolution as the runtime did, refusal, bridge", () => {
+  beforeEach(async () => {
+    await truncateAll();
+    for (const [bucket, key] of keys.splice(0)) await deleteFile(bucket, key).catch(() => {});
+    lines.length = 0;
+    ctx = await createTestContext({ orgSlug: "t0054" });
+  });
+
+  it("--apply refuses and writes nothing while a server archive is missing", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0", files: null }, { version: "1.1.0" }]);
+    await mkIntegration("1.0.0");
+    const key = versionZipKey(I2, "1.0.0");
+    const before = await storedBytes(AGENT_PACKAGES_BUCKET, key);
+    const manifestBefore = (await versionOf(I2)).manifest;
+
+    const dry = await run(false);
+    expect(dry.unfolded.join("\n")).toContain(`archive of ${S2}@1.0.0 missing`);
+    expect(lines.join("\n")).toContain("--apply would refuse");
+
+    const fold = await run(true);
+    expect(fold.refused).toBe(true);
+    expect(lines.join("\n")).toContain("0054: REFUSED");
+    expect(await serverCount()).toBe(1);
+    expect((await versionOf(I2)).manifest).toEqual(manifestBefore);
+    expect(Buffer.compare(before, await storedBytes(AGENT_PACKAGES_BUCKET, key))).toBe(0);
+    expect(await deletionJobs()).toBe(0);
+  });
+
+  it("exits before planning when no server archive is readable", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0", files: null }]);
+    await mkIntegration("1.0.0");
+    await expect(run(true)).rejects.toBeInstanceOf(StorageUnreadable);
+    expect(lines.join("\n")).toContain("storage: filesystem");
+    expect(await serverCount()).toBe(1);
+  });
+
+  it("a missing pin resolves the latest dist-tag, not the highest version", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0" }, { version: "2.0.0" }], { latest: "1.0.0" });
+    await mkIntegration(undefined);
+    await run(true);
+    expect(await toolOf(I2)).toBe("tool_1.0.0");
+  });
+
+  it("a pin that is a dist-tag name resolves through the tag", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0" }, { version: "2.0.0" }], { beta: "1.0.0" });
+    await mkIntegration("beta");
+    await run(true);
+    expect(await toolOf(I2)).toBe("tool_1.0.0");
+  });
+
+  it("an exact pin on a yanked version resolves it while live versions exist; a range skips it", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0", yanked: true }, { version: "1.1.0" }]);
+    await mkIntegration("1.0.0");
+    await run(true);
+    expect(await toolOf(I2)).toBe("tool_1.0.0");
+  });
+
+  it("a range pin never picks a yanked version", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0" }, { version: "1.1.0", yanked: true }]);
+    await mkIntegration("^1.0.0");
+    await run(true);
+    expect(await toolOf(I2)).toBe("tool_1.0.0");
+  });
+
+  it("an org integration referencing a SYSTEM server takes its highest version whatever the pin", async () => {
+    await mkServer(null, [{ version: "1.0.0" }, { version: "2.0.0" }]);
+    await mkIntegration("^1.0.0");
+    await run(true);
+    expect(await toolOf(I2)).toBe("tool_2.0.0");
+  });
+
+  it("a draft folds the published version its pin resolves, not the server's edited draft", async () => {
+    await mkServer(
+      ctx.orgId,
+      [{ version: "1.0.0" }],
+      {},
+      { files: { "server/index.ts": "// draft" } },
+    );
+    await mkIntegration("^1.0.0", { draft: true, version: false });
+    await run(true);
+    const draft = await draftManifestOf(I2);
+    expect(draft.source.server.tools[0].name).toBe("tool_1.0.0");
+    const files = unzipArtifact(
+      new Uint8Array(
+        (await downloadFile(PACKAGE_ITEMS_BUCKET, packageItemKey("integrations", ctx.orgId, I2)))!,
+      ),
+    );
+    expect(dec.decode(files["server/index.ts"])).toBe("// 1.0.0");
+  });
+
+  it("a server never published folds its draft, and refuses when the draft payload is missing", async () => {
+    await mkServer(ctx.orgId, [], {}, { files: null });
+    await mkIntegration("*", { draft: true, version: false });
+    const refused = await run(true);
+    expect(refused.refused).toBe(true);
+    expect(refused.unfolded.join("\n")).toContain("draft payload");
+    expect(await serverCount()).toBe(1);
+    expect((await draftManifestOf(I2)).source.server).toEqual({ name: S2, version: "*" });
+
+    await put(PACKAGE_ITEMS_BUCKET, `${ctx.orgId}/mcp-servers/${S2}.afps`, {
+      "manifest.json": "{}",
+      "server/index.ts": "// draft",
+    });
+    const ok = await run(true);
+    expect(ok.refused).toBe(false);
+    expect((await draftManifestOf(I2)).source.server.tools[0].name).toBe("tool_9.9.9");
+  });
+
+  it("a path in both with different bytes is unfolded, with identical bytes it folds", async () => {
+    await mkServer(ctx.orgId, [{ version: "1.0.0" }]);
+    await mkIntegration("1.0.0", { files: { "server/index.ts": "// mine" } });
+    const refused = await run(true);
+    expect(refused.refused).toBe(true);
+    expect(refused.unfolded.join("\n")).toContain("server/index.ts exists in both with different");
+    expect(await serverCount()).toBe(1);
+
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "t0054" });
+    await mkServer(ctx.orgId, [{ version: "1.0.0" }]);
+    await mkIntegration("1.0.0", { files: { "server/index.ts": "// 1.0.0" } });
+    const ok = await run(true);
+    expect(ok.refused).toBe(false);
+    expect(ok.notes.join("\n")).toContain("server/index.ts exists in both, identical");
+    expect(await serverCount()).toBe(0);
+  });
+
+  it("the boot guard refuses a leftover reference-shape integration with no mcp-server row", async () => {
+    await mkIntegration("^1.0.0", { draft: true });
+    expect(await serverCount()).toBe(0);
+    await expect(assertMcpServersFolded(null)).rejects.toThrow(/source\.server\.name/);
+    const refused = await run(true);
+    expect(refused.refused).toBe(true);
+    expect(refused.unfolded.join("\n")).toContain(`server ${S2} not found`);
+    await expect(assertMcpServersFolded(null)).rejects.toThrow(/0054-fold-mcp-servers\.ts/);
+  });
+});
+
+describe("0054 — the ${user_config.K} bridge", () => {
+  const integration = (delivery: object) => refManifest("*", delivery) as Record<string, any>;
+  const server = (env: Record<string, string>) => ({
+    ...srv2("1.0.0"),
+    server: { type: "node", entry_point: "x", mcp_config: { command: "bun", env } },
+  });
+  const delivered = (m: Record<string, any>) => m.auths.api.delivery.env;
+  const TOKEN = { value: "{$credential.token}", sensitive: true, user_config_key: "token" };
+
+  it("an embedded placeholder becomes a delivery template, sensitive when a matched entry is", () => {
+    const fold = foldLocalIntegrationManifest(
+      integration({ API_TOKEN: TOKEN }),
+      server({ AUTH: "Bearer ${user_config.token}" }),
+    );
+    expect(fold.unfolded).toEqual([]);
+    expect(delivered(fold.manifest).AUTH).toEqual({
+      value: "Bearer {$credential.token}",
+      sensitive: true,
+    });
+    expect((fold.manifest.source as any).server.mcp_config.env).toBeUndefined();
+  });
+
+  it("several placeholders in one value are all replaced", () => {
+    const fold = foldLocalIntegrationManifest(
+      integration({ A: { value: "{$credential.a}", user_config_key: "a" }, B: TOKEN }),
+      server({ BOTH: "${user_config.a}:${user_config.token}" }),
+    );
+    expect(delivered(fold.manifest).BOTH).toEqual({
+      value: "{$credential.a}:{$credential.token}",
+      sensitive: true,
+    });
+  });
+
+  it("an embedded placeholder with no matching entry is unfolded, a whole-value one is dropped with a note", () => {
+    const embedded = foldLocalIntegrationManifest(
+      integration({ API_TOKEN: TOKEN }),
+      server({ AUTH: "Bearer ${user_config.nowhere}" }),
+    );
+    expect(embedded.unfolded.join("\n")).toContain("AUTH");
+    const whole = foldLocalIntegrationManifest(
+      integration({ API_TOKEN: TOKEN }),
+      server({ AUTH: "${user_config.nowhere}" }),
+    );
+    expect(whole.unfolded).toEqual([]);
+    expect(whole.notes.join("\n")).toContain("AUTH");
+    expect(delivered(whole.manifest).AUTH).toBeUndefined();
+  });
+
+  it("an existing delivery.env[V] is never overwritten", () => {
+    const fold = foldLocalIntegrationManifest(
+      integration({ API_TOKEN: TOKEN, AUTH: { value: "mine" } }),
+      server({ AUTH: "Bearer ${user_config.token}" }),
+    );
+    expect(delivered(fold.manifest).AUTH).toEqual({ value: "mine" });
+    expect(fold.notes.join("\n")).toContain("already set");
   });
 });
 

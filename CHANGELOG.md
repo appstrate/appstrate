@@ -12,10 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   this release** (#2220). A local MCP server is no longer a package of its own:
   the script folds every stored `mcp-server` package into the integration that
   referenced it, and the boot guard `assertMcpServersFolded` refuses to start
-  while any `packages.type = 'mcp-server'` row remains. Dry run first, then
-  `--apply` with the app stopped. Procedure, per-org behaviour and rollback
-  (restore the backup) in `scripts/migration/README.md`, section "`mcp-server`
-  packages folded into their integrations".
+  while any `packages.type = 'mcp-server'` row remains or an org integration
+  still declares `source.server.name` (guard removal tracked in #2229).
+  **Snapshot object storage first** (buckets `agent-packages` and
+  `library-packages`): `--apply` overwrites archives in place and queues server
+  archives for deletion, which `pg_dump` cannot roll back. Dry run first; any
+  `UNFOLDED` line must be resolved before `--apply`, which refuses (exit 1,
+  nothing written) otherwise. Then `--apply` with the app stopped. Procedure
+  and rollback (database dump plus storage snapshot) in
+  `scripts/migration/README.md`, section "`mcp-server` packages folded into
+  their integrations".
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
   `0103` creates `run_reads` and renames the stored run notifications to

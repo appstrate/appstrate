@@ -45,7 +45,7 @@ export const invitationStatusEnum = pgEnum("invitation_status", invitationStatus
 
 /**
  * The labels of the `package_type` pg enum. `mcp-server` is a label kept for the fold script
- * (`scripts/migration/`); dropped by the follow-up of #2220, never produced by application code.
+ * (`scripts/migration/`); dropped with its boot guard by #2229, never produced by application code.
  * Postgres cannot drop an enum value in place, so the DB label outlives the package type.
  * Application code uses {@link PACKAGE_TYPES} / {@link PackageType}, which exclude it.
  */
