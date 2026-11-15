@@ -15,7 +15,6 @@ function render(props: Partial<ComponentProps<typeof PackageOverview>> = {}) {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <PackageOverview
-        type="skill"
         content="Vérifiez les pièces sources."
         historical={false}
         agentCount={2}

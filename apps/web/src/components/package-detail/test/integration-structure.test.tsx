@@ -3,12 +3,17 @@
 /** The integration's "how it works" block: a local source names the server it ships and its advisory tool catalog. */
 
 import { describe, expect, it } from "bun:test";
+import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { IntegrationFunctioning } from "../integration-structure.tsx";
 import type { IntegrationDetailWire } from "../../../hooks/use-integrations.ts";
 
 await i18nReady;
+// The source label reads the app config off `window`.
+installFakeStorage({
+  __APP_CONFIG__: { features: { localIntegrations: true }, trustedOrigins: [] },
+});
 
 function renderSource(source: unknown): string {
   const detail = { manifest: { source } } as unknown as IntegrationDetailWire;

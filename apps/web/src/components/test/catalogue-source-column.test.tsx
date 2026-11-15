@@ -47,7 +47,8 @@ describe("the Source column", () => {
     const hint = settingsFr["integrations.source.localUnavailable"];
     const explanation = settingsFr["integrations.source.localUnavailableHint"];
     expect(cell("local", false)).toContain(hint);
-    expect(cell("local", false)).toContain(explanation.replace(/'/g, "'"));
+    // The explanation is screen-reader text beside the visible hint.
+    expect(cell("local", false)).toContain(explanation);
     expect(cell("local", true)).not.toContain(hint);
     expect(cell("remote", false)).not.toContain(hint);
     expect(cell("none", false)).not.toContain(hint);

@@ -3,12 +3,17 @@
 /** The local source edits the inline run declaration: type, entry point, command, args. */
 
 import { describe, expect, it } from "bun:test";
+import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { SourceSection } from "../source-section.tsx";
 import { entryPointMissing } from "../utils.ts";
 
 await i18nReady;
+// The source label reads the app config off `window`.
+installFakeStorage({
+  __APP_CONFIG__: { features: { localIntegrations: true }, trustedOrigins: [] },
+});
 
 const manifest = {
   source: {
@@ -35,6 +40,20 @@ describe("SourceSection, local source", () => {
     expect(html).toContain('value="uv"');
     expect(html).toContain('id="int-source-server-args"');
     expect(html).toContain("run\nserver/main.py");
+  });
+
+  it("renders an empty-string argument without looping on it", () => {
+    const withBlank = {
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "a.js",
+          mcp_config: { command: "node", args: ["--name", ""] },
+        },
+      },
+    };
+    expect(renderSection(undefined, withBlank)).toContain("--name\n");
   });
 
   it("no longer asks for a server package", () => {

@@ -467,7 +467,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
             <DetailTabPanel value="overview">
               {pkgDetail && (
                 <PackageOverview
-                  type={type}
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
                   historical={isHistoricalVersion}
                   agentCount={pkgDetail.agents.length}

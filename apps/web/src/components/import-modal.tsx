@@ -27,8 +27,8 @@ interface ImportModalProps {
   type?: PackageType;
   /**
    * Stay where you are and hand the result back, instead of opening the
-   * imported package. For an import made from inside another form — the
-   * integration editor importing its local server — navigating would throw
+   * imported package. For an import made from inside another form — the agent
+   * editor importing a skill or integration to attach — navigating would throw
    * away the form.
    */
   onImported?: (result: ImportedPackage) => void;
@@ -36,17 +36,24 @@ interface ImportModalProps {
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
+/** An MCP Bundle is an integration: only an import that may bring one accepts it. */
+const acceptsMcpb = (type: PackageType | undefined) => type === undefined || type === "integration";
+
+function fileRefusal(
+  f: File,
+  mcpb: boolean,
+): "import.errZip" | "import.errZipMcpb" | "import.errSize" | null {
   const lower = f.name.toLowerCase();
-  const accepted = [".afps", ".afps-bundle", ".mcpb", ".zip"];
+  const accepted = [".afps", ".afps-bundle", ...(mcpb ? [".mcpb"] : []), ".zip"];
   if (!accepted.some((extension) => lower.endsWith(extension))) {
-    return "import.errZip";
+    return mcpb ? "import.errZipMcpb" : "import.errZip";
   }
   return f.size > MAX_SIZE ? "import.errSize" : null;
 }
 
 export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const mcpb = acceptsMcpb(type);
   const [file, setFile] = useState<File | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
   const [error, setError] = useState("");
@@ -69,7 +76,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   };
 
   const handleFile = (f: File) => {
-    const refusal = fileRefusal(f);
+    const refusal = fileRefusal(f, mcpb);
     clearConfirmations();
     setGithubUrl("");
     setError(refusal ? t(refusal) : "");
@@ -178,7 +185,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".afps,.afps-bundle,.mcpb,.zip"
+          accept={mcpb ? ".afps,.afps-bundle,.mcpb,.zip" : ".afps,.afps-bundle,.zip"}
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -189,7 +196,9 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
           <p className="text-foreground text-sm font-medium">{file.name}</p>
         ) : (
           <>
-            <p className="text-foreground text-sm">{t("import.dropText")}</p>
+            <p className="text-foreground text-sm">
+              {t(mcpb ? "import.dropTextMcpb" : "import.dropText")}
+            </p>
             <p className="text-muted-foreground mt-1 text-xs">{t("import.dropHint")}</p>
           </>
         )}

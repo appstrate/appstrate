@@ -1241,7 +1241,7 @@
   "integrations.source.remote": "MCP distant",
   "integrations.source.local": "MCP local",
   "integrations.source.localUnavailable": "indisponible ici",
-  "integrations.source.localUnavailableHint": "Ce serveur s'exécute dans le bac à sable : le mode d'exécution de cette instance (process) ne peut pas l'isoler.",
+  "integrations.source.localUnavailableHint": "Ce serveur s'exécute dans le bac à sable : cette instance ne peut pas l'isoler.",
   "integration.admin.creation.admins": "Administrateurs de l’organisation",
   "integration.admin.creation.members": "Tous les membres de l’espace",
   "integration.admin.usage.choice": "Connexion choisie par l’utilisateur",
@@ -1471,8 +1471,8 @@
   "creation.fromUrl.description": "Collez l’adresse d’un serveur MCP. Appstrate vous guide pour ajouter ses outils.",
   "integration.structure.localServer": "Serveur local",
   "integration.structure.localTools": "Outils déclarés",
-  "integration.structure.localToolsCount_one": "{{count}} outil",
-  "integration.structure.localToolsCount_other": "{{count}} outils",
+  "integration.structure.localToolsList_one": "{{count}} outil : {{names}}",
+  "integration.structure.localToolsList_other": "{{count}} outils : {{names}}",
   "integration.structure.localToolsNone": "Aucun catalogue déclaré",
   "integrations.exportMcpb": "Exporter en .mcpb"
 }

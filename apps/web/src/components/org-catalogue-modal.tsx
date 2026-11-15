@@ -64,6 +64,7 @@ import {
 import { useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
 import { INTEGRATION_SOURCES } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
 import { PackageCardSkeleton } from "./package-card";
@@ -209,6 +210,9 @@ export function OrgCatalogueModal({
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
   const sources = list.values("source", INTEGRATION_SOURCES);
+  // A source filter judges a row by its integration read: until it lands the list is loading, not empty.
+  const listLoading =
+    isLoading || (active === "integration" && sources.length > 0 && integrationsQuery.isLoading);
   const all = ofKind.filter((item) => {
     if (active === "integration" && sources.length > 0) {
       const kind = integrationById.get(item.id)?.manifest.source.kind;
@@ -310,6 +314,8 @@ export function OrgCatalogueModal({
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
     const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;
+    const sourceKind =
+      active === "integration" ? integrationById.get(item.id)?.manifest.source.kind : undefined;
     return {
       ...row,
       icon,
@@ -331,6 +337,12 @@ export function OrgCatalogueModal({
           <span className="truncate">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
+          {sourceKind && (
+            <>
+              <span aria-hidden>·</span>
+              <IntegrationSourceLabel source={sourceKind} />
+            </>
+          )}
           {sharer && (
             <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
               {t("catalogue.sheet.sharedBy", { name: sharer })}
@@ -544,8 +556,8 @@ export function OrgCatalogueModal({
           pinnedVersion={pinnedVersion}
           onUnpin={unpin}
           source={
-            active === "integration" && integrationById.get(previewed.id)
-              ? t(`integrations.source.${integrationById.get(previewed.id)!.manifest.source.kind}`)
+            active === "integration"
+              ? integrationById.get(previewed.id)?.manifest.source.kind
               : undefined
           }
           actionsMenu={
@@ -581,7 +593,7 @@ export function OrgCatalogueModal({
           columnMenu={columnMenu}
           items={offered}
           // Icons wait on their own (`iconPending`): the rows never do.
-          isLoading={isLoading}
+          isLoading={listLoading}
           error={
             error instanceof Error
               ? error

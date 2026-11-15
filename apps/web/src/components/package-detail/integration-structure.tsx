@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { readIntegrationSource } from "../../lib/package-manifest";
 import { CopyBlock } from "../copy-block";
+import { LocalUnavailableHint } from "../integration-source-label";
 import { SettingValue } from "../settings/setting-row";
 
 function accessInfo(detail: IntegrationDetailWire) {
@@ -33,6 +34,12 @@ export function IntegrationFunctioning({ detail }: { detail: IntegrationDetailWi
               ? "integration.structure.local"
               : "integration.structure.remote",
           )}
+          {source.kind === "local" && (
+            // The instance may be unable to run local servers: say so beside the mode.
+            <span className="ml-2 inline-flex">
+              <LocalUnavailableHint />
+            </span>
+          )}
         </SettingValue>
       )}
       {source?.kind === "local" && (
@@ -41,15 +48,12 @@ export function IntegrationFunctioning({ detail }: { detail: IntegrationDetailWi
             <code>{source.serverType}</code> · <code>{source.entryPoint}</code>
           </SettingValue>
           <SettingValue label={t("integration.structure.localTools")}>
-            {source.tools.length > 0 ? (
-              <>
-                {t("integration.structure.localToolsCount", { count: source.tools.length })}
-                {" : "}
-                {source.tools.map((tool) => tool.name).join(", ")}
-              </>
-            ) : (
-              t("integration.structure.localToolsNone")
-            )}
+            {source.tools.length > 0
+              ? t("integration.structure.localToolsList", {
+                  count: source.tools.length,
+                  names: source.tools.map((tool) => tool.name).join(", "),
+                })
+              : t("integration.structure.localToolsNone")}
           </SettingValue>
         </>
       )}

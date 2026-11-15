@@ -355,7 +355,9 @@ function IntegrationEditorInner({
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
   // The saved draft's files: the local server's entry point is checked against them.
-  const fileIndex = usePackageFileIndex(packageId);
+  // Read only for a local source: nothing else checks files.
+  const isLocal = getSource(state.manifest).kind === "local";
+  const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
   const serverFiles = fileIndex.data?.data.map((file) => file.path);
   const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
 
@@ -429,6 +431,8 @@ function IntegrationEditorInner({
           manifest={state.manifest}
           onChange={onManifestChange}
           serverFiles={serverFiles}
+          // A refused save names the empty required fields of the Source tab.
+          showErrors={editor.error === t("integrationEditor.source.errorLocalServer")}
         />
       )}
 

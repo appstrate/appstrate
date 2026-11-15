@@ -1240,7 +1240,7 @@
   "integrations.source.remote": "Remote MCP",
   "integrations.source.local": "Local MCP",
   "integrations.source.localUnavailable": "unavailable here",
-  "integrations.source.localUnavailableHint": "This server runs in the sandbox: this instance's execution mode (process) cannot isolate it.",
+  "integrations.source.localUnavailableHint": "This server runs in the sandbox: this instance cannot isolate it.",
   "integration.admin.creation.admins": "Organization administrators",
   "integration.admin.creation.members": "All workspace members",
   "integration.admin.usage.choice": "User-selected connection",
@@ -1471,8 +1471,8 @@
   "creation.fromUrl.description": "Paste the address of an MCP server. Appstrate guides you through adding its tools.",
   "integration.structure.localServer": "Local server",
   "integration.structure.localTools": "Declared tools",
-  "integration.structure.localToolsCount_one": "{{count}} tool",
-  "integration.structure.localToolsCount_other": "{{count}} tools",
+  "integration.structure.localToolsList_one": "{{count}} tool: {{names}}",
+  "integration.structure.localToolsList_other": "{{count}} tools: {{names}}",
   "integration.structure.localToolsNone": "No catalog declared",
   "integrations.exportMcpb": "Export as .mcpb"
 }

@@ -15,7 +15,7 @@
  *  4. the agent page fetching the agent's runs a second time, unpaginated and
  *     under a key of its own, to learn whether there is any;
  *  5. a launch refetching the run lists of the page it is leaving;
- *  6. a skill or MCP-server page reading the lists only an agent page shows.
+ *  6. a skill or integration page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test

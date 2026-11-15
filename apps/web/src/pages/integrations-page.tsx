@@ -38,6 +38,7 @@ import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { IntegrationSourceLabel } from "../components/integration-source-label";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
@@ -171,17 +172,26 @@ export function IntegrationsPage() {
             <PackageCard
               {...packageCardItem(integration, "integration")}
               meta={
-                connectionCounts &&
-                t("connections.connectionCount", {
-                  count: connectionCounts.get(integration.id) ?? 0,
-                })
+                <>
+                  <IntegrationSourceLabel source={integration.source_kind} />
+                  {connectionCounts && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span className="shrink-0">
+                        {t("connections.connectionCount", {
+                          count: connectionCounts.get(integration.id) ?? 0,
+                        })}
+                      </span>
+                    </>
+                  )}
+                </>
               }
             />
           )}
           isLoading={isLoading}
           failure={error}
           empty={empty}
-          placeholder={<PackageCardSkeleton />}
+          placeholder={<PackageCardSkeleton meta="both" />}
         />
       )}
       <ListFooter

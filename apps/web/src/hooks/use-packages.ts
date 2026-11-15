@@ -53,7 +53,7 @@ function useCanSeePackage(type: PackageType): boolean {
   return packageSightPermissions(type).some(can);
 }
 
-// --- Packages — one factory over the four types ---
+// --- Packages — one factory over the package types ---
 // `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths stay literal for the typed client.
 
 /** A detail plus the response's `ETag` (sent back as `If-Match`); `null` when absent. */
@@ -343,6 +343,8 @@ export function useIntegrationMcpbExport(scope: string | undefined, name: string
             parseAs: "blob",
           }),
         `${name}-${version}.mcpb`,
+        // The server's refusal says why this integration has no .mcpb form.
+        { surfaceRefusal: true },
       );
     },
     [scope, name],

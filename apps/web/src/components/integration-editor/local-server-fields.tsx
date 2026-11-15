@@ -14,19 +14,35 @@ import { LOCAL_SERVER_TYPES, entryPointMissing, type SourceState } from "./utils
 /** One argument per line; blank lines are not arguments. */
 const parseArgs = (text: string) => text.split("\n").filter((line) => line.trim() !== "");
 
+const sameArgs = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((arg, index) => arg === b[index]);
+
 interface LocalServerFieldsProps {
   source: SourceState;
   onChange: (patch: Partial<SourceState>) => void;
   /** Paths of the package's draft files; absent while unknown (no entry-point check then). */
   serverFiles?: readonly string[];
+  /** Flag the empty required fields (after a refused save). */
+  showErrors?: boolean;
 }
 
-export function LocalServerFields({ source, onChange, serverFiles }: LocalServerFieldsProps) {
-  const { t } = useTranslation("agents");
-  // The textarea keeps what is typed (a trailing newline is not an argument yet); a change of the
-  // manifest from elsewhere (JSON editor) replaces it.
+export function LocalServerFields({
+  source,
+  onChange,
+  serverFiles,
+  showErrors,
+}: LocalServerFieldsProps) {
+  const { t } = useTranslation(["agents", "common"]);
+  const requiredError = (value: string) =>
+    showErrors && !value.trim() ? t("validation.required", { ns: "common" }) : undefined;
+  // The textarea keeps what is typed (a trailing newline or a blank line is not an argument); a
+  // change of the manifest from elsewhere (JSON editor) replaces it. `seenArgs` is the last value
+  // this component read or emitted: only a different incoming one resets the text, so an argument
+  // the text cannot carry back (an empty string) does not loop.
   const [argsText, setArgsText] = useState(source.args.join("\n"));
-  if (parseArgs(argsText).join("\n") !== source.args.join("\n")) {
+  const [seenArgs, setSeenArgs] = useState(source.args);
+  if (!sameArgs(seenArgs, source.args)) {
+    setSeenArgs(source.args);
     setArgsText(source.args.join("\n"));
   }
 
@@ -51,6 +67,7 @@ export function LocalServerFields({ source, onChange, serverFiles }: LocalServer
           value={source.entryPoint}
           onChange={(v) => onChange({ entryPoint: v })}
           placeholder="server/index.ts"
+          error={requiredError(source.entryPoint)}
           description={t("integrationEditor.source.serverEntryPointDesc")}
         />
         {serverFiles && entryPointMissing(source.entryPoint, serverFiles) && (
@@ -72,6 +89,7 @@ export function LocalServerFields({ source, onChange, serverFiles }: LocalServer
         value={source.command}
         onChange={(v) => onChange({ command: v })}
         placeholder="bun"
+        error={requiredError(source.command)}
         description={t("integrationEditor.source.serverCommandDesc")}
       />
       <FormField
@@ -80,8 +98,10 @@ export function LocalServerFields({ source, onChange, serverFiles }: LocalServer
         type="textarea"
         value={argsText}
         onChange={(v) => {
+          const args = parseArgs(v);
           setArgsText(v);
-          onChange({ args: parseArgs(v) });
+          setSeenArgs(args);
+          onChange({ args });
         }}
         placeholder={"server/index.ts\n--stdio"}
         description={t("integrationEditor.source.serverArgsDesc")}

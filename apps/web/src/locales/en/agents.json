@@ -9,7 +9,6 @@
   "packageOverview.liveUsage": "Current package usage across all versions.",
   "packageOverview.openFiles": "Browse package files",
   "packageOverview.skillFiles": "Browse SKILL.md and any scripts and references that accompany the method.",
-  "packageOverview.serverFiles": "Browse the manifest and server files in the version being viewed.",
   "version.status": "Status",
   "version.search": "Search versions…",
   "version.created": "Created",
@@ -370,9 +369,11 @@
   "run.turnsPeakRelativeHint": "Context window unknown for this run: bars are relative to the highest value reached, not to the model window.",
   "import.title": "Import package",
   "import.dropText": "Drop an AFPS, AFPS-bundle, or ZIP file here",
+  "import.dropTextMcpb": "Drop an AFPS, AFPS-bundle, MCPB, or ZIP file here",
   "import.dropHint": "or click to browse",
   "import.importing": "Importing...",
-  "import.errZip": "Only .afps, .afps-bundle, .mcpb and .zip files are accepted",
+  "import.errZip": "Only .afps, .afps-bundle and .zip files are accepted",
+  "import.errZipMcpb": "Only .afps, .afps-bundle, .mcpb and .zip files are accepted",
   "bundle.download": "Download bundle (with deps)",
   "bundle.requiresVersion": "Publish a version of the agent first",
   "import.errSize": "File exceeds 10 MB",
@@ -1009,5 +1010,5 @@
   "integrationEditor.source.serverArgs": "Arguments",
   "integrationEditor.source.serverArgsDesc": "One argument per line.",
   "integrationEditor.source.serverHint": "Literal environment variables (mcp_config.env) and the tool catalog (tools) are edited in the JSON manifest; they are preserved.",
-  "integrationEditor.source.errorLocalServer": "The local server’s entry point and command are required."
+  "integrationEditor.source.errorLocalServer": "Fill in the local server’s entry point and command on the Source tab."
 }

@@ -9,7 +9,6 @@
   "packageOverview.liveUsage": "Utilisation actuelle du package, toutes versions confondues.",
   "packageOverview.openFiles": "Parcourir les fichiers du package",
   "packageOverview.skillFiles": "Consultez SKILL.md et les éventuels scripts et références qui accompagnent la méthode.",
-  "packageOverview.serverFiles": "Consultez le manifeste et les fichiers du serveur dans la version affichée.",
   "version.status": "Statut",
   "version.search": "Rechercher une version…",
   "version.created": "Créée le",
@@ -370,9 +369,11 @@
   "run.turnsPeakRelativeHint": "Fenêtre de contexte inconnue pour cette exécution : les barres sont proportionnelles au maximum atteint, pas à la fenêtre du modèle.",
   "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier AFPS, AFPS-bundle ou ZIP ici",
+  "import.dropTextMcpb": "Glissez un fichier AFPS, AFPS-bundle, MCPB ou ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",
   "import.importing": "Import en cours...",
-  "import.errZip": "Seuls les fichiers .afps, .afps-bundle, .mcpb et .zip sont acceptés",
+  "import.errZip": "Seuls les fichiers .afps, .afps-bundle et .zip sont acceptés",
+  "import.errZipMcpb": "Seuls les fichiers .afps, .afps-bundle, .mcpb et .zip sont acceptés",
   "bundle.download": "Télécharger le bundle (avec dépendances)",
   "bundle.requiresVersion": "Publiez d'abord une version de l'agent",
   "import.errSize": "Le fichier dépasse 10 Mo",
@@ -1009,5 +1010,5 @@
   "integrationEditor.source.serverArgs": "Arguments",
   "integrationEditor.source.serverArgsDesc": "Un argument par ligne.",
   "integrationEditor.source.serverHint": "Les variables d’environnement littérales (mcp_config.env) et le catalogue d’outils (tools) se modifient dans le manifeste JSON ; ils sont conservés.",
-  "integrationEditor.source.errorLocalServer": "Le point d’entrée et la commande du serveur local sont requis."
+  "integrationEditor.source.errorLocalServer": "Renseignez le point d’entrée et la commande du serveur local dans l’onglet Source."
 }

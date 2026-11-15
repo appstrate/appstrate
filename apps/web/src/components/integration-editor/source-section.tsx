@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { LocalServerFields } from "./local-server-fields";
 import { getSource, setSource, type SourceKind } from "./utils";
 
@@ -10,11 +11,14 @@ interface SourceSectionProps {
   onChange: (manifest: Record<string, unknown>) => void;
   /** Paths of the package's draft files, to check the local entry point against. */
   serverFiles?: readonly string[];
+  /** Flag the empty required fields (after a refused save). */
+  showErrors?: boolean;
 }
 
-export function SourceSection({ manifest, onChange, serverFiles }: SourceSectionProps) {
+export function SourceSection({ manifest, onChange, serverFiles, showErrors }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const source = getSource(manifest);
+  const { localIntegrations } = useAppConfig().features;
   const update = (patch: Partial<typeof source>) =>
     onChange(setSource(manifest, { ...source, ...patch }));
 
@@ -28,6 +32,16 @@ export function SourceSection({ manifest, onChange, serverFiles }: SourceSection
         enumValues={["remote", "local", "none"]}
         description={t("integrationEditor.source.kindDesc")}
       />
+      {source.kind === "local" && !localIntegrations && (
+        // Authoring stays possible; it only cannot run on this instance.
+        <p className="text-muted-foreground -mt-3 text-sm" data-testid="local-unavailable-notice">
+          <span className="font-medium">
+            {t("integrations.source.localUnavailable", { ns: "settings" })}
+          </span>
+          {" · "}
+          {t("integrations.source.localUnavailableHint", { ns: "settings" })}
+        </p>
+      )}
 
       {source.kind === "remote" && (
         <>
@@ -59,7 +73,12 @@ export function SourceSection({ manifest, onChange, serverFiles }: SourceSection
       )}
 
       {source.kind === "local" && (
-        <LocalServerFields source={source} onChange={update} serverFiles={serverFiles} />
+        <LocalServerFields
+          source={source}
+          onChange={update}
+          serverFiles={serverFiles}
+          showErrors={showErrors}
+        />
       )}
 
       {source.kind === "none" && (

@@ -65,7 +65,6 @@ export function CreationHandoffChoices({
             title: t("creation.fromUrl.title"),
             description: t("creation.fromUrl.description"),
             onClick: onFromUrl,
-            disabled: false,
           },
         ]
       : []),
@@ -75,7 +74,6 @@ export function CreationHandoffChoices({
       title: t("creation.manual.title"),
       description: t("creation.manual.description"),
       onClick: onManual,
-      disabled: false,
     },
     {
       id: "chat",
@@ -93,7 +91,6 @@ export function CreationHandoffChoices({
       title: t("creation.import.title"),
       description: t("creation.import.description"),
       onClick: onImport,
-      disabled: false,
     },
   ];
 

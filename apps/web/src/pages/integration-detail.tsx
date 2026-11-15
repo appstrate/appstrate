@@ -63,6 +63,8 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
+import { mcpbExportRefusal } from "../lib/mcpb-exportability";
+import { refusalMessage } from "../lib/mutation-error";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import {
@@ -415,6 +417,11 @@ export function IntegrationDetailPage() {
   const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
 
+  // `.mcpb` is offered for a local integration; one the format cannot carry shows why instead.
+  const mcpbOffered = m.source?.kind === "local";
+  const mcpbRefusal = mcpbOffered ? mcpbExportRefusal(m) : null;
+  const mcpbBlockedReason = mcpbRefusal ? (refusalMessage(mcpbRefusal) ?? undefined) : undefined;
+
   const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
     { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
     { value: "connections", label: t("integration.tabs.connections"), icon: Plug },
@@ -471,7 +478,8 @@ export function IntegrationDetailPage() {
                 isHistoricalVersion={false}
                 downloadVersion={version}
                 onDownload={downloadPackage}
-                onExportMcpb={detail?.manifest.source?.kind === "local" ? exportMcpb : undefined}
+                onExportMcpb={mcpbOffered ? exportMcpb : undefined}
+                mcpbBlockedReason={mcpbBlockedReason}
                 isActiveHere={active}
               />
             )}

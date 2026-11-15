@@ -4,7 +4,7 @@ import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createIntegration } from "../../helpers/seed.ts";
 
 for (const screen of [
-  { path: "/integrations?execution=local", key: "integrations" },
+  { path: "/integrations", key: "integrations" },
   { path: "/files", key: "documents" },
 ]) {
   test(`${screen.key} defaults to cards and respects existing choices`, async ({
@@ -46,7 +46,7 @@ test("integration cards remain reachable on a narrow dark screen", async ({
   const name = `grid-mobile-${Date.now()}`;
   const scope = `@${browserCtx.org.orgSlug}`;
   await createIntegration(apiClient, scope, name);
-  await page.goto("/integrations?execution=local");
+  await page.goto("/integrations");
   const link = page.getByRole("link", { name: `Test Integration ${name}`, exact: true });
   await expect(link).toBeVisible();
   await expect(page.getByText(/0 connexion/)).toBeVisible();
