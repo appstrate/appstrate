@@ -11,6 +11,7 @@ const {
   holdsOverview,
   overviewEntry,
   overviewLanding,
+  overviewLapsed,
   overviewListVerdict,
   overviewModeOn,
   overviewOffered,
@@ -48,6 +49,14 @@ describe("overviewModeOn", () => {
     expect(overviewModeOn(false, TWO)).toBe(false);
     // A reader who falls below two spaces: off, whatever was chosen.
     expect(overviewModeOn(true, [space("spc_a", ["runs:read"])])).toBe(false);
+  });
+});
+
+describe("overviewLapsed", () => {
+  it("lapses once the listing proves the mode no longer offered, not before it answers", () => {
+    expect(overviewLapsed([space("spc_a", ["runs:read"])])).toBe(true);
+    expect(overviewLapsed(TWO)).toBe(false);
+    expect(overviewLapsed(undefined)).toBe(false);
   });
 });
 

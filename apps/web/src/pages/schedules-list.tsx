@@ -1,23 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
+import { useAllSchedules } from "../hooks/use-schedules";
+import { useSpaceFilter } from "../hooks/use-space-filter";
 import { PageHeader } from "../components/page-header";
-import { SchedulesCollection } from "../components/schedules-collection";
+import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
+import { SchedulesTable } from "../components/schedules-table";
+import { scheduleAgentName, useScheduleColumns } from "../components/schedule-columns";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
+import { LIST_ADMITS } from "../lib/space-lists";
+import { matchesSearch } from "../lib/strings";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { NewScheduleModal } from "../components/new-schedule-modal";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+
+/** The values the state dimension accepts — a URL is user input. */
+const STATES = ["enabled", "disabled"] as const;
 
 export function SchedulesListPage() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  // « Vue d'ensemble »: every space by default, read-only (a schedule is created in one space).
-  const { on: overview } = useOverviewMode();
-  const canCreate = !overview && can("schedules:write");
+  const { spaceIds, spanning, scope } = useSpaceFilter(LIST_ADMITS.schedules);
+  const { data: schedules, isLoading, isError, error } = useAllSchedules(spaceIds);
+  const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
+  // A schedule is created in one space, which a list spanning spaces does not name.
+  const canCreate = !spanning && can("schedules:write");
 
   const createAction: MenuAction = {
     id: "create",
@@ -27,6 +41,44 @@ export function SchedulesListPage() {
     hidden: !canCreate,
   };
 
+  const allColumns = useScheduleColumns({ spanning });
+  const { columns, menu } = useColumnVisibility("schedules", allColumns);
+
+  // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
+  // with no paging and no query parameters, so the box searches every schedule
+  // rather than the page on screen — the same test the package lists pass and
+  // the run list fails, which is why the run list waited for a `q`.
+  //
+  // The state still rides in the URL, like the runs page: a filtered list is
+  // what people paste to each other, whoever does the filtering.
+  const list = useListParams(["state"]);
+  const query = list.search;
+  const states = list.values("state", STATES);
+  const shown = useMemo(() => {
+    return (schedules ?? []).filter((schedule) => {
+      const enabled = schedule.enabled ?? true;
+      const key = enabled ? "enabled" : "disabled";
+      if (states.length > 0 && !states.includes(key)) return false;
+      return matchesSearch(query, [schedule.name, scheduleAgentName(schedule)]);
+    });
+  }, [schedules, query, states]);
+
+  const filtering = query.trim() !== "" || states.length > 0;
+  const emptyBody = filtering ? (
+    <NoMatchState message={t("schedules.noMatch")} />
+  ) : !spanning ? (
+    <EmptyState
+      message={t("schedules.empty")}
+      hint={t("schedules.emptyHint")}
+      icon={Calendar}
+      compact
+    >
+      <EmptyStateAction action={createAction} />
+    </EmptyState>
+  ) : (
+    <EmptyState message={t("schedules.empty")} icon={Calendar} compact />
+  );
+
   return (
     <div>
       <PageHeader
@@ -35,9 +87,38 @@ export function SchedulesListPage() {
         breadcrumbs={[{ label: t("common:nav.schedules") }]}
         actions={canCreate ? <PageActionsMenu actions={[createAction]} /> : undefined}
       />
-      <SchedulesCollection
-        spaceDefault={overview ? "all" : "current"}
-        createAction={overview ? undefined : createAction}
+
+      <ListToolbar
+        search={{ value: query, onChange: list.setSearch, placeholder }}
+        scope={scope}
+        filters={[
+          {
+            id: "state",
+            label: t("providers.col.state"),
+            values: states,
+            onChange: list.setValues("state"),
+            options: [
+              { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
+              { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
+            ],
+          },
+        ]}
+        onReset={list.reset}
+        columns={menu}
+      />
+
+      <SchedulesTable
+        schedules={shown}
+        columns={columns}
+        isLoading={isLoading}
+        isError={isError}
+        error={<ErrorState error={error} compact />}
+        // A list nobody filtered and a filter that matched nothing are two
+        // different sentences. The bar stays in either case.
+        empty={emptyBody}
+      />
+      <ListFooter
+        count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />
       {newScheduleOpen && <NewScheduleModal onClose={() => setNewScheduleOpen(false)} />}
     </div>

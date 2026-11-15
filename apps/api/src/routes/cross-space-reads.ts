@@ -19,8 +19,9 @@ import { runReadGrant } from "../lib/run-visibility.ts";
 import { getActor } from "../lib/actor.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
-import { parseGlobalRunListQuery } from "./runs.ts";
-import { fileLifecycleCeiling, orgListFilesQuerySchema, parseListFilesQuery } from "./files.ts";
+import { parseGlobalRunListQuery } from "../lib/run-list-query.ts";
+import { parseListFilesQuery } from "../lib/file-list-query.ts";
+import { fileLifecycleCeiling } from "./files.ts";
 
 export function createCrossSpaceReadsRouter() {
   const router = new Hono<AppEnv>();
@@ -29,7 +30,9 @@ export function createCrossSpaceReadsRouter() {
   // authorization IS the per-space grant list, read from the caller's role in
   // each space they reach (a pinned credential reaches its space only). The
   // ceiling guard refuses a delegated credential whose scopes omit the list's
-  // read permission, instead of answering it an empty page.
+  // read permission, instead of answering it an empty page. Each route reads
+  // `spaceId` once and resolves its spaces before parsing any other parameter,
+  // so a refused end-user is a 403 whatever its query.
 
   router.get(
     "/:orgId/runs",
@@ -37,10 +40,10 @@ export function createCrossSpaceReadsRouter() {
     requireAnyCeiling(RUNS_READ_PERMISSIONS),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      const filters = parseGlobalRunListQuery(c);
-      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+      const spaces = await readableSpacesAcross(c, orgId, c.req.query("spaceId"), (permissions) =>
         canReadRuns((p) => permissions.has(p)),
       );
+      const filters = parseGlobalRunListQuery(c);
       const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
       const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
       setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
@@ -54,7 +57,7 @@ export function createCrossSpaceReadsRouter() {
     requireCeiling("schedules", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+      const spaces = await readableSpacesAcross(c, orgId, c.req.query("spaceId"), (permissions) =>
         permissions.has("schedules:read"),
       );
       const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
@@ -69,10 +72,11 @@ export function createCrossSpaceReadsRouter() {
     requireCeiling("files", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
-      const filters = parseListFilesQuery(c, orgListFilesQuerySchema);
-      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+      const { spaceId, ...query } = c.req.query();
+      const spaces = await readableSpacesAcross(c, orgId, spaceId, (permissions) =>
         permissions.has("files:read"),
       );
+      const filters = parseListFilesQuery(c, query);
       const grants = spaces.map((space) => fileReadGrant(space.id, space.permissions));
       return c.json(
         await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),

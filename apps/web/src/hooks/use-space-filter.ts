@@ -7,12 +7,10 @@ import { readList } from "../lib/list-params";
 import { admittingSpaces, type AdmitsList } from "../lib/space-lists";
 import { spaceLabel } from "../lib/space-label";
 import { useCurrentSpaceId } from "./use-current-space";
+import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 
 const PARAM = "spaceId";
-
-/** What a list shows while `?spaceId=` is absent: the current space (a page), or every admitting space (the overview). */
-export type SpaceDefault = "current" | "all";
 
 interface ListedSpace {
   id: string;
@@ -22,16 +20,17 @@ interface ListedSpace {
 
 /**
  * The spaces a list may span, and the ones it spans (empty: the current space's own route).
- * A page offers them from two admitting spaces and spans the URL's `spaceId` (stale ids dropped,
- * the current space alone meaning none). The overview offers every admitting space and spans the
- * URL's narrowing, else all of them. Exported for its test.
+ * Out of « Vue d'ensemble », they are offered from two admitting spaces and the list spans the
+ * URL's `spaceId` (stale ids dropped, the current space alone meaning none). In the mode, every
+ * admitting space is offered and the list spans the URL's narrowing, else all of them. Exported
+ * for its test.
  */
 export function spaceSelection<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
   raw: string | null,
   admits: AdmitsList,
   currentSpaceId: string | null,
-  spaceDefault: SpaceDefault,
+  overview: boolean,
 ): { offered: S[]; selected: S[] } {
   const admitting = admittingSpaces(spaces, admits);
   const ticked = new Set(
@@ -41,7 +40,7 @@ export function spaceSelection<S extends ListedSpace>(
     ),
   );
   const narrowed = admitting.filter((space) => ticked.has(space.id));
-  if (spaceDefault === "all") {
+  if (overview) {
     return { offered: admitting, selected: narrowed.length > 0 ? narrowed : admitting };
   }
   const offered = admitting.length >= 2 ? admitting : [];
@@ -55,36 +54,37 @@ export function storedSpaceIds(
   ticked: readonly string[],
   offered: readonly { id: string }[],
   currentSpaceId: string | null,
-  spaceDefault: SpaceDefault,
+  overview: boolean,
 ): string[] {
   const ids = offered.filter((space) => ticked.includes(space.id)).map((space) => space.id);
-  const isDefault =
-    spaceDefault === "all"
-      ? ids.length === offered.length
-      : ids.length === 1 && ids[0] === currentSpaceId;
+  const isDefault = overview
+    ? ids.length === offered.length
+    : ids.length === 1 && ids[0] === currentSpaceId;
   return isDefault ? [] : ids;
 }
 
 /**
  * The « Espace » scope of a list (runs, schedules, files), carried by the URL (`?spaceId=`)
- * outside the page's filters and their reset. Drawn from two offered spaces.
+ * outside the page's filters and their reset. Drawn from two offered spaces. A list that spans
+ * spaces (`spanning`) is read-only: a write acts in one space, which it does not name.
  */
-export function useSpaceFilter(admits: AdmitsList, spaceDefault: SpaceDefault = "current") {
+export function useSpaceFilter(admits: AdmitsList) {
   const { t } = useTranslation(["common"]);
   const [params, setParams] = useSearchParams();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
+  const { on: overview } = useOverviewMode();
   const { offered, selected } = spaceSelection(
     spaces,
     params.get(PARAM),
     admits,
     currentSpaceId,
-    spaceDefault,
+    overview,
   );
   const ids = (list: readonly { id: string }[]) => list.map((space) => space.id);
 
   const choose = (ticked: string[]) => {
-    const stored = storedSpaceIds(ticked, offered, currentSpaceId, spaceDefault);
+    const stored = storedSpaceIds(ticked, offered, currentSpaceId, overview);
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       if (stored.length === 0) next.delete(PARAM);
@@ -93,8 +93,7 @@ export function useSpaceFilter(admits: AdmitsList, spaceDefault: SpaceDefault = 
     });
   };
 
-  const implicit =
-    spaceDefault === "all" ? ids(offered) : ids(offered).filter((id) => id === currentSpaceId);
+  const implicit = overview ? ids(offered) : ids(offered).filter((id) => id === currentSpaceId);
   const scope: ScopeSpec | undefined =
     offered.length >= 2
       ? {
@@ -107,5 +106,5 @@ export function useSpaceFilter(admits: AdmitsList, spaceDefault: SpaceDefault = 
           onChange: choose,
         }
       : undefined;
-  return { spaceIds: ids(selected), selected, scope };
+  return { spaceIds: ids(selected), selected, spanning: selected.length > 0, scope };
 }

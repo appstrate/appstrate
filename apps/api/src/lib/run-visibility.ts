@@ -18,10 +18,11 @@
  * ownership question — which is why the file surfaces test whichever of the
  * two they already have loaded rather than joining back to the other.
  *
- * One semantic, four shapes — the read-all test itself, a WHERE fragment for
- * the queries that list, an ownership test for a loaded row, and the assertion
- * that turns it into the 404 a handler throws. Nothing re-derives ownership on
- * its own.
+ * One semantic, five shapes: the read-all test itself; per-space grants and
+ * the WHERE fragment over them, for the queries listing one space or several;
+ * the request-space WHERE fragment, `undefined` when nothing narrows; an
+ * ownership test for a loaded row; and the assertion that turns it into the
+ * 404 a handler throws. Nothing re-derives ownership on its own.
  */
 
 import type { Context } from "hono";
@@ -31,6 +32,7 @@ import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
+import { readsAgentContent } from "./package-access.ts";
 import { callerPermissions } from "./permissions.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -45,14 +47,18 @@ export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
   return permissions.has("runs:read-all");
 }
 
+/** Which runs of ONE space the caller reads: all of them, or their own. */
+export interface RunReach {
+  spaceId: string;
+  readAll: boolean;
+}
+
 /**
  * What the caller reads of ONE space's runs, from their effective set there: a
  * run list spanning spaces decides each row by its own space, never by the
- * request's. `agentInput` is `agents:read` there (`agentReadIsSummary`).
+ * request's. `agentInput` is {@link readsAgentContent} there.
  */
-export interface RunReadGrant {
-  spaceId: string;
-  readAll: boolean;
+export interface RunReadGrant extends RunReach {
   agentInput: boolean;
 }
 
@@ -60,7 +66,7 @@ export function runReadGrant(spaceId: string, permissions: ReadonlySet<string>):
   return {
     spaceId,
     readAll: canReadEveryRun(permissions),
-    agentInput: permissions.has("agents:read"),
+    agentInput: readsAgentContent(permissions),
   };
 }
 
@@ -94,7 +100,7 @@ function ownRunsFilter(actor: Actor): SQL {
  * {@link runVisibilityFilter}: every query spanning spaces narrows through it.
  */
 export function runReadCondition(
-  grants: readonly RunReadGrant[],
+  grants: readonly RunReach[],
   actor: Actor | null,
   ownOnly = false,
 ): SQL {

@@ -50,7 +50,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { useOverviewMode, useOverviewRouteRule } from "./hooks/use-overview-mode";
+import { useOverviewMode, useOverviewRules } from "./hooks/use-overview-mode";
 import { useSpaces } from "./hooks/use-spaces";
 import { overviewLanding } from "./lib/space-lists";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
@@ -442,7 +442,7 @@ function MainLayout() {
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
-  useOverviewRouteRule();
+  useOverviewRules();
   useGlobalRunSync();
 
   return (

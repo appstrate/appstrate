@@ -48,9 +48,14 @@ export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boo
   return admittingSpaces(spaces, admits).length >= 2;
 }
 
-/** The mode is on while the reader chose it AND it is offered; a lost space turns it off silently. */
+/** The mode is on while the reader chose it AND it is offered. */
 export function overviewModeOn(chosen: boolean, spaces: readonly ListedSpace[] | undefined) {
   return chosen && overviewOffered(spaces);
+}
+
+/** The listing proves the mode no longer offered (a space lost): the choice is withdrawn. */
+export function overviewLapsed(spaces: readonly ListedSpace[] | undefined): boolean {
+  return spaces !== undefined && !overviewOffered(spaces);
 }
 
 const LIST_ROUTE: Record<SpaceList, RoutePath> = {

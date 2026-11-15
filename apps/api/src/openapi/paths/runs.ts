@@ -63,7 +63,7 @@ const runListQueryParameters = [
     in: "query",
     schema: { type: "string", enum: ["me"] },
     description:
-      "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
+      "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
   },
   {
     name: "limit",

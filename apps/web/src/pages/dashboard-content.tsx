@@ -17,6 +17,7 @@ import { ChoiceCard } from "../components/choice-card";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
+import { scheduleAgentName } from "../components/schedule-columns";
 import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
@@ -234,7 +235,7 @@ function DashboardScheduleRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {agent?.display_name ?? schedule.packageId}
+          {scheduleAgentName(schedule)}
         </p>
       </div>
       <div className="shrink-0 text-right">

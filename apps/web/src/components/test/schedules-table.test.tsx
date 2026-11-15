@@ -44,7 +44,7 @@ describe("the schedules table", () => {
     const ids = (spanning: boolean) => {
       let columns: DataColumn<EnrichedSchedule>[] = [];
       function Probe() {
-        columns = useScheduleColumns({ agentName: () => "Agent", spanning });
+        columns = useScheduleColumns({ spanning });
         return null;
       }
       render(<Probe />);

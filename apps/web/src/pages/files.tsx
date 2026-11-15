@@ -1,24 +1,80 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The Files page: the current space's files gallery, and the storage alert of the org. */
+/**
+ * Files gallery. Paginated (keyset "load more") list of every file
+ * visible to the caller in the current space, or in the spaces its « Espace »
+ * scope spans, with a purpose filter. Visibility is the API's
+ * (container-inherited ACL): members see the space's files, end-users see only
+ * their own.
+ */
 
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useFilesPaged, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
-import { FilesCollection } from "../components/files-collection";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { ListViewTabs } from "../components/list-view-tabs";
+import { useListView } from "../stores/list-view-store";
+import { DocumentListPanel } from "../components/document-list-panel";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { LIST_ADMITS } from "../lib/space-lists";
+import { useCanReach } from "../hooks/use-can-reach";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+
+const PURPOSES = ["agent_output", "user_upload"] as const;
 
 export function FilesPage() {
-  const { t } = useTranslation(["files", "common"]);
   // Remount on space switch so the loaded pages reset.
   const spaceId = useCurrentSpaceId();
-  const { storage, limitBytes: limit } = useOrgStorage();
+  return <DocumentsPageContent key={spaceId ?? "none"} />;
+}
+
+function DocumentsPageContent() {
+  const { t } = useTranslation(["files", "common"]);
+  const list = useListParams(["purpose"]);
+  const purposes = list.values("purpose", PURPOSES);
+  const search = list.search;
+  const { spaceIds, selected: spaces, spanning, scope } = useSpaceFilter(LIST_ADMITS.files);
+  const canReach = useCanReach();
+  const [view, setView] = useListView("documents");
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
+  const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
+  const query = useDebouncedValue(search);
+
+  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
+    search: query,
+    purpose: purposes.length === 1 ? purposes[0] : undefined,
+    spaceIds,
+  });
+  const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
+
+  // A row's run opens in the row's space: judged by that space's grants when the list spans spaces.
+  const readsRunsHere = canReach("/agents/:scope/:name/runs/:runId");
+  const showRunLink = (doc: FileDto) => {
+    if (!spanning) return readsRunsHere;
+    const space = spaces.find((s) => s.id === doc.spaceId);
+    return !!space && LIST_ADMITS.runs(space.permissions);
+  };
+
+  const filtering = purposes.length > 0 || query.trim() !== "";
+  const countLabel = hasNextPage
+    ? t("page.countLoaded", { count: files.length })
+    : t("page.count", { count: files.length });
   const overLimit = storage !== undefined && limit !== null && storage.used_bytes >= limit;
-  // « Vue d'ensemble »: every space by default.
-  const { on: overview } = useOverviewMode();
+  const footerLabel = usageLabel ? (
+    <>
+      {countLabel} <span aria-hidden>·</span> {t("storage.usage", { usage: usageLabel })}
+    </>
+  ) : (
+    countLabel
+  );
 
   return (
     <div>
@@ -27,13 +83,67 @@ export function FilesPage() {
         variant="collection"
         breadcrumbs={[{ label: t("common:nav.files") }]}
       />
+
       {overLimit && (
         <Alert variant="warning" className="mb-4">
           <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
         </Alert>
       )}
-      <FilesCollection key={spaceId ?? "none"} spaceDefault={overview ? "all" : "current"} />
+
+      <DocumentListPanel
+        documents={files}
+        display={view}
+        isLoading={isLoading}
+        error={error}
+        tableLabel={t("tableLabel")}
+        toolbar={({ columns }) => (
+          <ListToolbar
+            search={{
+              value: search,
+              onChange: list.setSearch,
+              placeholder: searchPlaceholder,
+            }}
+            scope={scope}
+            filters={[
+              {
+                id: "purpose",
+                label: t("column.purpose"),
+                values: purposes,
+                onChange: list.setValues("purpose"),
+                options: [
+                  { value: "agent_output", label: t("filter.agent_output") },
+                  { value: "user_upload", label: t("filter.user_upload") },
+                ],
+              },
+            ]}
+            onReset={list.reset}
+            columns={view === "table" ? columns : undefined}
+            actions={<ListViewTabs view={view} onChange={setView} />}
+          />
+        )}
+        empty={
+          filtering
+            ? { message: t("page.noMatch"), compact: true }
+            : { message: t("page.empty"), hint: t("page.emptyHint") }
+        }
+        showRunLink={showRunLink}
+        spanning={spanning}
+        footer={
+          <ListFooter count={isLoading || error ? undefined : footerLabel}>
+            {hasNextPage && (
+              <PendingButton
+                variant="outline"
+                size="sm"
+                pending={isFetchingNextPage}
+                onClick={() => void fetchNextPage()}
+              >
+                {t("page.loadMore")}
+              </PendingButton>
+            )}
+          </ListFooter>
+        }
+      />
     </div>
   );
 }

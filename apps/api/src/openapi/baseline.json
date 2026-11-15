@@ -2792,7 +2792,7 @@
               "type": "string",
               "enum": ["me"]
             },
-            "description": "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org."
+            "description": "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
           },
           {
             "name": "limit",
@@ -2940,7 +2940,7 @@
               "type": "string",
               "enum": ["me"]
             },
-            "description": "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org."
+            "description": "Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
           },
           {
             "name": "limit",
@@ -5444,6 +5444,7 @@
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z",
+                  "agent_name": "Email Sorter",
                   "actor_name": "Pierre",
                   "actor_type": "user",
                   "running_runs": 0,
@@ -5579,6 +5580,7 @@
                   "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-14T14:00:00Z",
                   "updatedAt": "2026-01-15T09:00:05Z",
+                  "agent_name": "Email Sorter",
                   "actor_name": "Pierre",
                   "actor_type": "user",
                   "running_runs": 0,
@@ -26884,9 +26886,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           }
@@ -32593,7 +32592,7 @@
         "name": "spaceId",
         "in": "query",
         "required": false,
-        "description": "Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing.",
+        "description": "Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing.",
         "schema": {
           "type": "string"
         }
@@ -34984,6 +34983,7 @@
           "next_run_at",
           "createdAt",
           "updatedAt",
+          "agent_name",
           "actor_name",
           "actor_type",
           "running_runs",
@@ -35099,6 +35099,10 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "agent_name": {
+            "type": ["string", "null"],
+            "description": "Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists."
           },
           "actor_name": {
             "type": ["string", "null"],

@@ -118,6 +118,15 @@ describe("the switcher", () => {
     expect(off).toContain("Studio");
   });
 
+  it("names the organization and the space, or the mode, in its accessible name", () => {
+    expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain(
+      "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Vue d'ensemble)\"",
+    );
+    expect(renderIn(false, <OrgSwitcher variant="brand" />).html).toContain(
+      "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Studio)\"",
+    );
+  });
+
   it("puts its tile in the space's slot, in the sidebar and the phone header alike", () => {
     for (const variant of ["brand", "mobile"] as const) {
       expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(

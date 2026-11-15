@@ -7354,6 +7354,8 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists. */
+            agent_name: string | null;
             /** @description Display name of the schedule actor */
             actor_name: string | null;
             /** @enum {string|null} */
@@ -7964,7 +7966,7 @@ export interface components {
         Offset: number;
         /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
         RunStatusFilter: ("pending" | "running" | "success" | "failed" | "timeout" | "cancelled")[];
-        /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+        /** @description Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
         OrgSpaceFilter: string;
         /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
         RunSearch: string;
@@ -9481,6 +9483,7 @@ export interface operations {
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z",
+                     *       "agent_name": "Email Sorter",
                      *       "actor_name": "Pierre",
                      *       "actor_type": "user",
                      *       "running_runs": 0,
@@ -20277,7 +20280,7 @@ export interface operations {
     listOrgFiles: {
         parameters: {
             query?: {
-                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                /** @description Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
                 spaceId?: components["parameters"]["OrgSpaceFilter"];
                 /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
@@ -20379,7 +20382,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -20649,9 +20651,9 @@ export interface operations {
     listOrgRuns: {
         parameters: {
             query?: {
-                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                /** @description Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
                 spaceId?: components["parameters"]["OrgSpaceFilter"];
-                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 user?: "me";
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
@@ -20711,7 +20713,7 @@ export interface operations {
     listOrgSchedules: {
         parameters: {
             query?: {
-                /** @description Only these spaces: one space id, or several separated by commas. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
+                /** @description Only these spaces: one value holding one space id or several separated by commas (`?spaceId=spc_a,spc_b`), never the parameter repeated. Empty segments are ignored, and an empty value means no filter. An id that names no space the caller holds a role in — whether it does not exist or is not theirs to reach — is rejected with `400` (`param: spaceId`), the same answer either way. A space the caller reaches without the list's permission contributes nothing. */
                 spaceId?: components["parameters"]["OrgSpaceFilter"];
             };
             header?: never;
@@ -24496,7 +24498,7 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 user?: "me";
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
@@ -26000,6 +26002,7 @@ export interface operations {
                      *       "next_run_at": "2026-01-16T09:00:00Z",
                      *       "createdAt": "2026-01-14T14:00:00Z",
                      *       "updatedAt": "2026-01-15T09:00:05Z",
+                     *       "agent_name": "Email Sorter",
                      *       "actor_name": "Pierre",
                      *       "actor_type": "user",
                      *       "running_runs": 0,

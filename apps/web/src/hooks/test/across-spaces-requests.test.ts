@@ -22,7 +22,7 @@ beforeEach(() => {
 afterEach(() => get.mockRestore());
 
 describe("fetchSchedules", () => {
-  it("asks the current space by default, as it always did", async () => {
+  it("asks the current space without ticked spaces", async () => {
     await fetchSchedules("org_1", undefined);
     await fetchSchedules("org_1", []);
     expect(get.mock.calls).toEqual([["/api/schedules"], ["/api/schedules"]]);

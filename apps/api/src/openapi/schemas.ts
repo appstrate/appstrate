@@ -1855,6 +1855,7 @@ export const schemas = {
       "next_run_at",
       "createdAt",
       "updatedAt",
+      "agent_name",
       "actor_name",
       "actor_type",
       "running_runs",
@@ -1904,6 +1905,11 @@ export const schemas = {
       next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+      agent_name: {
+        type: ["string", "null"],
+        description:
+          "Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists.",
+      },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
       running_runs: {

@@ -166,4 +166,33 @@ describe("a list spanning spaces", () => {
     expect(panel(true)).toContain('data-column="space"');
     expect(panel(false)).not.toContain('data-column="space"');
   });
+
+  it("offers no write on any row while spanning, the working space's included", () => {
+    // Keep and delete are its only deeds: its « … » menu shows exactly when one is offered.
+    const writable = fileFixture({
+      ...file,
+      expiresAt: "2026-12-01T00:00:00.000Z",
+      capabilities: {
+        ...file.capabilities,
+        download: false,
+        preview: false,
+        keep: true,
+        delete: true,
+      },
+    });
+    const rows = (spanning: boolean) =>
+      inSpace1(
+        <DocumentListPanel
+          documents={[writable, { ...writable, id: "file_ailleurs", spaceId: "spc_2" }]}
+          display="compact"
+          isLoading={false}
+          error={null}
+          empty={{ message: "Vide" }}
+          spanning={spanning}
+        />,
+      );
+    const actions = (html: string) => html.match(/aria-label="Plus d'actions pour/g)?.length ?? 0;
+    expect(actions(rows(false))).toBe(2);
+    expect(actions(rows(true))).toBe(0);
+  });
 });

@@ -108,7 +108,7 @@ export function usePaginatedRuns({
   return useQuery({
     queryKey: currentKey,
     queryFn: () =>
-      fetchRunPage(orgId, {
+      fetchRunPage({
         packageId,
         scheduleId,
         user,
@@ -116,7 +116,7 @@ export function usePaginatedRuns({
         status: statusQuery,
         search,
         unread,
-        spaceIds: acrossSpaces,
+        across: acrossSpaces && orgId ? { orgId, spaceIds: acrossSpaces } : undefined,
         limit,
         offset,
       }),
@@ -129,25 +129,27 @@ export function usePaginatedRuns({
   });
 }
 
+/** One page's question: the hook's filters, and the org's spaces when it spans several. */
+type RunPageRequest = Omit<UsePaginatedRunsOptions, "spaceIds" | "enabled"> & {
+  across?: { orgId: string; spaceIds: string[] };
+};
+
 /**
- * One page, from the door the options name. `user`/`kind`/`unread` exist only on the global
- * view; `spaceIds` moves it to the org route. Exported for its test.
+ * One page, from the door the request names. `user`/`kind`/`unread` exist only on the global
+ * view; `across` moves it to the org route. Exported for its test.
  */
-export async function fetchRunPage(
-  orgId: string | null,
-  {
-    packageId,
-    scheduleId,
-    user,
-    kind,
-    status,
-    search,
-    unread,
-    spaceIds,
-    limit,
-    offset,
-  }: UsePaginatedRunsOptions,
-): Promise<ListEnvelope<EnrichedRun>> {
+export async function fetchRunPage({
+  packageId,
+  scheduleId,
+  user,
+  kind,
+  status,
+  search,
+  unread,
+  across,
+  limit,
+  offset,
+}: RunPageRequest): Promise<ListEnvelope<EnrichedRun>> {
   if (scheduleId) {
     const { data } = await client.GET("/api/schedules/{id}/runs", {
       params: {
@@ -176,9 +178,12 @@ export async function fetchRunPage(
     q: search || undefined,
     unread: unread || undefined,
   };
-  if (spaceIds && spaceIds.length > 0) {
+  if (across) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: { path: { orgId: orgId! }, query: { ...query, spaceId: spaceIds.join(",") } },
+      params: {
+        path: { orgId: across.orgId },
+        query: { ...query, spaceId: across.spaceIds.join(",") },
+      },
     });
     return data!;
   }

@@ -1233,6 +1233,7 @@ export async function getFileForActor(
     )
     .limit(1);
   if (!row) return null;
+  const grant = fileReadGrant(scope.spaceId, permissions);
 
   if (row.runId) {
     // Run container: the file inherits its run's read-ACL, so resolving it by
@@ -1243,7 +1244,7 @@ export async function getFileForActor(
     // invariant in `lib/run-visibility.ts` says why the two agree.
     const run = await getRun(scope, row.runId);
     if (!run) return null;
-    if (!canReadEveryRun(permissions) && !ownsRun(actor, run)) return null;
+    if (!grant.readAll && !ownsRun(actor, run)) return null;
   } else if (row.chatSessionId) {
     // Chat container: sessions are per-dashboard-user; only the owner reads.
     if (actor.type !== "user") return null;
@@ -1268,13 +1269,13 @@ export async function getFileForActor(
     // widened by `read-all`: it was creator-only in its container and deletion
     // never opens it. This intentionally also narrows a run-origin detached
     // upload to creator-only — least surprise.
-    const supervises = row.purpose === "agent_output" && canReadEveryRun(permissions);
+    const supervises = row.purpose === "agent_output" && grant.readAll;
     if (!isFileCreator(row, actor) && !supervises) return null;
   }
 
   const capabilities = getFileCapabilities(row, actor, {
     visible: true,
-    canManage: permissions.has("files:delete"),
+    canManage: grant.manage,
     creatorCanManage: opts.creatorCanManage,
   });
   return { row: row as FileRow, capabilities };

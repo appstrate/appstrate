@@ -66,14 +66,18 @@ import { placementRowJoin } from "../services/package-placement.ts";
 export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
 /**
- * `agents:run` without `agents:read` — the caller sees what the launch form
- * needs and nothing an author would call the agent's content.
- *
- * The three routes above answer this ONE question to shape their projection;
- * none of them re-derives the condition.
+ * Does this permission set read an agent's content — its prompt, its stored
+ * input? `agents:read`; `agents:run` alone sees what the launch form needs.
+ * Every projection of agent content, in one space or per space of a list
+ * spanning several, asks this one predicate.
  */
+export function readsAgentContent(permissions: ReadonlySet<string>): boolean {
+  return permissions.has("agents:read");
+}
+
+/** {@link readsAgentContent}, negated, for the request's own space. */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
-  return !callerPermissions(c).has("agents:read");
+  return !readsAgentContent(callerPermissions(c));
 }
 
 /**

@@ -39,8 +39,8 @@ export function linkedSpaceStep(
 }
 
 /**
- * The SSE stream is scoped to the current space: a run or schedule list spanning spaces polls
- * while mounted, or it would never see a new row of another space. React Query pauses it in a
+ * The SSE stream is scoped to the current space: a run, schedule or file list spanning spaces
+ * polls while mounted, or it would never see a new row of another space. React Query pauses it in a
  * hidden tab. Same period as the stream's reconnect reconciliation.
  */
 export const ACROSS_SPACES_POLL_MS = 10_000;

@@ -29,7 +29,8 @@
  * | guest session                                | no row anywhere                                | empty page, 200                                           |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)      | the owner's own rows of Default                           |
  * | API key pinned to Un, scopes `files:read` + `runs:read-all` | Un only, ceiling applied        | every Un row, `capabilities.delete` false; `spaceId` = Deux → 400 |
- * | API key + `Appstrate-User` (end-user)        | —                                              | 403                                                       |
+ * | API key without `files:read` in scopes       | —                                              | 403 (ceiling guard)                                       |
+ * | API key + `Appstrate-User` (end-user)        | —                                              | 403, malformed query included                             |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling     | ceiling `files:read` → own rows only                      |
  * | any                                          | another organization                           | never; its path → 403                                     |
  *
@@ -293,6 +294,10 @@ describe("GET /api/orgs/{orgId}/files", () => {
     ).toEqual([]);
     const strict = await app.request(path("?spaceIds=x"), { headers: session(member) });
     expect(strict.status).toBe(400);
+    // An empty segment is dropped.
+    expect(ids(await list(session(member), `?spaceId=${s.deux},`))).toEqual(
+      pick("deuxMemberOutput", "deuxMemberChat"),
+    );
   });
 
   it("looks a runId up in the listed spaces only", async () => {
@@ -355,6 +360,17 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(otherOrg.status).toBe(403);
   });
 
+  it("refuses an API key whose scopes hold no files:read", async () => {
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: s.un,
+      createdBy: owner.user.id,
+      scopes: ["agents:read"],
+    });
+    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
+    expect(res.status).toBe(403);
+  });
+
   it("refuses an end-user", async () => {
     const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.un });
     const key = await seedApiKey({
@@ -363,10 +379,9 @@ describe("GET /api/orgs/{orgId}/files", () => {
       createdBy: owner.user.id,
       scopes: ["files:read"],
     });
-    const res = await app.request(path(), {
-      headers: { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id },
-    });
-    expect(res.status).toBe(403);
+    const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
+    expect((await app.request(path(), { headers })).status).toBe(403);
+    expect((await app.request(path("?bogus=1"), { headers })).status).toBe(403);
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {

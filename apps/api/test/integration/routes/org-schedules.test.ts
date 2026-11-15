@@ -19,6 +19,7 @@
  * | guest session                                | no row anywhere                                       | empty list, 200 | —        |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)             | Default   | 1 (own run)    |
  * | API key pinned to Un, scopes `schedules:read`| Un only, ceiling applied                              | Un        | 1 (own run); `spaceId` = Deux → 400 |
+ * | API key without `schedules:read` in scopes   | —                                                     | 403 (ceiling guard) | —    |
  * | API key + `Appstrate-User` (end-user)        | —                                                     | 403       | —              |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling            | ceiling without `runs:read-all` → Un counts own run only | |
  * | any                                          | another organization                                  | never; its path → 403 | — |
@@ -53,6 +54,7 @@ const app = getTestApp();
 interface ListedSchedule {
   id: string;
   spaceId: string;
+  agent_name: string | null;
   running_runs: number;
 }
 
@@ -66,11 +68,18 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
   let foreignSchedule: string;
 
   async function seedFiredSchedule(spaceId: string, orgId = owner.orgId, userId = owner.user.id) {
+    const id = `@orgsched/agent-${crypto.randomUUID().slice(0, 8)}`;
     const pkg = await seedPackage({
-      id: `@orgsched/agent-${crypto.randomUUID().slice(0, 8)}`,
+      id,
       orgId,
       homeSpaceId: spaceId,
       createdBy: userId,
+      draftManifest: {
+        name: id,
+        display_name: `Agent of ${spaceId}`,
+        version: "0.1.0",
+        type: "agent",
+      },
     });
     const schedule = await seedSchedule({
       packageId: pkg.id,
@@ -156,6 +165,8 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     const byId = new Map(body.data.map((row) => [row.id, row]));
     expect(byId.get(sched.un!)!.spaceId).toBe(s.un);
     expect(byId.get(sched.deux!)!.spaceId).toBe(s.deux);
+    // The agent's display name rides on the row, whatever space places it.
+    expect(byId.get(sched.deux!)!.agent_name).toBe(`Agent of ${s.deux}`);
   });
 
   it("narrows to the spaces spaceId names", async () => {
@@ -164,6 +175,10 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     );
     // Reached, but no `schedules:read` there: nothing, not a 400.
     expect((await list({ Cookie: member.cookie }, `?spaceId=${s.trois}`)).counters).toEqual({});
+    // An empty segment is dropped.
+    expect((await list({ Cookie: member.cookie }, `?spaceId=${s.deux},`)).counters).toEqual(
+      expected({ deux: 1 }),
+    );
   });
 
   it("answers a space the caller does not reach exactly as one that does not exist", async () => {
@@ -212,6 +227,17 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     expect(outside.status).toBe(400);
     const otherOrg = await app.request(path("", foreignOrgId), { headers });
     expect(otherOrg.status).toBe(403);
+  });
+
+  it("refuses an API key whose scopes hold no schedules:read", async () => {
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: s.un,
+      createdBy: owner.user.id,
+      scopes: ["agents:read"],
+    });
+    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
+    expect(res.status).toBe(403);
   });
 
   it("refuses an end-user", async () => {

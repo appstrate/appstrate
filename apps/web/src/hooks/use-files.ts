@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
 import { keysetPaging } from "../lib/keyset-paging";
+import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { downloadOrToast } from "../lib/blob-download";
 import {
   fileBlobKeys,
@@ -85,6 +86,8 @@ export function useFilesPaged(
     // Each row's space grants it server-side; the current space's gate does not apply.
     enabled: !!spaceIds && !!orgId,
     placeholderData: keepPreviousData,
+    // Other spaces' new files reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
+    refetchInterval: ACROSS_SPACES_POLL_MS,
   });
   const inSpace = useInfiniteQuery({
     queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
@@ -221,8 +224,8 @@ export function useFileImageSrc(id: string, spaceId?: string): string | null | u
   const currentSpaceId = useCurrentSpaceId();
   const readsFiles = usePermissions().can("files:read");
   // A file of another space (a list spanning spaces) is read in its own, which the server judges.
-  const elsewhere = !!spaceId && !!orgId && spaceId !== currentSpaceId;
-  const header = elsewhere ? { "X-Org-Id": orgId, "X-Space-Id": spaceId } : scope.header;
+  const elsewhere = spaceId && orgId && spaceId !== currentSpaceId ? { orgId, spaceId } : undefined;
+  const header = fileContextHeader(elsewhere) ?? scope.header;
   const query = useQuery({
     queryKey: fileBlobKeys.detail(id, header),
     queryFn: async ({ signal }): Promise<string | null> => {
@@ -235,7 +238,7 @@ export function useFileImageSrc(id: string, spaceId?: string): string | null | u
       signal.throwIfAborted();
       return data ? URL.createObjectURL(data) : null;
     },
-    enabled: elsewhere || (readsFiles && scope.enabled),
+    enabled: !!elsewhere || (readsFiles && scope.enabled),
     // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
     // Only leaving the cache frees it (`lib/query-client.ts`).
     staleTime: Infinity,

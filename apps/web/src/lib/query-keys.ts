@@ -13,6 +13,15 @@ import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
 
+/** The segment that sets a list across spaces apart, where a space-scoped list keys its space. */
+const ACROSS_RUNS = "/orgs/runs";
+const ACROSS_SCHEDULES = "/orgs/schedules";
+
+/** A run or schedule list across spaces: it names its spaces, never the current one. */
+export function spansSpaces(queryKey: readonly unknown[]): boolean {
+  return queryKey[2] === ACROSS_RUNS || queryKey[2] === ACROSS_SCHEDULES;
+}
+
 /** A spec path that has a GET operation: the only paths a query key can name. */
 export type GetPath = {
   [P in keyof paths]: paths[P] extends { get: object } ? P : never;
@@ -102,7 +111,7 @@ export const paginatedRunsKeys = {
     [
       "paginated-runs",
       orgId,
-      "/orgs/runs",
+      ACROSS_RUNS,
       spaceIds,
       user,
       kind,
@@ -179,10 +188,10 @@ export const scheduleKeys = {
   runsAll: ["schedule-runs"] as const,
   list: (orgId: Id, spaceId: Id) => ["schedules", orgId, spaceId] as const,
   /** Prefix of every list across spaces (`GET /api/orgs/{orgId}/schedules`). */
-  acrossSpacesAll: (orgId: Id) => ["schedules", orgId, "/orgs/schedules"] as const,
+  acrossSpacesAll: (orgId: Id) => ["schedules", orgId, ACROSS_SCHEDULES] as const,
   /** The listed spaces (comma-joined) in place of the current one. */
   acrossSpaces: (orgId: Id, spaceIds: string) =>
-    ["schedules", orgId, "/orgs/schedules", spaceIds] as const,
+    ["schedules", orgId, ACROSS_SCHEDULES, spaceIds] as const,
   listForAgent: (orgId: Id, spaceId: Id, packageId: Id) =>
     ["schedules", orgId, spaceId, packageId] as const,
   detail: (orgId: Id, spaceId: Id, scheduleId: Id) =>

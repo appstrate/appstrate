@@ -9,6 +9,7 @@
  * | member session                             | custom role holding `runs:read-all` (Un)      | every run of Un                       |
  * | member session                             | custom role holding `runs:read` only (Deux)   | the member's own runs of Deux         |
  * | member session                             | open space, default role `operator` (Default) | the member's own runs of Default      |
+ * | member session                             | custom role without run read (Trois)          | none; `spaceId` = it → empty page     |
  * | member session                             | `closed` space, not joined (Fermé)            | none; `spaceId` = it → 400            |
  * | member session                             | `private` space, not a member (Privé)         | none; `spaceId` = it → the same 400   |
  * | owner session                              | every team space (preset `admin`)             | every run                             |
@@ -16,8 +17,8 @@
  * | guest session                              | no row anywhere                               | empty page, 200                       |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)   | the owner's own runs of Default       |
  * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un; `spaceId` = Deux → 400 |
- * | API key without the list's read scope      | —                                             | 403 (ceiling guard), on the three lists |
- * | API key + `Appstrate-User` (end-user)      | —                                             | 403                                   |
+ * | API key without a run-read scope           | —                                             | 403 (ceiling guard)                   |
+ * | API key + `Appstrate-User` (end-user)      | —                                             | 403, malformed query included         |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
  * | any                                        | another organization                          | never; its path → 403                 |
  * | member session                             | own live personal space                       | the member's runs there               |
@@ -75,6 +76,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
   let member: TestContext;
   let un: string;
   let deux: string;
+  let trois: string;
   let ferme: string;
   let prive: string;
   /** Run ids by space and launcher. */
@@ -107,6 +109,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     member = await memberContext(owner, "member");
     un = (await seedSpace({ orgId: owner.orgId, name: "Un", visibility: "closed" })).id;
     deux = (await seedSpace({ orgId: owner.orgId, name: "Deux", visibility: "closed" })).id;
+    trois = (await seedSpace({ orgId: owner.orgId, name: "Trois", visibility: "closed" })).id;
     ferme = (await seedSpace({ orgId: owner.orgId, name: "Fermé", visibility: "closed" })).id;
     prive = (await seedSpace({ orgId: owner.orgId, name: "Privé", visibility: "private" })).id;
     const readAll = await seedSpaceRole({
@@ -126,11 +129,19 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       presetRole: null,
       customRoleId: readOwn.id,
     });
+    const noRunRead = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
+    await seedSpaceMember({
+      spaceId: trois,
+      userId: member.user.id,
+      presetRole: null,
+      customRoleId: noRunRead.id,
+    });
     r = {
       unOwner: await seedSpaceRun(un, owner.user.id),
       unMember: await seedSpaceRun(un, member.user.id),
       deuxOwner: await seedSpaceRun(deux, owner.user.id),
       deuxMember: await seedSpaceRun(deux, member.user.id),
+      troisMember: await seedSpaceRun(trois, member.user.id),
       defaultOwner: await seedSpaceRun(owner.defaultSpaceId, owner.user.id),
       defaultMember: await seedSpaceRun(owner.defaultSpaceId, member.user.id),
       ferme: await seedSpaceRun(ferme, owner.user.id),
@@ -203,8 +214,11 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(ids(await list(session(member), `?spaceId=${un},${deux}`))).toEqual(
       sorted(r.unOwner!, r.unMember!, r.deuxMember!),
     );
-    // Empty reads as absent.
+    // Empty reads as absent, and an empty segment is dropped.
     expect((await list(session(member), "?spaceId=")).total).toBe(4);
+    expect(ids(await list(session(member), `?spaceId=${deux},`))).toEqual([r.deuxMember!]);
+    // Reached, but no run read there: nothing, not a 400.
+    expect(await list(session(member), `?spaceId=${trois}`)).toMatchObject({ data: [], total: 0 });
   });
 
   it("answers a space the caller does not reach exactly as one that does not exist", async () => {
@@ -267,18 +281,15 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(otherOrg.status).toBe(403);
   });
 
-  it("refuses an API key whose scopes hold no run-read permission, on each list", async () => {
+  it("refuses an API key whose scopes hold no run-read permission", async () => {
     const key = await seedApiKey({
       orgId: owner.orgId,
       spaceId: un,
       createdBy: owner.user.id,
       scopes: ["agents:read"],
     });
-    const headers = { Authorization: `Bearer ${key.rawKey}` };
-    for (const list of ["runs", "schedules", "files"]) {
-      const res = await app.request(`/api/orgs/${owner.orgId}/${list}`, { headers });
-      expect(res.status).toBe(403);
-    }
+    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
+    expect(res.status).toBe(403);
   });
 
   it("refuses an end-user", async () => {
@@ -289,10 +300,9 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       createdBy: owner.user.id,
       scopes: ["runs:read"],
     });
-    const res = await app.request(path(), {
-      headers: { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id },
-    });
-    expect(res.status).toBe(403);
+    const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
+    expect((await app.request(path(), { headers })).status).toBe(403);
+    expect((await app.request(path("?kind=inlinee"), { headers })).status).toBe(403);
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {

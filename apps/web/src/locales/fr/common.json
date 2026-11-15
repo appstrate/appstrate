@@ -7,7 +7,7 @@
   "userMenu.themeLight": "Clair",
   "userMenu.themeDark": "Sombre",
   "userMenu.themeSystem": "Système",
-  "switcher.orgAriaLabel": "Changer d'organisation",
+  "switcher.ariaLabel": "Changer d'organisation ou d'espace (actuel : {{current}})",
   "switcher.orgsColumn": "Vos organisations",
   "switcher.workspacesColumn": "Espaces de travail",
   "switcher.searchPlaceholder": "Rechercher…",

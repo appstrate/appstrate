@@ -52,24 +52,29 @@ export async function callerReachableSpaces(
 
 /**
  * The preamble of every list spanning the spaces of `orgId`: the caller's
- * reach, narrowed by `?spaceId=` (comma-separated), kept where the effective
- * set `admits` the list. A space reached but not admitting it contributes no
- * row; an id outside the reach is a 400, one answer for a space that does not
- * exist and one not reached, so it discloses nothing. An empty value reads as
- * absent, as on every closed-set filter. An end-user acts in its own space
- * only (RBAC spec §7.2), so it is refused.
+ * reach, narrowed by `spaceIdParam` (the `spaceId` query value, comma-separated
+ * ids), kept where the effective set `admits` the list. A space reached but not
+ * admitting it contributes no row; an id outside the reach is a 400, one answer
+ * for a space that does not exist and one not reached, so it discloses nothing.
+ * Empty segments are dropped and an empty value reads as absent, as on every
+ * closed-set filter. An end-user acts in its own space only (RBAC spec §7.2),
+ * so it is refused — before the route reads any other query parameter.
  */
 export async function readableSpacesAcross(
   c: Context<AppEnv>,
   orgId: string,
+  spaceIdParam: string | undefined,
   admits: (permissions: ReadonlySet<Permission>) => boolean,
 ): Promise<ReachableSpace[]> {
   if (c.get("principalKind") === "end_user") {
     throw forbidden("An end-user cannot list across spaces");
   }
   const reachable = await callerReachableSpaces(c, orgId);
-  const raw = c.req.query("spaceId");
-  const requested = raw ? raw.split(",").map((id) => id.trim()) : undefined;
+  const ids = (spaceIdParam ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const requested = ids.length ? ids : undefined;
   const unknown = requested?.find((id) => !reachable.some((space) => space.id === id));
   if (unknown !== undefined) {
     throw invalidRequest(`spaceId names a space you do not reach: ${unknown}`, "spaceId");

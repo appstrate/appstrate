@@ -196,6 +196,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const offersOverview =
     overview.offered && !isExploringElsewhere && matchesSearch(query, [overviewLabel]);
 
+  const currentContextLabel = overview.on
+    ? overviewLabel
+    : currentSpace
+      ? spaceLabel(currentSpace, t)
+      : undefined;
   const spaceName: ReactNode = overview.on ? (
     <span className="text-muted-foreground">
       <OverviewTile className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom" />
@@ -207,7 +212,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         {...spaceTile(currentSpace, viewer)}
         className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
       />
-      {spaceLabel(currentSpace, t)}
+      {currentContextLabel}
     </span>
   ) : (
     spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
@@ -232,7 +237,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         <button
           type="button"
           data-testid="org-switcher-button"
-          aria-label={t("switcher.orgAriaLabel")}
+          aria-label={t("switcher.ariaLabel", {
+            current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
+          })}
           className={cn(
             "flex items-center gap-2 rounded-md px-1.5 text-sm transition-colors",
             TRIGGER_BOX[variant],
@@ -369,6 +376,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     <div className="mb-1 border-b pb-1">
                       <PickerRow
                         data-testid="space-item-overview"
+                        aria-current={overview.on || undefined}
                         onClick={chooseOverview}
                         rowClassName={overview.on && "bg-primary/10 hover:bg-primary/10"}
                         onNavigate={closeSwitcherAndSidebar}
@@ -405,6 +413,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                           managed): disabled, and says why. */}
                         <PickerRow
                           data-testid={`space-item-${space.id}`}
+                          aria-current={isCurrent || undefined}
                           disabled={!enterable}
                           title={
                             enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })

@@ -52,7 +52,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const schedules = schedulesQuery.data;
   const list = useLocalListParams();
   const states = list.values("state", ["active", "disabled"] as const);
-  const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
+  const columns = useScheduleColumns({ showAgentName: false });
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
 

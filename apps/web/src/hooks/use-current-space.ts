@@ -14,6 +14,7 @@ import {
   persistenceKeys,
   runKeys,
   scheduleKeys,
+  spansSpaces,
   versionKeys,
 } from "../lib/query-keys";
 import { authStore } from "../stores/auth-store";
@@ -28,7 +29,8 @@ export function useCurrentSpaceId(): string | null {
 
 // Flat, space-less query-key prefixes dropped on space switch. A key that embeds
 // the space (typed-client domains via `useOrgScope`, chat's
-// `["chat", "sessions", spaceId]`) refetches by itself and must NOT be listed.
+// `["chat", "sessions", spaceId]`) refetches by itself and must NOT be listed;
+// a list across spaces (`spansSpaces`) does not depend on the current one and is kept.
 const SPACE_SCOPED_KEYS = new Set<string>(
   [
     packageKeys.all,
@@ -48,6 +50,12 @@ const SPACE_SCOPED_KEYS = new Set<string>(
   ].map(([root]) => root),
 );
 
+/** Whether a space switch drops this cache entry. Exported for its test. */
+export function droppedOnSpaceSwitch(queryKey: readonly unknown[]): boolean {
+  const [root] = queryKey;
+  return typeof root === "string" && SPACE_SCOPED_KEYS.has(root) && !spansSpaces(queryKey);
+}
+
 // The ONE way the current space changes: skipping the cache reset would serve
 // rows keyed on the previous space (or on none, right after login) as the new one's.
 function selectSpace(queryClient: QueryClient, spaceId: string | null): void {
@@ -55,12 +63,7 @@ function selectSpace(queryClient: QueryClient, spaceId: string | null): void {
 
   spaceStore.getState().setId(spaceId);
 
-  queryClient.removeQueries({
-    predicate: (q) => {
-      const key = q.queryKey[0];
-      return typeof key === "string" && SPACE_SCOPED_KEYS.has(key);
-    },
-  });
+  queryClient.removeQueries({ predicate: (q) => droppedOnSpaceSwitch(q.queryKey) });
 }
 
 /** Returns a `switchSpace` function that also drops space-scoped caches. */

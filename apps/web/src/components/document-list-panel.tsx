@@ -49,8 +49,8 @@ export function DocumentListPanel({
   isLoading: boolean;
   error: unknown;
   empty: { message: string; hint?: string; compact?: boolean };
-  /** Gallery tiles link to the producing run. */
-  showRunLink?: boolean;
+  /** Whether a row links to the run that produced it (the gallery's). */
+  showRunLink?: (doc: FileDto) => boolean;
   /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
   footer?: ReactNode;
   /** The gallery offers cards or table; run surfaces keep their table or compact list. */
@@ -60,7 +60,7 @@ export function DocumentListPanel({
   tableLabel?: string;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
-  /** The list spans several spaces: each row names its own. */
+  /** The list spans several spaces: each row names its own, and none offers a write. */
   spanning?: boolean;
 }) {
   const { t } = useTranslation("files");
@@ -73,18 +73,19 @@ export function DocumentListPanel({
   const currentSpaceId = useCurrentSpaceId();
   const spaceLabelOf = useSpaceLabelOf();
 
-  // A file of another space (a list spanning spaces) is read in its own, through the reader's
-  // `?org=…&space=…`, without switching. Its writes (keep, delete) are space-scoped: not offered
-  // here — the reader's « Ouvrir dans l'espace » leads to them.
+  // A file of another space is read in its own, through the reader's `?org=…&space=…`, without
+  // switching. A list spanning spaces offers no write (keep, delete), the working space's rows
+  // included: the reader's « Ouvrir dans l'espace » leads to them.
   const contextOf = (doc: FileDto): FileContext | undefined =>
     orgId && currentSpaceId && doc.spaceId !== currentSpaceId
       ? { orgId, spaceId: doc.spaceId }
       : undefined;
-  const rows = documents.map((doc) =>
-    contextOf(doc)
-      ? { ...doc, capabilities: { ...doc.capabilities, keep: false, delete: false } }
-      : doc,
-  );
+  const rows = spanning
+    ? documents.map((doc) => ({
+        ...doc,
+        capabilities: { ...doc.capabilities, keep: false, delete: false },
+      }))
+    : documents;
   const readerHref = (doc: FileDto) => {
     const context = contextOf(doc);
     return context && doc.capabilities.preview ? fileReaderPath(doc.id, context) : undefined;
@@ -165,7 +166,7 @@ export function DocumentListPanel({
               <FileTile
                 file={doc}
                 isKeepPending={pendingKeepId === doc.id}
-                showRunLink={showRunLink}
+                showRunLink={showRunLink?.(doc)}
                 spaceName={spanning ? spaceLabelOf(doc.spaceId) : undefined}
                 onPreview={openPreview}
                 onDownload={onDownload}
@@ -189,7 +190,7 @@ export function DocumentListPanel({
                 <DocumentRowActions
                   doc={doc}
                   isPending={pendingKeepId === doc.id}
-                  showRunLink={showRunLink}
+                  showRunLink={showRunLink?.(doc)}
                   onPreview={openPreview}
                   onDownload={onDownload}
                   onKeep={onKeep}

@@ -165,7 +165,7 @@ const pipelineResponses = {
   "404": { $ref: "#/components/responses/NotFound" },
 } as const;
 
-/** The query of both galleries (`parseListFilesQuery`, `routes/files.ts`). */
+/** The query of both galleries (`parseListFilesQuery`, `lib/file-list-query.ts`). */
 const fileListQueryParameters = [
   {
     name: "purpose",
@@ -247,8 +247,9 @@ const fileListResponses = {
       },
     },
   },
+  "400": { $ref: "#/components/responses/ValidationError" },
   "401": { $ref: "#/components/responses/Unauthorized" },
-  ...pipelineResponses,
+  "403": { $ref: "#/components/responses/Forbidden" },
   "429": { $ref: "#/components/responses/RateLimited" },
 };
 
@@ -273,7 +274,8 @@ export const filesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         ...fileListQueryParameters,
       ],
-      responses: fileListResponses,
+      // 404: a `private` space the caller is not in (`X-Space-Id`).
+      responses: { ...fileListResponses, "404": { $ref: "#/components/responses/NotFound" } },
     },
   },
   "/api/orgs/{orgId}/files": {

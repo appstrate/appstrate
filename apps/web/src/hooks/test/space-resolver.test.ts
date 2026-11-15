@@ -14,7 +14,9 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 // The space store reads `localStorage` at module init.
 installFakeStorage();
 
-const { enterableSpaceId, isSpaceEnterable } = await import("../use-current-space.ts");
+const { droppedOnSpaceSwitch, enterableSpaceId, isSpaceEnterable } =
+  await import("../use-current-space.ts");
+const { paginatedRunsKeys, scheduleKeys } = await import("../../lib/query-keys.ts");
 
 const space = (id: string, access: string, isDefault = false, personal = false) => ({
   id,
@@ -85,5 +87,22 @@ describe("isSpaceEnterable", () => {
     expect(isSpaceEnterable({ access: "member" })).toBe(true);
     // A closed space the caller may ask to join, an orphaned personal space.
     expect(isSpaceEnterable({ access: "none" })).toBe(false);
+  });
+});
+
+describe("droppedOnSpaceSwitch", () => {
+  const runs = (spaceIds?: string) =>
+    spaceIds
+      ? paginatedRunsKeys.acrossSpaces("org_1", spaceIds, null, null, null, false, "", 15, 0)
+      : paginatedRunsKeys.list("org_1", "spc_a", "/runs", null, null, null, false, "", 15, 0);
+
+  it("drops the current space's run and schedule lists", () => {
+    expect(droppedOnSpaceSwitch(runs())).toBe(true);
+    expect(droppedOnSpaceSwitch(scheduleKeys.list("org_1", "spc_a"))).toBe(true);
+  });
+
+  it("keeps the lists across spaces, which name their spaces", () => {
+    expect(droppedOnSpaceSwitch(runs("spc_a,spc_b"))).toBe(false);
+    expect(droppedOnSpaceSwitch(scheduleKeys.acrossSpaces("org_1", "spc_a,spc_b"))).toBe(false);
   });
 });

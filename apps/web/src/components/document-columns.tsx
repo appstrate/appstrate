@@ -20,7 +20,7 @@ export function useDocumentColumns({
   spanning = false,
 }: {
   pendingKeepId: string | null;
-  showRunLink?: boolean;
+  showRunLink?: (doc: FileDto) => boolean;
   onDownload: (doc: FileDto) => void;
   onKeep: (doc: FileDto) => void;
   onDelete: (doc: FileDto) => void;
@@ -89,7 +89,7 @@ export function useDocumentColumns({
       <DocumentRowActions
         doc={doc}
         isPending={pendingKeepId === doc.id}
-        showRunLink={showRunLink}
+        showRunLink={showRunLink?.(doc)}
         onDownload={onDownload}
         onKeep={onKeep}
         onDelete={onDelete}

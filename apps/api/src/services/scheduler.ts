@@ -6,7 +6,13 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers, runs, type ScheduleDisabledReason } from "@appstrate/db/schema";
+import {
+  schedules,
+  endUsers,
+  runs,
+  packages,
+  type ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
@@ -20,7 +26,9 @@ import {
   prepareAndExecuteRun,
   resolveRunPreflight,
   extractRunAgentDenorm,
+  agentDisplayName,
 } from "./run-pipeline.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
@@ -41,7 +49,7 @@ import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
-import { runReadCondition, type RunReadGrant } from "../lib/run-visibility.ts";
+import { runReadCondition, type RunReach } from "../lib/run-visibility.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -722,7 +730,7 @@ export async function triggerScheduledRun(
  */
 export async function listSchedules(
   orgId: string,
-  grants: readonly RunReadGrant[],
+  grants: readonly RunReach[],
   viewer: Actor | null,
 ): Promise<EnrichedSchedule[]> {
   if (grants.length === 0) return [];
@@ -806,6 +814,7 @@ const EMPTY_RUN_STATS: ScheduleRunStats = { runningRuns: 0, unreadCount: 0, last
  * added to the happy path alone.
  */
 const UNENRICHED_SCHEDULE_FIELDS = {
+  agent_name: null,
   actor_name: null,
   actor_type: null,
   running_runs: 0,
@@ -879,8 +888,8 @@ async function loadScheduleRunStats(
 }
 
 /**
- * Enrich schedules with the display name of the actor (member or end-user)
- * each schedule runs as, plus the viewer-scoped run counters the list UI would
+ * Enrich schedules with the display name of their agent and of the actor
+ * (member or end-user) each schedule runs as, plus the viewer-scoped run counters the list UI would
  * otherwise fetch per row. Batches every lookup across the whole list.
  *
  * @param viewer Actor the response is being rendered for — scopes
@@ -901,7 +910,9 @@ async function enrichSchedules(
     ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
   ];
 
-  const [userNameMap, endUserRows, runStats] = await Promise.all([
+  const packageIds = [...new Set(schedules.map((s) => s.packageId))];
+
+  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
     endUserIds.length > 0
       ? db
@@ -918,8 +929,18 @@ async function enrichSchedules(
       viewer,
       visibility,
     ),
+    // The agent's name rides on the schedule so a list spanning spaces names an
+    // agent the caller's working space does not place — the client has no
+    // other way to resolve it.
+    db
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
   const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
+  const agentNameMap = new Map(
+    packageRows.map((r) => [r.id, agentDisplayName(asRecordOrNull(r.draftManifest))]),
+  );
 
   return schedules.map((schedule) => {
     let actorName: string | null = null;
@@ -935,6 +956,7 @@ async function enrichSchedules(
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;
     return {
       ...schedule,
+      agent_name: agentNameMap.get(schedule.packageId) ?? null,
       actor_name: actorName,
       actor_type: actorType,
       running_runs: stats.runningRuns,

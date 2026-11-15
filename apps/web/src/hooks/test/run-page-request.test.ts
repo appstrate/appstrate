@@ -22,8 +22,8 @@ beforeEach(() => {
 afterEach(() => get.mockRestore());
 
 describe("fetchRunPage", () => {
-  it("asks the current space by default, as it always did", async () => {
-    await fetchRunPage("org_1", { status: ["failed"], search: "rap", limit: 15, offset: 0 });
+  it("asks the current space unless it spans spaces", async () => {
+    await fetchRunPage({ status: ["failed"], search: "rap", limit: 15, offset: 0 });
     expect(get.mock.calls).toEqual([
       [
         "/api/runs",
@@ -45,10 +45,10 @@ describe("fetchRunPage", () => {
   });
 
   it("asks the org route with the ticked spaces, the other filters unchanged", async () => {
-    await fetchRunPage("org_1", {
+    await fetchRunPage({
       user: "me",
       kind: "inline",
-      spaceIds: ["spc_a", "spc_b"],
+      across: { orgId: "org_1", spaceIds: ["spc_a", "spc_b"] },
       limit: 15,
       offset: 15,
     });
