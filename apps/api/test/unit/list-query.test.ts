@@ -2,12 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import type { Context } from "hono";
-import {
-  paginate,
-  projectFields,
-  parseFieldSelection,
-  parseListPagination,
-} from "../../src/lib/list-query.ts";
+import { parseListLimit, parseListPagination } from "@appstrate/core/list-query";
+import { paginate, projectFields, parseFieldSelection } from "../../src/lib/list-query.ts";
 
 /** Minimal Context stub exposing only `req.query(name)`. */
 function catchError(run: () => unknown): unknown {
@@ -140,5 +136,24 @@ describe("parseListPagination", () => {
 
   it("does not hold an absent limit to the maximum", () => {
     expect(parseListPagination(fakeCtx({}), { defaultLimit: 200, maxLimit: 100 }).limit).toBe(200);
+  });
+});
+
+describe("parseListLimit", () => {
+  it("applies the default, and ignores `offset`", () => {
+    expect(parseListLimit(fakeCtx({}), { defaultLimit: 20 })).toBe(20);
+    expect(parseListLimit(fakeCtx({ offset: "5" }), { defaultLimit: 20 })).toBe(20);
+  });
+
+  it("refuses an out-of-range limit with a 400 naming `limit`", () => {
+    for (const limit of ["0", "201", "abc"]) {
+      const err = catchError(() =>
+        parseListLimit(fakeCtx({ limit }), { defaultLimit: 50, maxLimit: 200 }),
+      );
+      expect(err).toMatchObject({ status: 400, param: "limit" });
+    }
+    expect(parseListLimit(fakeCtx({ limit: "200" }), { defaultLimit: 50, maxLimit: 200 })).toBe(
+      200,
+    );
   });
 });

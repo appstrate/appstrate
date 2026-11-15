@@ -134,7 +134,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   // shared-type was free to mark `generation` and `input` optional while the
   // spec required them, which is exactly the drift this step exists to catch.
   {
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config",
+    path: "/api/spaces/{id}/packages/{scope}/{name}/run-config",
     method: "get",
     status: "200",
     sharedTypeName: "ResolvedRunConfig",

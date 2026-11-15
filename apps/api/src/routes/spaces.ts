@@ -23,7 +23,7 @@ import { ApiError, forbidden, invalidRequest, internalError, notFound } from "..
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { toISO } from "../lib/date-helpers.ts";
 import {
   assertSpaceAdminAct,
@@ -245,7 +245,7 @@ export const updatePackageSchema = z
  * space being current. The per-space routes therefore resolve their space here
  * instead, through the same helper the middleware uses (spec §4.3).
  */
-function requireSpaceFromParam(param: "id" | "spaceId") {
+function requireSpaceFromParam(param: "id") {
   // Marked: every guard mounted behind this one reads the caller's set in the
   // space the PATH names, not in the space the request entered — a reader of
   // the route table cannot see that from the mounts alone.
@@ -364,16 +364,16 @@ function toSweepWire(
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  // `/:spaceId/*` also matches the bare `/:spaceId`. An exact twin would run the
+  // `/:id/*` also matches the bare `/:id`. An exact twin would run the
   // guard twice and, as an `ALL` exact mount, serve every method at `/:id`.
-  router.use("/:spaceId/*", pinnedSpaceScopeGuard);
+  router.use("/:id/*", pinnedSpaceScopeGuard);
 
   router.get(
-    "/:spaceId/library",
-    requireSpaceFromParam("spaceId"),
+    "/:id/library",
+    requireSpaceFromParam("id"),
     requirePermission("spaces", "read"),
     async (c) => {
-      return c.json(await getPackageLibrary(c, c.req.param("spaceId")));
+      return c.json(await getPackageLibrary(c, c.req.param("id")));
     },
   );
 
@@ -764,17 +764,17 @@ export function createSpacesRouter() {
   // ─── Space packages (activate / deactivate / configure) ────────────
 
   // Guard: resolve the PATH space and the caller's role in it, once for all
-  // /:spaceId/packages/* routes. These are space-scoped by their path, not by
+  // /:id/packages/* routes. These are space-scoped by their path, not by
   // `X-Space-Id`, so they resolve their own space — `run-config` gates on
   // `agents:read`, a space-level string that org context alone never carries.
-  router.use("/:spaceId/packages/*", requireSpaceFromParam("spaceId"));
+  router.use("/:id/packages/*", requireSpaceFromParam("id"));
 
-  // GET /api/spaces/:spaceId/packages — list this space's placements.
+  // GET /api/spaces/:id/packages — list this space's placements.
   // The `router.use` guard above only proves the space belongs to the org;
   // `spaces:read` is the read twin of the `spaces:write` the mutating routes
   // carry, and matches this route being package-type agnostic.
-  router.get("/:spaceId/packages", requirePermission("spaces", "read"), async (c) => {
-    const spaceId = c.req.param("spaceId")!;
+  router.get("/:id/packages", requirePermission("spaces", "read"), async (c) => {
+    const spaceId = c.req.param("id")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
     const rows = await listSpacePackages({ orgId, spaceId: spaceId }, type);
@@ -784,7 +784,7 @@ export function createSpacesRouter() {
     return c.json(listResponse(readable.map((row) => ({ object: "space_package", ...row }))));
   });
 
-  // POST /api/spaces/:spaceId/packages — ACTIVATE a package here. THE door, for
+  // POST /api/spaces/:id/packages — ACTIVATE a package here. THE door, for
   // a team space and a personal one alike, and for all four package types:
   // there is no per-type activation route beside it.
   //
@@ -795,9 +795,9 @@ export function createSpacesRouter() {
   //
   // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
-  router.post("/:spaceId/packages", async (c) => {
+  router.post("/:id/packages", async (c) => {
     const orgId = c.get("orgId");
-    const spaceId = c.req.param("spaceId")!;
+    const spaceId = c.req.param("id")!;
     const scope = { orgId, spaceId };
 
     // Coarse gate before the body is parsed: a caller with no grant gets the 403, not a 400.
@@ -842,12 +842,12 @@ export function createSpacesRouter() {
     return c.json({ object: "space_package", ...activation.placement }, turnedOn ? 201 : 200);
   });
 
-  // GET /api/spaces/:spaceId/packages/:packageId — one placement, in detail
+  // GET /api/spaces/:id/packages/:packageId — one placement, in detail
   router.get(
-    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
+    `/:id/packages/${SCOPED_PACKAGE_ROUTE}`,
     requirePermission("spaces", "read"),
     async (c) => {
-      const spaceId = c.req.param("spaceId")!;
+      const spaceId = c.req.param("id")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const row = await getSpacePackage({ orgId, spaceId: spaceId }, packageId);
@@ -866,9 +866,9 @@ export function createSpacesRouter() {
     },
   );
 
-  // PATCH /api/spaces/:spaceId/packages/:packageId — merge-update config
-  router.patch(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const spaceId = c.req.param("spaceId")!;
+  // PATCH /api/spaces/:id/packages/:packageId — merge-update config
+  router.patch(`/:id/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const spaceId = c.req.param("id")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
@@ -966,13 +966,13 @@ export function createSpacesRouter() {
     return c.json({ object: "space_package", ...updated });
   });
 
-  // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
+  // DELETE /api/spaces/:id/packages/:packageId — DEACTIVATE it here.
   //
   // The row and its settings stay (only a share revocation or a home move
   // withdraws it). 204 when the space has a row, or none but the package is on
   // by the deployment default (the row is then created saying `false`); else 404.
-  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const spaceId = c.req.param("spaceId")!;
+  router.delete(`/:id/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const spaceId = c.req.param("id")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
@@ -993,17 +993,17 @@ export function createSpacesRouter() {
     return c.body(null, 204);
   });
 
-  // GET /api/spaces/:spaceId/packages/:scope/:name/run-config —
+  // GET /api/spaces/:id/packages/:scope/:name/run-config —
   // single source of truth for the per-space config and the model/proxy
   // override. Consumed by the CLI to reproduce a UI run without hand-stitching
   // three separate calls. It carries no version: the space selects no
   // definition, so a run without an explicit selector is the latest published
   // one wherever it is launched from.
   router.get(
-    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
+    `/:id/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
     requirePermission("agents", "read"),
     async (c) => {
-      const spaceId = c.req.param("spaceId")!;
+      const spaceId = c.req.param("id")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const resolved = await getResolvedRunConfig({ orgId, spaceId }, packageId);

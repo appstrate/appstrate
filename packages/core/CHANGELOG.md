@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/list-query`**: **`parseListPagination`**, **`parseListLimit`** (keyset lists: `limit`
+  only), **`listResponse`**, **`ListEnvelope`** and **`ListPagination`**, so a module validates
+  `limit` / `offset` (400 naming the parameter) and builds the list envelope as the platform does.
+
 - **`@appstrate/core/model-error`: a structured reason beside the category.**
   **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
   optional `reason` on `ModelErrorClassification` that `classifyModelError` and

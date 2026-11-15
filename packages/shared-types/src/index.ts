@@ -1332,7 +1332,7 @@ export interface SpacePackage {
 
 /**
  * Per-space resolved run-config returned by
- * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+ * `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.

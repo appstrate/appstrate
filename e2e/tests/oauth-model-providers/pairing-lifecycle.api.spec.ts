@@ -96,7 +96,7 @@ for (const provider of PROVIDER_CASES) {
       const mintRes = await apiClient.post("/model-providers-oauth/pairing", {
         providerId: provider.id,
       });
-      expect(mintRes.status()).toBe(200);
+      expect(mintRes.status()).toBe(201);
       const mint = (await mintRes.json()) as PairingMintResponse;
       expect(mint.id).toMatch(/^pair_[A-Za-z0-9_-]+$/);
       expect(mint.token).toMatch(/^appp_/);

@@ -115,7 +115,7 @@ The [chat](/using-appstrate/chat) assistant also uses the skills of the space. E
 | `manual`         | The skills you chose (up to 5) are injected, and the model may still find others on request. |
 | `strict`         | Only the skills you chose (up to 5) are injected.                                            |
 
-A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced. A space enforces at most 3 skills, and their `SKILL.md` files may total at most 64,000 characters, a budget the skills chosen in a conversation share.
+A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{id}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced. A space enforces at most 3 skills, and their `SKILL.md` files may total at most 64,000 characters, a budget the skills chosen in a conversation share.
 
 ## Who can see and use a skill
 

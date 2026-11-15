@@ -71,7 +71,7 @@ import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitive
 import { reportPermissionDenial } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";

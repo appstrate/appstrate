@@ -237,7 +237,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   const pinnedSpaceId = c.get("spaceId");
   if (!pinnedSpaceId) return next();
-  const paramSpaceId = c.req.param("id") ?? c.req.param("spaceId");
+  const paramSpaceId = c.req.param("id");
   if (paramSpaceId && paramSpaceId !== pinnedSpaceId) {
     throw forbidden("Credential scope does not include this space");
   }

@@ -251,8 +251,8 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["GET"], "/api/library"],
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
-    [["POST"], "/api/spaces/{spaceId}/packages"],
-    [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+    [["POST"], "/api/spaces/{id}/packages"],
+    [["PATCH", "DELETE"], "/api/spaces/{id}/packages/{scope}/{name}"],
   ]),
   ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
     [["GET"], "/api/realtime/runs"],

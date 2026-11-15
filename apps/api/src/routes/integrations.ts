@@ -11,8 +11,8 @@
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
- * spells it — `POST /api/spaces/{spaceId}/packages` and
- * `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` (RBAC spec §6.10).
+ * spells it — `POST /api/spaces/{id}/packages` and
+ * `DELETE /api/spaces/{id}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
@@ -67,13 +67,9 @@ import {
   validationFailed,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
-import {
-  parseListPagination,
-  parseFieldSelection,
-  paginate,
-  projectFields,
-} from "../lib/list-query.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { parseListPagination } from "@appstrate/core/list-query";
+import { parseFieldSelection, paginate, projectFields } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";

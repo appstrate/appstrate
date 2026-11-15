@@ -454,13 +454,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Space Packages ────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/spaces/{spaceId}/packages",
+    path: "/api/spaces/{id}/packages",
     jsonSchema: toJsonSchema(activatePackageSchema),
     description: "Activate a package in a space",
   },
   {
     method: "PATCH",
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
+    path: "/api/spaces/{id}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Configure a space package",
   },

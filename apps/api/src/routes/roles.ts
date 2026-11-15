@@ -18,7 +18,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { assertSpaceRoleId } from "../lib/ids.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceLevelVocabulary } from "../lib/permissions.ts";

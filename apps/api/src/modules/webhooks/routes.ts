@@ -18,7 +18,7 @@ import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireAnyPermission } from "../../middleware/require-permission.ts";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import {
   createWebhook,
@@ -38,7 +38,7 @@ import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissi
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
-import { parseListPagination } from "../../lib/list-query.ts";
+import { parseListPagination } from "@appstrate/core/list-query";
 import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
 
 /**

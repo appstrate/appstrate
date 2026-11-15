@@ -261,7 +261,7 @@ function useMovePackageHome(type: PackageType) {
       invalidatePackageCaches(qc);
       void invalidateLibraries(qc);
       // `keepInPreviousHome: false` withdraws the old space's placement, so its own listing is stale too.
-      void invalidatePaths(qc, ["/api/spaces/{spaceId}/packages"]);
+      void invalidatePaths(qc, ["/api/spaces/{id}/packages"]);
       if (type === "integration") void invalidateIntegrationQueries(qc);
     },
   });
