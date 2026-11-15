@@ -10,6 +10,7 @@ import {
   mcpbFromIntegration,
   McpbProjectionError,
   type McpbManifest,
+  type McpbProjectionErrorCode,
 } from "../src/mcpb.ts";
 import type { IntegrationManifest } from "../src/integration.ts";
 import { validateManifest } from "../src/validation.ts";
@@ -24,6 +25,18 @@ function expectStrictMcpb(mcpb: McpbManifest): void {
   const ok = validate(mcpb);
   expect(validate.errors ?? []).toEqual([]);
   expect(ok).toBe(true);
+}
+
+function expectRefused(run: () => unknown, code: McpbProjectionErrorCode, message?: RegExp): void {
+  let caught: unknown;
+  try {
+    run();
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(McpbProjectionError);
+  expect((caught as McpbProjectionError).code).toBe(code);
+  if (message) expect((caught as McpbProjectionError).message).toMatch(message);
 }
 
 function expectValidIntegration(manifest: IntegrationManifest): void {
@@ -116,7 +129,7 @@ describe("integrationFromMcpb", () => {
     expectValidIntegration(manifest);
     const m = manifest as unknown as Record<string, any>;
     expect(m.name).toBe("@acme/fetch-json");
-    expect(m.author).toBe("Example");
+    expect(m.author).toEqual({ name: "Example" });
     expect(m.source.server).toEqual({
       type: "node",
       entry_point: "server/index.js",
@@ -157,26 +170,197 @@ describe("integrationFromMcpb", () => {
   });
 
   it("refuses a non-sensitive setting with no default", () => {
-    expect(() =>
-      integrationFromMcpb(
-        {
-          ...FETCH_MCPB,
-          user_config: { region: { type: "string", title: "Region", description: "r" } },
-        },
-        "acme",
-      ),
-    ).toThrow(/user_config\.region is not sensitive and has no default/);
+    expectRefused(
+      () =>
+        integrationFromMcpb(
+          {
+            ...FETCH_MCPB,
+            user_config: { region: { type: "string", title: "Region", description: "r" } },
+          },
+          "acme",
+        ),
+      "mcpb_unsupported_user_config",
+      /user_config\.region is not sensitive and has no default/,
+    );
   });
 
   it("refuses a credential referenced from args", () => {
     const mcpb = structuredClone(FETCH_MCPB);
     mcpb.server.mcp_config.args.push("--key=${user_config.api_key}");
-    expect(() => integrationFromMcpb(mcpb, "acme")).toThrow(McpbProjectionError);
+    expectRefused(() => integrationFromMcpb(mcpb, "acme"), "mcpb_unsupported_user_config");
+  });
+
+  it("refuses a credential referenced from command", () => {
+    const mcpb = structuredClone(FETCH_MCPB);
+    mcpb.server.mcp_config.command = "${user_config.api_key}";
+    expectRefused(() => integrationFromMcpb(mcpb, "acme"), "mcpb_unsupported_user_config");
+  });
+
+  it("refuses a credential referenced from a platform override, args or env", () => {
+    for (const override of [
+      { args: ["--key=${user_config.api_key}"] },
+      { env: { API_KEY: "${user_config.api_key}" } },
+      { command: "${user_config.api_key}" },
+    ]) {
+      const mcpb = structuredClone(FETCH_MCPB) as Record<string, any>;
+      mcpb.server.mcp_config.platform_overrides = { linux: override };
+      expectRefused(() => integrationFromMcpb(mcpb, "acme"), "mcpb_unsupported_user_config");
+    }
+  });
+
+  it("inlines a non-sensitive default inside a platform override", () => {
+    const mcpb = structuredClone(FETCH_MCPB) as Record<string, any>;
+    mcpb.server.mcp_config.platform_overrides = {
+      win32: {
+        command: "node.exe",
+        args: ["--timeout=${user_config.timeout}"],
+        env: { TIMEOUT: "${user_config.timeout}" },
+      },
+    };
+    const m = integrationFromMcpb(mcpb, "acme") as unknown as Record<string, any>;
+    expectValidIntegration(m as unknown as IntegrationManifest);
+    expect(m.source.server.mcp_config.platform_overrides).toEqual({
+      win32: { command: "node.exe", args: ["--timeout=30"], env: { TIMEOUT: "30" } },
+    });
+  });
+
+  it("refuses a reference to an undeclared user_config entry", () => {
+    const mcpb = structuredClone(FETCH_MCPB);
+    mcpb.server.mcp_config.args.push("--region=${user_config.region}");
+    expectRefused(
+      () => integrationFromMcpb(mcpb, "acme"),
+      "mcpb_invalid_manifest",
+      /user_config\.region/,
+    );
+  });
+
+  it("refuses a multiple entry and a sensitive entry that is not a string", () => {
+    expectRefused(
+      () =>
+        integrationFromMcpb(
+          {
+            ...FETCH_MCPB,
+            user_config: {
+              dirs: {
+                type: "directory",
+                title: "Dirs",
+                description: "d",
+                multiple: true,
+                default: [],
+              },
+            },
+          },
+          "acme",
+        ),
+      "mcpb_unsupported_user_config",
+      /multiple/,
+    );
+    expectRefused(
+      () =>
+        integrationFromMcpb(
+          {
+            ...FETCH_MCPB,
+            user_config: {
+              api_key: { type: "number", title: "Key", description: "k", sensitive: true },
+            },
+          },
+          "acme",
+        ),
+      "mcpb_unsupported_user_config",
+      /not a string/,
+    );
+  });
+
+  it("refuses a sensitive key outside [A-Za-z0-9_]", () => {
+    expectRefused(
+      () =>
+        integrationFromMcpb(
+          {
+            ...FETCH_MCPB,
+            user_config: {
+              "api-key": { type: "string", title: "Key", description: "k", sensitive: true },
+            },
+          },
+          "acme",
+        ),
+      "mcpb_unsupported_user_config",
+      /letters, digits and underscores/,
+    );
+  });
+
+  it("refuses a placeholder left in an env value, and keeps one in args", () => {
+    for (const placeholder of [
+      "${__dirname}/data",
+      "${HOME}",
+      "${DESKTOP}",
+      "${DOCUMENTS}",
+      "${DOWNLOADS}",
+      "a${pathSeparator}b",
+      "a${/}b",
+    ]) {
+      const mcpb = structuredClone(FETCH_MCPB);
+      (mcpb.server.mcp_config.env as Record<string, string>).DATA_DIR = placeholder;
+      expectRefused(
+        () => integrationFromMcpb(mcpb, "acme"),
+        "mcpb_unsupported_placeholder",
+        /DATA_DIR/,
+      );
+    }
+    const inOverride = structuredClone(FETCH_MCPB) as Record<string, any>;
+    inOverride.server.mcp_config.platform_overrides = { linux: { env: { D: "${__dirname}" } } };
+    expectRefused(() => integrationFromMcpb(inOverride, "acme"), "mcpb_unsupported_placeholder");
+    // A credential composite keeps the same rule for what surrounds the reference.
+    const composite = structuredClone(FETCH_MCPB);
+    composite.server.mcp_config.env.AUTH_HEADER = "${HOME}:${user_config.api_key}";
+    expectRefused(() => integrationFromMcpb(composite, "acme"), "mcpb_unsupported_placeholder");
+    const m = integrationFromMcpb(FETCH_MCPB, "acme") as unknown as Record<string, any>;
+    expect(m.source.server.mcp_config.args[0]).toBe("${__dirname}/server/index.js");
+  });
+
+  it("accepts compatibility.platforms with linux and refuses it without", () => {
+    expectRefused(
+      () => integrationFromMcpb({ ...FETCH_MCPB, compatibility: { platforms: ["win32"] } }, "acme"),
+      "mcpb_unsupported_platform",
+    );
+    expectRefused(
+      () => integrationFromMcpb({ ...FETCH_MCPB, compatibility: { platforms: [] } }, "acme"),
+      "mcpb_unsupported_platform",
+    );
+    const accepted = integrationFromMcpb(
+      {
+        ...FETCH_MCPB,
+        compatibility: { platforms: ["darwin", "linux"], runtimes: { node: ">=20" } },
+      },
+      "acme",
+    ) as unknown as Record<string, unknown>;
+    expect(accepted.compatibility).toBeUndefined();
+    expectValidIntegration(accepted as unknown as IntegrationManifest);
+  });
+
+  it("accepts any manifest_version string", () => {
+    expectValidIntegration(integrationFromMcpb({ ...FETCH_MCPB, manifest_version: "9.9" }, "acme"));
+  });
+
+  it("refuses a non-string env value instead of dropping it", () => {
+    const mcpb = structuredClone(FETCH_MCPB) as Record<string, any>;
+    mcpb.server.mcp_config.env.RETRIES = 3;
+    expectRefused(() => integrationFromMcpb(mcpb, "acme"), "mcpb_invalid_manifest", /env/);
   });
 
   it("refuses a manifest missing a required MCPB field", () => {
     const { author: _author, ...withoutAuthor } = FETCH_MCPB;
-    expect(() => integrationFromMcpb(withoutAuthor, "acme")).toThrow(/author\.name/);
+    expectRefused(
+      () => integrationFromMcpb(withoutAuthor, "acme"),
+      "mcpb_invalid_manifest",
+      /author\.name/,
+    );
+  });
+
+  it("keeps the author object", () => {
+    const author = { name: "Example", email: "dev@example.com", url: "https://example.com" };
+    const m = integrationFromMcpb({ ...FETCH_MCPB, author: { ...author, extra: 1 } }, "acme");
+    expect((m as unknown as Record<string, unknown>).author).toEqual(author);
+    expectValidIntegration(m);
   });
 });
 
@@ -243,23 +427,115 @@ describe("mcpbFromIntegration", () => {
     ).toBeUndefined();
   });
 
-  it("refuses what MCPB cannot carry", () => {
+  it("marks a credential sensitive whatever the delivery entry says", () => {
+    const manifest = localIntegration();
+    (manifest as unknown as Record<string, any>).auths.primary.delivery.env = {
+      API_KEY: { value: "{$credential.api_key}", sensitive: false },
+    };
+    const mcpb = mcpbFromIntegration(manifest);
+    expectStrictMcpb(mcpb);
+    expect(mcpb.user_config?.api_key).toMatchObject({ sensitive: true, required: true });
+    const reimported = integrationFromMcpb(mcpb, "acme");
+    expectValidIntegration(reimported);
+    expect(mcpbFromIntegration(reimported)).toEqual(mcpb);
+  });
+
+  it("picks the MCPB fields: extra keys under server and mcp_config do not reach the export", () => {
+    const manifest = localIntegration();
+    const server = (manifest as unknown as Record<string, any>).source.server;
+    server.extra = true;
+    server.mcp_config.extra = true;
+    server.mcp_config.platform_overrides = {
+      win32: { command: "node.exe", args: ["a"], env: { A: "b" }, extra: true },
+      bad: "not an object",
+    };
+    const mcpb = mcpbFromIntegration(manifest);
+    expectStrictMcpb(mcpb);
+    expect(mcpb.server).toEqual({
+      type: "node",
+      entry_point: "server/index.js",
+      mcp_config: {
+        command: "node",
+        args: ["server/index.js"],
+        env: { LOG_LEVEL: "info", API_KEY: "${user_config.api_key}" },
+        platform_overrides: { win32: { command: "node.exe", args: ["a"], env: { A: "b" } } },
+      },
+    });
+  });
+
+  it("converts the author both ways and never emits an at-sign fallback", () => {
+    const object = mcpbFromIntegration(
+      localIntegration({
+        author: { name: "Acme", email: "dev@acme.test", url: "https://acme.test", extra: 1 },
+      }),
+    );
+    expectStrictMcpb(object);
+    expect(object.author).toEqual({
+      name: "Acme",
+      email: "dev@acme.test",
+      url: "https://acme.test",
+    });
+    expect(mcpbFromIntegration(localIntegration({ author: "Acme" })).author).toEqual({
+      name: "Acme",
+    });
+    const fallback = mcpbFromIntegration(localIntegration({ author: undefined }));
+    expectStrictMcpb(fallback);
+    expect(fallback.author).toEqual({ name: "acme" });
+  });
+
+  it("refuses delivery over HTTP", () => {
     const http = localIntegration();
     (http as unknown as Record<string, any>).auths.primary.delivery = {
       http: { in: "header", name: "Authorization", value: "{$credential.api_key}" },
     };
-    expect(() => mcpbFromIntegration(http)).toThrow(/over HTTP or as a file/);
+    expectRefused(
+      () => mcpbFromIntegration(http),
+      "mcpb_unsupported_auth",
+      /over HTTP or as a file/,
+    );
+  });
+
+  it("refuses delivery as a file", () => {
+    const files = localIntegration();
+    (files as unknown as Record<string, any>).auths.primary.delivery = {
+      files: [{ path: "key.txt", value: "{$credential.api_key}" }],
+    };
+    expectRefused(
+      () => mcpbFromIntegration(files),
+      "mcpb_unsupported_auth",
+      /over HTTP or as a file/,
+    );
+  });
+
+  it("refuses a second auth method, connection variables and a non-local source", () => {
     const two = localIntegration();
     (two as unknown as Record<string, any>).auths.secondary = (
       two as unknown as Record<string, any>
     ).auths.primary;
-    expect(() => mcpbFromIntegration(two)).toThrow(/more than one auth method/);
-    expect(() =>
-      mcpbFromIntegration(localIntegration({ variables: { schema: { type: "object" } } })),
-    ).toThrow(/connection variables/);
-    expect(() => mcpbFromIntegration(localIntegration({ source: { kind: "none" } }))).toThrow(
+    expectRefused(
+      () => mcpbFromIntegration(two),
+      "mcpb_unsupported_auth",
+      /more than one auth method/,
+    );
+    expectRefused(
+      () => mcpbFromIntegration(localIntegration({ variables: { schema: { type: "object" } } })),
+      "mcpb_unsupported_variables",
+      /connection variables/,
+    );
+    expectRefused(
+      () => mcpbFromIntegration(localIntegration({ source: { kind: "none" } })),
+      "mcpb_not_local",
       /source\.kind is local/,
     );
+  });
+
+  it("refuses a local server without mcp_config.command as not local", () => {
+    const manifest = localIntegration();
+    delete (manifest as unknown as Record<string, any>).source.server.mcp_config;
+    expectRefused(() => mcpbFromIntegration(manifest), "mcpb_not_local");
+    const noCommand = localIntegration();
+    delete (noCommand as unknown as Record<string, any>).source.server.mcp_config.command;
+    expectRefused(() => mcpbFromIntegration(noCommand), "mcpb_not_local");
   });
 });
 

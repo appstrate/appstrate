@@ -91,6 +91,7 @@ describe("declaredTools / serverEntryPoint", () => {
         server: {
           type: "bun",
           entry_point: "server/index.ts",
+          mcp_config: { command: "bun" },
           tools: [{ name: "clone" }, { name: "status" }, { notName: 1 }, "bad"],
         },
       },
@@ -106,7 +107,14 @@ describe("declaredTools / serverEntryPoint", () => {
   it("reads source.server.entry_point", () => {
     expect(
       serverEntryPoint({
-        source: { kind: "local", server: { type: "node", entry_point: "server/index.ts" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.ts",
+            mcp_config: { command: "node" },
+          },
+        },
       }),
     ).toBe("server/index.ts");
     expect(serverEntryPoint({ source: { kind: "local", server: {} } })).toBeUndefined();

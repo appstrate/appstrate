@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A manifest declaring the retired `type: "mcp-server"` is refused with a message naming the
+  replacement (a `local` integration declares its server inline under `source.server`), the
+  same guidance as `dependencies.mcp_servers`; `MCP_SERVER_GUIDANCE` is exported from
+  `@appstrate/core/dependencies`.
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
   resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
@@ -56,18 +60,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`@appstrate/core/mcpb`** — the MCP Bundle projection of a `local` integration (AFPS §7.1.1):
-  **`mcpbFromIntegration(manifest, files?)`** emits a strict MCPB `manifest.json` (delivery.env
-  credentials become sensitive `user_config`), **`integrationFromMcpb(raw, scope)`** builds the
-  integration from one (sensitive `user_config` becomes a `custom` auth delivered in env),
-  **`isMcpbManifest(raw)`** tells the two manifest kinds apart, and both refuse what they cannot
-  carry with **`McpbProjectionError`** (`McpbProjectionErrorCode`). Types **`McpbManifest`**,
-  **`McpbUserConfigEntry`**.
+  **`mcpbFromIntegration(manifest, files?)`** emits a strict MCPB `manifest.json` (`server` and
+  `author` are picked field by field; every `delivery.env` credential becomes a `user_config`
+  entry that is always `sensitive` and `required`), **`integrationFromMcpb(raw, scope)`** builds
+  the integration from one (sensitive `user_config` becomes one `custom` auth, `allow_all_uris`,
+  delivered in env; non-sensitive defaults are inlined in `command`, `args` and `env`, platform
+  overrides included; `compatibility` is dropped), **`isMcpbManifest(raw)`** tells the two
+  manifest kinds apart, and both refuse what they cannot carry with **`McpbProjectionError`**
+  carrying a **`McpbProjectionErrorCode`**: `mcpb_not_local`, `mcpb_unsupported_auth`,
+  `mcpb_unsupported_variables`, `mcpb_invalid_manifest`, `mcpb_unsupported_user_config` (a
+  sensitive reference outside a top-level `env` value, a `multiple` entry, a sensitive non-string,
+  a setting with no default), `mcpb_unsupported_placeholder` (a `${…}` left in an `env` value) and
+  `mcpb_unsupported_platform` (`compatibility.platforms` without `linux`). Types
+  **`McpbManifest`**, **`McpbUserConfigEntry`**, **`McpbAuthor`**, **`McpbRun`**.
 - **`resolveIntegrationToolCatalog`** takes **`listedTools`**: the tools the running server
   listed, which stand for the catalog when the caller passes them (a remote source with
   `allow_undeclared_tools`).
 - **Local server accessors** (`@appstrate/core/integration`, `@appstrate/core/mcp-server`):
   **`LocalServer`**, **`getLocalServer(manifest)`** and **`getLocalServerTools(manifest)`** read
-  `source.server` of a `local` integration; **`getLocalServerEnv(manifest)`** returns its literal
+  `source.server` of a `local` integration (`null` unless it carries `type`, `entry_point` and an
+  `mcp_config` object with a string `command`); **`getLocalServerEnv(manifest)`** returns its literal
   `mcp_config.env`. `getMcpServerRuntime`, `effectiveMcpServerType` and
   `getMcpServerWorkspaceMount` now read the INTEGRATION manifest (`source.server` and its `_meta`),
   whose schema validates the `dev.appstrate/workspace` and `dev.appstrate/mcp-server` hints.

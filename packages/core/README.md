@@ -44,6 +44,7 @@ import type { AppstrateModule } from "@appstrate/core/module";
 | `./integration`                                              | AFPS integration manifest — schema, types, and the install-time scope/tool helpers.     |
 | `./naming` · `./semver` · `./dist-tags` · `./version-policy` | Scope/name rules, version resolution, dist-tag and version-policy semantics.            |
 | `./dependencies` · `./integrity` · `./zip`                   | Dependency resolution, integrity digests, package ZIP parsing.                          |
+| `./mcpb`                                                     | MCP Bundle (`.mcpb`) projection of a `local` integration — export and import.           |
 | `./system-packages`                                          | System-package catalog helpers.                                                         |
 
 **Runtime & agents**

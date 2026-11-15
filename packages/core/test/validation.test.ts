@@ -738,7 +738,7 @@ describe("validateManifest", () => {
 });
 
 // ─────────────────────────────────────────────
-// validateManifest — all four AFPS package types
+// validateManifest — the three AFPS package types
 // ─────────────────────────────────────────────
 
 describe("validateManifest — package-type dispatch", () => {
@@ -783,7 +783,7 @@ describe("validateManifest — package-type dispatch", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("refuses the retired mcp-server package type as an unknown type", () => {
+  it("refuses the retired mcp-server package type and names its replacement", () => {
     const r = validateManifest({
       name: "@test/fetch-json",
       version: "1.0.0",
@@ -797,6 +797,7 @@ describe("validateManifest — package-type dispatch", () => {
     });
     expect(r.valid).toBe(false);
     expect(r.errors[0]).toMatch(/Unknown package type "mcp-server"/);
+    expect(r.errors[0]).toContain("source.server");
     expect(r.errors[0]).toContain("agent, skill, integration");
   });
 });

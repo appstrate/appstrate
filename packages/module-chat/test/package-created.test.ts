@@ -38,9 +38,6 @@ describe("packageCreatedByImport", () => {
   it("names nothing without a known root type", () => {
     expect(packageCreatedByImport({ root_package_id: "@acme/x" })).toBeNull();
     expect(packageCreatedByImport({ root_package_id: "@acme/x", root_type: "tool" })).toBeNull();
-    expect(
-      packageCreatedByImport({ root_package_id: "@acme/x", root_type: "mcp-server" }),
-    ).toBeNull();
     expect(packageCreatedByImport({ error: "refused" })).toBeNull();
   });
 });

@@ -311,14 +311,6 @@ export interface IntegrationSpawnSpec {
        */
       entry_point?: string;
       /**
-       * The id of the integration whose archive carries the server payload —
-       * the integration itself (`source.kind: "local"`). The sidecar fetches
-       * THIS integration's `.afps` archive (the runnable server code) from
-       * `GET /internal/integration-bundle/:scope/:name`. Set for local
-       * sources; omitted for remote and serverless integrations.
-       */
-      packageId?: string;
-      /**
        * The CONCRETE integration version this run froze at kickoff. The
        * sidecar forwards it to
        * `GET /internal/integration-bundle/:scope/:name?version=…` so the

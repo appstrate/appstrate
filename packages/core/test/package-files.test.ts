@@ -56,10 +56,6 @@ describe("PACKAGE_CONTENT_ENTRY", () => {
     expect(required).toEqual(["agent", "skill"]);
   });
 
-  it("has no entry for the retired mcp-server package type", () => {
-    expect(Object.keys(PACKAGE_CONTENT_ENTRY)).not.toContain("mcp-server");
-  });
-
   it("declares no empty or nested path", () => {
     for (const type of packageTypeEnum.options) {
       const entry = PACKAGE_CONTENT_ENTRY[type];

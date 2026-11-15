@@ -14,7 +14,7 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
-import { findRetiredDependencyKeys } from "./dependencies.ts";
+import { MCP_SERVER_GUIDANCE, findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { asRecord } from "./safe-json.ts";
 import { isAppearanceColor, type AppearanceColor } from "./appearance.ts";
@@ -587,16 +587,17 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
  *     silently dropping it ships an agent missing a tool with no signal, and a
  *     retired dependency key declares a dependency no reader will ever honour.
  *   - `"drop"` — the manifest was ALREADY PERSISTED (a stored draft, a
- *     published version snapshot). Those cannot be fixed in place — a
- *     published artifact is immutable by construction — so:
+ *     published version snapshot) or comes back from outside the platform (a
+ *     bundle re-imported). Script 0054 rewrites the platform's own stored
+ *     versions, but a bundle exported earlier cannot be fixed in place, so:
  *       - retired `runtime_tools` ids are stripped and the manifest stays valid
  *         and runnable (read {@link ValidateManifestResult.droppedRuntimeTools}
  *         to log what went), and
  *       - a retired `dependencies` key is TOLERATED, left exactly where it is.
  *         It is inert (no reader has ever read it) so there is nothing to strip,
- *         and rewriting a stored manifest's bytes here would change its
- *         integrity hash. Surfacing it belongs to the install-warning channel,
- *         not to this validator.
+ *         and rewriting a manifest's bytes here would change its integrity
+ *         hash. Surfacing it belongs to the install-warning channel, not to
+ *         this validator.
  *
  * The name is historical — the flag predates the dependency-key rule and is
  * part of the published `@appstrate/core` surface, so it is kept rather than
@@ -685,6 +686,14 @@ export function validateManifest(
   // base-schema errors.
   const received =
     typeof type === "string" ? `"${type}"` : type === undefined ? "missing" : String(type);
+  if (type === "mcp-server") {
+    return {
+      valid: false,
+      errors: [
+        `type: Unknown package type "mcp-server" — the package type is retired: ${MCP_SERVER_GUIDANCE}. A local integration declares its server inline under \`source.server\`; the package type is one of: agent, skill, integration`,
+      ],
+    };
+  }
   return {
     valid: false,
     errors: [

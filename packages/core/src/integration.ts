@@ -777,14 +777,19 @@ export type LocalServer = Extract<
 
 /**
  * The `source.server` of a `local` integration; `null` for any other source or when the
- * declaration is missing / malformed (a draft being edited).
+ * declaration is missing / malformed (a draft being edited): no `type`, `entry_point`, or
+ * `mcp_config` object with a string `command`.
  */
 export function getLocalServer(manifest: unknown): LocalServer | null {
   const source = (manifest as { source?: { kind?: unknown; server?: unknown } } | null)?.source;
   if (source?.kind !== "local") return null;
-  const server = source.server as { type?: unknown; entry_point?: unknown } | null | undefined;
+  const server = source.server as
+    { type?: unknown; entry_point?: unknown; mcp_config?: unknown } | null | undefined;
   if (!server || typeof server !== "object" || Array.isArray(server)) return null;
   if (typeof server.type !== "string" || typeof server.entry_point !== "string") return null;
+  const config = server.mcp_config as { command?: unknown } | null | undefined;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  if (typeof config.command !== "string") return null;
   return server as LocalServer;
 }
 

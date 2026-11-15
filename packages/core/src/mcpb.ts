@@ -11,7 +11,12 @@
  *
  * Both directions refuse what they cannot carry faithfully rather than dropping it: a credential
  * delivered over HTTP or as a file, a second auth method, connection variables (export); a
- * credential referenced from `mcp_config.args`, a non-sensitive setting with no default (import).
+ * credential anywhere but a top-level `mcp_config.env` value, a setting with no place to live, a
+ * placeholder nothing expands, a non-Linux bundle (import).
+ *
+ * The runner derives the launch from `server.type` + `entry_point` only: `mcp_config.command` /
+ * `args` and `platform_overrides` are carried for MCPB interoperability and never executed, and
+ * `mcp_config.env` values are literal strings (no placeholder is expanded in them).
  */
 
 import { AFPS_SCHEMA_VERSION } from "./validation.ts";
@@ -33,7 +38,9 @@ export type McpbProjectionErrorCode =
   | "mcpb_unsupported_auth"
   | "mcpb_unsupported_variables"
   | "mcpb_invalid_manifest"
-  | "mcpb_unsupported_user_config";
+  | "mcpb_unsupported_user_config"
+  | "mcpb_unsupported_placeholder"
+  | "mcpb_unsupported_platform";
 
 /** The strict MCPB `manifest.json` fields this projection reads or writes. */
 export interface McpbManifest {
@@ -42,7 +49,7 @@ export interface McpbManifest {
   display_name?: string;
   version: string;
   description: string;
-  author: { name: string; email?: string; url?: string };
+  author: McpbAuthor;
   license?: string;
   keywords?: string[];
   icon?: string;
@@ -53,11 +60,24 @@ export interface McpbManifest {
       command: string;
       args?: string[];
       env?: Record<string, string>;
-      platform_overrides?: Record<string, unknown>;
+      platform_overrides?: Record<string, McpbRun>;
     };
   };
   tools?: { name: string; description?: string }[];
   user_config?: Record<string, McpbUserConfigEntry>;
+}
+
+export interface McpbAuthor {
+  name: string;
+  email?: string;
+  url?: string;
+}
+
+/** The launch fields shared by `mcp_config` and each `platform_overrides` entry. */
+export interface McpbRun {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 export interface McpbUserConfigEntry {
@@ -67,11 +87,37 @@ export interface McpbUserConfigEntry {
   required?: boolean;
   sensitive?: boolean;
   default?: unknown;
+  multiple?: boolean;
+}
+
+/** What the reader keeps of a bundle. `manifest_version` is a plain string: see `readMcpb`. */
+interface McpbRead {
+  manifest_version?: string;
+  name: string;
+  display_name?: string;
+  version: string;
+  description: string;
+  author: McpbAuthor;
+  license?: string;
+  keywords?: string[];
+  server: {
+    type: string;
+    entry_point: string;
+    mcp_config: McpbRun & { command: string; platform_overrides?: Record<string, McpbRun> };
+  };
+  tools?: { name: string; description?: string }[];
+  user_config?: Record<
+    string,
+    Omit<McpbUserConfigEntry, "type" | "description"> & { type?: string; description?: string }
+  >;
+  compatibility?: { platforms?: string[] };
 }
 
 const USER_CONFIG_REF = /\$\{user_config\.([^}]+)\}/g;
 const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
 const CREDENTIAL_FIELD = /^[A-Za-z0-9_]+$/;
+/** Any `${…}` placeholder (`${__dirname}`, `${HOME}`, `${/}`, …). */
+const PLACEHOLDER = /\$\{[^}]*\}/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -101,6 +147,23 @@ function packageSegment(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === "string")
+    ? (value as string[])
+    : undefined;
+}
+
+/** Pick the launch fields of an `mcp_config` / override object; MCPB objects admit no other key. */
+function pickRun(value: Record<string, unknown>, env?: Record<string, string>): McpbRun {
+  const args = stringArray(value.args);
+  const effectiveEnv = env ?? stringRecord(value.env);
+  return {
+    ...(typeof value.command === "string" ? { command: value.command } : {}),
+    ...(args ? { args } : {}),
+    ...(Object.keys(effectiveEnv).length > 0 ? { env: effectiveEnv } : {}),
+  };
+}
+
 /**
  * Integration → strict MCPB `manifest.json` (AFPS §7.1.1, export). `files` is the set of paths
  * the archive carries, to keep `icon` only when it names a PNG shipped with the bundle.
@@ -113,7 +176,7 @@ export function mcpbFromIntegration(
   if (!server) {
     throw new McpbProjectionError(
       "mcpb_not_local",
-      "Only an integration whose source.kind is local has an MCPB form",
+      "Only an integration whose source.kind is local, with a source.server declaring mcp_config.command, has an MCPB form",
     );
   }
   const record = manifest as unknown as Record<string, unknown>;
@@ -131,7 +194,8 @@ export function mcpbFromIntegration(
     );
   }
 
-  const env: Record<string, string> = { ...stringRecord(server.mcp_config.env) };
+  const config = server.mcp_config as unknown as Record<string, unknown>;
+  const env: Record<string, string> = { ...stringRecord(config.env) };
   const userConfig: Record<string, McpbUserConfigEntry> = {};
   const [auth] = auths;
   if (auth) {
@@ -145,18 +209,19 @@ export function mcpbFromIntegration(
     }
     const properties = credentialProperties(method);
     // Each credential field a value references becomes ONE user_config entry, named after the
-    // field, so two variables fed the same credential ask the host for it once.
+    // field, so two variables fed the same credential ask the host for it once. It is always
+    // sensitive: a credential is a secret whatever the delivery entry's own flag says, and the
+    // import refuses a non-sensitive entry it cannot store.
     for (const [variable, entry] of Object.entries(isRecord(delivery.env) ? delivery.env : {})) {
       if (!isRecord(entry) || typeof entry.value !== "string") continue;
       env[variable] = entry.value.replace(CREDENTIAL_REF, (_, field: string) => {
         const property = properties[field];
         const title = typeof property?.title === "string" ? property.title : field;
-        const sensitive = entry.sensitive === true || userConfig[field]?.sensitive === true;
         userConfig[field] = {
           type: "string",
           title,
           description: typeof property?.description === "string" ? property.description : title,
-          sensitive,
+          sensitive: true,
           required: true,
         };
         return `\${user_config.${field}}`;
@@ -164,10 +229,20 @@ export function mcpbFromIntegration(
     }
   }
 
-  const mcpConfig = { ...server.mcp_config };
-  if (Object.keys(env).length > 0) mcpConfig.env = env;
-  else delete mcpConfig.env;
-  const { tools, ...run } = server;
+  // Picked field by field: MCPB objects are `additionalProperties: false`, AFPS ones are loose.
+  const overrides = isRecord(config.platform_overrides)
+    ? Object.fromEntries(
+        Object.entries(config.platform_overrides)
+          .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
+          .map(([platform, override]) => [platform, pickRun(override)]),
+      )
+    : undefined;
+  const mcpConfig: McpbManifest["server"]["mcp_config"] = {
+    ...pickRun(config, env),
+    command: server.mcp_config.command,
+    ...(overrides && Object.keys(overrides).length > 0 ? { platform_overrides: overrides } : {}),
+  };
+  const tools = server.tools;
   const displayName = typeof record.display_name === "string" ? record.display_name : undefined;
   const description =
     typeof record.description === "string" && record.description.length > 0
@@ -184,13 +259,13 @@ export function mcpbFromIntegration(
     ...(displayName ? { display_name: displayName } : {}),
     version: manifest.version,
     description,
-    author: { name: authorName(record) },
+    author: exportAuthor(record),
     ...(typeof record.license === "string" ? { license: record.license } : {}),
     ...(Array.isArray(record.keywords)
       ? { keywords: record.keywords.filter((k): k is string => typeof k === "string") }
       : {}),
     ...(icon ? { icon } : {}),
-    server: { ...run, mcp_config: mcpConfig },
+    server: { type: server.type, entry_point: server.entry_point, mcp_config: mcpConfig },
     ...(tools && tools.length > 0
       ? {
           tools: tools.map((tool) => ({
@@ -214,13 +289,31 @@ function credentialProperties(method: unknown): Record<string, Record<string, un
   );
 }
 
-function authorName(record: Record<string, unknown>): string {
-  if (typeof record.author === "string" && record.author.length > 0) return record.author;
+function pickAuthor(value: Record<string, unknown>): McpbAuthor | undefined {
+  if (typeof value.name !== "string" || value.name.length === 0) return undefined;
+  return {
+    name: value.name,
+    ...(typeof value.email === "string" ? { email: value.email } : {}),
+    ...(typeof value.url === "string" ? { url: value.url } : {}),
+  };
+}
+
+/** AFPS `author` is a string or `{ name, email?, url? }` (§3.1); MCPB's is always the object. */
+function exportAuthor(record: Record<string, unknown>): McpbAuthor {
+  if (isRecord(record.author)) {
+    const author = pickAuthor(record.author);
+    if (author) return author;
+  }
+  if (typeof record.author === "string" && record.author.length > 0) {
+    return { name: record.author };
+  }
   const meta = isRecord(record._meta) ? record._meta["dev.appstrate/package"] : undefined;
   if (isRecord(meta) && typeof meta.author === "string" && meta.author.length > 0) {
-    return meta.author;
+    return { name: meta.author };
   }
-  return typeof record.name === "string" ? (record.name.split("/")[0] ?? record.name) : "unknown";
+  // The `@scope` of the package name, without its at-sign.
+  const scope = typeof record.name === "string" ? record.name.split("/")[0]?.replace(/^@/, "") : "";
+  return { name: scope || "unknown" };
 }
 
 /**
@@ -231,66 +324,112 @@ function authorName(record: Record<string, unknown>): string {
 export function integrationFromMcpb(raw: unknown, scope: string): IntegrationManifest {
   const mcpb = readMcpb(raw);
   const userConfig = mcpb.user_config ?? {};
-  const sensitive = new Set(
-    Object.entries(userConfig)
-      .filter(([, entry]) => entry.sensitive === true)
-      .map(([key]) => key),
-  );
-  for (const key of sensitive) {
-    if (!CREDENTIAL_FIELD.test(key)) {
-      throw new McpbProjectionError(
-        "mcpb_unsupported_user_config",
-        `user_config.${key}: a credential field name is letters, digits and underscores only`,
-      );
-    }
+  const unsupported = (message: string): never => {
+    throw new McpbProjectionError("mcpb_unsupported_user_config", message);
+  };
+
+  if (mcpb.compatibility?.platforms && !mcpb.compatibility.platforms.includes("linux")) {
+    throw new McpbProjectionError(
+      "mcpb_unsupported_platform",
+      "compatibility.platforms does not include linux: a local server runs in a Linux runner",
+    );
   }
+
+  const sensitive = new Set<string>();
   for (const [key, entry] of Object.entries(userConfig)) {
-    if (!sensitive.has(key) && entry.default === undefined) {
-      throw new McpbProjectionError(
-        "mcpb_unsupported_user_config",
+    if (entry.multiple === true) {
+      unsupported(`user_config.${key} is multiple: an integration has no list-valued setting`);
+    }
+    if (entry.sensitive === true) {
+      if (entry.type !== "string") {
+        unsupported(`user_config.${key} is sensitive but not a string: a credential is a string`);
+      }
+      if (!CREDENTIAL_FIELD.test(key)) {
+        unsupported(
+          `user_config.${key}: a credential field name is letters, digits and underscores only`,
+        );
+      }
+      sensitive.add(key);
+    } else if (entry.default === undefined) {
+      unsupported(
         `user_config.${key} is not sensitive and has no default: an integration has no place to store it`,
       );
     }
   }
 
-  /** Inline a non-sensitive default; a sensitive reference is left for the caller to translate. */
-  const inlineDefaults = (value: string): string =>
-    value.replace(USER_CONFIG_REF, (whole, key: string) =>
-      sensitive.has(key) ? whole : String(userConfig[key]?.default ?? whole),
-    );
-  const refersToCredential = (value: string): boolean =>
-    [...value.matchAll(USER_CONFIG_REF)].some((match) => sensitive.has(match[1]!));
-
-  const args = (mcpb.server.mcp_config.args ?? []).map((arg) => {
-    if (refersToCredential(arg)) {
+  /**
+   * Inline the non-sensitive defaults of a value. A sensitive reference is refused unless
+   * `credentialAllowed` (an `env` value of the top-level `mcp_config`: a credential reaches the
+   * server through its environment only), where it is left for the caller to translate.
+   */
+  const inline = (value: string, where: string, credentialAllowed: boolean): string =>
+    value.replace(USER_CONFIG_REF, (whole, key: string) => {
+      const entry = userConfig[key];
+      if (!entry) {
+        throw new McpbProjectionError(
+          "mcpb_invalid_manifest",
+          `${where} references user_config.${key}, which the manifest does not declare`,
+        );
+      }
+      if (sensitive.has(key)) {
+        if (credentialAllowed) return whole;
+        return unsupported(
+          `${where} references the sensitive user_config.${key}: a credential reaches the server through its environment only`,
+        );
+      }
+      return String(entry.default);
+    });
+  /** Env values are literal on the platform: nothing expands a placeholder left in one. */
+  const assertLiteral = (value: string, where: string): void => {
+    if (PLACEHOLDER.test(value)) {
       throw new McpbProjectionError(
-        "mcpb_unsupported_user_config",
-        "server.mcp_config.args references a sensitive user_config entry: a credential reaches the server through its environment only",
+        "mcpb_unsupported_placeholder",
+        `${where} holds a placeholder (${PLACEHOLDER.exec(value)![0]}): environment values are literal and nothing expands them`,
       );
     }
-    return inlineDefaults(arg);
-  });
+  };
+  /** `command` / `args` / `env` of one run object; placeholders stay in `command` and `args`. */
+  const inlineRun = (run: McpbRun, where: string): McpbRun => {
+    const out: McpbRun = {};
+    if (run.command !== undefined) out.command = inline(run.command, `${where}.command`, false);
+    if (run.args) out.args = run.args.map((arg) => inline(arg, `${where}.args`, false));
+    if (run.env) {
+      out.env = {};
+      for (const [variable, value] of Object.entries(run.env)) {
+        const inlined = inline(value, `${where}.env.${variable}`, false);
+        assertLiteral(inlined, `${where}.env.${variable}`);
+        out.env[variable] = inlined;
+      }
+    }
+    return out;
+  };
 
+  const config = mcpb.server.mcp_config;
+  const where = "server.mcp_config";
   const env: Record<string, string> = {};
   const deliveryEnv: Record<string, { value: string; sensitive: true }> = {};
-  for (const [variable, value] of Object.entries(mcpb.server.mcp_config.env ?? {})) {
-    const inlined = inlineDefaults(value);
-    if (refersToCredential(inlined)) {
-      deliveryEnv[variable] = {
-        value: inlined.replace(USER_CONFIG_REF, (_, key: string) => `{$credential.${key}}`),
-        sensitive: true,
-      };
-    } else {
-      env[variable] = inlined;
-    }
+  for (const [variable, value] of Object.entries(config.env ?? {})) {
+    const at = `${where}.env.${variable}`;
+    const inlined = inline(value, at, true);
+    const translated = inlined.replace(USER_CONFIG_REF, (_, key: string) => `{$credential.${key}}`);
+    assertLiteral(translated, at);
+    if (translated !== inlined) deliveryEnv[variable] = { value: translated, sensitive: true };
+    else env[variable] = inlined;
   }
 
-  const mcpConfig: Record<string, unknown> = { command: mcpb.server.mcp_config.command };
-  if (args.length > 0) mcpConfig.args = args;
+  const mcpConfig: Record<string, unknown> = {
+    ...inlineRun({ command: config.command, args: config.args }, where),
+  };
   if (Object.keys(env).length > 0) mcpConfig.env = env;
-  if (mcpb.server.mcp_config.platform_overrides) {
-    mcpConfig.platform_overrides = mcpb.server.mcp_config.platform_overrides;
+  if (config.platform_overrides) {
+    mcpConfig.platform_overrides = Object.fromEntries(
+      Object.entries(config.platform_overrides).map(([platform, run]) => [
+        platform,
+        inlineRun(run, `${where}.platform_overrides.${platform}`),
+      ]),
+    );
   }
+  if (mcpConfig.args && (mcpConfig.args as string[]).length === 0) delete mcpConfig.args;
 
   const name = `@${scope}/${packageSegment(mcpb.name)}`;
   const manifest: Record<string, unknown> = {
@@ -300,7 +439,7 @@ export function integrationFromMcpb(raw: unknown, scope: string): IntegrationMan
     schema_version: AFPS_SCHEMA_VERSION,
     display_name: mcpb.display_name ?? mcpb.name,
     description: mcpb.description,
-    author: mcpb.author.name,
+    author: mcpb.author,
     ...(mcpb.license ? { license: mcpb.license } : {}),
     ...(mcpb.keywords ? { keywords: mcpb.keywords } : {}),
     source: {
@@ -358,19 +497,45 @@ export function isMcpbManifest(raw: unknown): boolean {
   );
 }
 
-function readMcpb(raw: unknown): McpbManifest {
+/**
+ * Validate and pick the fields the import reads. Lenient on the version: any `manifest_version`
+ * / `dxt_version` string is accepted, because the fields read here are stable across MCPB
+ * versions; the writer, by contrast, emits exactly "0.3" or "0.4".
+ */
+function readMcpb(raw: unknown): McpbRead {
   const fail = (field: string, expected: string): never => {
     throw new McpbProjectionError("mcpb_invalid_manifest", `MCPB manifest: ${field} ${expected}`);
   };
+  const readEnv = (value: unknown, field: string): Record<string, string> | undefined => {
+    if (value === undefined) return undefined;
+    if (!isRecord(value) || Object.values(value).some((v) => typeof v !== "string")) {
+      return fail(field, "must be an object of strings");
+    }
+    return value as Record<string, string>;
+  };
+  const readRun = (value: Record<string, unknown>, field: string): McpbRun => {
+    if (value.command !== undefined && typeof value.command !== "string") {
+      fail(`${field}.command`, "must be a string");
+    }
+    if (value.args !== undefined && !stringArray(value.args)) {
+      fail(`${field}.args`, "must be an array of strings");
+    }
+    const env = readEnv(value.env, `${field}.env`);
+    return {
+      ...(value.command !== undefined ? { command: value.command as string } : {}),
+      ...(value.args !== undefined ? { args: value.args as string[] } : {}),
+      ...(env ? { env } : {}),
+    };
+  };
+
   if (!isRecord(raw)) return fail("manifest.json", "must be a JSON object");
   if (typeof raw.name !== "string" || packageSegment(raw.name).length === 0) {
     return fail("name", "must be a non-empty string");
   }
   if (typeof raw.version !== "string") return fail("version", "must be a string");
   if (typeof raw.description !== "string") return fail("description", "must be a string");
-  if (!isRecord(raw.author) || typeof raw.author.name !== "string") {
-    return fail("author.name", "must be a string");
-  }
+  const author = isRecord(raw.author) ? pickAuthor(raw.author) : undefined;
+  if (!author) return fail("author.name", "must be a string");
   const server = raw.server;
   if (!isRecord(server)) return fail("server", "must be an object");
   if (typeof server.type !== "string") return fail("server.type", "must be a string");
@@ -378,19 +543,39 @@ function readMcpb(raw: unknown): McpbManifest {
   if (!isRecord(server.mcp_config) || typeof server.mcp_config.command !== "string") {
     return fail("server.mcp_config.command", "must be a string");
   }
-  const args = server.mcp_config.args;
-  if (args !== undefined && (!Array.isArray(args) || args.some((a) => typeof a !== "string"))) {
-    return fail("server.mcp_config.args", "must be an array of strings");
+  const run = readRun(server.mcp_config, "server.mcp_config");
+  const overrides = server.mcp_config.platform_overrides;
+  if (overrides !== undefined && !isRecord(overrides)) {
+    return fail("server.mcp_config.platform_overrides", "must be an object");
   }
+  const platformOverrides = Object.entries(overrides ?? {}).map(([platform, value]) => {
+    const field = `server.mcp_config.platform_overrides.${platform}`;
+    if (!isRecord(value)) return fail(field, "must be an object");
+    return [platform, readRun(value, field)] as const;
+  });
+
   const userConfig = raw.user_config;
   if (userConfig !== undefined && !isRecord(userConfig)) {
     return fail("user_config", "must be an object");
   }
-  for (const [key, entry] of Object.entries(userConfig ?? {})) {
+  const entries = Object.entries(userConfig ?? {}).map(([key, entry]) => {
     if (!isRecord(entry) || typeof entry.title !== "string") {
       return fail(`user_config.${key}.title`, "must be a string");
     }
-  }
+    return [
+      key,
+      {
+        ...(typeof entry.type === "string" ? { type: entry.type } : {}),
+        title: entry.title,
+        ...(typeof entry.description === "string" ? { description: entry.description } : {}),
+        ...(typeof entry.required === "boolean" ? { required: entry.required } : {}),
+        ...(typeof entry.sensitive === "boolean" ? { sensitive: entry.sensitive } : {}),
+        ...(typeof entry.multiple === "boolean" ? { multiple: entry.multiple } : {}),
+        ...(entry.default !== undefined ? { default: entry.default } : {}),
+      },
+    ] as const;
+  });
+
   const tools = raw.tools;
   if (
     tools !== undefined &&
@@ -398,23 +583,50 @@ function readMcpb(raw: unknown): McpbManifest {
   ) {
     return fail("tools", "must be an array of { name, description? }");
   }
+  const compatibility = raw.compatibility;
+  let platforms: string[] | undefined;
+  if (isRecord(compatibility) && compatibility.platforms !== undefined) {
+    platforms = stringArray(compatibility.platforms);
+    if (!platforms) return fail("compatibility.platforms", "must be an array of strings");
+  }
+  const version =
+    typeof raw.manifest_version === "string"
+      ? raw.manifest_version
+      : typeof raw.dxt_version === "string"
+        ? raw.dxt_version
+        : undefined;
+
   return {
-    ...(raw as unknown as McpbManifest),
-    tools: (tools as { name: string; description?: unknown }[] | undefined)?.map((tool) => ({
-      name: tool.name,
-      ...(typeof tool.description === "string" ? { description: tool.description } : {}),
-    })),
+    ...(version ? { manifest_version: version } : {}),
+    name: raw.name,
+    ...(typeof raw.display_name === "string" ? { display_name: raw.display_name } : {}),
+    version: raw.version,
+    description: raw.description,
+    author,
+    ...(typeof raw.license === "string" ? { license: raw.license } : {}),
+    ...(Array.isArray(raw.keywords)
+      ? { keywords: raw.keywords.filter((k): k is string => typeof k === "string") }
+      : {}),
     server: {
       type: server.type,
       entry_point: server.entry_point,
       mcp_config: {
+        ...run,
         command: server.mcp_config.command,
-        ...(args ? { args: args as string[] } : {}),
-        env: stringRecord(server.mcp_config.env),
-        ...(isRecord(server.mcp_config.platform_overrides)
-          ? { platform_overrides: server.mcp_config.platform_overrides }
+        ...(platformOverrides.length > 0
+          ? { platform_overrides: Object.fromEntries(platformOverrides) }
           : {}),
       },
     },
+    ...(tools
+      ? {
+          tools: (tools as { name: string; description?: unknown }[]).map((tool) => ({
+            name: tool.name,
+            ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+          })),
+        }
+      : {}),
+    ...(entries.length > 0 ? { user_config: Object.fromEntries(entries) } : {}),
+    ...(platforms ? { compatibility: { platforms } } : {}),
   };
 }
