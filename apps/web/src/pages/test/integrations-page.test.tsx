@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The integration index: the server's ACTIVE set of this space, split by execution, the rest left
+ * The integration index: the server's ACTIVE set of this space, one list, the rest left
  * to the space library, and a page menu only for a caller with a deed in it.
  */
 
@@ -57,7 +57,11 @@ function integration(
   };
 }
 
-function page(permissions: string[], integrations: IntegrationIndexItem[]): string {
+function page(
+  permissions: string[],
+  integrations: IntegrationIndexItem[],
+  { url = "/integrations" } = {},
+): string {
   const qc = new QueryClient();
   // No org is selected here: every scoped query is disabled and serves the cache as seeded.
   qc.setQueryData(
@@ -96,7 +100,7 @@ function page(permissions: string[], integrations: IntegrationIndexItem[]): stri
     id: SPACE_ID,
   });
   try {
-    return render(<IntegrationsPage />, { queryClient: qc });
+    return render(<IntegrationsPage />, { queryClient: qc, initialEntries: [url] });
   } finally {
     snapshot.mockRestore();
   }
@@ -105,21 +109,37 @@ function page(permissions: string[], integrations: IntegrationIndexItem[]): stri
 const READER = ["spaces:read", "integrations:read"];
 
 describe("the integration index", () => {
-  it("draws the server's index, the remote tab without the local integrations", () => {
-    const html = page(READER, [
-      integration("@acme/remote", "Zéphyr"),
-      integration("@acme/api", "Boréal", "none"),
-      integration("@acme/local", "Kestrel", "local"),
-    ]);
+  const three = [
+    integration("@acme/remote", "Zéphyr"),
+    integration("@acme/api", "Boréal", "none"),
+    integration("@acme/local", "Kestrel", "local"),
+  ];
+
+  it("draws every source in one list, without tabs", () => {
+    const html = page(READER, three);
     expect(html).toContain("Zéphyr");
     expect(html).toContain("Boréal");
-    expect(html).not.toContain("Kestrel");
+    expect(html).toContain("Kestrel");
+    // No « Distantes / Locales » tabs: the only tablist left is the cards/table switch.
+    expect(html).not.toContain("Distantes");
+    expect(html).not.toContain("Locales");
+    expect(html.match(/role="tablist"/g)).toHaveLength(1);
   });
 
-  it("defaults to cards and does not invent a connection count while it is unknown", () => {
+  it("filters on the source param", () => {
+    const html = page(READER, three, { url: "/integrations?source=none,local" });
+    expect(html).not.toContain("Zéphyr");
+    expect(html).toContain("Boréal");
+    expect(html).toContain("Kestrel");
+    const one = page(READER, three, { url: "/integrations?source=remote" });
+    expect(one).toContain("Zéphyr");
+    expect(one).not.toContain("Boréal");
+    expect(one).not.toContain("Kestrel");
+  });
+
+  it("links each row and does not invent a connection count while it is unknown", () => {
     const html = page(READER, [integration("@acme/remote", "Zéphyr")]);
     expect(html).toContain('href="/integrations/@acme/remote"');
-    expect(html).not.toContain("<table");
     expect(html).not.toContain("0 connexion");
   });
 

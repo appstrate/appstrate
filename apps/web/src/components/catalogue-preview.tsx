@@ -169,7 +169,7 @@ export function CataloguePreview({
   mayConfigureIn,
   integrations,
   agents,
-  protocol,
+  source,
   actionsMenu,
   icon,
   pinnedVersion,
@@ -190,8 +190,8 @@ export function CataloguePreview({
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
   agents: LibraryPackageItem[];
-  /** An integration's protocol, when the catalogue knows it. */
-  protocol?: string;
+  /** An integration's source (API, remote or local MCP), already worded, when the catalogue knows it. */
+  source?: string;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
   /** The package's tile, the one its card draws. */
@@ -414,9 +414,9 @@ export function CataloguePreview({
       {/* "À propos" comes FIRST, in the same order for every type; what varies by type follows. */}
       <SettingsGroup title={t("orgSettings.tabGeneral")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
-          {protocol && (
-            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-              {protocol}
+          {source && (
+            <PropertyRow icon={Plug} label={t("integrations.col.source")}>
+              {source}
             </PropertyRow>
           )}
           {usedBy.length > 0 && (

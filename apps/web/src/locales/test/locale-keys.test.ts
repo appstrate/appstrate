@@ -265,8 +265,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
-  "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
-  "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
+  "integrations.source.", // components/catalogue-columns.tsx, org-catalogue-modal.tsx, pages/integrations-page.tsx — one per source_kind
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()

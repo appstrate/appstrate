@@ -20,7 +20,8 @@ import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../lib/package-card-item";
-import type { IntegrationProtocol } from "../lib/integration-collection";
+import type { IntegrationSource } from "../lib/integration-collection";
+import { useAppConfig } from "../hooks/use-app-config";
 
 export function useCatalogueSelectColumn({
   selected,
@@ -138,21 +139,35 @@ export function useCatalogueActionsColumn({
   ));
 }
 
-/** API or MCP, for a remote integration — a local one is always MCP. */
-export function useCatalogueProtocolColumn<T = CardItem>(
-  protocolOf: (item: T) => IntegrationProtocol | undefined,
+/**
+ * Where an integration's tools come from: its API, a hosted MCP server, or an MCP server run in
+ * the sandbox. The last only runs when this instance's run adapter can isolate a runner.
+ */
+export function useCatalogueSourceColumn<T = CardItem>(
+  sourceOf: (item: T) => IntegrationSource | undefined,
 ): DataColumn<T> {
   const { t } = useTranslation("settings");
+  const { localIntegrations } = useAppConfig().features;
   return {
-    id: "protocol",
-    header: t("catalogue.column.protocol"),
-    width: 88,
+    id: "source",
+    header: t("integrations.col.source"),
+    width: 120,
     cell: (item) => {
-      const protocol = protocolOf(item);
-      return protocol ? (
-        <CellText>{t(`integrations.protocol.${protocol}`)}</CellText>
-      ) : (
-        <CellEmpty />
+      const source = sourceOf(item);
+      if (!source) return <CellEmpty />;
+      const unavailable = source === "local" && !localIntegrations;
+      return (
+        <span className="flex min-w-0 flex-col items-start [&>*]:max-w-full">
+          <CellText>{t(`integrations.source.${source}`)}</CellText>
+          {unavailable && (
+            <span
+              className="text-muted-foreground/70 relative z-10 truncate text-[0.68rem]"
+              title={t("integrations.source.localUnavailableHint")}
+            >
+              {t("integrations.source.localUnavailable")}
+            </span>
+          )}
+        </span>
       );
     },
   };

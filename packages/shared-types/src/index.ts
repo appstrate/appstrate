@@ -268,6 +268,12 @@ export interface AppConfigFeatures {
    * pending-state boolean.
    */
   bootstrapTokenPending: boolean;
+  /**
+   * The run adapter can isolate a runner process (`RUN_ADAPTER` is not `process`), so an
+   * integration whose source is a local MCP server can actually run. The SPA flags those as
+   * unavailable here when false.
+   */
+  localIntegrations: boolean;
   [key: string]: boolean;
 }
 
