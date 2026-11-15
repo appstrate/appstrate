@@ -13,7 +13,7 @@ import {
   metaSchema as afpsMetaSchema,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
-import { MCP_SERVER_GUIDANCE, findRetiredDependencyKeys } from "./dependencies.ts";
+import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { asRecord } from "./safe-json.ts";
 import { isAppearanceColor, type AppearanceColor } from "./appearance.ts";
@@ -523,14 +523,6 @@ export function validateManifest(
   // base-schema errors.
   const received =
     typeof type === "string" ? `"${type}"` : type === undefined ? "missing" : String(type);
-  if (type === "mcp-server") {
-    return {
-      valid: false,
-      errors: [
-        `type: Unknown package type "mcp-server" — the package type is retired: ${MCP_SERVER_GUIDANCE}. A local integration declares its server inline under \`source.server\`; the package type is one of: agent, skill, integration`,
-      ],
-    };
-  }
   return {
     valid: false,
     errors: [

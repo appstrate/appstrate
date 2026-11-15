@@ -3,9 +3,8 @@
 /**
  * A `source.kind: "local"` integration carries its server payload in its OWN archive, so the
  * sidecar fetches `GET /internal/integration-bundle/<spec.integrationId>` — the id the spec names
- * for the integration, never a field of the server bag. A stray `packageId` in that bag (the
- * retired two-package model) must not redirect the fetch to another package's bytes in a
- * code-execution position.
+ * for the integration, never a field of the server bag. A stray `packageId` in that bag must not
+ * redirect the fetch to another package's bytes in a code-execution position.
  *
  * Runs fully in-process — the case stops at the bundle route, before any runner is spawned.
  */

@@ -702,10 +702,9 @@ const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
   },
 };
 
-// L1.9 — `tools_policy` drives per-tool policy (§7.10). AFPS renamed the
-// legacy `tools` map to `tools_policy` to disambiguate from a local source's
-// `source.server.tools` catalog. Manifests using the new key MUST
-// validate; the new key is what platform helpers read.
+// L1.9 — `tools_policy` drives per-tool policy (§7.10), distinct from a local
+// source's `source.server.tools` catalog. Manifests using it MUST validate;
+// it is what platform helpers read.
 const L1_TOOLS_POLICY: ConformanceCase = {
   id: "L1.9",
   level: "L1",

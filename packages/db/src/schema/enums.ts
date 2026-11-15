@@ -43,18 +43,9 @@ export const runStatusEnum = pgEnum("run_status", runStatusValues);
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
 
-/**
- * The labels of the `package_type` pg enum. `mcp-server` is a label kept for the fold script
- * (`scripts/migration/`); dropped with its boot guard by #2229, never produced by application code.
- * Postgres cannot drop an enum value in place, so the DB label outlives the package type.
- * Application code uses {@link PACKAGE_TYPES} / {@link PackageType}, which exclude it.
- */
-export const packageTypeValues = ["agent", "skill", "integration", "mcp-server"] as const;
+export const packageTypeValues = ["agent", "skill", "integration"] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
-
-/** The package types the application produces and reads: AFPS §2.1. */
-export const PACKAGE_TYPES = ["agent", "skill", "integration"] as const;
-export type PackageType = (typeof PACKAGE_TYPES)[number];
+export type PackageType = (typeof packageTypeValues)[number];
 
 export const packageSourceValues = ["local", "system"] as const;
 export const packageSourceEnum = pgEnum("package_source", packageSourceValues);

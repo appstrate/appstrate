@@ -5,7 +5,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   organizationMembers,
-  PACKAGE_TYPES,
+  packageTypeValues,
   type PackageType,
   packageDistTags,
   packages,
@@ -127,7 +127,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   // alone. A personal target additionally hides every other space, since its
   // page is its owner's and nobody else's.
   const readableSpaceIds = new Map<PackageType, Set<string>>(
-    PACKAGE_TYPES.map((type) => [
+    packageTypeValues.map((type) => [
       type,
       new Set(
         accessible

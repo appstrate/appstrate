@@ -16,7 +16,7 @@ describe("findRetiredDependencyKeys", () => {
     expect(findRetiredDependencyKeys({ dependencies: { tools: { "@a/b": "^1.0.0" } } })).toEqual([
       {
         key: "tools",
-        guidance: expect.stringContaining("declared inline on their local integration"),
+        guidance: expect.stringContaining("declared inline on its integration"),
       },
     ]);
   });

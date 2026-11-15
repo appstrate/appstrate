@@ -7,10 +7,14 @@
  * `dependencies.mcp_servers`, every `mcp-server` package (orphans and system ones included) is
  * deleted, a dry run writes nothing and a second `--apply` finds nothing. Resolution reproduces the
  * runtime (dist-tag / yanked / system / `latest`), an unfoldable draft or version makes `--apply`
- * refuse and write nothing, and the boot guard refuses a leftover reference-shape integration.
+ * refuse and write nothing, and stored `mcp-servers:*` grants are removed. The release migration
+ * `0106` rebuilds `package_type` without `mcp-server`: it fails while a server row remains and
+ * succeeds once the script has run. The test database is migrated past `0106`, so the label is put
+ * back for this file and `0106` is replayed at the end.
  */
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import { sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
 import { deleteFile, downloadFile, uploadFile } from "@appstrate/db/storage";
@@ -21,7 +25,6 @@ import {
   runFoldMcpServers,
   StorageUnreadable,
 } from "../migration/0054-fold-mcp-servers.ts";
-import { assertMcpServersFolded } from "../../apps/api/src/lib/boot.ts";
 import {
   PACKAGE_ITEMS_BUCKET,
   packageItemKey,
@@ -32,7 +35,12 @@ import {
 } from "../../apps/api/src/services/package-storage-keys.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../apps/api/test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedPackageVersion,
+  seedSpaceRole,
+} from "../../apps/api/test/helpers/seed.ts";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -43,6 +51,32 @@ const INTEGRATION = "@t0054/int";
 const AGENT = "@t0054/agent";
 
 const lines: string[] = [];
+
+/** The statements of the release migration that drops the `mcp-server` label. */
+const migration0106 = async () =>
+  (
+    await Bun.file(
+      resolve(
+        import.meta.dir,
+        "../../packages/db/drizzle/0106_package_type_without_mcp_server.sql",
+      ),
+    ).text()
+  )
+    .split("--> statement-breakpoint")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+
+beforeAll(async () => {
+  await db.execute(sql.raw(`ALTER TYPE package_type ADD VALUE IF NOT EXISTS 'mcp-server'`));
+});
+
+afterAll(async () => {
+  await truncateAll();
+  const statements = await migration0106();
+  await db.transaction(async (tx) => {
+    for (const statement of statements) await tx.execute(sql.raw(statement));
+  });
+});
 const run = (apply: boolean) => runFoldMcpServers({ apply, out: (line) => lines.push(line) });
 
 const serverManifest = (version: string, name = SERVER) => ({
@@ -305,8 +339,7 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     ).toBe(fold.storageObjectsQueued);
     expect(fold.storageObjectsQueued).toBe(3 + 3);
 
-    // The guard passes, and a second apply writes nothing: same bytes, same integrity.
-    expect(await assertMcpServersFolded(null)).toBeUndefined();
+    // A second apply writes nothing: same bytes, same integrity.
     const keyOf = versionZipKey(INTEGRATION, "1.0.0");
     const bytesBefore = Buffer.from((await downloadFile(AGENT_PACKAGES_BUCKET, keyOf))!);
     const again = await run(true);
@@ -368,10 +401,51 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     expect((await run(true)).systemVersionsDeleted).toEqual([]);
   });
 
-  it("the guard refuses while a server remains, naming the script", async () => {
-    await expect(assertMcpServersFolded(null)).rejects.toThrow(/0054-fold-mcp-servers\.ts --apply/);
+  it("removes stored mcp-servers:* grants from api keys and custom space roles", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      scopes: ["agents:read", "mcp-servers:read", "mcp-servers:write"],
+    });
+    const untouched = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      scopes: ["agents:read"],
+    });
+    const role = await seedSpaceRole({
+      orgId: ctx.orgId,
+      permissions: ["skills:read", "mcp-servers:read", "mcp-servers:share"],
+    });
+    const fold = await run(true);
+    expect(fold.apiKeysScrubbed).toBe(1);
+    expect(fold.spaceRolesScrubbed).toBe(1);
+    const scopes = async (id: string) =>
+      (await one<{ scopes: string[] }>(sql`SELECT scopes FROM api_keys WHERE id = ${id}`)).scopes;
+    expect(await scopes(key.id)).toEqual(["agents:read"]);
+    expect(await scopes(untouched.id)).toEqual(["agents:read"]);
+    expect(
+      (
+        await one<{ permissions: string[] }>(
+          sql`SELECT permissions FROM space_roles WHERE id = ${role.id}`,
+        )
+      ).permissions,
+    ).toEqual(["skills:read"]);
+    const again = await run(true);
+    expect([again.apiKeysScrubbed, again.spaceRolesScrubbed]).toEqual([0, 0]);
+  });
+
+  it("the release migration 0106 fails while a server remains, and passes once folded", async () => {
+    const statements = await migration0106();
+    const apply0106 = () =>
+      db.transaction(async (tx) => {
+        for (const statement of statements) await tx.execute(sql.raw(statement));
+        throw new Error("rolled back on purpose");
+      });
+    // drizzle wraps the driver error: the refused cast is in its cause.
+    const refusal = await apply0106().catch((error: Error) => error);
+    expect(String((refusal as Error).cause)).toContain("mcp-server");
     await run(true);
-    expect(await assertMcpServersFolded(null)).toBeUndefined();
+    await expect(apply0106()).rejects.toThrow("rolled back on purpose");
   });
 });
 
@@ -586,16 +660,6 @@ describe("0054 — resolution as the runtime did, refusal, bridge", () => {
     expect(ok.notes.join("\n")).toContain("server/index.ts exists in both, identical");
     expect(await serverCount()).toBe(0);
   });
-
-  it("the boot guard refuses a leftover reference-shape integration with no mcp-server row", async () => {
-    await mkIntegration("^1.0.0", { draft: true });
-    expect(await serverCount()).toBe(0);
-    await expect(assertMcpServersFolded(null)).rejects.toThrow(/source\.server\.name/);
-    const refused = await run(true);
-    expect(refused.refused).toBe(true);
-    expect(refused.unfolded.join("\n")).toContain(`server ${S2} not found`);
-    await expect(assertMcpServersFolded(null)).rejects.toThrow(/0054-fold-mcp-servers\.ts/);
-  });
 });
 
 describe("0054 — the ${user_config.K} bridge", () => {
@@ -653,22 +717,5 @@ describe("0054 — the ${user_config.K} bridge", () => {
     );
     expect(delivered(fold.manifest).AUTH).toEqual({ value: "mine" });
     expect(fold.notes.join("\n")).toContain("already set");
-  });
-});
-
-describe("assertMcpServersFolded — injected count", () => {
-  it("returns on zero, refuses naming the count and the embedded directory", async () => {
-    expect(await assertMcpServersFolded(null, async () => 0)).toBeUndefined();
-    await expect(assertMcpServersFolded(null, async () => 2)).rejects.toThrow(
-      /holds 2 row\(s\)[\s\S]*Refusing to boot[\s\S]*0054-fold-mcp-servers\.ts --apply`, with this DATABASE_URL/,
-    );
-    await expect(assertMcpServersFolded("/srv/pglite", async () => 1)).rejects.toThrow(
-      "`PGLITE_DATA_DIR=/srv/pglite bun scripts/migration/0054-fold-mcp-servers.ts` (dry run), then the same with `--apply`",
-    );
-  });
-
-  it("propagates a failing probe", async () => {
-    const boom = new Error("connection terminated");
-    await expect(assertMcpServersFolded(null, () => Promise.reject(boom))).rejects.toThrow(boom);
   });
 });

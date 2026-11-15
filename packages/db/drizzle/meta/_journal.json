@@ -743,6 +743,13 @@
       "when": 1794753815682,
       "tag": "0105_notification_agent_message",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1794773354130,
+      "tag": "0106_package_type_without_mcp_server",
+      "breakpoints": true
     }
   ]
 }

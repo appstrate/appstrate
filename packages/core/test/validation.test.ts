@@ -147,9 +147,9 @@ describe("validateManifest", () => {
     expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
   });
 
-  // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; they became
-  // `mcp_servers` / `integrations`, and `mcp_servers` is gone too (a local MCP server is
-  // declared inline on its integration). Every reader destructures exactly
+  // AFPS retires `dependencies.tools`, `dependencies.providers` and
+  // `dependencies.mcp_servers` (a local MCP server is declared inline on its
+  // integration). Every reader destructures exactly
   // `{ skills, integrations }`, so a retired spelling is inert — accepting it silently
   // ships an agent whose dependency is never resolved (#1021). Author input rejects,
   // an already-persisted manifest is tolerated.
@@ -170,7 +170,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toStartWith("dependencies.mcp_servers:");
-    expect(result.errors[0]).toContain("declared inline on their local integration");
+    expect(result.errors[0]).toContain("declared inline on its integration");
     expect(result.errors[0]).toContain("source.server");
   });
 
@@ -584,24 +584,6 @@ describe("validateManifest — package-type dispatch", () => {
       },
     });
     expect(r.valid).toBe(true);
-  });
-
-  it("refuses the retired mcp-server package type and names its replacement", () => {
-    const r = validateManifest({
-      name: "@test/fetch-json",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
-      },
-    });
-    expect(r.valid).toBe(false);
-    expect(r.errors[0]).toMatch(/Unknown package type "mcp-server"/);
-    expect(r.errors[0]).toContain("source.server");
-    expect(r.errors[0]).toContain("agent, skill, integration");
   });
 });
 

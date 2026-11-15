@@ -4,7 +4,7 @@ import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
-  PACKAGE_TYPES,
+  packageTypeValues,
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
@@ -760,7 +760,7 @@ export const schemas = {
       },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      package_type: { type: "string", enum: [...PACKAGE_TYPES] },
+      package_type: { type: "string", enum: [...packageTypeValues] },
       package_source: { type: "string", enum: [...packageSourceValues] },
       draft_manifest: {
         type: ["object", "null"],
@@ -1020,7 +1020,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: [...PACKAGE_TYPES],
+        enum: [...packageTypeValues],
       },
       running_runs: { type: "integer" },
       unread_count: {
@@ -3013,7 +3013,7 @@ export const schemas = {
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
-        type: { type: "string", enum: [...PACKAGE_TYPES] },
+        type: { type: "string", enum: [...packageTypeValues] },
         source: {
           type: "string",
           description:
@@ -3185,7 +3185,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string", description: "Package id (`@scope/name`)." },
-      type: { type: "string", enum: [...PACKAGE_TYPES] },
+      type: { type: "string", enum: [...packageTypeValues] },
       ...PACKAGE_HOME_PROPERTIES,
       read_space_ids: {
         type: "array",

@@ -1510,23 +1510,22 @@ none of `log`, `note`, `pin` or `output`; for the same reason, do not serve it b
 **Not a runbook.** A local MCP server is no longer a package of its own: the integration declares it
 inline (`source.server = { type, entry_point, mcp_config, tools }`), its payload (`server/**`) sits in
 the integration's own files and archive, the credential reaches it through the auth's `delivery.env`,
-and `dependencies.mcp_servers` no longer exists (#2220). The `mcp-server` label stays in the
-`package_type` enum for now (Postgres cannot drop a value in place; #2229 drops it with the guard,
-as for `package_shares`). The release refuses to boot while a `packages` row has `type = 'mcp-server'`
-or an org integration draft or version still has `source.server.name`
-(`assertMcpServersFolded`, `apps/api/src/lib/boot.ts`, removal tracked in #2229). The app stays
-stopped from step 1 to step 5:
+and `dependencies.mcp_servers` no longer exists (#2220). The release's drizzle migration `0106`
+rebuilds the `package_type` enum without `mcp-server` (Postgres drops no value in place) and its
+cast fails on a row still of that type, so **this script runs BEFORE the release's migrations**:
+a database that boots the release first fails the migration batch (one transaction, nothing
+applied) until the script has run. The script queries in raw SQL comparing `type::text`, so it reads
+the schema of either release. The app stays stopped from step 1 to step 6:
 
 1. `pg_dump` the database.
-2. Run the migrations alone (`bun run db:migrate`, or the migrate service).
-3. **Snapshot object storage.** `--apply` overwrites in place the archive of every rewritten
+2. **Snapshot object storage.** `--apply` overwrites in place the archive of every rewritten
    integration, agent and skill version (bucket `agent-packages`, keys `{packageId}/{version}.afps`)
    and every rewritten integration draft (bucket `library-packages`, `{org}/integrations/{id}.afps`),
    and queues the deletion of the server archives (`agent-packages` `{packageId}/{version}.afps`,
    `library-packages` `{org or system}/mcp-servers/{id}.afps`). `pg_dump` cannot undo any of that:
    copy both buckets whole (S3: `aws s3 sync` or the provider's bucket versioning; filesystem: the
    `FS_STORAGE_PATH` directory) and keep the copy until the release is verified.
-4. `set -a && . ./.env && set +a && bun scripts/migration/0054-fold-mcp-servers.ts` is the dry run
+3. `set -a && . ./.env && set +a && bun scripts/migration/0054-fold-mcp-servers.ts` is the dry run
    (rolled back, no storage written). It prints the database and the storage target first: check
    both (a script run without the platform's storage env reads `./data/storage`; it exits 2 when
    server versions exist and no server archive is readable). Read the table, every `note`, `orphan
@@ -1536,7 +1535,7 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    not found, pin matching no version, server archive or draft payload missing, the integration's
    own archive missing, a `${user_config.K}` embedded in a larger value with no matching entry, or a
    path both hold with different bytes.
-5. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
+4. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
    is resolved as the runtime did: a system server is its highest version; an org server goes by
    the pin, exact version (yanked included), then dist-tag name, then semver range, a missing pin
    meaning the `latest` dist-tag. A draft takes the server's published version resolved by its own
@@ -1560,14 +1559,16 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    deleted, printed `<id>@<version>`, with its dist tags, dependency rows and archive (outbox); the
    `packages` row stays. A `latest` tag that pointed at one is re-pointed to the highest remaining
    version (boot only sets `latest` when it registers a new version, not for one already stored).
-   Before the commit the script verifies, in the transaction, that no org draft or version still has
-   `source.server.name` and no `mcp-server` row is left, and rolls back otherwise.
-6. Start the app.
+   Every `mcp-servers:*` entry of `api_keys.scopes` and of a custom role's `space_roles.permissions`
+   is removed: the permission resource is gone, and a custom role still holding one is refused on
+   its next edit. Before the commit the script verifies, in the transaction, that no org draft or
+   version still has `source.server.name` and no `mcp-server` row is left, and rolls back otherwise.
+5. Run the migrations (`bun run db:migrate`, or the migrate service); `0106` now passes.
+6. Run `0053` (it runs after the migrations), then start the app.
 
-`0053` runs in the same window and is independent of this script: either order is correct. `0053`
-rewrites agent manifests in the database only; an agent version this script rewrites (one carrying
-`dependencies.mcp_servers`) gets its archive's `manifest.json` from the row as it reads it, so with
-`0053` first that archive carries the manifest `0053` wrote.
+`0053` rewrites agent manifests in the database only, so an agent version both scripts rewrite (one
+carrying `dependencies.mcp_servers`) keeps in its archive the manifest `0054` wrote, as every version
+`0053` rewrites keeps its archive.
 
 Ordering of the writes: the database changes run in one transaction and the rewritten archives are
 uploaded inside it, just before the commit, so the transaction (and its locks) stays open for the
@@ -1635,4 +1636,4 @@ queued for deletion are gone once the outbox has run.
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0053 | not yet             | every stored agent manifest carrying `runtime_tools`, or predating `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added and indexed in `package_version_dependencies`, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, open `output.schema` for an agent selecting `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the release window, app stopped, after the schema migrations, before the app serves traffic**; `.ts`, `--before <RFC 3339 instant>` required, dry run by default, `--apply` to write    | prints the mode and the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` — how many manifests still carry `runtime_tools` and how many written before `--before` still lack the dependency: each is one of those listed; a second run rewrites 0                                                                                                                                                                                                                                                                                                                   |
-| 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, after the migrations**                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the `mcp-server` packages, the integrations folded, the `note` / `UNFOLDED` lines and the storage target; `--apply` refuses (exit 1, nothing written) on any `UNFOLDED` line, else commits in one transaction after verifying none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, BEFORE the migrations** (drizzle `0106` drops the `mcp-server` enum label and fails while a row of that type remains); also removes stored `mcp-servers:*` grants                                                                                                                                                                                                                                     | dry run lists the `mcp-server` packages, the integrations folded, the `note` / `UNFOLDED` lines and the storage target; `--apply` refuses (exit 1, nothing written) on any `UNFOLDED` line, else commits in one transaction after verifying none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                         |

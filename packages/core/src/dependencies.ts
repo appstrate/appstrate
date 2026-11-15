@@ -42,12 +42,11 @@ export interface Dependencies {
  * `dependencies` stays a loose object and `dependencies._meta` remains legal.
  * The rejection below is a POLICY on author input, not a shape constraint —
  * which is what lets a manifest carrying a retired key keep validating when it is
- * re-imported from outside the platform (the platform's own stored versions are
- * rewritten by script 0054). See
+ * re-imported from outside the platform. See
  * {@link import("./validation.ts").RetiredDependencyKeysPolicy}.
  */
-export const MCP_SERVER_GUIDANCE =
-  "MCP servers are now declared inline on their local integration (`source.server`); depend on that integration instead";
+const MCP_SERVER_GUIDANCE =
+  "a local MCP server is declared inline on its integration (`source.server`); depend on that integration instead";
 const RETIRED_DEPENDENCY_KEYS = {
   tools: MCP_SERVER_GUIDANCE,
   mcp_servers: MCP_SERVER_GUIDANCE,

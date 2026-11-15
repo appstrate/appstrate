@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PACKAGE_TYPES } from "@appstrate/db/schema";
+import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { APPEARANCE_COLORS, ICON_MAX_LENGTH } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
@@ -415,7 +415,7 @@ export const spacesPaths = {
           name: "type",
           in: "query",
           required: false,
-          schema: { type: "string", enum: [...PACKAGE_TYPES] },
+          schema: { type: "string", enum: [...packageTypeValues] },
           description: "Filter by package type",
         },
       ],

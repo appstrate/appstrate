@@ -64,11 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object schema. The `runtime_tools` default and the refusal of a non-array
   `manifest.runtime_tools` are removed.
 
-- A manifest declaring the retired `type: "mcp-server"` is refused with a message naming the
-  replacement (a `local` integration declares its server inline under `source.server`), the
-  same guidance as `dependencies.mcp_servers`; `MCP_SERVER_GUIDANCE` is exported from
-  `@appstrate/core/dependencies`.
-
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
   resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the

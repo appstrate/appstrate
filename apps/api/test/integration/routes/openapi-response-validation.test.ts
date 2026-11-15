@@ -233,9 +233,6 @@ describe("OpenAPI response validation", () => {
 
       expect(result.valid).toBe(true);
       expect(result.extraFields).toEqual([]);
-      // The agent exposes no `mcp_servers` group any more: a local MCP server is
-      // declared inline on its integration.
-      expect((body as any).dependencies).not.toHaveProperty("mcp_servers");
     });
 
     it("each space item conforms to SpaceObject schema", async () => {

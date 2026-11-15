@@ -9,10 +9,11 @@
  *
  * A local MCP server is now declared INLINE on its integration (`source.server = { type,
  * entry_point, mcp_config, tools }`, payload in the integration's own files) and the `mcp-server`
- * package type is gone. Run after the release's migrations, BEFORE the app starts, with `pg_dump`
- * AND a snapshot of object storage taken first (README, step 3): the platform refuses to boot while
- * a `type = 'mcp-server'` row, or an org integration still on `source.server.name`, exists
- * (`assertMcpServersFolded`, removal tracked in #2229). Dry run by default (rolled back, no storage
+ * package type is gone. Run BEFORE the new release boots, with the app stopped and `pg_dump` AND a
+ * snapshot of object storage taken first (README, step 3): the release's migration `0106` rebuilds
+ * the `package_type` enum without `mcp-server` and fails on a row still of that type, so the boot
+ * fails until this script has run. Every query is raw SQL comparing `type::text`, so the script
+ * reads the schema of either release. Dry run by default (rolled back, no storage
  * write); `--apply` commits; a second `--apply` writes nothing. Targets `DATABASE_URL` or
  * `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`). The storage is the platform's
  * (`S3_BUCKET`, else `FS_STORAGE_PATH`): load the platform's env. Both targets are printed first.
@@ -47,6 +48,8 @@
  *
  * Then every ORG agent / skill / integration draft or version carrying `dependencies.mcp_servers`
  * loses that key (it never launched anything), its archive and integrity rewritten for a version.
+ * Then every `api_keys.scopes` / `space_roles.permissions` entry of the retired `mcp-servers`
+ * permission resource (`mcp-servers:read|write|delete|share`) is removed.
  * Then every `mcp-server` package — system ones included, boot re-syncs only what
  * `system-packages/` holds — is deleted with its versions, dist tags, dependency rows,
  * `space_packages` rows and (through the deletion outbox, same transaction) its storage objects.
@@ -335,6 +338,9 @@ export interface McpServersFold {
   systemServersDeleted: number;
   dependencyRowsDeleted: number;
   storageObjectsQueued: number;
+  /** API keys and custom space roles that held an `mcp-servers:*` permission, now removed. */
+  apiKeysScrubbed: number;
+  spaceRolesScrubbed: number;
   /** System integration versions still on the retired shape (`<id>@<version>`) — deleted. */
   systemVersionsDeleted: string[];
   /** System packages whose `latest` tag pointed at a deleted version and was re-pointed. */
@@ -374,6 +380,8 @@ export async function runFoldMcpServers(options: {
     systemServersDeleted: 0,
     dependencyRowsDeleted: 0,
     storageObjectsQueued: 0,
+    apiKeysScrubbed: 0,
+    spaceRolesScrubbed: 0,
     systemVersionsDeleted: [],
     latestRepointed: [],
   };
@@ -381,7 +389,7 @@ export async function runFoldMcpServers(options: {
   // ── Read ────────────────────────────────────────────────────────────────
   const servers = toRows<{ id: string; org_id: string | null; draft_manifest: Json | null }>(
     await db.execute(
-      sql`SELECT id, org_id, draft_manifest FROM packages WHERE type = 'mcp-server' ORDER BY id`,
+      sql`SELECT id, org_id, draft_manifest FROM packages WHERE type::text = 'mcp-server' ORDER BY id`,
     ),
   ).map((r): ServerRow => ({ id: r.id, orgId: r.org_id, draftManifest: r.draft_manifest }));
   const serverVersions = toRows<{
@@ -392,7 +400,7 @@ export async function runFoldMcpServers(options: {
   }>(
     await db.execute(sql`SELECT pv.package_id, pv.version, pv.manifest, pv.yanked
       FROM package_versions pv JOIN packages p ON p.id = pv.package_id
-      WHERE p.type = 'mcp-server'`),
+      WHERE p.type::text = 'mcp-server'`),
   ).map((r): ServerVersionRow => ({
     packageId: r.package_id,
     version: r.version,
@@ -402,7 +410,7 @@ export async function runFoldMcpServers(options: {
   const serverTags = toRows<{ package_id: string; tag: string; version: string }>(
     await db.execute(sql`SELECT t.package_id, t.tag, v.version
       FROM package_dist_tags t JOIN package_versions v ON v.id = t.version_id
-      JOIN packages p ON p.id = t.package_id WHERE p.type = 'mcp-server'`),
+      JOIN packages p ON p.id = t.package_id WHERE p.type::text = 'mcp-server'`),
   );
   const drafts = toRows<{
     id: string;
@@ -411,7 +419,7 @@ export async function runFoldMcpServers(options: {
     draft_manifest: Json | null;
   }>(
     await db.execute(sql`SELECT id, type, org_id, draft_manifest FROM packages
-      WHERE org_id IS NOT NULL AND type <> 'mcp-server' AND draft_manifest IS NOT NULL
+      WHERE org_id IS NOT NULL AND type::text <> 'mcp-server' AND draft_manifest IS NOT NULL
       ORDER BY id`),
   );
   const versions = toRows<{
@@ -425,7 +433,7 @@ export async function runFoldMcpServers(options: {
     await db.execute(sql`SELECT pv.id AS row_id, pv.package_id, p.type, p.org_id, pv.version,
         pv.manifest
       FROM package_versions pv JOIN packages p ON p.id = pv.package_id
-      WHERE p.org_id IS NOT NULL AND p.type <> 'mcp-server'
+      WHERE p.org_id IS NOT NULL AND p.type::text <> 'mcp-server'
       ORDER BY pv.package_id, pv.id`),
   );
   // System integration versions on the retired shape: boot only registers what `system-packages/`
@@ -752,32 +760,48 @@ export async function runFoldMcpServers(options: {
 
       const removedDeps = toRows<{ id: number }>(
         await tx.execute(
-          sql`DELETE FROM package_version_dependencies WHERE dep_type = 'mcp-server' RETURNING id`,
+          sql`DELETE FROM package_version_dependencies WHERE dep_type::text = 'mcp-server' RETURNING id`,
         ),
       );
       result.dependencyRowsDeleted = removedDeps.length;
       await tx.execute(sql`DELETE FROM package_dist_tags WHERE package_id IN
-        (SELECT id FROM packages WHERE type = 'mcp-server')`);
+        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
       await tx.execute(sql`DELETE FROM package_versions WHERE package_id IN
-        (SELECT id FROM packages WHERE type = 'mcp-server')`);
+        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
       await tx.execute(sql`DELETE FROM space_packages WHERE package_id IN
-        (SELECT id FROM packages WHERE type = 'mcp-server')`);
-      await tx.execute(sql`DELETE FROM packages WHERE type = 'mcp-server'`);
+        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
+      await tx.execute(sql`DELETE FROM packages WHERE type::text = 'mcp-server'`);
       result.serversDeleted = servers.length;
       result.systemServersDeleted = servers.filter((s) => s.orgId === null).length;
+
+      // The `mcp-servers` permission resource is gone: a stored grant of it names nothing, and a
+      // custom role still holding one is refused on its next edit (`normalizePermissions`).
+      result.apiKeysScrubbed = toRows<{ id: string }>(
+        await tx.execute(sql`UPDATE api_keys
+          SET scopes = ARRAY(SELECT s FROM unnest(scopes) AS s WHERE s NOT LIKE 'mcp-servers:%')
+          WHERE EXISTS (SELECT 1 FROM unnest(scopes) AS s WHERE s LIKE 'mcp-servers:%')
+          RETURNING id`),
+      ).length;
+      result.spaceRolesScrubbed = toRows<{ id: string }>(
+        await tx.execute(sql`UPDATE space_roles
+          SET permissions = ARRAY(SELECT p FROM unnest(permissions) AS p
+            WHERE p NOT LIKE 'mcp-servers:%'), updated_at = now()
+          WHERE EXISTS (SELECT 1 FROM unnest(permissions) AS p WHERE p LIKE 'mcp-servers:%')
+          RETURNING id`),
+      ).length;
 
       // Nothing may still read the reference shape, nor any server row remain: roll back otherwise.
       const [left] = toRows<{ drafts: number; versions: number; servers: number }>(
         await tx.execute(sql`SELECT
           (SELECT count(*)::int FROM packages
-            WHERE org_id IS NOT NULL AND type <> 'mcp-server'
+            WHERE org_id IS NOT NULL AND type::text <> 'mcp-server'
               AND draft_manifest -> 'source' ->> 'kind' = 'local'
               AND draft_manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL) AS drafts,
           (SELECT count(*)::int FROM package_versions pv JOIN packages p ON p.id = pv.package_id
-            WHERE p.org_id IS NOT NULL AND p.type <> 'mcp-server'
+            WHERE p.org_id IS NOT NULL AND p.type::text <> 'mcp-server'
               AND pv.manifest -> 'source' ->> 'kind' = 'local'
               AND pv.manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL) AS versions,
-          (SELECT count(*)::int FROM packages WHERE type = 'mcp-server') AS servers`),
+          (SELECT count(*)::int FROM packages WHERE type::text = 'mcp-server') AS servers`),
       );
       // (A dry run with unfolded lines leaves them by definition: it only reports.)
       if (result.unfolded.length === 0 && left!.drafts + left!.versions + left!.servers !== 0) {
@@ -820,6 +844,8 @@ function report(result: McpServersFold, out: (line: string) => void): void {
     ["  of which system", String(result.systemServersDeleted)],
     ["mcp-server dependency rows deleted", String(result.dependencyRowsDeleted)],
     ["storage objects queued for deletion", String(result.storageObjectsQueued)],
+    ["api keys losing mcp-servers:* scopes", String(result.apiKeysScrubbed)],
+    ["custom space roles losing mcp-servers:* permissions", String(result.spaceRolesScrubbed)],
   ];
   for (const line of table(["what", "count"], rows)) out(line);
   for (const label of result.integrationsFolded) out(`  folded ${label}`);

@@ -3,13 +3,11 @@
 /**
  * A `local` integration carries its MCP server payload in its own archive.
  *
- * Covers the write paths that used to belong to the retired `mcp-server` package type:
  *   1. IMPORT — an integration archive with `server/index.ts` keeps the payload in the draft
  *      files and the version archive.
  *   2. PUBLISH — a draft whose entry point file is absent from the stored files is refused.
- *   3. REFUSALS — an archive missing its entry point, a manifest still declaring
- *      `dependencies.mcp_servers`, and `type: "mcp-server"` are all rejected before any write.
- *   4. The `mcp-servers` route family is gone.
+ *   3. REFUSALS — an archive missing its entry point and a manifest declaring
+ *      `dependencies.mcp_servers` are rejected before any write.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -166,17 +164,5 @@ describe("local integration with a server payload", () => {
     expect(text).toContain("mcp_servers");
     expect(text).toContain("retired");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
-  });
-
-  it("refuses a manifest of the retired type `mcp-server`", async () => {
-    const manifest = manifestFor({ type: "mcp-server" });
-    const res = await importArchive(archive(manifest, { [ENTRY]: SERVER_SOURCE }));
-    expect(res.status).toBe(400);
-    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
-  });
-
-  it("no longer serves the mcp-servers route family", async () => {
-    const res = await app.request("/api/packages/mcp-servers", { headers: authHeaders(ctx) });
-    expect(res.status).toBe(404);
   });
 });

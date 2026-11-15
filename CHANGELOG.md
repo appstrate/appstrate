@@ -37,9 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Run `scripts/migration/0054-fold-mcp-servers.ts` before the first boot of
   this release** (#2220). A local MCP server is no longer a package of its own:
   the script folds every stored `mcp-server` package into the integration that
-  referenced it, and the boot guard `assertMcpServersFolded` refuses to start
-  while any `packages.type = 'mcp-server'` row remains or an org integration
-  still declares `source.server.name` (guard removal tracked in #2229).
+  referenced it and removes stored `mcp-servers:*` grants. Run it BEFORE the
+  release's migrations: drizzle `0106` rebuilds the `package_type` enum without
+  `mcp-server` and fails, with nothing applied, while a row of that type remains.
   **Snapshot object storage first** (buckets `agent-packages` and
   `library-packages`): `--apply` overwrites archives in place and queues server
   archives for deletion, which `pg_dump` cannot roll back. Dry run first; any

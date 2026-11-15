@@ -323,14 +323,14 @@ describe("validateBundle (AFPS)", () => {
     );
   });
 
-  it("flags the retired mcp-server package type as unsupported", async () => {
-    const retired = { ...VALID_LOCAL_INTEGRATION, type: "mcp-server" };
+  it("flags an unknown package type as unsupported", async () => {
+    const unknown = { ...VALID_LOCAL_INTEGRATION, type: "widget" };
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
       { ...VALID_AGENT, dependencies: { integrations: { "@me/mcp": "^1" } } },
       { "prompt.md": enc("p") },
     );
-    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, retired, {
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, unknown, {
       "server/index.js": enc("//"),
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));

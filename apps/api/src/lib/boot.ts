@@ -134,10 +134,6 @@ export async function bootCritical(): Promise<void> {
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertPackageSharesFolded(embeddedDataDir);
 
-  // Refuse to boot while a `mcp-server` package row remains: nothing reads it any more, and the
-  // integration that ran it has not received its server. Detection only; operator task.
-  await assertMcpServersFolded(embeddedDataDir);
-
   await assertKeyringCoversCiphertexts();
 
   // Bootstrap-token reconciliation. If the env still carries an
@@ -757,59 +753,6 @@ export async function unfoldedPackageShareCount(
   const { sql: rawSql } = await import("drizzle-orm");
   const [row] = toRows<{ pending: number }>(
     await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
-  );
-  return row?.pending ?? 0;
-}
-
-/**
- * Refuse to boot while a `packages` row has `type = 'mcp-server'`, or an org integration draft
- * (`packages.draft_manifest`) or version (`package_versions.manifest`) still declares
- * `source.server.name` (the retired reference shape), i.e. until
- * `scripts/migration/0054-fold-mcp-servers.ts` has run: such an integration has no server to
- * launch. Refuses rather than warns, like {@link assertPackageSharesFolded}. Deleted with the
- * `mcp-server` enum label, tracked in #2229. `pendingFolds` is injected for tests.
- */
-export async function assertMcpServersFolded(
-  embeddedDataDir: string | null,
-  pendingFolds: () => Promise<number> = unfoldedMcpServerCount,
-): Promise<void> {
-  const pending = await pendingFolds();
-  if (pending === 0) return;
-
-  const script = "bun scripts/migration/0054-fold-mcp-servers.ts";
-  const command =
-    embeddedDataDir === null
-      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
-      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
-        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
-        "opens in one process at a time)";
-  throw new Error(
-    `MCP servers not folded: the database still holds ${pending} row(s) — packages of type ` +
-      "'mcp-server' and/or org integration drafts or versions still declaring `source.server.name` " +
-      "— but a local MCP server is now declared inline on its integration, and " +
-      "scripts/migration/0054-fold-mcp-servers.ts has not moved them there. Until it runs, " +
-      `every local integration naming such a server has none to launch. Refusing to boot: run ${command}, then restart.`,
-  );
-}
-
-async function unfoldedMcpServerCount(): Promise<number> {
-  const { sql: rawSql } = await import("drizzle-orm");
-  // Raw SQL: the TS `PackageType` no longer carries `mcp-server`, the enum label does. The two
-  // reference-shape counts are the verification query of the 0054 script.
-  const [row] = toRows<{ pending: number }>(
-    await db.execute(
-      rawSql`SELECT (
-          (SELECT count(*) FROM packages WHERE type = 'mcp-server')
-          + (SELECT count(*) FROM packages
-              WHERE org_id IS NOT NULL AND type <> 'mcp-server'
-                AND draft_manifest -> 'source' ->> 'kind' = 'local'
-                AND draft_manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL)
-          + (SELECT count(*) FROM package_versions pv JOIN packages p ON p.id = pv.package_id
-              WHERE p.org_id IS NOT NULL AND p.type <> 'mcp-server'
-                AND pv.manifest -> 'source' ->> 'kind' = 'local'
-                AND pv.manifest -> 'source' -> 'server' ->> 'name' IS NOT NULL)
-        )::int AS pending`,
-    ),
   );
   return row?.pending ?? 0;
 }
