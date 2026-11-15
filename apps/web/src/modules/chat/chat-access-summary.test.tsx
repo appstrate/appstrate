@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's access chip — its trigger, which is all this harness can
- * see (`renderToStaticMarkup` has no DOM, and Radix portals the popover body).
+ * The Info tab's access summary (`renderToStaticMarkup` has no DOM).
  *
  * Two properties are worth pinning here, and both are about NOT lying:
  *
  *  - nothing renders until the permission sets have landed. `can()` answers
  *    `false` for a set still in flight, which is indistinguishable from a
- *    denial — a chip that painted then would tell every user, on every hard
+ *    denial — a summary that painted then would tell every user, on every hard
  *    reload, that the assistant may do nothing;
  *  - the label is the standing that actually governs the chat. Sessions are
  *    space-scoped rows (RBAC spec §5), so the SPACE role is the specific
@@ -29,7 +28,7 @@ const SPACE_ID = "spc_a";
 // dynamic imports below pull them in.
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { ChatAccessChip, ChatCapabilityList } = await import("./chat-access-chip.tsx");
+const { ChatAccessSummary, ChatCapabilityList } = await import("./chat-access-summary.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { $api } = await import("../../api/client.ts");
@@ -78,11 +77,11 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
 }
 
 /**
- * Render the chip. `seedSpaces: false` leaves `GET /api/spaces` unresolved,
- * which is the loading case — `usePermissions().ready` is false and the chip
+ * Render the summary. `seedSpaces: false` leaves `GET /api/spaces` unresolved,
+ * which is the loading case — `usePermissions().ready` is false and the summary
  * must hold its box as a skeleton, never a verdict.
  */
-function chip(options: {
+function summary(options: {
   seedSpaces: boolean;
   spaceRole?: { kind: "preset" | "custom"; key: string; name: string } | null;
 }): string {
@@ -120,26 +119,26 @@ function chip(options: {
     id: SPACE_ID,
   });
   try {
-    return render(<ChatAccessChip />, { queryClient: qc });
+    return render(<ChatAccessSummary />, { queryClient: qc });
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
   }
 }
 
-describe("the chat access chip", () => {
+describe("the chat access summary", () => {
   it("holds its box as a skeleton while the permission sets are still loading", () => {
     // The flash guard. Without it every hard reload paints "you may do
     // nothing" for as long as `GET /api/spaces` takes.
-    const html = chip({ seedSpaces: false });
+    const html = summary({ seedSpaces: false });
     expect(html).toContain("animate-pulse");
-    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<ul");
   });
 
   it("labels itself with the caller's role in THIS space", () => {
     // Chat sessions are space-scoped rows, so the space role is the standing
     // that governs the conversation.
-    const html = chip({
+    const html = summary({
       seedSpaces: true,
       spaceRole: { kind: "preset", key: "operator", name: "operator" },
     });
@@ -147,7 +146,7 @@ describe("the chat access chip", () => {
   });
 
   it("renders a custom role under the name its author typed, not a slug", () => {
-    const html = chip({
+    const html = summary({
       seedSpaces: true,
       spaceRole: { kind: "custom", key: "analyste", name: "Analyste" },
     });
@@ -157,22 +156,24 @@ describe("the chat access chip", () => {
   it("falls back to the org role when the caller holds no role in the space", () => {
     // A closed space the caller has not joined: no space role to show, but
     // there is still a truthful thing to say about who they are.
-    const html = chip({ seedSpaces: true, spaceRole: null });
+    const html = summary({ seedSpaces: true, spaceRole: null });
     expect(html).toContain(i18n.t("common:switcher.role.member"));
   });
 
-  it("names its trigger with the visible role, not a label that hides it", () => {
-    // WCAG 2.5.3 label-in-name: an `aria-label` REPLACES the visible text, so
-    // one that omitted the role would leave a voice user unable to reach the
-    // button by saying what it shows.
-    const role = i18n.t("settings:roles.preset.operator");
-    const html = chip({
+  it("names both standings in the role line, the space one being the specific answer", () => {
+    const org = i18n.t("common:switcher.role.member");
+    const space = i18n.t("settings:roles.preset.operator");
+    const html = summary({
       seedSpaces: true,
       spaceRole: { kind: "preset", key: "operator", name: "operator" },
     });
-    const label = /aria-label="([^"]*)"/.exec(html)?.[1];
-    expect(label).toBe(i18n.t("chat:access.triggerLabel", { role }));
-    expect(label).toContain(role);
+    expect(html).toContain(i18n.t("chat:access.roleLine", { org, space }));
+  });
+
+  it("lists the capabilities under the caller's role once permissions are known", () => {
+    const html = summary({ seedSpaces: true, spaceRole: null });
+    expect(html).toContain(i18n.t("chat:access.capability.runAgents"));
+    expect(html).not.toContain(i18n.t("chat:access.previewing"));
   });
 });
 
