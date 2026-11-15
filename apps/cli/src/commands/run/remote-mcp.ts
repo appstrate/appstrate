@@ -152,42 +152,50 @@ export async function buildRemoteMcpExtensions(
     }),
   );
 
-  for (const outcome of outcomes) {
-    if ("unavailable" in outcome) {
-      unavailable.push({ id: outcome.ref.name, ...outcome.unavailable });
-      continue;
+  try {
+    for (const outcome of outcomes) {
+      if ("unavailable" in outcome) {
+        unavailable.push({ id: outcome.ref.name, ...outcome.unavailable });
+        continue;
+      }
+      const { ref, target, client, tools } = outcome;
+      const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
+      const before = factories.length;
+      for (const tool of tools) {
+        if (toolExclusion(tool.name, target.allowlist, target.hidden)) continue;
+        const exposure = exposeTool(tool, { namespace, isTaken: (name) => toolNames.has(name) });
+        if ("exclusion" in exposure) continue;
+        toolNames.add(exposure.descriptor.name);
+        factories.push(
+          mcpToolForwardFactory({
+            mcp: client,
+            tool: exposure.descriptor,
+            upstreamName: tool.name,
+            runId: opts.runId,
+            workspace: opts.workspace,
+            emit: opts.emit,
+          }),
+        );
+      }
+      if (factories.length === before) {
+        await client.close().catch(() => {});
+        unavailable.push({
+          id: ref.name,
+          reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
+          detail: "its server exposes none of the selected tools",
+        });
+        continue;
+      }
+      namespaces.add(namespace);
+      clients.push(client);
+      integrationIds.add(ref.name);
     }
-    const { ref, target, client, tools } = outcome;
-    const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
-    const before = factories.length;
-    for (const tool of tools) {
-      if (toolExclusion(tool.name, target.allowlist, target.hidden)) continue;
-      const exposure = exposeTool(tool, { namespace, isTaken: (name) => toolNames.has(name) });
-      if ("exclusion" in exposure) continue;
-      toolNames.add(exposure.descriptor.name);
-      factories.push(
-        mcpToolForwardFactory({
-          mcp: client,
-          tool: exposure.descriptor,
-          upstreamName: tool.name,
-          runId: opts.runId,
-          workspace: opts.workspace,
-          emit: opts.emit,
-        }),
-      );
-    }
-    if (factories.length === before) {
-      await client.close().catch(() => {});
-      unavailable.push({
-        id: ref.name,
-        reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
-        detail: "its server exposes none of the selected tools",
-      });
-      continue;
-    }
-    namespaces.add(namespace);
-    clients.push(client);
-    integrationIds.add(ref.name);
+  } catch (err) {
+    // A throw leaves no caller holding the connected clients.
+    await Promise.all(
+      outcomes.flatMap((outcome) => ("client" in outcome ? [outcome.client.close()] : [])),
+    ).catch(() => {});
+    throw err;
   }
 
   return {
@@ -252,7 +260,12 @@ function remoteTarget(
   };
 
   if (isRuntimeBoundIntegration(manifest)) {
-    if (!runToolsMcp) return { reason: UNAVAILABLE_INTEGRATION_REASONS.unbound };
+    if (!runToolsMcp) {
+      return {
+        reason: UNAVAILABLE_INTEGRATION_REASONS.unbound,
+        detail: "the run reports to no instance",
+      };
+    }
     const { url, runSecret } = runToolsMcp;
     const signRequest: RequestSigner = (body) => signFresh({ body, secret: runSecret });
     return { url, signRequest, era: "legacy", ...filters };

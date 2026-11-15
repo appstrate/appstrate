@@ -165,27 +165,13 @@ export const INLINE_MANIFEST_RULE =
   '`integrations_configuration["@appstrate/platform"] = { tools: [] }` gives a run without ' +
   "the platform tools. A complete deterministic manifest may override every field, including " +
   "a strict `output.schema`; the run has the `output` tool exactly when its manifest declares " +
-  "an `output.schema`.";
+  "a non-empty `output.schema`.";
 
 /**
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
- * AFPS manifest sent to the inline-run route.
- *
- * Defaults fill ABSENT top-level fields, and every caller-supplied field
- * replaces its default verbatim, with one exception: the tables keyed by
- * package id (`dependencies.integrations`, `integrations_configuration`)
- * receive their defaults entry by entry, and the caller's own entries are
- * never touched. `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
- * is added when `dependencies.integrations` does not name that id;
- * `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` is
- * added only when NEITHER table names it, so a caller who declares the
- * dependency alone gets the integration's `default_tools`. A caller opts out
- * of the platform tools by writing the configuration entry, e.g.
- * `integrations_configuration["@appstrate/platform"] = { tools: [] }`. A
- * `dependencies` or `dependencies.integrations` value that is not an object is
- * left as written, for manifest validation to refuse. Nested deterministic
- * contracts such as `output.schema` remain entirely caller-owned, and
- * `output: {}` (no schema) gives a run without the `output` tool.
+ * AFPS manifest sent to the inline-run route, as {@link INLINE_MANIFEST_RULE}
+ * states. A `dependencies` or `dependencies.integrations` value that is not an
+ * object is left as written, for manifest validation to refuse.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -217,8 +203,8 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   }
 
   const materialized: Record<string, unknown> = { ...defaults, ...manifest };
-  const names = (table: Record<string, unknown> | null): boolean =>
-    table !== null && Object.prototype.hasOwnProperty.call(table, PLATFORM_INTEGRATION_ID);
+  const names = (table: Record<string, unknown>): boolean =>
+    Object.prototype.hasOwnProperty.call(table, PLATFORM_INTEGRATION_ID);
 
   const dependencies = hasOwn("dependencies") ? asRecordOrNull(manifest.dependencies) : {};
   const integrations =

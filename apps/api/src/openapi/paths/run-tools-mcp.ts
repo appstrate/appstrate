@@ -14,7 +14,8 @@ export const RUN_TOOLS_MCP_DESCRIPTION =
   "`run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run " +
   "log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's " +
   "checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to " +
-  "each recipient of the run (whoever launched it, else the org's owners and admins), once per " +
+  "each recipient of the run (whoever launched it, else the org's owners and admins; an " +
+  "ephemeral run has none and the tool refuses), once per " +
   `run. Rate-limited to ${RUN_ROUTE_RATE_PER_MIN} ` +
   "requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) " +
   "is refused with 400 (`-32600`).";

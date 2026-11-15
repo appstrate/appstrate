@@ -1213,6 +1213,37 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
+  it("drops a second connection's tool too large once sanitised, sibling or not", async () => {
+    const [oversized] = sshTool("db");
+    const properties = Object.fromEntries(
+      Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),
+    );
+    const work = await makeUpstream(sshTool("web-1"));
+    const perso = await makeUpstream([
+      {
+        ...oversized!,
+        descriptor: { ...oversized!.descriptor, inputSchema: { type: "object", properties } },
+      },
+    ]);
+    try {
+      const logs: Array<{ data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({ namespace: "@orga/ssh", client: work.client, connection: CONN_A });
+      await host.register({ namespace: "@orga/ssh", client: perso.client, connection: CONN_B });
+      expect(host.routeCount()).toBe(1);
+      expect(logs.map((e) => e.data)).toContainEqual(
+        expect.objectContaining({
+          event: "tool_rejected",
+          reason: "schema_too_large_after_sanitisation",
+          originalName: "ssh_exec",
+        }),
+      );
+    } finally {
+      await work.pair.close();
+      await perso.pair.close();
+    }
+  });
+
   it("CONTROL — a single connection advertises the upstream schema unchanged", async () => {
     const work = await makeUpstream(sshTool("web-1"));
     try {

@@ -120,8 +120,7 @@ export async function markRunNotificationsRead(
  *
  * Each recipient receives at most one `agent_message` per run: the
  * `(run, recipient, type)` unique index makes a second call a no-op. Returns how
- * many rows were written; `0` for a non-empty `recipients` means the run already
- * sent its message.
+ * many rows were written; `0` means the run already sent its message.
  */
 export async function createAgentMessageNotifications(
   scope: SpaceScope,
@@ -129,7 +128,6 @@ export async function createAgentMessageNotifications(
   recipients: Actor[],
   message: { title: string; message: string },
 ): Promise<number> {
-  if (recipients.length === 0) return 0;
   const payload: NotificationPayloads["agent_message"] = toPgSafe({
     packageId: run.packageId,
     title: message.title,

@@ -6,7 +6,8 @@
  * Registers every namespaced `{ns}__{tool}` entry the sidecar advertises
  * (spawned and remote integrations, the one bound to the runtime included)
  * as a Pi-SDK tool forwarding to the sidecar's MCP `tools/call` endpoint via
- * {@link AppstrateMcpClient}. The LLM sees the canonical
+ * {@link AppstrateMcpClient}, except an `api_upload` tool, run agent-side
+ * through its `api_call` sibling. The LLM sees the canonical
  * MCP names verbatim — Appstrate is indistinguishable (LLM-side) from
  * any other MCP host.
  *

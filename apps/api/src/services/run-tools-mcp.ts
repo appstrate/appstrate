@@ -62,7 +62,7 @@ import type { RunSinkContext } from "../types/run-sink.ts";
 const RUN_TOOLS_SERVER_INFO = { name: "appstrate-platform", version: "1.0.0" } as const;
 
 /** The running run the tools act for, resolved and authorised by the mount. */
-export type RunToolsRun = Pick<
+type RunToolsRun = Pick<
   RunSinkContext,
   "id" | "orgId" | "spaceId" | "packageId" | "userId" | "endUserId"
 >;

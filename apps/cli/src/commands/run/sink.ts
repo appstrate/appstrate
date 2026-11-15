@@ -105,8 +105,6 @@ export function createConsoleSink(opts: SinkOptions = {}): EventSink {
  * Args and results never appear on the same emit — start events carry
  * args, end events carry result. Splitting the rendering keeps each
  * line self-explanatory and scrollback-friendly.
- *
- * Routes every write through the injected `writeStdout`.
  */
 function renderToolEvent(
   data: {

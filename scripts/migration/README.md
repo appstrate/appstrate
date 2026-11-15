@@ -60,13 +60,17 @@ The per-subject sections below are not runbooks and never were. They explain
 what each script does and what it checks, which is what the next release reads
 them for.
 
-## Where each command runs
+## Release beta.67 — order of operations
 
-A `.ts` script imports `@appstrate/db/client`, which validates the platform's whole environment
-schema, so it runs with the platform's environment, never with `DATABASE_URL` alone. Run from the
-platform's directory, Bun loads its `.env` itself. Never shell-source it (`set -a && . ./.env`):
-the shell strips the quotes of an unquoted JSON value such as `SYSTEM_PROVIDER_KEYS`, and the
-validation then fails before connecting.
+`v1.0.0-beta.67` shipped with this order, and production ran it on 2026-10-14 (counts in the Log
+below). A deployment upgrading to beta.67 or later from an earlier release follows it once.
+
+The order only; each step's detail, counts and rollback are in its `Detail` section below and in
+the root `CHANGELOG.md` (Operators). A database created before the `0000_init.sql` squash must
+have run `0018` first: drizzle `0096` drops `org_models_credential_id_model_provider_credentials_id_fk`
+by that name, which `0018` gave the constraint, and the migrate fails without it.
+
+Where each command runs:
 
 - **`examples/self-hosting/`** (compose): the release image carries `scripts/migration/`, so the
   migrate service is `docker compose run --rm migrate` and a `.ts` script is
@@ -78,61 +82,19 @@ validation then fails before connecting.
   scripts never touch the real database. Run the release image in the network namespace of the
   resource's own database container (labelled `com.docker.compose.project=<resource-uuid>` and
   `com.docker.compose.service=appstrate-postgres`), with the stopped application container's
-  environment, whose `DATABASE_URL` must name that postgres:
+  environment: a script imports `@appstrate/db/client`, which validates the platform's whole
+  environment schema, so `DATABASE_URL` alone fails on the missing secrets before connecting. That
+  `DATABASE_URL` must name that postgres:
   `docker run --rm --network container:<postgres container> --env-file <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' <app container>) ghcr.io/appstrate/appstrate:<version> bun scripts/migration/<script>.ts`,
   and `bun packages/db/src/migrate.ts` the same way for the migrations. The release runbook holds
   the exact form.
 - **Embedded database** (tier 0, no `DATABASE_URL`): from the platform's directory, with the
   database named, `PGLITE_DATA_DIR=./data/pglite bun scripts/migration/<script>.ts` (the `.env`'s
   value if it sets one), the platform stopped: PGlite opens in one process at a time. With neither
-  variable set, the window scripts exit 2 rather than open the default directory
-  (`lib/database-target.ts`). There is no `pg_dump`: the backup is a copy of the `PGLITE_DATA_DIR`
-  directory, taken with the platform stopped. There is no migrate service either: the platform
-  applies the migrations itself at boot, so a release window starts it once for them and stops it
-  as soon as boot completes (`/health` answers `200`), unless a boot guard stops it first. While it
-  is up it serves requests and fires schedules against the data the window scripts have not
-  converted yet.
-
-## Release beta.69 — order of operations
-
-The order only; each script's detail, counts and rollback are in its `Detail` section below and in
-the root `CHANGELOG.md` (Operators). Commands per deployment: "Where each command runs" above.
-
-**Before the deploy, on the running release (read-only):** `0050` — the schedules whose override
-narrows an imposed set, each one's owner told.
-
-**The window — the app stays stopped from step 1 to step 8:**
-
-1. Wait until no run is `running`, then stop the app, so the scheduler fires nothing. Nothing pauses
-   the scheduler short of stopping the platform: a run a schedule starts between the check and the
-   stop is drained by the stop for up to 30 seconds, then interrupted, and recorded `failed` at the
-   next boot. Back up (`pg_dump`; on the embedded database a copy of `PGLITE_DATA_DIR`) and note
-   the wall-clock instant, in RFC 3339 with `Z` or an offset: it is `0053`'s `--before`.
-2. Run the migrations alone (on the embedded database, the platform started once and stopped).
-3. `0048` dry run, then `--apply`: package shares folded into `space_packages`. The release refuses
-   to boot while `package_shares` holds a row.
-4. `0049`, only where drizzle `0097` was applied before `0101` (staging): dry run, then `--apply`.
-5. `0051` dry run, then `--apply`: auto-provisioned OAuth clients no longer flagged default.
-6. `0053 --before <instant of step 1>` dry run, then `--apply`: stored agent manifests moved from
-   `runtime_tools` to `@appstrate/platform`. It exits 1 while a malformed manifest remains; fix
-   each by hand and re-run with the same `--before`.
-7. `0047` (shares into personal spaces removed), then `0052` (run read state out of the
-   notifications). On PostgreSQL either may instead run once the app is up, in the same window.
-8. Start the app.
-
-## Release beta.67 — order of operations
-
-`v1.0.0-beta.67` shipped with this order, and production ran it on 2026-10-14 (counts in the Log
-below). A deployment upgrading to beta.67 or later from an earlier release follows it once.
-
-The order only; each step's detail, counts and rollback are in its `Detail` section below and in
-the root `CHANGELOG.md` (Operators). A database created before the `0000_init.sql` squash must
-have run `0018` first: drizzle `0096` drops `org_models_credential_id_model_provider_credentials_id_fk`
-by that name, which `0018` gave the constraint, and the migrate fails without it.
-
-Commands per deployment: "Where each command runs" above. On the embedded database, start the
-platform once for the migrations, stop it (it stops itself while `0044` is pending), run steps 3 to
-6, start it, then `0040` with the platform stopped again.
+  variable set, `0040` and the window scripts exit 2 rather than open the default directory
+  (`lib/database-target.ts`). The platform applies the migrations itself there: start it once, stop it (it stops
+  itself while `0044` is pending), run steps 3 to 6, start it, then `0040` with the platform
+  stopped again.
 
 **Before the deploy, on the running release (read-only):**
 
@@ -1390,7 +1352,7 @@ app stopped:
    cannot see them either). On such a database, list them before the deploy and decide by hand.
 3. Start the app.
 
-`bun scripts/migration/0048-fold-package-shares.ts` is the dry run
+`set -a && . ./.env && set +a && bun scripts/migration/0048-fold-package-shares.ts` is the dry run
 (rolled back); `--apply` commits. It refuses to run with neither `DATABASE_URL` nor
 `PGLITE_DATA_DIR` set (an embedded database is named, the platform stopped). Rehearse on a restored
 dump first: the per-space counts are the check.
@@ -1418,7 +1380,7 @@ organizations whose `icon` reads `image:`, objects in the `orgs` bucket. `--appl
 to NULL (the organization renders its initial again), `updated_at` bumped, in one transaction, then
 deletes every object of the bucket, and exits 1 unless both counts read 0 after. A second run finds
 nothing; one that failed after the commit deletes the objects left.
-`bun scripts/migration/0049-org-icon-images.ts` is the dry run;
+`set -a && . ./.env && set +a && bun scripts/migration/0049-org-icon-images.ts` is the dry run;
 `--apply` commits. It refuses to run with neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set.
 
 Rollback: none for the bytes. `pg_dump` and a copy of the bucket first if an image must survive.
@@ -1473,7 +1435,7 @@ and no other client changes, and the effective default of every tier is the one 
 since no picker read the flag; the rewrite also bumps `updated_at`, which gives a per-connection DCR
 row one extra lease window before pruning (harmless). Skipping it leaves the slot held: a manual org
 client registered later may land non-default while a system client exists.
-`bun scripts/migration/0051-clear-auto-provisioned-defaults.ts` is
+`set -a && . ./.env && set +a && bun scripts/migration/0051-clear-auto-provisioned-defaults.ts` is
 the dry run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor
 `PGLITE_DATA_DIR` set.
 
@@ -1516,20 +1478,21 @@ the same reason, do not serve the previous release beside this one. It also read
 **Not a runbook.** Nothing reads `runtime_tools` any more (#2197, #2199): `0053` rewrites the stored
 agent manifests (`package_versions.manifest`, `packages.draft_manifest`) so that each declares
 `@appstrate/platform` and keeps the tools it had. Its header is the authority on the rewrite, on
-`--before` and on the exit codes. Until it runs, every stored agent runs without those tools, and
-nothing reports it.
+`--before`, on when it runs and on the exit codes.
 
-When: step 6 of "Release beta.69" above, the app stopped since step 1. It waits for no run to be
-`running` because a container started before the deploy posts its notes, pins and logs in a
-finalize body the new release does not read. Its counts are unmeasured: rehearse it on a restored
-production dump before the window and record them in the Log.
-`bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>` is the dry run; `--apply`
-commits.
+Run: back up first (`pg_dump`; on the embedded database a copy of the stopped `PGLITE_DATA_DIR`),
+then
+`set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
+is the dry run (rolled back); `--apply` commits. On the embedded database the platform applies the
+schema migrations itself at boot, before the script, and a draft saved during that boot is newer
+than a `--before` taken earlier: take `--before` once that boot is stopped. Its counts are
+unmeasured: rehearse it on a restored production dump before the window and record them in the
+Log.
 
-Verify: it prints the database it targets, then per store what it rewrites, how many of those gain
-the open `output.schema`, the malformed manifests it leaves, and after the rewrite how many still
-carry `runtime_tools` and how many written before `--before` still lack the dependency. Both
-"after" columns read 0, or count only listed malformed manifests. A second run with the same
+Verify: it prints its mode and the database it targets, then per store what it rewrites, how many
+of those gain the open `output.schema`, the malformed manifests it leaves, and after the rewrite how
+many still carry `runtime_tools` and how many written before `--before` still lack the dependency.
+Both "after" columns read 0, or count only listed malformed manifests. A second run with the same
 `--before` rewrites nothing.
 
 Malformed: a manifest with a field the rewrite merges into that is not an object is listed and left
@@ -1594,4 +1557,4 @@ none of `log`, `note`, `pin` or `output`; for the same reason, do not serve it b
 | 0050 | not yet             | READ-ONLY report (#2043): the schedules, enabled or not, whose `connection_overrides` name `[]` or a strict subset of the set an admin pin (else an enforced org default) imposes on the integration — each binds the WHOLE imposed set after the deploy — with the override, the imposed set and the imposing layer — **run before deploying the release where an override can no longer narrow an imposed set**; nothing is rewritten, the schedule owner is told                                                                                                                                                                                                                          | read-only — prints the table and the enabled / disabled totals, or `0 schedules — nothing widens.`; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0053 | not yet             | every stored agent manifest that carries `runtime_tools`, or predates `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, an open `output.schema` for an agent that selected `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the window of the release that ships #2199, once no run is `running`, app stopped**; `.ts`, `--before <RFC 3339 instant>` required, the same on every run, dry run by default, `--apply` to write, PostgreSQL or PGlite     | prints the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` (both = the malformed rows); a second run rewrites 0                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 0053 | not yet             | every stored agent manifest carrying `runtime_tools`, or predating `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added and indexed in `package_version_dependencies`, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, open `output.schema` for an agent selecting `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the release window, app stopped, after the schema migrations, before the app serves traffic**; `.ts`, `--before <RFC 3339 instant>` required, dry run by default, `--apply` to write    | prints the mode and the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` — how many manifests still carry `runtime_tools` and how many written before `--before` still lack the dependency: each is one of those listed; a second run rewrites 0                                                                                                                                                                                                                                                                                                                   |

@@ -22,7 +22,11 @@ import { forgetProtocolEras, legacyMcpHandler } from "@appstrate/mcp-transport/t
 import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
 import { buildRemoteMcpExtensions } from "../src/commands/run/remote-mcp.ts";
 import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
-import { buildIntegrationTools, cliPromptInputs } from "../src/commands/run.ts";
+import {
+  buildIntegrationTools,
+  cliPromptInputs,
+  unavailableIntegrationLines,
+} from "../src/commands/run.ts";
 import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 
 const DOCS = "@acme/docs";
@@ -276,6 +280,42 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     });
   }
 
+  it("closes the connected clients when wiring their tools throws", async () => {
+    // A stateful server keeps the client's GET stream open until the client closes.
+    let streamOpened!: () => void;
+    const opened = new Promise<void>((resolve) => (streamOpened = resolve));
+    let streamClosed!: () => void;
+    const closed = new Promise<void>((resolve) => (streamClosed = resolve));
+    const handler = legacyMcpHandler({ tools: [echoTool("a")], stateful: true });
+    const stateful = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        if (req.method === "GET") {
+          req.signal.addEventListener("abort", () => streamClosed());
+          streamOpened();
+        } else if ((await req.clone().text()).includes('"tools/list"')) {
+          await opened;
+        }
+        return handler(req);
+      },
+    });
+    // Every namespace `@acme/docs` can take is held: allocating one throws once connected.
+    const takenToolNames = new Set([
+      "acme_docs__api_call",
+      ...Array.from({ length: 998 }, (_, i) => `acme_docs_${i + 2}__api_call`),
+    ]);
+    try {
+      const bundle = makeBundle({ url: `http://127.0.0.1:${stateful.port}/mcp` });
+      await expect(
+        buildRemoteMcpExtensions(runOptions(bundle, { takenToolNames })),
+      ).rejects.toThrow("exhausted MCP namespace suffixes");
+      await closed;
+    } finally {
+      stateful.stop(true);
+    }
+  });
+
   it("marks a server that never answers unavailable once the startup timeout fires", async () => {
     const silent = Bun.serve({
       hostname: "127.0.0.1",
@@ -421,38 +461,43 @@ function makeMultiBundle(urls: readonly string[]): Bundle {
 
 describe("run --local — several remote integrations", () => {
   it("connects them concurrently and names their tools in declaration order", async () => {
-    const handler = legacyMcpHandler({ tools: [echoTool("a")] });
-    const slow = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: async (req) => {
-        await Bun.sleep(25);
-        return handler(req);
-      },
-    });
-    // Requests the silent server holds at once: one at a time if the integrations connected in turn.
-    let inFlight = 0;
-    let maxInFlight = 0;
+    // The silent servers hold their requests until two are held at once, which never happens if
+    // the integrations connect in turn; the first server answers only after that.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = 0;
+    let maxHeld = 0;
     const silent = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (req) => {
-        inFlight += 1;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        req.signal.addEventListener("abort", () => (inFlight -= 1));
-        return new Promise<Response>(() => {});
+      fetch: async () => {
+        held += 1;
+        maxHeld = Math.max(maxHeld, held);
+        if (held === 2) release();
+        await released;
+        held -= 1;
+        return new Response(null, { status: 503 });
+      },
+    });
+    const handler = legacyMcpHandler({ tools: [echoTool("a")] });
+    const late = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        await released;
+        return handler(req);
       },
     });
     try {
       const bundle = makeMultiBundle([
-        `http://127.0.0.1:${slow.port}/mcp`,
+        `http://127.0.0.1:${late.port}/mcp`,
         `http://127.0.0.1:${silent.port}/mcp`,
         `http://127.0.0.1:${silent.port}/mcp`,
         serverUrl,
       ]);
-      const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 300 });
+      const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 10_000 });
       try {
-        expect(maxInFlight).toBe(2);
+        expect(maxHeld).toBe(2);
         expect(tools.map((t) => t.name)).toEqual(["acme_server0__a", "acme_server3__a"]);
         expect(extensions.unavailable.map((entry) => entry.id)).toEqual([
           "@acme/server1",
@@ -462,10 +507,10 @@ describe("run --local — several remote integrations", () => {
         await extensions.close();
       }
     } finally {
-      slow.stop(true);
+      late.stop(true);
       silent.stop(true);
     }
-  });
+  }, 60_000);
 });
 
 describe("run --local — integration bound to the runtime", () => {
@@ -613,10 +658,17 @@ describe("run --local — integration bound to the runtime", () => {
   it("leaves the integration unbound when the run reports to no instance", async () => {
     const { extensions, tools } = await wire(makeBundle({ integration: runtimeBound }));
     expect(tools).toEqual([]);
-    expect(extensions.unavailable).toEqual([
-      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound },
-    ]);
+    const entry = {
+      id: DOCS,
+      reason: UNAVAILABLE_INTEGRATION_REASONS.unbound,
+      detail: "the run reports to no instance",
+    };
+    expect(extensions.unavailable).toEqual([entry]);
     expect(seen).toEqual([]);
+    // The person reads the true cause; the agent, the reason alone.
+    expect(unavailableIntegrationLines(extensions.unavailable)).toBe(
+      `warn: integration ${DOCS} unavailable: ${entry.reason}\n  the run reports to no instance\n`,
+    );
   });
 
   // Another port of the declared host: allowed by the egress guard, another origin all the same.

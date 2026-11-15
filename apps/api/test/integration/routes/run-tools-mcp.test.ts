@@ -254,6 +254,15 @@ describe("run MCP server", () => {
     it("`log`, `note`, `pin` and `notify` write in the run's space, not the agent's home", async () => {
       const space = await seedSpace({ orgId: ctx.orgId });
       await seedSpacePackage(space.id, pkgId);
+      const home = await seedRunningRun({ status: "success", checkpoint: { home: true } });
+      await addMemory(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "user", id: ctx.user.id },
+        "home memory",
+        home.id,
+      );
       const run = await seedRunningRun({ spaceId: space.id });
       for (const [tool, args] of [
         ["log", { level: "info", message: "elsewhere" }],
@@ -272,6 +281,16 @@ describe("run MCP server", () => {
       expect(sent.map((r) => r.spaceId)).toEqual([space.id]);
       // A run log has no space column: it belongs to the run, which lives in that space.
       expect(await db.select().from(runLogs).where(eq(runLogs.runId, run.id))).toHaveLength(1);
+
+      const history = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      expect((JSON.parse(history.content[0]!.text) as { data: unknown[] }).data).toEqual([]);
+      const recalled = await callTool(path, bearer(run.id), "recall_memory", {});
+      const memoriesRead = JSON.parse(recalled.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(memoriesRead.memories.map((m) => m.content)).toEqual(["fact"]);
     });
 
     it('`pin("checkpoint")` is read back by the next run\'s `run_history`', async () => {
@@ -520,7 +539,7 @@ describe("run MCP server", () => {
       const run = await seedRunningRun();
       const result = await callTool(path, bearer(run.id), "pin", { key: "Bad Key", content: 1 });
       expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain("key: ");
+      expect(result.content[0]!.text).toStartWith("pin: invalid arguments — key: ");
       const rows = await db
         .select()
         .from(packagePersistence)
@@ -572,6 +591,33 @@ describe("run MCP server", () => {
       expect(notification!.payload).toMatchObject({ title: safe, message: safe });
     });
 
+    it('`pin("checkpoint")` stores the same sanitised value in the slot and the run snapshot', async () => {
+      const first = await seedRunningRun();
+      const result = await callTool(path, bearer(first.id), "pin", {
+        key: "checkpoint",
+        content: { cursor: "a\u0000b\uD800" },
+      });
+      expect(result.isError).toBeUndefined();
+      const safe = { cursor: "a�b�" };
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId);
+      expect(slots.map((r) => [r.key, r.content])).toEqual([["checkpoint", safe]]);
+      const [snapshot] = await db
+        .select({ checkpoint: runs.checkpoint })
+        .from(runs)
+        .where(eq(runs.id, first.id));
+      expect(snapshot!.checkpoint).toEqual(safe);
+      await db.update(runs).set({ status: "success" }).where(eq(runs.id, first.id));
+
+      const second = await seedRunningRun();
+      const history = await callTool(path, bearer(second.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      const body = JSON.parse(history.content[0]!.text) as {
+        data: Array<{ id: string; checkpoint: unknown }>;
+      };
+      expect(body.data).toEqual([expect.objectContaining({ id: first.id, checkpoint: safe })]);
+    });
+
     it("answers 429 past the per-minute budget of one run", async () => {
       const run = await seedRunningRun();
       const limited = limitedApp();
@@ -579,6 +625,15 @@ describe("run MCP server", () => {
         expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(200);
       }
       expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(429);
+    });
+
+    it("keeps one budget per run: another run is served after one hits 429", async () => {
+      const run = await seedRunningRun();
+      const other = await seedRunningRun();
+      const limited = limitedApp();
+      for (let i = 0; i < 3; i++) await rpc(path, bearer(run.id), "tools/list", {}, limited);
+      expect((await rpc(path, bearer(run.id), "tools/list", {}, limited)).status).toBe(429);
+      expect((await rpc(path, bearer(other.id), "tools/list", {}, limited)).status).toBe(200);
     });
   });
 
@@ -632,6 +687,10 @@ describe("run MCP server", () => {
       expect(result.isError).toBeUndefined();
       const recipients = (await notificationsOf(run.id)).map((r) => r.recipientId).sort();
       expect(recipients).toEqual([ctx.user.id, admin.user.id].sort());
+
+      const second = await callTool(path, bearer(run.id), "notify", { title: "t2", message: "m" });
+      expect(second.isError).toBe(true);
+      expect(await notificationsOf(run.id)).toHaveLength(2);
     });
 
     it("refuses arguments outside the input schema as a tool error, writing nothing", async () => {
@@ -733,6 +792,46 @@ describe("run MCP server", () => {
       const call = () => rpc(path(run.id), signed(SECRET), "tools/list", {}, limited);
       for (let i = 0; i < 2; i++) expect((await call()).status).toBe(200);
       expect((await call()).status).toBe(429);
+    });
+
+    it("verifies the signature before spending the run's budget", async () => {
+      const run = await seedRemoteRun();
+      const limited = limitedApp();
+      for (let i = 0; i < 3; i++) {
+        expect((await rpc(path(run.id), {}, "tools/list", {}, limited)).status).toBe(401);
+      }
+      for (let i = 0; i < 2; i++) {
+        const { status } = await rpc(path(run.id), signed(SECRET), "tools/list", {}, limited);
+        expect(status).toBe(200);
+      }
+    });
+
+    it("keeps one budget per run: another run is served after one hits 429", async () => {
+      const run = await seedRemoteRun();
+      const other = await seedRemoteRun();
+      const limited = limitedApp();
+      const call = (runId: string) => rpc(path(runId), signed(SECRET), "tools/list", {}, limited);
+      for (let i = 0; i < 2; i++) await call(run.id);
+      expect((await call(run.id)).status).toBe(429);
+      expect((await call(other.id)).status).toBe(200);
+    });
+
+    it("refuses a JSON-RPC batch with 400 `-32600`", async () => {
+      const run = await seedRemoteRun();
+      const message = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+      const body = JSON.stringify([message, { ...message, id: 2 }]);
+      const res = await app.request(path(run.id), {
+        method: "POST",
+        headers: {
+          ...signed(SECRET)(body),
+          "content-type": "application/json",
+          Accept: MCP_ACCEPT,
+        },
+        body,
+      });
+      expect(res.status).toBe(400);
+      const envelope = (await res.json()) as JsonRpcEnvelope;
+      expect(envelope.error?.code).toBe(-32600);
     });
 
     it("returns 401 without signature headers", async () => {

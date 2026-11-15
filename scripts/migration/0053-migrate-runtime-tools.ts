@@ -5,20 +5,22 @@
  * 0053 — every stored agent manifest moved from `runtime_tools` to the
  * `@appstrate/platform` integration (#2197, #2199):
  *
- *   bun scripts/migration/0053-migrate-runtime-tools.ts --before <RFC 3339 instant> [--apply]
+ *   set -a && . ./.env && set +a && \
+ *     bun scripts/migration/0053-migrate-runtime-tools.ts --before <RFC 3339 instant> [--apply]
  *
- * Where and with which environment it runs: `scripts/migration/README.md`, "Where each command
- * runs"; when: "Release beta.69" there, which orders the window scripts. Dry run by default
- * (rolled back); `--apply` commits. One transaction. It needs the platform's whole environment
- * (`@appstrate/db/client` validates it), targets `DATABASE_URL` or `PGLITE_DATA_DIR`
- * (`lib/database-target.ts`), and prints the database it targets before anything else.
+ * Run in the release window, the app stopped, after the schema migrations and before the app
+ * serves traffic (backup first). Until it runs, every stored agent runs without the platform tools
+ * it had, and nothing reports it. Dry run by default (rolled back); `--apply` commits. One
+ * transaction. Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither
+ * (`lib/database-target.ts`). It prints its mode, then the database it targets, before reading
+ * or writing anything.
  *
  * `--before` is required: an RFC 3339 instant with `Z` or a numeric offset
- * (`2026-11-15T09:30:00Z`): the wall-clock instant once the platform is stopped (step 1 of
- * "Release beta.69"), and the SAME value on every re-run. Anything else — a date alone, no
- * offset, an impossible date, a future instant — exits 2. Too early, and the agents saved after
- * it without the old field keep no `recall_memory` / `run_history`; a later value on a re-run
- * adds `@appstrate/platform` back to agents whose authors removed it after the release.
+ * (`2026-11-15T09:30:00Z`), taken after the app stopped, and the SAME value on every re-run.
+ * Anything else — a date alone, no offset, an impossible date, a future instant — exits 2. Too
+ * early, and the agents saved after it without the old field keep no `recall_memory` /
+ * `run_history`; a later value on a re-run adds `@appstrate/platform` back to agents whose
+ * authors removed it after the release.
  *
  * `log`, `note`, `pin`, `recall_memory`, `run_history` and `notify` are tools of
  * the `@appstrate/platform` system integration: an agent receives them by
@@ -42,7 +44,10 @@
  *      ends without calling it gets one corrective turn, and the platform prompt
  *      tells the model to call `output` exactly once, as its final action; the
  *      schema requires no property, so a run that never calls it still succeeds;
- *   4. `runtime_tools` is removed.
+ *   4. `runtime_tools` is removed;
+ *   5. a rewritten version gains the `package_version_dependencies` row of the dependency, the
+ *      derived index publishing writes in the same transaction as the manifest
+ *      (`storeVersionDependencies`), `ON CONFLICT DO NOTHING`.
  *
  * A rewritten draft's `lock_version` is incremented with it, as every draft write does: an
  * editor tab opened before the window then saves against a stale `If-Match` and is refused,
@@ -84,35 +89,46 @@
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
+import { parseScopedName } from "@appstrate/core/naming";
 import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 import { table } from "./lib/report-table.ts";
 
 class DryRunRollback extends Error {}
 
-/** The two stores of an agent manifest: column, write time, row label, what else a rewrite sets. */
+const PLATFORM = `'${PLATFORM_INTEGRATION_ID}'`;
+const { scope: PLATFORM_SCOPE, name: PLATFORM_NAME } = parseScopedName(PLATFORM_INTEGRATION_ID)!;
+
+/**
+ * The two stores of an agent manifest: column, write time, row label, what else a rewrite sets,
+ * and what the rewritten rows `r` (each `RETURNING` the store's `returning`) add elsewhere.
+ */
 const STORES = [
   {
     table: "package_versions",
     column: "manifest",
     writtenAt: "created_at",
     rowLabel: `package_id || '@' || version`,
-    key: "version",
     alsoSet: "",
+    returning: `id, manifest -> 'dependencies' -> 'integrations' ->> ${PLATFORM} AS range`,
+    /** Step 5: the derived index row, as `storeVersionDependencies` writes it at publish. */
+    alsoWrite: `, i AS (INSERT INTO package_version_dependencies
+            (version_id, dep_scope, dep_name, dep_type, version_range)
+          SELECT id, '@${PLATFORM_SCOPE}', '${PLATFORM_NAME}', 'integration', range FROM r
+          ON CONFLICT DO NOTHING)`,
   },
   {
     table: "packages",
     column: "draft_manifest",
     writtenAt: "updated_at",
     rowLabel: `id || ' (draft)'`,
-    key: "draft",
     /** The draft's `If-Match` token (`sendPackageDetail`), advanced like every draft write. */
     alsoSet: ", lock_version = lock_version + 1",
+    returning: "1",
+    alsoWrite: "",
   },
 ] as const;
 
 type Store = (typeof STORES)[number];
-
-const PLATFORM = `'${PLATFORM_INTEGRATION_ID}'`;
 
 /** `m` (a jsonb column) is an agent manifest carrying `runtime_tools`. */
 const carriesRuntimeTools = (m: string): string =>
@@ -203,12 +219,12 @@ export async function runMigrateRuntimeTools(options: {
   apply: boolean;
   before: Date;
   out: (line: string) => void;
-}): Promise<Record<Store["key"], StoreCounts>> {
+}): Promise<Record<Store["table"], StoreCounts>> {
   const { apply, before, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
   out(await describeDatabaseTarget());
-  const result = {} as Record<Store["key"], StoreCounts>;
+  const result = {} as Record<Store["table"], StoreCounts>;
   let committed = false;
   try {
     await db.transaction(async (tx) => {
@@ -228,13 +244,13 @@ export async function runMigrateRuntimeTools(options: {
         const rewritten = await n(`WITH r AS (UPDATE ${store.table}
             SET ${m} = ${withPlatform(m)}${store.alsoSet}
             WHERE ${target} AND ${wellFormed(m)}
-            RETURNING 1)
+            RETURNING ${store.returning})${store.alsoWrite}
           SELECT count(*)::int AS n FROM r`);
         const carryingAfter = await n(`SELECT count(*)::int AS n FROM ${store.table}
           WHERE ${carriesRuntimeTools(m)}`);
         const withoutPlatformAfter = await n(`SELECT count(*)::int AS n FROM ${store.table}
           WHERE ${predatesWithoutPlatform(store, before)}`);
-        result[store.key] = {
+        result[store.table] = {
           rewritten,
           outputSchemaAdded,
           malformed,
@@ -253,11 +269,11 @@ export async function runMigrateRuntimeTools(options: {
         ],
         STORES.map((s) => [
           s.table,
-          String(result[s.key].rewritten),
-          String(result[s.key].outputSchemaAdded),
-          String(result[s.key].malformed.length),
-          String(result[s.key].carryingAfter),
-          String(result[s.key].withoutPlatformAfter),
+          String(result[s.table].rewritten),
+          String(result[s.table].outputSchemaAdded),
+          String(result[s.table].malformed.length),
+          String(result[s.table].carryingAfter),
+          String(result[s.table].withoutPlatformAfter),
         ]),
       ).forEach(out);
       if (!apply) throw new DryRunRollback();
@@ -266,7 +282,7 @@ export async function runMigrateRuntimeTools(options: {
   } catch (error) {
     if (!(error instanceof DryRunRollback)) throw error;
   }
-  const malformed = STORES.flatMap((s) => result[s.key].malformed);
+  const malformed = STORES.flatMap((s) => result[s.table].malformed);
   if (malformed.length > 0) {
     out("");
     out("malformed (fix by hand):");
@@ -343,11 +359,11 @@ export function parseArguments(
 
 /** The exit code of an outcome: refused arguments, a failure, or the counts of a completed run. */
 export function exitCode(
-  outcome: { refusal: string } | { failure: unknown } | Record<Store["key"], StoreCounts>,
+  outcome: { refusal: string } | { failure: unknown } | Record<Store["table"], StoreCounts>,
 ): 0 | 1 | 2 {
   if ("refusal" in outcome) return 2;
   if ("failure" in outcome) return 1;
-  return STORES.some((s) => outcome[s.key].malformed.length > 0) ? 1 : 0;
+  return STORES.some((s) => outcome[s.table].malformed.length > 0) ? 1 : 0;
 }
 
 if (import.meta.main) {

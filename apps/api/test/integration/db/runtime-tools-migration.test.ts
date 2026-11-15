@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageVersions } from "@appstrate/db/schema";
+import { packages, packageVersionDependencies, packageVersions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext } from "../../helpers/auth.ts";
@@ -74,6 +74,21 @@ async function storedOf(id: string): Promise<Manifest[]> {
     .from(packageVersions)
     .where(eq(packageVersions.packageId, id));
   return [draft!.m as Manifest, version!.m as Manifest];
+}
+
+/** The `package_version_dependencies` rows of `id`'s version, as (scope, name, type, range). */
+async function indexOf(id: string): Promise<string[]> {
+  const rows = await db
+    .select({
+      scope: packageVersionDependencies.depScope,
+      name: packageVersionDependencies.depName,
+      type: packageVersionDependencies.depType,
+      range: packageVersionDependencies.versionRange,
+    })
+    .from(packageVersionDependencies)
+    .innerJoin(packageVersions, eq(packageVersions.id, packageVersionDependencies.versionId))
+    .where(eq(packageVersions.packageId, id));
+  return rows.map((r) => `${r.scope}/${r.name} ${r.type} ${r.range}`).sort();
 }
 
 const run = (apply: boolean, lines: string[] = []) =>
@@ -164,7 +179,7 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
 
     const result = await run(true);
     expect(exitCode(result)).toBe(0);
-    for (const counts of [result.draft, result.version]) {
+    for (const counts of [result.packages, result.package_versions]) {
       expect(counts.rewritten).toBe(1);
       expect(counts.outputSchemaAdded).toBe(c.output === OPEN_OUTPUT ? 1 : 0);
       expect(counts.malformed).toEqual([]);
@@ -180,6 +195,8 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
       if (c.output !== undefined) expect(m.output).toEqual(c.output);
       else expect(m).not.toHaveProperty("output");
     }
+    const range = (c.dependencies?.integrations as Manifest | undefined)?.[PLATFORM] ?? "^1.0.0";
+    expect(await indexOf(id)).toEqual([`${PLATFORM} integration ${range}`]);
   });
 
   it("leaves a non-agent manifest, and an agent written after --before without the dependency", async () => {
@@ -195,8 +212,8 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     );
 
     const result = await run(true);
-    expect(result.draft.rewritten).toBe(1);
-    expect(result.version.rewritten).toBe(1);
+    expect(result.packages.rewritten).toBe(1);
+    expect(result.package_versions.rewritten).toBe(1);
     expect(await storedOf("@migr/skill")).toEqual([skill, skill]);
     expect(await storedOf("@migr/recent")).toEqual([recent, recent]);
     for (const m of await storedOf("@migr/recent-tools")) {
@@ -217,13 +234,13 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     const result = await run(true, lines);
     expect(exitCode(result)).toBe(1);
     const ids = Object.keys(seeded).sort();
-    expect(result.version).toMatchObject({
+    expect(result.package_versions).toMatchObject({
       rewritten: 0,
       malformed: ids.map((id) => `${id}@1.0.0`),
       carryingAfter: MALFORMED.length,
       withoutPlatformAfter: MALFORMED.length,
     });
-    expect(result.draft).toMatchObject({
+    expect(result.packages).toMatchObject({
       rewritten: 0,
       malformed: ids.map((id) => `${id} (draft)`),
       carryingAfter: MALFORMED.length,
@@ -249,20 +266,54 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     expect(await draftLockOf("@migr/recent")).toBe(recent);
   });
 
+  it("indexes the dependency of a rewritten version once, as publishing does", async () => {
+    await seedAgent("@migr/agent", agentManifest("@migr/agent", { runtime_tools: ["log"] }));
+    const kept = agentManifest("@migr/kept", {
+      runtime_tools: ["note"],
+      dependencies: { integrations: { [PLATFORM]: "~1.2.0" } },
+    });
+    await seedAgent("@migr/kept", kept);
+    const [keptVersion] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, "@migr/kept"));
+    await db.insert(packageVersionDependencies).values({
+      versionId: keptVersion!.id,
+      depScope: "@appstrate",
+      depName: "platform",
+      depType: "integration",
+      versionRange: "~1.2.0",
+    });
+    // Declared at publish, after --before, without runtime_tools: not a target.
+    const declared = agentManifest("@migr/declared", {
+      dependencies: { integrations: { [PLATFORM]: "^1.0.0" } },
+    });
+    await seedAgent("@migr/declared", declared, true);
+
+    await run(false);
+    expect(await indexOf("@migr/agent")).toEqual([]);
+    await run(true);
+    await run(true);
+    expect(await indexOf("@migr/agent")).toEqual(["@appstrate/platform integration ^1.0.0"]);
+    expect(await indexOf("@migr/kept")).toEqual(["@appstrate/platform integration ~1.2.0"]);
+    expect(await indexOf("@migr/declared")).toEqual([]);
+    expect(await storedOf("@migr/declared")).toEqual([declared, declared]);
+  });
+
   it("writes nothing on a dry run, and nothing on a second apply", async () => {
     const id = "@migr/agent";
     await seedAgent(id, agentManifest(id, { runtime_tools: ["log"] }));
     const before = await storedOf(id);
 
     const dry = await run(false);
-    expect(dry.draft.rewritten).toBe(1);
-    expect(dry.version.rewritten).toBe(1);
+    expect(dry.packages.rewritten).toBe(1);
+    expect(dry.package_versions.rewritten).toBe(1);
     expect(await storedOf(id)).toEqual(before);
 
     await run(true);
     const again = await run(true);
-    expect(again.draft.rewritten).toBe(0);
-    expect(again.version.rewritten).toBe(0);
+    expect(again.packages.rewritten).toBe(0);
+    expect(again.package_versions.rewritten).toBe(0);
   });
 });
 

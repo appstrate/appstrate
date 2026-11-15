@@ -490,18 +490,25 @@ export class McpHost {
       return true;
     };
     for (const tool of admitted) {
-      // A claimed tool needs no name of its own.
-      if (claim(tool.name)) continue;
       // Trusted first-party upstreams (our own in-process api_call server) are neither sanitised
       // nor renamed: their audited docs and canonical names (`api_call__primary`) reach the agent.
+      const exposure = trusted
+        ? null
+        : exposeTool(tool, {
+            namespace: normalisedNs,
+            isTaken: (name) => this.toolToNamespace.has(name),
+          });
+      // A claimed tool needs no name of its own; a descriptor too large once sanitised gets no
+      // route either.
+      const tooLarge =
+        exposure !== null &&
+        "exclusion" in exposure &&
+        exposure.exclusion === "schema_too_large_after_sanitisation";
+      if (!tooLarge && claim(tool.name)) continue;
       let descriptor: Tool;
-      if (trusted) {
+      if (exposure === null) {
         descriptor = { ...tool, name: `${normalisedNs}__${tool.name}` };
       } else {
-        const exposure = exposeTool(tool, {
-          namespace: normalisedNs,
-          isTaken: (name) => this.toolToNamespace.has(name),
-        });
         if ("exclusion" in exposure) {
           this.options.onLog?.({
             source: `host:${normalisedNs}`,

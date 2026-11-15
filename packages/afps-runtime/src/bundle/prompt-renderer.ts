@@ -52,7 +52,7 @@ export interface PromptView {
   uploads?: ReadonlyArray<PromptViewUpload>;
   /**
    * Opaque platform-specific bag. Intentionally unstructured — platforms
-   * set whatever their environment template needs (quota hints, etc.).
+   * set whatever their environment template needs.
    * External runners that don't set this leave it undefined; templates
    * addressing `{{platform.*}}` fields safely render as empty in that case.
    */

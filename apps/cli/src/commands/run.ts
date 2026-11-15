@@ -385,10 +385,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // Lifted out of the `try` so the cleanup hook can stop the heartbeat and
   // close the MCP connections whether or not the runner ever started. The
-  // shutdown coordinator can fire during setup (between here and `runner.run`).
+  // shutdown coordinator can fire during setup (between here and `runner.run`),
+  // a connection build still in flight included.
   let heartbeat: SinkHeartbeatHandle | null = null;
-  let remoteMcp: RemoteMcpExtensions | undefined;
-  const emittedRunId = reportSession?.runId ?? runId;
+  let integrationToolsBuild: ReturnType<typeof buildIntegrationTools> | undefined;
 
   let cleanupPromise: Promise<void> | null = null;
   const runCleanup = (): Promise<void> => {
@@ -434,7 +434,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // The run is over: no report request may outlive it, or a stalled
       // platform would keep the process from exiting.
       reportSession?.httpSink.abort(new Error("run ended"));
-      await remoteMcp?.close();
+      await (await integrationToolsBuild?.catch(() => undefined))?.remoteMcp.close();
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
     return cleanupPromise;
@@ -456,7 +456,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     const emitEvent: RuntimeEventEmitter = (event) => {
       sink.handle(event as RunEvent).catch(() => {});
     };
-    const integrationTools = await buildIntegrationTools({
+    const emittedRunId = reportSession?.runId ?? runId;
+    integrationToolsBuild = buildIntegrationTools({
       bundle: boundBundle,
       integrationResolver,
       ...(reportSession
@@ -472,8 +473,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       emit: emitEvent,
       signal: shutdownSignal,
     });
-    const { apiCall, factories: extensionFactories } = integrationTools;
-    remoteMcp = integrationTools.remoteMcp;
+    const { apiCall, remoteMcp, factories: extensionFactories } = await integrationToolsBuild;
     if (!opts.json) {
       if (apiCall.factories.length > 0) {
         process.stderr.write(`→ wired ${apiCall.factories.length} integration api_call tool(s)\n`);
@@ -481,10 +481,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       if (remoteMcp.factories.length > 0) {
         process.stderr.write(`→ wired ${remoteMcp.factories.length} remote MCP tool(s)\n`);
       }
-      for (const entry of remoteMcp.unavailable) {
-        process.stderr.write(`warn: integration ${entry.id} unavailable: ${entry.reason}\n`);
-        if (entry.detail) process.stderr.write(`  ${entry.detail}\n`);
-      }
+      process.stderr.write(unavailableIntegrationLines(remoteMcp.unavailable));
     }
     // The catalog lists only integrations the agent can call.
     const promptInputs = cliPromptInputs(
@@ -840,6 +837,17 @@ export async function buildIntegrationTools(
     takenToolNames: apiCall.toolNames,
   });
   return { apiCall, remoteMcp, factories: [...apiCall.factories, ...remoteMcp.factories] };
+}
+
+/** The stderr warning of each integration the run starts without, its cause indented below. */
+export function unavailableIntegrationLines(entries: RemoteMcpExtensions["unavailable"]): string {
+  return entries
+    .map(
+      (entry) =>
+        `warn: integration ${entry.id} unavailable: ${entry.reason}\n` +
+        (entry.detail ? `  ${entry.detail}\n` : ""),
+    )
+    .join("");
 }
 
 /**

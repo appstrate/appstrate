@@ -18,20 +18,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   releases at once, and roll back by restoring the backup. Detail in
   `scripts/migration/README.md`.
 
-- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the window** (#2197,
-  #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools it had,
-  an agent that selected `output` without an `output.schema` has no `output` tool, and nothing
-  reports it. It runs with the release's other window scripts, after the migrations and before
-  the app starts, in the order and with the commands of `scripts/migration/README.md`, "Release
-  beta.69" (embedded database included: the backup is a copy of the stopped `PGLITE_DATA_DIR`).
-  Rehearse it on a restored production dump first.
-  - `--before` is required: the wall-clock instant once the app is stopped, in RFC 3339 with `Z`
-    or an offset, and the SAME value on every re-run.
-  - It exits 1 while it lists a malformed manifest: that agent is left untouched and runs
-    without the tools. Fix each by hand and re-run with the same `--before`.
-  - An agent that selected `output` without a schema gains the open object schema, so it keeps
-    the `output` tool.
-  - Rollback: restore the backup.
+- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the release window**
+  (#2197, #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools
+  it had, and nothing reports it. With the app stopped, after the schema migrations and before the
+  app serves traffic:
+  1. Back up, and note an instant after the app stopped, in RFC 3339 with `Z` or an offset: it is
+     `--before`, the same value on every re-run.
+  2. Dry run:
+     `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`.
+  3. The same with `--apply`. It exits 1 while a malformed manifest remains: fix it by hand, then
+     re-run with the same `--before`.
+
+  What it rewrites and what `--before` bounds: the script's header. Verification, the embedded
+  database and rollback: its section in `scripts/migration/README.md`. Rehearse it on a restored
+  production dump first.
 
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
@@ -599,8 +599,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
   for one run, and each tool writes at call time: `log` a run log (message up to 2 000
   characters), `note` an archive memory (up to 2 000 characters, refused beyond rather than
-  cut), `pin` a pinned slot (and, for `checkpoint`, the run's checkpoint snapshot `run_history`
-  returns), `notify` a notification. The sidecar authenticates `/internal/mcp` with the run
+  cut), `pin` a pinned slot (and, for `checkpoint` with an object content, the run's checkpoint
+  snapshot `run_history` returns), `notify` a notification. The sidecar authenticates `/internal/mcp` with the run
   token (a run that is not `running` answers 403). The host executing a remote run reaches
   `/api/runs/{runId}/mcp` with the Standard Webhooks signature it already puts on the run's
   events, over the exact request body, so the credential lasts as long as the run's sink, not

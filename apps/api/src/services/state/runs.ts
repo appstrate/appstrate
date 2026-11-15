@@ -915,7 +915,7 @@ export async function setRunCheckpoint(
 ): Promise<void> {
   await db
     .update(runs)
-    .set({ checkpoint })
+    .set({ checkpoint: toPgSafe(checkpoint) })
     .where(
       scopedWhere(runs, { orgId: scope.orgId, spaceId: scope.spaceId, extra: [eq(runs.id, id)] }),
     );

@@ -11,8 +11,8 @@
  *   1. if the run was aborted, RETHROW immediately — the caller's
  *      `finally` owns cancellation cleanup, the runner must NOT finalize;
  *   2. surface the failure as a live `appstrate.error` event;
- *   3. best-effort final drain: settle the fire-and-forget emits the runner
- *      still has in flight (an emit the runner awaited is already captured);
+ *   3. best-effort wait for the sink writes still in flight, so they land
+ *      before `finalize` (every event is already captured; this adds none);
  *   4. reduce the captured events into a {@link TerminalRunResult}, stamp
  *      the failure error + terminal status + the runner's own token-usage
  *      snapshot, and `finalize` it.
@@ -60,8 +60,8 @@ export interface FinalizeThrownFailureOptions {
   /** The run's single event sink writer (captures + forwards each event). */
   emit: (event: RunEvent) => Promise<void>;
   /**
-   * Best-effort final drain (events still pending in the runner). Invoked before the
-   * result is reduced; this helper guarantees it cannot throw past it.
+   * Best-effort wait for the runner's in-flight sink writes, so they land before
+   * `finalize`; it adds no event. This helper guarantees it cannot throw past it.
    */
   settlePending: () => Promise<void>;
   /** Terminal sink. */
@@ -126,8 +126,9 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   };
   await emit(errorEvent);
 
-  // 3. Best-effort final drain: capture the events still pending from before
-  //    the session threw. A dead drain must NOT mask the failure.
+  // 3. Best-effort wait for the in-flight sink writes, so they land before
+  //    `finalize`; every event is already captured. A failed wait must NOT
+  //    mask the failure.
   try {
     await settlePending();
   } catch {

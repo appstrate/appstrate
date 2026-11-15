@@ -5,9 +5,8 @@
  * MCP exposure of the sidecar's capabilities — the only agent-facing
  * surface.
  *
- * The sidecar's only first-party HTTP endpoint is `/health`; every tool
- * the agent talks to (`{ns}__api_call`, integration tools) is dispatched
- * here as MCP tools.
+ * Every tool the agent calls (`{ns}__api_call`, integration tools) is served
+ * as an MCP tool on the `/mcp` endpoint this module mounts.
  *
  * Key invariants:
  *
