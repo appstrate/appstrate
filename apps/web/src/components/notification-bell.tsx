@@ -258,7 +258,7 @@ export function NotificationBell() {
     return (
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>{triggerButton}</SheetTrigger>
-        <SheetContent side="bottom" className="rounded-t-xl p-0 [&>button:last-child]:hidden">
+        <SheetContent side="bottom" className="rounded-t-xl p-0" showCloseButton={false}>
           <NotificationContent {...contentProps} />
         </SheetContent>
       </Sheet>

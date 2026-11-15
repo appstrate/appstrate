@@ -361,13 +361,10 @@ function ConversationContext({
   conversationId,
   state,
   dispatch,
-  closeButton,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
-  /** The sheet draws its own close control. */
-  closeButton: boolean;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open.
@@ -403,17 +400,15 @@ function ConversationContext({
             </TabsTrigger>
           ))}
         </TabsList>
-        {closeButton ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="ml-auto size-8 shrink-0"
-            aria-label={t("context.collapse")}
-            onClick={() => dispatch({ type: "toggle" })}
-          >
-            <XIcon />
-          </Button>
-        ) : null}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-8 shrink-0"
+          aria-label={t("context.collapse")}
+          onClick={() => dispatch({ type: "toggle" })}
+        >
+          <XIcon />
+        </Button>
       </AgentDetailPaneHeader>
       {tabs.map(({ id }) => (
         <TabsContent key={id} value={id} className="mt-0 min-h-0 flex-1 overflow-auto">
@@ -461,15 +456,12 @@ export function ConversationSidebar({
           id={CONVERSATION_CONTEXT_PANEL_ID}
           side="right"
           aria-describedby={undefined}
+          // The panel's header carries the one close control, as on desktop.
+          showCloseButton={false}
           className="bg-card flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
         >
           <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
-          <ConversationContext
-            conversationId={conversationId}
-            state={state}
-            dispatch={dispatch}
-            closeButton={false}
-          />
+          <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
         </SheetContent>
       </Sheet>
     );
@@ -502,12 +494,7 @@ export function ConversationSidebar({
           onCommit={size.commit}
           onDraggingChange={setDragging}
         />
-        <ConversationContext
-          conversationId={conversationId}
-          state={state}
-          dispatch={dispatch}
-          closeButton
-        />
+        <ConversationContext conversationId={conversationId} state={state} dispatch={dispatch} />
       </div>
     </aside>
   );
