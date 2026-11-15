@@ -19,9 +19,13 @@ export function useTabWithHash<T extends string>(
   // so a bare `{ hash }` silently DROPS the query string, and with it any
   // modal or section the page keeps there.
   const search = location.search;
+  // Radix reports one click twice (pointer-down, then focus) before React re-renders, so the
+  // guard reads the live URL: a second identical push would leave Back on the same tab.
   const setActiveTab = useCallback(
     (tab: T) => {
-      navigate({ search, hash: tab === defaultTab ? "" : tab });
+      const next = tab === defaultTab ? "" : tab;
+      if (window.location.hash.replace(/^#/, "") === next) return;
+      navigate({ search, hash: next });
     },
     [navigate, defaultTab, search],
   );
