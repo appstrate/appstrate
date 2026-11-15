@@ -45,6 +45,16 @@ export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
   return [...SESSIONS_QUERY_KEY, spaceId];
 }
 
+/**
+ * The title-search results of ONE space. Nested under `sessionsQueryKey` on
+ * purpose: an invalidation (or `setQueriesData`) on the prefix reaches the
+ * filtered lists too. The default list's key shape is unchanged — the
+ * local-first patch in `index.tsx` addresses it exactly.
+ */
+export function sessionsSearchQueryKey(spaceId: string | null, q: string): readonly unknown[] {
+  return [...sessionsQueryKey(spaceId), "search", q];
+}
+
 /** One conversation's stored history, in one space. */
 export function sessionQueryKey(spaceId: string | null, id: string): readonly unknown[] {
   return ["chat", "session", id, spaceId];
@@ -69,8 +79,12 @@ export type SessionsCache = InfiniteData<SessionsPage, string | undefined>;
 export async function fetchSessionsPage(
   request: ChatRequest,
   startingAfter: string | undefined,
+  q?: string,
 ): Promise<SessionsPage> {
-  const query = startingAfter ? `?startingAfter=${encodeURIComponent(startingAfter)}` : "";
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (startingAfter) params.set("startingAfter", startingAfter);
+  const query = params.size > 0 ? `?${params}` : "";
   const res = await request(`/api/chat/sessions${query}`);
   const body = (await res.json()) as Partial<SessionsPage>;
   return { data: body.data ?? [], hasMore: body.hasMore ?? false };

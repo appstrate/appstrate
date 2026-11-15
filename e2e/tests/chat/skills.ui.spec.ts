@@ -7,9 +7,16 @@
  * in the catalogue, behind a confirmation, and reaches the picker locked.
  */
 
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
 import { openRow } from "../../helpers/table.ts";
+
+/** The picker sits behind the composer's « + » menu (its chip shows only off the defaults). */
+async function openSkillsPicker(page: Page) {
+  await page.getByTestId("composer-tools-trigger").click();
+  await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
+}
 
 test("carries the chosen mode and skills with the first message, and writes nothing before", async ({
   authedPage: page,
@@ -27,8 +34,7 @@ test("carries the chosen mode and skills with the first message, and writes noth
   });
 
   await page.goto("/chat");
-  const trigger = page.getByTestId("skills-picker-trigger");
-  await trigger.click();
+  await openSkillsPicker(page);
   const popover = page.getByTestId("skills-picker-popover");
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
@@ -95,7 +101,7 @@ test("a skill imposed from the space library is locked in the picker, after a co
 
   // The composer lists it first, checked and locked, and not among the choices.
   await page.goto("/chat");
-  await page.getByTestId("skills-picker-trigger").click();
+  await openSkillsPicker(page);
   const popover = page.getByTestId("skills-picker-popover");
   const locked = popover.getByTestId(`skill-enforced-${packageId}`);
   await expect(locked).toBeChecked();

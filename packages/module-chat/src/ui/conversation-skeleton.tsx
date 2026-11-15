@@ -49,11 +49,11 @@ export function ConversationSkeleton({
               {placeholder}
             </div>
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <Skeleton className="size-8 rounded-lg" />
+              <Skeleton className="size-8 rounded-full" />
+              <div className="flex items-center gap-2">
                 <Skeleton className="h-7 w-32 rounded-md" />
+                <Skeleton className="size-8 rounded-lg" />
               </div>
-              <Skeleton className="size-8 rounded-lg" />
             </div>
           </div>
           {/* `Disclaimer`, the writer's line under the composer. */}
