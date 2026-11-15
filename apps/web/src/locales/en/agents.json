@@ -752,7 +752,7 @@
   "manifest.support": "Support",
   "manifest.privacyPolicy": "Privacy policy",
   "manifest.depSkills": "Skills",
-  "manifest.depMcpServers": "Local MCP servers",
+  "manifest.depMcpServers": "MCP servers",
   "manifest.depIntegrations": "Integrations",
   "manifest.tools": "Tools",
   "manifest.server": "Server",
