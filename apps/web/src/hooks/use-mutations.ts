@@ -24,7 +24,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
-  versionKeys,
+  invalidateVersionInfo,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -390,7 +390,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+      void invalidateVersionInfo(qc);
     },
   });
 }

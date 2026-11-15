@@ -110,18 +110,20 @@ export function invalidatePackageFiles(qc: QueryClient) {
   ]);
 }
 
-/** Package versions: the published list, one version's detail, and the latest/active summary. */
-export const versionKeys = {
-  detailAll: ["version-detail"] as const,
-  listAll: ["package-versions"] as const,
-  infoAll: ["version-info"] as const,
-  detail: (orgId: Id, spaceId: Id, type: string, packageId: Id, version: string | undefined) =>
-    ["version-detail", orgId, spaceId, type, packageId, version] as const,
-  list: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
-    ["package-versions", orgId, spaceId, type, packageId] as const,
-  info: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
-    ["version-info", orgId, spaceId, type, packageId] as const,
-};
+/** Typed-client keys of the version reads (list, detail, info), whose path carries the type's route segment. */
+const VERSION_PATH = /^\/api\/packages\/[^/]+\/\{scope\}\/\{name\}\/versions(\/|$)/;
+const VERSION_INFO_PATH = /^\/api\/packages\/[^/]+\/\{scope\}\/\{name\}\/versions\/info$/;
+
+function pathMatching(re: RegExp) {
+  return (queryKey: readonly unknown[]) =>
+    queryKey[0] === "get" && typeof queryKey[1] === "string" && re.test(queryKey[1]);
+}
+
+/** The latest/active summary of every package's versions. */
+export function invalidateVersionInfo(qc: QueryClient) {
+  const matches = pathMatching(VERSION_INFO_PATH);
+  return qc.invalidateQueries({ predicate: (q) => matches(q.queryKey) });
+}
 
 /** Agent catalog list (sidebar, agent list page). */
 export const agentsKeys = {
@@ -139,9 +141,8 @@ export function invalidatePackageCaches(qc: QueryClient) {
 
 /** A version appeared or vanished: the version caches, and a pinned Files tab or dist-tag read with them. */
 export function invalidateVersionCaches(qc: QueryClient) {
-  for (const queryKey of [versionKeys.listAll, versionKeys.detailAll, versionKeys.infoAll]) {
-    void qc.invalidateQueries({ queryKey });
-  }
+  const matches = pathMatching(VERSION_PATH);
+  void qc.invalidateQueries({ predicate: (q) => matches(q.queryKey) });
   invalidatePackageCaches(qc);
 }
 
@@ -158,19 +159,6 @@ export const scheduleKeys = {
   runs: (orgId: Id, spaceId: Id, scheduleId: Id) =>
     ["schedule-runs", orgId, spaceId, scheduleId] as const,
 };
-
-function agentSettingKeys<K extends string>(kind: K) {
-  return {
-    all: [kind] as const,
-    detail: (orgId: Id, spaceId: Id, packageId: Id) => [kind, orgId, spaceId, packageId] as const,
-  };
-}
-
-/** Per-agent effective model resolution. */
-export const agentModelKeys = agentSettingKeys("agent-model");
-
-/** Per-agent effective proxy resolution. */
-export const agentProxyKeys = agentSettingKeys("agent-proxy");
 
 /** Organization list (preserved across org switch). */
 export const orgKeys = {

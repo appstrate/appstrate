@@ -8,7 +8,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 

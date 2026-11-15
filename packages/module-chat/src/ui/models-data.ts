@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import type { ChatRequest } from "./runtime-context.ts";
 import { CHAT_USABLE_FAMILIES } from "../chat-families.ts";
 import {
   modelGenerationCapabilitiesSchema,
@@ -77,20 +78,19 @@ export interface OrgModelOption {
   generation?: ModelGenerationCapabilities | null;
 }
 
-export async function fetchModels(
-  getHeaders?: () => Record<string, string>,
-): Promise<OrgModelOption[]> {
-  const res = await fetch("/api/models", {
-    credentials: "include",
-    headers: { ...getHeaders?.() },
-  });
-  if (!res.ok) throw new Error(`/api/models returned ${res.status}`);
+/** `GET /api/models`, whole: the cache entry the shell's `$api` models queries share. */
+export async function fetchModelsEnvelope(request: ChatRequest): Promise<unknown> {
+  return (await request("/api/models")).json();
+}
+
+/** The catalog rows the chat can offer, from the `/api/models` envelope. */
+export function selectChatModels(envelope: unknown): OrgModelOption[] {
   try {
     // Stripe-canonical list envelope `{ object: "list", data, hasMore }` — the
     // single shape `/api/models` returns (apps/api `listResponse`; `data` is
     // required by the OpenAPI schema). Same read as the server-side
     // `listModels` in `../llm.ts`.
-    const body = (await res.json()) as { data?: unknown };
+    const body = envelope as { data?: unknown };
     const rawList = Array.isArray(body.data) ? body.data : [];
     // Narrow each row through Zod, dropping any that don't match — never trust
     // the wire shape with a blind cast.

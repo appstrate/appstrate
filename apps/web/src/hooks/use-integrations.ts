@@ -43,8 +43,6 @@ export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
 export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
@@ -222,8 +220,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const orgScope = useOrgScope();
   const { can } = usePermissions();
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
@@ -236,13 +233,10 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
       params: {
         path: { scope, name },
         ...(version ? { query: { version } } : {}),
-        header: {
-          "X-Org-Id": orgId ?? undefined,
-          "X-Space-Id": spaceId ?? undefined,
-        },
+        header: orgScope.header,
       },
     },
-    { enabled: Boolean(can("integrations:read") && orgId && spaceId && agentPackageId) },
+    { enabled: Boolean(can("integrations:read") && orgScope.enabled && agentPackageId) },
   );
 }
 

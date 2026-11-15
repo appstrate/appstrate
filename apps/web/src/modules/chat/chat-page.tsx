@@ -14,8 +14,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState 
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ChatHeadersProvider,
   ChatPage,
+  ChatTransportProvider,
   SelectConversationProvider,
   type OpenFile,
 } from "@appstrate/module-chat/ui";
@@ -30,7 +30,7 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
-import { useChatGetHeaders, useChatTranslate } from "./use-chat-runtime";
+import { useChatTransport, useChatTranslate } from "./use-chat-runtime";
 import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -86,7 +86,7 @@ export function ChatModulePage() {
   );
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // the answers speaks the same language too — labels and aria-labels alike.
-  const getHeaders = useChatGetHeaders();
+  const transport = useChatTransport();
   const translate = useChatTranslate();
   const { can } = usePermissions();
   // Absent means allowed (the setting is opt-out): the chat only drops its
@@ -140,7 +140,7 @@ export function ChatModulePage() {
   // area: it belongs to the conversation, and it overlays it on narrow screens.
   // Its tabs sit in the shell's header, portaled there for the page's lifetime.
   return (
-    <ChatHeadersProvider value={getHeaders}>
+    <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
           <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
@@ -148,7 +148,7 @@ export function ChatModulePage() {
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <div className="min-w-0 flex-1">
             <ChatPage
-              getHeaders={getHeaders}
+              transport={transport}
               conversationId={conversationId ?? null}
               newChatKey={location.key}
               initialComposerDraft={initialComposerDraft}
@@ -173,6 +173,6 @@ export function ChatModulePage() {
           />
         </div>
       </SelectConversationProvider>
-    </ChatHeadersProvider>
+    </ChatTransportProvider>
   );
 }

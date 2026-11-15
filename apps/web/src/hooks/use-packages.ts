@@ -8,10 +8,11 @@ import { toast } from "sonner";
 import { stripScope } from "@appstrate/core/naming";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { client, type components } from "../api/client";
+import { $api, client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
-import { keepPreviousWithin, versionKeyPackage } from "../lib/query-state";
+import { generatedKeyPackage, keepPreviousWithin } from "../lib/query-state";
+import { useOrgScope } from "./use-org-scope";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -22,10 +23,10 @@ import { ApiError } from "../api/errors";
 import {
   packageKeys,
   agentsKeys,
-  versionKeys,
   invalidatePackageCaches,
   invalidatePaths,
   invalidateVersionCaches,
+  invalidateVersionInfo,
 } from "../lib/query-keys";
 import type {
   IntegrationIndexItem,
@@ -38,8 +39,8 @@ import type {
   VersionDetailResponse,
 } from "@appstrate/shared-types";
 
-// These hooks keep LEGACY query keys (["packages", ...], ["agents", ...], ["version-*", ...]):
-// they are cache-coupled to other hooks' invalidations and to the space-switch reset.
+// The package and agent lists keep LEGACY query keys (["packages", ...], ["agents", ...]): the run SSE
+// patcher and the space-switch reset reach them by name. The version reads are typed.
 
 // Each read gates ITSELF on its route's permission: a custom role may omit it, and the server would refuse.
 function useCanReadPackages(type: PackageType): boolean {
@@ -356,42 +357,41 @@ export function useVersionDetail(
   packageId: string | undefined,
   version: string | undefined,
 ) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   const canRead = useCanReadPackages(type);
-  return useQuery({
-    queryKey: versionKeys.detail(orgId, spaceId, type, packageId, version),
-    queryFn: async (): Promise<VersionDetailResponse> => {
-      const { data } = await client.GET(
-        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/{version}`,
-        { params: { path: { ...splitPackageRef(packageId!), version: version! } } },
-      );
-      return data!;
+  return $api.useQuery(
+    "get",
+    `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/{version}`,
+    {
+      params: {
+        header: scope.header,
+        path: { ...splitPackageRef(packageId ?? ""), version: version ?? "" },
+      },
     },
-    enabled: canRead && !!orgId && !!spaceId && !!packageId && !!version,
-    // Another version of the same package keeps the page drawn while it loads.
-    placeholderData: keepPreviousWithin(
-      packageId && version ? `${type}/${packageId}` : undefined,
-      versionKeyPackage,
-    ),
-  });
+    {
+      select: (data): VersionDetailResponse => data,
+      enabled: canRead && scope.enabled && !!packageId && !!version,
+      // Another version of the same package keeps the page drawn while it loads.
+      placeholderData: keepPreviousWithin(
+        packageId && version ? packageId : undefined,
+        generatedKeyPackage,
+      ),
+    },
+  );
 }
 
 export function usePackageVersions(type: PackageType, packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   const canRead = useCanReadPackages(type);
-  return useQuery({
-    queryKey: versionKeys.list(orgId, spaceId, type, packageId),
-    queryFn: async (): Promise<VersionListItem[]> => {
-      const { data } = await client.GET(
-        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
-        { params: { path: splitPackageRef(packageId!) } },
-      );
-      return data!.data;
+  return $api.useQuery(
+    "get",
+    `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
+    { params: { header: scope.header, path: splitPackageRef(packageId ?? "") } },
+    {
+      select: (e): VersionListItem[] => e.data,
+      enabled: canRead && scope.enabled && !!packageId,
     },
-    enabled: canRead && !!orgId && !!spaceId && !!packageId,
-  });
+  );
 }
 
 // --- Version management mutations ---
@@ -429,7 +429,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
         err instanceof ApiError &&
         (err.code === "precondition_failed" || err.code === "no_changes")
       ) {
-        qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+        void invalidateVersionInfo(qc);
         invalidatePackageCaches(qc);
       }
     },
@@ -478,26 +478,20 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
 }
 
 export function useVersionInfo(type: PackageType, packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   const canRead = useCanReadPackages(type);
-  return useQuery({
-    queryKey: versionKeys.info(orgId, spaceId, type, packageId),
-    queryFn: async (): Promise<{
-      latest_published_version: string | null;
-      active_version: string | null;
-    }> => {
-      const { data } = await client.GET(
-        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/info`,
-        { params: { path: splitPackageRef(packageId!) } },
-      );
-      return {
-        latest_published_version: data!.latest_published_version ?? null,
-        active_version: data!.active_version ?? null,
-      };
+  return $api.useQuery(
+    "get",
+    `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/info`,
+    { params: { header: scope.header, path: splitPackageRef(packageId ?? "") } },
+    {
+      select: (data) => ({
+        latest_published_version: data.latest_published_version ?? null,
+        active_version: data.active_version ?? null,
+      }),
+      enabled: canRead && scope.enabled && !!packageId,
     },
-    enabled: canRead && !!orgId && !!spaceId && !!packageId,
-  });
+  );
 }
 
 // --- Fork ---

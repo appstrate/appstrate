@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery, useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
@@ -37,8 +37,9 @@ export function useNotifications(opts: { unread?: boolean; limit?: number } = {}
   const spaceId = useCurrentSpaceId();
   const { unread = true, limit = 50 } = opts;
   return useInfiniteQuery({
-    // Same `[method, path]` prefix as the generated keys, so the invalidations reach it.
-    queryKey: ["get", "/api/notifications", { header: scope.header, query: { unread, limit } }],
+    queryKey: pagedQueryKey("/api/notifications", {
+      params: { header: scope.header, query: { unread, limit } },
+    }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/notifications", {
         params: { header: scope.header, query: { unread, limit, startingAfter: pageParam } },

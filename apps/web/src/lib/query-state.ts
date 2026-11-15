@@ -11,20 +11,13 @@ export function isQueryInFlight(query: { isPending: boolean; fetchStatus: FetchS
 }
 
 /**
- * The package a generated `[method, path, init]` key reads (`init.params.path`
+ * The package a generated `[method, path, init]` key reads (a file, a version) (`init.params.path`
  * holds `{ scope, name }`), or `undefined` for any other key shape.
  */
 export function generatedKeyPackage(key: readonly unknown[]): string | undefined {
   const init = key[2] as { params?: { path?: { scope?: string; name?: string } } } | undefined;
   const path = init?.params?.path;
   return path?.scope && path.name ? `${path.scope}/${path.name}` : undefined;
-}
-
-/** The package of a `versionKeys.detail` key (type and id, never the version). */
-export function versionKeyPackage(key: readonly unknown[]): string | undefined {
-  return key[0] === "version-detail" && key[3] !== undefined && key[4] !== undefined
-    ? `${String(key[3])}/${String(key[4])}`
-    : undefined;
 }
 
 /**

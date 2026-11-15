@@ -25,7 +25,7 @@ import {
   togglePinned,
 } from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
-import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -37,27 +37,27 @@ const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
 const MODES = Object.keys(MODE_COPY) as ChatSkillMode[];
 
 interface SkillsPickerProps {
-  getHeaders: GetHeaders | undefined;
+  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
 }
 
-export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerProps) {
+export function SkillsPicker({ transport, selection, onChange }: SkillsPickerProps) {
   const { t, can } = useChatHost();
   const [open, setOpen] = useState(false);
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  const readable = !!spaceId && can("skills:read");
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const readable = !!spaceId && !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the space scopes it.
     queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
-    queryFn: () => fetchSkills(getHeaders),
+    queryFn: () => fetchSkills(transport!.request),
     enabled: readable,
     staleTime: 60_000,
   });
   const skills = catalogue.data ?? [];
-  const enforcedQuery = useEnforcedSkills(getHeaders);
+  const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".

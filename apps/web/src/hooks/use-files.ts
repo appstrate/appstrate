@@ -10,7 +10,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
 import {
   fileBlobKeys,
@@ -73,7 +73,7 @@ export function useFilesPaged(
     limit: filters.limit ?? 25,
   };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
+    queryKey: pagedQueryKey("/api/files", { params: { header: scope.header, query } }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/files", {
         params: { query: { ...query, startingAfter: pageParam }, header: scope.header },

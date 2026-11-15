@@ -6,17 +6,11 @@
  * silently absent, and every model lands in the neutral "managed" group.
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
-import { fetchModels } from "../src/ui/models-data.ts";
+import { describe, expect, it } from "bun:test";
+import { selectChatModels } from "../src/ui/models-data.ts";
 
-const realFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
-
-function serve(rows: unknown[]): void {
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ object: "list", data: rows, hasMore: false }))) as typeof fetch;
+function envelope(rows: unknown[]) {
+  return { object: "list", data: rows, hasMore: false };
 }
 
 const ROW = {
@@ -28,16 +22,14 @@ const ROW = {
   enabled: true,
 };
 
-describe("fetchModels", () => {
-  it("keeps the wire's snake_case `provider_name`", async () => {
-    serve([{ ...ROW, provider_name: "OpenCode Go" }]);
-    const [model] = await fetchModels();
+describe("selectChatModels", () => {
+  it("keeps the wire's snake_case `provider_name`", () => {
+    const [model] = selectChatModels(envelope([{ ...ROW, provider_name: "OpenCode Go" }]));
     expect(model?.provider_name).toBe("OpenCode Go");
   });
 
-  it("does not read a camelCase `providerName`", async () => {
-    serve([{ ...ROW, providerName: "OpenCode Go" }]);
-    const [model] = await fetchModels();
+  it("does not read a camelCase `providerName`", () => {
+    const [model] = selectChatModels(envelope([{ ...ROW, providerName: "OpenCode Go" }]));
     expect(model?.provider_name).toBeUndefined();
     expect(model).not.toHaveProperty("providerName");
   });

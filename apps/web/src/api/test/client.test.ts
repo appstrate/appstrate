@@ -9,8 +9,8 @@
  * or a JSON parse failure.
  */
 
-import { describe, it, expect } from "bun:test";
-import { toApiError } from "../client.ts";
+import { afterEach, describe, it, expect } from "bun:test";
+import { fetchOrThrow, toApiError } from "../client.ts";
 import { ApiError } from "../errors.ts";
 
 const problem = (body: unknown, status: number, statusText = "") =>
@@ -138,5 +138,48 @@ describe("toApiError", () => {
     await toApiError(response);
 
     expect(await response.json()).toEqual({ code: "conflict", detail: "nope" });
+  });
+});
+
+describe("fetchOrThrow", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("returns a 2xx response unread, sent with credentials", async () => {
+    let sent: Request | undefined;
+    globalThis.fetch = (async (request: Request) => {
+      sent = request;
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch;
+
+    const response = await fetchOrThrow("http://localhost/api/chat/sessions", {
+      headers: { "X-Space-Id": "spc_a" },
+    });
+
+    expect(sent?.credentials).toBe("include");
+    expect(sent?.headers.get("X-Space-Id")).toBe("spc_a");
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("throws the server's problem as an ApiError, not a bare HTTP status", async () => {
+    globalThis.fetch = (async () =>
+      problem(
+        { code: "validation_failed", detail: "title is required", request_id: "req_9" },
+        422,
+      )) as unknown as typeof fetch;
+
+    const error = await fetchOrThrow("http://localhost/api/chat/sessions/chs_1", {
+      method: "PATCH",
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      code: "validation_failed",
+      status: 422,
+      message: "title is required",
+      requestId: "req_9",
+    });
   });
 });

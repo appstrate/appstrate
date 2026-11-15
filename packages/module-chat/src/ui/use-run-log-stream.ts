@@ -28,7 +28,7 @@
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { useChatHeaders, useChatHost } from "./runtime-context.ts";
+import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import {
   buildRunSseUrl,
   isTerminalStatus,
@@ -128,7 +128,7 @@ export function useRunLogStream(
   initialStatus?: string,
   initialPackageId?: string,
 ): RunLogStream {
-  const getHeaders = useChatHeaders();
+  const transport = useChatTransport();
   // `chat:read` implies neither the run reads nor the file read below.
   const { can } = useChatHost();
   const readsRuns = canReadRuns(can);
@@ -169,10 +169,10 @@ export function useRunLogStream(
   }
 
   useEffect(() => {
-    if (!runId || !readsRuns) return;
+    if (!runId || !readsRuns || !transport) return;
     let cancelled = false;
-    const headers = getHeaders?.() ?? {};
-    const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(headers);
+    const { request } = transport;
+    const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(transport.getHeaders());
 
     // Decided up front (not after the fetches) because the one-shot run read
     // below needs to know whether anything else will ever report on this run.
@@ -195,11 +195,8 @@ export function useRunLogStream(
     const fetchLogPage = async (since: number | undefined): Promise<unknown | undefined> => {
       try {
         const qs = since === undefined ? "limit=1000" : `limit=1000&since=${since}`;
-        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/logs?${qs}`, {
-          headers,
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return undefined;
+        const res = await request(`/api/runs/${encodeURIComponent(runId)}/logs?${qs}`);
+        if (cancelled) return undefined;
         return await res.json();
       } catch {
         return undefined;
@@ -220,11 +217,7 @@ export function useRunLogStream(
     const readProducedFiles = async (): Promise<SweepRead> => {
       if (!readsFiles) return "failed";
       try {
-        const res = await fetch(runProducedFilesPath(runId), {
-          headers,
-          credentials: "include",
-        });
-        if (!res.ok) return "failed";
+        const res = await request(runProducedFilesPath(runId));
         const page = producedFilesFromFileList(await res.json(), runId);
         if (!page) return "failed";
         if (cancelled) return "failed";
@@ -249,11 +242,8 @@ export function useRunLogStream(
     //     `run_update` frame that arrives first always wins.
     void (async () => {
       try {
-        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
-          headers,
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
+        const res = await request(`/api/runs/${encodeURIComponent(runId)}`);
+        if (cancelled) return;
         const run = parseRunResource(await res.json());
         if (!run || cancelled) return;
         setStatus((prev) => prev ?? (run.status as RunStatus));
@@ -375,12 +365,12 @@ export function useRunLogStream(
       es.close();
     };
     // initialStatus is read once at subscribe time; runId is the real identity.
-    // `getHeaders` is a dependency, not a convenience: its identity moves with
+    // `transport` is a dependency, not a convenience: its identity moves with
     // the host's scoping context (organization, space, role preview), and this
     // stream reads its URL once at connect. Without it a preview entered while
     // a run card is open keeps tailing under the previous authority.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, getHeaders, readsRuns, readsFiles]);
+  }, [runId, transport, readsRuns, readsFiles]);
 
   return {
     logs,

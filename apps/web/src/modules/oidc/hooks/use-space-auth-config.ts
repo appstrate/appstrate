@@ -12,9 +12,9 @@
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { z } from "zod";
-import { client, ApiError, type components } from "@/api/client";
+import { $api, client, ApiError, type components } from "@/api/client";
 import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
-import { useCurrentOrgId } from "@/hooks/use-org";
+import { useOrgScope } from "@/hooks/use-org-scope";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
 
 /** Wire shapes from the OpenAPI spec. */
@@ -53,25 +53,18 @@ async function nullOn404<T>(read: () => Promise<T | undefined>): Promise<T | nul
 }
 
 export function useSmtpConfig() {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgScope();
   const spaceId = useCurrentSpaceId();
+  const params = { path: { id: spaceId ?? "" } };
   return useQuery({
-    // Same [method, path, init] shape as the $api hooks so the typed
-    // path-string invalidations below hit this query too.
-    queryKey: [
-      "get",
-      "/api/spaces/{id}/smtp-config",
-      { params: { path: { id: spaceId } } },
-    ] as const,
-    enabled: !!orgId && !!spaceId,
-    queryFn: async (): Promise<SmtpConfigView | null> => {
-      return nullOn404(async () => {
-        const { data } = await client.GET("/api/spaces/{id}/smtp-config", {
-          params: { path: { id: spaceId! } },
-        });
+    // The generated key (untagged: the answer here is `null` on a 404), so the typed path-string invalidations below hit this query too.
+    queryKey: [...$api.queryOptions("get", "/api/spaces/{id}/smtp-config", { params }).queryKey],
+    enabled: scope.enabled,
+    queryFn: ({ signal }): Promise<SmtpConfigView | null> =>
+      nullOn404(async () => {
+        const { data } = await client.GET("/api/spaces/{id}/smtp-config", { params, signal });
         return data;
-      });
-    },
+      }),
   });
 }
 
@@ -123,25 +116,24 @@ export function useTestSmtp() {
 }
 
 export function useSocialProvider(provider: SocialProviderId) {
-  const orgId = useCurrentOrgId();
+  const scope = useOrgScope();
   const spaceId = useCurrentSpaceId();
+  const params = { path: { id: spaceId ?? "", provider } };
   return useQuery({
-    // Same [method, path, init] shape as the $api hooks so the typed
-    // path-string invalidations below hit this query too.
+    // The generated key (untagged: the answer here is `null` on a 404), so the typed path-string invalidations below hit this query too.
     queryKey: [
-      "get",
-      "/api/spaces/{id}/social-providers/{provider}",
-      { params: { path: { id: spaceId, provider } } },
-    ] as const,
-    enabled: !!orgId && !!spaceId,
-    queryFn: async (): Promise<SocialProviderView | null> => {
-      return nullOn404(async () => {
+      ...$api.queryOptions("get", "/api/spaces/{id}/social-providers/{provider}", { params })
+        .queryKey,
+    ],
+    enabled: scope.enabled,
+    queryFn: ({ signal }): Promise<SocialProviderView | null> =>
+      nullOn404(async () => {
         const { data } = await client.GET("/api/spaces/{id}/social-providers/{provider}", {
-          params: { path: { id: spaceId!, provider } },
+          params,
+          signal,
         });
         return data;
-      });
-    },
+      }),
   });
 }
 

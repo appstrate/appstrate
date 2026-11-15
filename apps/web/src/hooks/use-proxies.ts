@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
-import { useOrgOnlyScope } from "./use-org-scope";
+import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
-import { agentProxyKeys, packageKeys } from "../lib/query-keys";
+import { invalidatePaths, packageKeys } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
@@ -58,21 +56,14 @@ export function useTestProxy() {
 
 /** `agents:read` alone: unlike the agent detail, `agents:run` does not open it. */
 export function useAgentProxy(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   const { can } = usePermissions();
-  return useQuery({
-    // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
-    // space-switch resets.
-    queryKey: agentProxyKeys.detail(orgId, spaceId, packageId),
-    queryFn: async () => {
-      const { data } = await client.GET("/api/agents/{scope}/{name}/proxy", {
-        params: { path: splitPackageRef(packageId!) },
-      });
-      return data!;
-    },
-    enabled: can("agents:read") && !!orgId && !!spaceId && !!packageId,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/agents/{scope}/{name}/proxy",
+    { params: { header: scope.header, path: splitPackageRef(packageId ?? "") } },
+    { enabled: can("agents:read") && scope.enabled && !!packageId },
+  );
 }
 
 export function useSetAgentProxy(packageId: string) {
@@ -86,7 +77,7 @@ export function useSetAgentProxy(packageId: string) {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentProxyKeys.all });
+      void invalidatePaths(qc, ["/api/agents/{scope}/{name}/proxy"]);
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
   });

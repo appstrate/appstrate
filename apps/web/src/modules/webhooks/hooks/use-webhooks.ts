@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { invalidatePaths } from "@/lib/query-keys";
-import { keysetPaging } from "@/lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
 import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
@@ -130,12 +130,12 @@ export function useRotateWebhookSecret() {
   return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
-/** Delivery history, keyset-paged. The key keeps the `[method, path, init]` prefix so `useInvalidateWebhooks` reaches it. */
+/** Delivery history, keyset-paged. `useInvalidateWebhooks` reaches it through the `[method, path]` prefix. */
 export function useWebhookDeliveries(webhookId: string) {
   const scope = useWebhookScope();
   const params = { path: { id: webhookId }, header: scope.header };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/webhooks/{id}/deliveries", { params }] as const,
+    queryKey: pagedQueryKey("/api/webhooks/{id}/deliveries", { params }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/webhooks/{id}/deliveries", {
         params: { ...params, query: { limit: 25, startingAfter: pageParam } },

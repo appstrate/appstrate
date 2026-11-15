@@ -14,10 +14,11 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatConversationList } from "../src/ui/thread-list.tsx";
-import { ChatHeadersProvider } from "../src/ui/runtime-context.ts";
+import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache } from "../src/ui/sessions.ts";
+import { transportOf } from "./fake-request.ts";
 
-const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 // The list is the shell's navigation, mounted outside `ChatPage`: `t` and `can`
 // arrive as props, and it renders into the host's sidebar.
@@ -33,19 +34,19 @@ function render(granted: string[], hasMore = false): string {
         hasMore,
       },
     ],
-    pageParams: [null],
+    pageParams: [undefined],
   });
   return renderToString(
     <QueryClientProvider client={qc}>
       <TooltipProvider>
         <SidebarProvider>
-          <ChatHeadersProvider value={getHeaders}>
+          <ChatTransportProvider value={transport}>
             <ChatConversationList
               activeId={null}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
             />
-          </ChatHeadersProvider>
+          </ChatTransportProvider>
         </SidebarProvider>
       </TooltipProvider>
     </QueryClientProvider>,

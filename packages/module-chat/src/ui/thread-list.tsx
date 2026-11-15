@@ -11,7 +11,7 @@
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
  * the title is where-you-are (it sits in the shell breadcrumb). They read the
  * same two contexts `ChatPage` publishes, so the host renders both below its own
- * `ChatHeadersProvider` / `SelectConversationProvider` — the title is portalled
+ * `ChatTransportProvider` / `SelectConversationProvider` — the title is portalled
  * into the breadcrumb from there — and they share the thread's React Query key,
  * so one request feeds all of it.
  *
@@ -45,7 +45,7 @@ import {
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
 import {
-  useChatHeaders,
+  useChatTransport,
   useSelectConversation,
   type ChatCan,
   type ChatTranslate,
@@ -211,11 +211,12 @@ export function ChatConversationList({
  * both call sites stay byte-identical.
  */
 function useInlineRename(sessionId: string) {
-  const getHeaders = useChatHeaders();
+  const transport = useChatTransport();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const save = async (title: string) => {
-    await renameSession(getHeaders, sessionId, title);
+    if (!transport) return;
+    await renameSession(transport.request, sessionId, title);
     await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
   };
   return { editing, setEditing, save };
@@ -236,7 +237,7 @@ function ConversationRow({
   t: ChatTranslate;
   canWrite: boolean;
 }) {
-  const getHeaders = useChatHeaders();
+  const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
@@ -247,12 +248,13 @@ function ConversationRow({
   // The dialog stays open while the delete is in flight and on failure (it says
   // so); it closes only once the row is gone.
   const onDelete = async () => {
+    if (!transport) return;
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await deleteSession(getHeaders, session.id);
+      await deleteSession(transport.request, session.id);
     } catch {
-      // The chat's own fetch is not toasted by the app's mutation cache: say it in the dialog.
+      // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
       setDeleteFailed(true);
       setDeleting(false);
       return;
@@ -265,7 +267,7 @@ function ConversationRow({
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
     queryClient.setQueryData<SessionsCache>(
-      sessionsQueryKey(spaceIdFromHeaders(getHeaders)),
+      sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)),
       (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);

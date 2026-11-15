@@ -382,6 +382,7 @@ export function PreferencesSecurityPage() {
     refetch,
     error: accountsError,
   } = useQuery({
+    // Better Auth's own endpoint, absent from the OpenAPI spec: a named key, user-level.
     queryKey: ["linked-accounts"],
     queryFn: () => listLinkedAccounts(),
   });
