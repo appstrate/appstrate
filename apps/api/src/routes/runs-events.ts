@@ -9,7 +9,8 @@
  *   POST /api/runs/:runId/events/finalize  — terminal RunResult, idempotent
  *   POST /api/runs/:runId/mcp              — the run MCP server of a remote run
  *
- * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`). No
+ * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`,
+ * `verifyRunUploadSignature` and `verifyRunCallSignature`). No
  * user principal — the request's legitimacy is proven cryptographically.
  * The middleware populates `c.get("run")` with the sink context; handlers
  * consume that and never dereference `c.get("user")` (there isn't one).
@@ -30,6 +31,7 @@ import {
   RUN_ROUTE_RATE_PER_MIN,
   rateLimitByRunId,
   rateLimitRunFiles,
+  rateLimitRunMcp,
 } from "../middleware/rate-limit.ts";
 import {
   verifyRunCallSignature,
@@ -239,13 +241,11 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // The run MCP server gets a per-minute budget of its own: one point per
   // POST, which carries one MCP message (`initialize`, `tools/list`, a tool
   // call; `serveRunMcp` refuses batches) — the figure the sidecar's mount of
-  // the same server has (`/internal/mcp`). The 60 s window keeps its bucket
-  // apart from the 1 s event budget above, which is sized for telemetry, not
-  // tool calls.
-  const mcpLimiter = rateLimitByRunId(mcpRatePerMin, 60);
+  // the same server has (`/internal/mcp`).
+  const mcpLimiter = rateLimitRunMcp(mcpRatePerMin, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
-  // the per-run limiter second. Both limiters key on the `:runId` from the
+  // the per-run limiter second. The three limiters key on the `:runId` from the
   // URL, so a limiter placed first would let anyone who merely knows a runId
   // burn a legitimate run's ingestion budget with unsigned garbage — a remote
   // DoS on that run's event stream and finalize sweep. Verifying first means
@@ -259,7 +259,7 @@ export function createRunsEventsRouter(mcpRatePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // traffic from a fleet of runners behind one NAT egress address is never
   // throttled while an unauthenticated flood is capped.
   //
-  // No handler depends on the limiter having run: both limiters are
+  // No handler depends on the limiter having run: the three limiters are
   // `emitHeaders: false` (no response header the handler reads) and their only
   // effect is consuming a point or throwing 429.
 

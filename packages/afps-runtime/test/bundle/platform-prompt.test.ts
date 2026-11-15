@@ -712,6 +712,17 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("- **random** (number, required): A random float between 0 and 1");
     });
 
+    it("prints no shape heading for a schema without properties", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: { type: "object", properties: {}, additionalProperties: true },
+      });
+      expect(out).toContain("## Output Format");
+      expect(out).not.toContain("### Required shape");
+      expect(out).toContain("### Full JSON Schema");
+    });
+
     it("marks optional fields as optional", () => {
       const out = renderPlatformPrompt({
         template: "T",

@@ -318,7 +318,8 @@ export interface IntegrationSpawnSpec {
       version?: string;
       /**
        * Remote MCP endpoint URL. Required when
-       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
+       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`, unless the
+       * integration is bound to the runtime ({@link platformEndpoint}). The sidecar
        * opens a Streamable HTTP MCP client against this URL instead of
        * spawning a runner. Mutually exclusive with `entry_point` (enforced
        * by `integrationManifestSchema`).

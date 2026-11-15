@@ -36,6 +36,7 @@ import {
   getRecentRuns,
   RUN_HISTORY_FIELDS,
   RUN_HISTORY_LIMIT_DEFAULT,
+  RUN_HISTORY_LIMIT_MAX,
   setRunCheckpoint,
 } from "./state/runs.ts";
 import {
@@ -140,9 +141,6 @@ const scopeArg = (description: string) =>
  * while the run is watched, and stored in full.
  */
 const LOG_MESSAGE_MAX = 2000;
-
-/** Most past runs one `run_history` call returns. */
-const RUN_HISTORY_LIMIT_MAX = 50;
 
 /** Bounds of a `notify` message: one bell row, a title line and a short body. */
 const NOTIFY_TITLE_MAX = 100;
@@ -351,7 +349,7 @@ const RUN_TOOLS: RunTool[] = [
         .max(NOTIFY_MESSAGE_MAX)
         .describe(`Body text under the title (max ${NOTIFY_MESSAGE_MAX} characters)`),
     }),
-    run: async (message, { run }) => {
+    run: async ({ title, message }, { run }) => {
       const scope = { orgId: run.orgId, spaceId: run.spaceId };
       const target = await resolveRunRecipients(scope, run.id);
       if (!target || target.recipients.length === 0) {
@@ -359,12 +357,10 @@ const RUN_TOOLS: RunTool[] = [
           "notify: nobody can be notified for this run (an ephemeral run, or no recipient); nothing was sent.",
         );
       }
-      const inserted = await createAgentMessageNotifications(
-        scope,
-        target.run,
-        target.recipients,
+      const inserted = await createAgentMessageNotifications(scope, target.run, target.recipients, {
+        title,
         message,
-      );
+      });
       if (inserted === 0) {
         return errorResult(
           "notify: this run already sent its notification; a run notifies each recipient once.",

@@ -308,7 +308,7 @@ For each carve-out:
 4f. Connect-helper internal types camelCase; its redeem body spelled per 4e
 4g. JSONB contracts — the boundary rule: for each jsonb() column, is it returned/accepted verbatim? Platform-written + verbatim → interior snake_case (check the writers: notifications payloads, runs.metadata, spaces.settings.branding, run_logs.data markers, generation settings); client/agent-supplied → opaque; never verbatim → producer casing. The doc's three tables must list every jsonb() column.
 4h. SSE: `snakeToCamel` in apps/api/src/services/realtime.ts; the channel list matches packages/shared-types/src/realtime-events.ts
-4i. Run events: packages/afps-runtime/src/types/canonical-events.ts + run-result.ts camelCase; `file.published` carries `fileId`
+4i. Run events: packages/afps-runtime/src/runner/event-builders.ts + types/run-result.ts camelCase; `file.published` carries `fileId`
 4j. Webhooks: delivery envelope + payload camelCase end-to-end
 4k. BullMQ: every `createQueue<…>` data type is in the doc's table
 4l. Logger fields: spot-check pino calls

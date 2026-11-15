@@ -63,7 +63,7 @@ export interface FinalizeThrownFailureOptions {
    * Best-effort final drain (events still pending in the runner). Invoked before the
    * result is reduced; this helper guarantees it cannot throw past it.
    */
-  drainAndEmit: () => Promise<void>;
+  settlePending: () => Promise<void>;
   /** Terminal sink. */
   eventSink: FinalizeSink;
   /**
@@ -92,7 +92,7 @@ function errorMessage(err: unknown): string {
 }
 
 export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions): Promise<void> {
-  const { events, err, signal, runId, now, emit, drainAndEmit, eventSink, usage } = opts;
+  const { events, err, signal, runId, now, emit, settlePending, eventSink, usage } = opts;
 
   // 1. Cancellation: propagate without finalizing — the caller's finally
   //    block decides. MUST stay first so an aborted run never produces a
@@ -129,7 +129,7 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   // 3. Best-effort final drain: capture the events still pending from before
   //    the session threw. A dead drain must NOT mask the failure.
   try {
-    await drainAndEmit();
+    await settlePending();
   } catch {
     /* best-effort — the run outcome is decided below regardless */
   }

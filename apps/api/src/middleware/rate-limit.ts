@@ -219,12 +219,10 @@ export const rateLimitByIp = createRateLimitMiddleware({
 export const RUN_ROUTE_RATE_PER_MIN = 200;
 
 /**
- * Per-run rate limiter for the run-HMAC routes: event ingestion
- * (`POST /api/runs/:runId/events` + `/finalize`) and the run MCP server
- * (`POST /api/runs/:runId/mcp`). The runId path param IS the identity — a
- * misbehaving sink cannot evade the limit by rotating API keys, and a single
- * run's traffic cannot affect another run's budget. Each window has its own
- * Redis prefix, so routes limited over different windows never share a bucket.
+ * Per-run rate limiter for event ingestion (`POST /api/runs/:runId/events`
+ * + `/finalize`). The runId path param IS the identity — a misbehaving sink
+ * cannot evade the limit by rotating API keys, and a single run's traffic
+ * cannot affect another run's budget.
  */
 export const rateLimitByRunId = createRateLimitMiddleware({
   category: "run-event",
@@ -237,7 +235,7 @@ export const rateLimitByRunId = createRateLimitMiddleware({
  * `middleware/verify-run-signature.ts` before it trusts anything.
  *
  * The run-HMAC routes take their identity from the `:runId` path param, so the
- * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` limiters can only
+ * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` / `rateLimitRunMcp` limiters can only
  * be applied AFTER the signature proves the caller is that run — applying them
  * first lets anyone who knows a runId burn a legitimate run's ingestion budget
  * with unsigned garbage. But with nothing in front, every attempt (including a
@@ -322,5 +320,17 @@ export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void
 export const rateLimitRunFiles = createRateLimitMiddleware({
   category: "run-file",
   extractKey: (c) => `run-file:${c.req.param("runId") ?? "unknown"}`,
+  emitHeaders: false,
+});
+
+/**
+ * Per-run rate limiter for the run MCP server of a remote run
+ * (`POST /api/runs/:runId/mcp`), kept SEPARATE from `rateLimitByRunId`: tool
+ * calls and event telemetry each spend their own budget. Same runId-keyed
+ * anti-evasion property.
+ */
+export const rateLimitRunMcp = createRateLimitMiddleware({
+  category: "run-mcp",
+  extractKey: (c) => `run-mcp:${c.req.param("runId") ?? "unknown"}`,
   emitHeaders: false,
 });

@@ -216,7 +216,7 @@ describe("POST /mcp — tools/list", () => {
     try {
       await expect(
         buildMcpDirectFactories({ mcp: agent, runId: "run_1", workspace: "/tmp", emit: () => {} }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("Internal Server Error");
     } finally {
       await agent.close();
     }

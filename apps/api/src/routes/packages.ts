@@ -267,7 +267,7 @@ async function validateManifestForRoute(
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
-    direction === "stored" ? { retiredVocabulary: "tolerate" } : undefined,
+    direction === "stored" ? { retiredDependencyKeys: "tolerate" } : undefined,
   );
   if (!result.valid) {
     throw validationFailed(manifestErrorsToFieldErrors(result));
@@ -2435,7 +2435,7 @@ export function createPackagesRouter() {
   async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
     const zipBytes = new Uint8Array(upload);
     try {
-      const parsed = parsePackageZip(zipBytes, { retiredVocabulary: "reject" });
+      const parsed = parsePackageZip(zipBytes, { retiredDependencyKeys: "reject" });
       // `parsePackageZip` applies the lenient loader rule (it also reads
       // already-published artifacts); an import is author input.
       assertArchiveContentConforms(parsed.type, parsed.files, "file");

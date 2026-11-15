@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { exposeTool, MAX_SCHEMA_SERIALISED_BYTES, type Tool } from "../src/index.ts";
+import { exposeTool, toolExclusion, MAX_SCHEMA_SERIALISED_BYTES, type Tool } from "../src/index.ts";
 
 const tool = (name: string, extra: Partial<Tool> = {}): Tool => ({
   name,
@@ -10,7 +10,7 @@ const tool = (name: string, extra: Partial<Tool> = {}): Tool => ({
   ...extra,
 });
 
-const free = { namespace: "docs", allowlist: null, hidden: null, isTaken: () => false };
+const free = { namespace: "docs", isTaken: () => false };
 
 describe("exposeTool", () => {
   it("exposes an admitted tool as {namespace}__{name}", () => {
@@ -21,12 +21,6 @@ describe("exposeTool", () => {
         inputSchema: { type: "object" },
       },
     });
-  });
-
-  it("excludes a tool outside the selection, then a hidden one", () => {
-    const opts = { ...free, allowlist: new Set(["a", "b"]), hidden: new Set(["b"]) };
-    expect(exposeTool(tool("c"), opts)).toEqual({ exclusion: "allowlist" });
-    expect(exposeTool(tool("b"), opts)).toEqual({ exclusion: "hidden_tools" });
   });
 
   it("sanitises the descriptor and drops one too large once sanitised", () => {
@@ -56,5 +50,16 @@ describe("exposeTool", () => {
     expect(exposeTool(tool("a"), { ...free, isTaken: () => true })).toEqual({
       exclusion: "name_collision",
     });
+  });
+});
+
+describe("toolExclusion", () => {
+  it("excludes a tool outside the selection, then a hidden one", () => {
+    const allowlist = new Set(["a", "b"]);
+    const hidden = new Set(["b"]);
+    expect(toolExclusion("c", allowlist, hidden)).toBe("allowlist");
+    expect(toolExclusion("b", allowlist, hidden)).toBe("hidden_tools");
+    expect(toolExclusion("a", allowlist, hidden)).toBeNull();
+    expect(toolExclusion("c", null, null)).toBeNull();
   });
 });

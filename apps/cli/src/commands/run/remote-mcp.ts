@@ -9,8 +9,9 @@
  * (`integrations_configuration.<id>.tools`, else `default_tools`) and `hidden_tools` applied to
  * the upstream names, then one Pi tool per admitted tool, named `{ns}__{tool}` exactly as the
  * platform sidecar's McpHost names it, in one allocation with the run's `api_call` tools.
- * Admission and descriptors follow the platform's rules (`exposeTool`) before they reach the
- * model; each tool spills its resources to the run's workspace and reports its calls as events.
+ * Admission and descriptors follow the platform's rules (`toolExclusion`, `exposeTool`) before
+ * they reach the model; each tool spills its resources to the run's workspace and reports its
+ * calls as events.
  *
  * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
  * takes the same path with another target: the run's MCP server on the instance the run reports
@@ -37,10 +38,9 @@ import {
   type IntegrationRef,
 } from "@appstrate/afps-runtime/resolvers";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
-import { sign, type SignedEnvelopeHeaders } from "@appstrate/afps-runtime/events";
+import { signFresh, type SignedEnvelopeHeaders } from "@appstrate/afps-runtime/events";
 import { renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
-import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
@@ -59,6 +59,7 @@ import {
   createMcpHttpClient,
   exposeTool,
   mcpFetch,
+  toolExclusion,
   type AppstrateMcpClient,
   type Tool,
 } from "@appstrate/mcp-transport";
@@ -107,8 +108,6 @@ interface BuildRemoteMcpExtensionsOptions {
   emit: RuntimeEventEmitter;
   /** Aborts the connections in flight (the CLI's shutdown signal). */
   signal?: AbortSignal;
-  /** DNS resolver of the egress guard. Production omits it. */
-  resolveHost?: HostResolver;
   /** Bound on one integration's connection and `tools/list`. Production omits it. */
   startupTimeoutMs?: number;
 }
@@ -162,12 +161,8 @@ export async function buildRemoteMcpExtensions(
     const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
     const before = factories.length;
     for (const tool of tools) {
-      const exposure = exposeTool(tool, {
-        namespace,
-        allowlist: target.allowlist,
-        hidden: target.hidden,
-        isTaken: (name) => toolNames.has(name),
-      });
+      if (toolExclusion(tool.name, target.allowlist, target.hidden)) continue;
+      const exposure = exposeTool(tool, { namespace, isTaken: (name) => toolNames.has(name) });
       if ("exclusion" in exposure) continue;
       toolNames.add(exposure.descriptor.name);
       factories.push(
@@ -225,6 +220,8 @@ type RemoteTarget =
       url: string;
       /** Set for the run's own MCP server only: no other target is sent a credential. */
       signRequest?: RequestSigner;
+      /** `legacy` for the run's own MCP server, built by `createMcpServer`: no era probe. */
+      era?: "legacy";
       allowlist: ReadonlySet<string> | null;
       hidden: ReadonlySet<string>;
     }
@@ -257,15 +254,8 @@ function remoteTarget(
   if (isRuntimeBoundIntegration(manifest)) {
     if (!runToolsMcp) return { reason: UNAVAILABLE_INTEGRATION_REASONS.unbound };
     const { url, runSecret } = runToolsMcp;
-    // What `HttpSink` sends with each event: a fresh message id and timestamp per request.
-    const signRequest: RequestSigner = (body) =>
-      sign({
-        msgId: crypto.randomUUID(),
-        timestampSec: Math.floor(Date.now() / 1000),
-        body,
-        secret: runSecret,
-      });
-    return { url, signRequest, ...filters };
+    const signRequest: RequestSigner = (body) => signFresh({ body, secret: runSecret });
+    return { url, signRequest, era: "legacy", ...filters };
   }
 
   const source = getRemoteSource(manifest);
@@ -290,7 +280,7 @@ function remoteTarget(
 
 /** One connection and its complete `tools/list`, or the reason the integration is unavailable. */
 async function connectAndList(
-  { url, signRequest }: { url: string; signRequest?: RequestSigner },
+  { url, signRequest, era }: { url: string; signRequest?: RequestSigner; era?: "legacy" },
   opts: BuildRemoteMcpExtensionsOptions,
 ): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | Unavailability> {
   const declaredHost = new URL(url).hostname;
@@ -302,7 +292,6 @@ async function connectAndList(
         allowHost: (host) => host === declaredHost,
         // A redirect to another origin is sent no signature.
         sensitiveHeaders: SIGNATURE_HEADERS,
-        ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
       },
     );
     return response;
@@ -315,6 +304,7 @@ async function connectAndList(
       fetch: guardedFetch,
       clientInfo: CLIENT_INFO,
       signal,
+      ...(era ? { era } : {}),
     });
   } catch (err) {
     return {

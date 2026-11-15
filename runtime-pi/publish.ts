@@ -22,8 +22,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { randomUUID } from "node:crypto";
-import { sign } from "@appstrate/afps-runtime/events";
+import { signFresh } from "@appstrate/afps-runtime/events";
 import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -246,12 +245,7 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
     let lastError = "";
     for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
       const headers: Record<string, string> = {
-        ...sign({
-          msgId: randomUUID(),
-          timestampSec: Math.floor(Date.now() / 1000),
-          body: "",
-          secret: deps.sinkSecret,
-        }),
+        ...signFresh({ body: "", secret: deps.sinkSecret }),
         "Content-Type": contentType,
         "X-File-Name": encodedName,
       };

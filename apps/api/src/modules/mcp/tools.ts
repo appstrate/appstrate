@@ -44,6 +44,7 @@ import {
   enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
+  INLINE_MANIFEST_RULE,
   RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
@@ -1069,22 +1070,6 @@ function startRunProgress(
     stopLogs();
   };
 }
-
-/** How the platform completes an inline run's partial manifest (`materializeInlineManifest`). */
-export const INLINE_MANIFEST_RULE =
-  "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set only a " +
-  "concise task-specific `display_name` plus the dependencies/configuration the task needs. " +
-  "The platform derives `name` and fills the top-level fields you omit with AFPS boilerplate " +
-  "and an open object `output` schema; every field you provide replaces its default verbatim, " +
-  "except the tables keyed by package id, which receive defaults entry by entry: the platform " +
-  "adds the `@appstrate/platform` dependency unless `dependencies.integrations` already names " +
-  "it, and selects its `log` tool in `integrations_configuration` unless either " +
-  "`dependencies.integrations` or `integrations_configuration` names it (the dependency alone " +
-  "keeps its `default_tools`). It never changes your entries, and " +
-  '`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. ' +
-  "A complete deterministic manifest may override every field, including a strict " +
-  "`output.schema`; the run has the `output` tool exactly when its manifest declares an " +
-  "`output.schema`.";
 
 /** What a caller composing an inline run tells it about the `log` tool. */
 export const INLINE_LOG_INSTRUCTION =

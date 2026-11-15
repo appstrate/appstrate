@@ -62,7 +62,10 @@ import {
   type McpPost,
 } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import {
+  INLINE_MANIFEST_RULE,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+} from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
@@ -97,7 +100,6 @@ import {
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
   INLINE_LOG_INSTRUCTION,
-  INLINE_MANIFEST_RULE,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   WARNING_CODES_PHRASE,
   type Dispatch,

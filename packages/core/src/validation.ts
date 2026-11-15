@@ -462,15 +462,15 @@ function parseWithSchema(
  *     never be repaired. Surfacing it belongs to the install-warning channel,
  *     not to this validator.
  */
-export type RetiredVocabularyPolicy = "reject" | "tolerate";
+export type RetiredDependencyKeysPolicy = "reject" | "tolerate";
 
 /** Options for {@link validateManifest}. */
 export interface ValidateManifestOptions {
   /**
-   * Direction-dependent handling of the retired manifest vocabulary.
-   * Default `"reject"` (author input). See {@link RetiredVocabularyPolicy}.
+   * Direction-dependent handling of the retired `dependencies` keys.
+   * Default `"reject"` (author input). See {@link RetiredDependencyKeysPolicy}.
    */
-  retiredVocabulary?: RetiredVocabularyPolicy;
+  retiredDependencyKeys?: RetiredDependencyKeysPolicy;
 }
 
 /**
@@ -503,10 +503,10 @@ export function validateManifest(
   const type = obj.type;
 
   // Retired `dependencies` keys: rejected with the replacement named, on the
-  // author direction only (see {@link RetiredVocabularyPolicy}). Checked before
+  // author direction only (see {@link RetiredDependencyKeysPolicy}). Checked before
   // the type dispatch because every package type may declare `dependencies`.
   const errors =
-    options?.retiredVocabulary === "tolerate"
+    options?.retiredDependencyKeys === "tolerate"
       ? []
       : findRetiredDependencyKeys(obj).map(
           ({ key, replacement }) =>

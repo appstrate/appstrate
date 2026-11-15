@@ -132,7 +132,8 @@ export interface PlatformPromptOptions {
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
   /**
-   * Output schema — drives the `## Output Format` section. The full JSON
+   * Output schema — drives the `## Output Format` section. Takes what
+   * `readDeclaredOutputSchema` returns: rendered as given when set. The full JSON
    * Schema (as it appears under `manifest.output.schema`) is surfaced in
    * plain text so the LLM sees the constraint in the prompt AND via the
    * `output` tool definition. This belt-and-suspenders is necessary
@@ -499,7 +500,12 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         )
       : [];
     const props = opts.outputSchema.properties;
-    if (props && typeof props === "object" && !Array.isArray(props)) {
+    if (
+      props &&
+      typeof props === "object" &&
+      !Array.isArray(props) &&
+      Object.keys(props).length > 0
+    ) {
       sections.push("### Required shape\n");
       for (const [key, prop] of Object.entries(props as Record<string, unknown>)) {
         const propRec = (prop as Record<string, unknown>) ?? {};

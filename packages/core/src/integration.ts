@@ -117,7 +117,8 @@ export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
 
 /**
  * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
- * resolver, the sidecar, activation and the write rule read it, never the package id. The value
+ * resolver, activation, the manifest schema, the write rule and the CLI read it, never the
+ * package id. The value
  * must be a JSON object (AFPS §10.1), so `null` or a scalar binds nothing.
  */
 export function isRuntimeBoundIntegration(manifest: unknown): boolean {
@@ -810,8 +811,7 @@ export type IntegrationManifest = AfpsIntegrationManifest;
 export function getIntegrationSourceKind(
   manifest: IntegrationManifest,
 ): "local" | "remote" | "none" | undefined {
-  const source = (manifest as { source?: { kind?: string } }).source;
-  const kind = source?.kind;
+  const kind = manifest.source?.kind;
   return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
 }
 
@@ -822,9 +822,7 @@ export function getIntegrationSourceKind(
 export function getRemoteSource(
   manifest: IntegrationManifest,
 ): { url: string; transport: "streamable-http" | "sse" } | null {
-  const source = (
-    manifest as { source?: { kind?: string; remote?: { url?: unknown; transport?: unknown } } }
-  ).source;
+  const source = manifest.source;
   if (source?.kind !== "remote" || !source.remote) return null;
   const { url, transport } = source.remote;
   if (typeof url !== "string") return null;

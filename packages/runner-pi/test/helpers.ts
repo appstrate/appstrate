@@ -43,7 +43,7 @@ export interface FakeSession extends BridgeableSession, PromptableSession, ToolW
   reset(): void;
   /** Every message passed to `prompt()`, in order. */
   prompts: string[];
-  /** Times the bridge's early-stop `onTerminalTool` fired (stands in for `session.abort()`). */
+  /** Times the bridge's early-stop `onOutputSettled` fired (stands in for `session.abort()`). */
   aborts: number;
   /** Test hook: drives what the session does during a `prompt()` turn. */
   onPrompt?: (message: string) => void | Promise<void>;
@@ -271,7 +271,7 @@ export class ScriptedPiRunner extends PiRunner {
     const outputRequired = this.opts.outputSchema !== undefined;
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       outputRequired,
-      onTerminalTool: () => {
+      onOutputSettled: () => {
         session.aborts += 1;
       },
     });

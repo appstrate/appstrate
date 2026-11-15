@@ -46,7 +46,6 @@ import {
   PLATFORM_META_KEY,
   isRuntimeBoundIntegration,
   findRuntimeBinding,
-  platformToolName,
   getIntegrationSourceKind,
   getRemoteSource,
 } from "../src/integration.ts";
@@ -3123,40 +3122,35 @@ describe("runtime binding (_meta dev.appstrate/platform)", () => {
   });
 });
 
-describe("platformToolName", () => {
-  it("prefixes the tool with the platform integration's namespace", () => {
-    expect(platformToolName("log")).toBe("appstrate_platform__log");
-  });
-});
-
 describe("source accessors", () => {
   const manifest = (source: unknown) => baseManifest({ source }) as unknown as IntegrationManifest;
 
-  it("getIntegrationSourceKind returns a known kind, else undefined", () => {
-    expect(getIntegrationSourceKind(manifest({ kind: "local" }))).toBe("local");
-    expect(getIntegrationSourceKind(manifest({ kind: "none" }))).toBe("none");
-    expect(getIntegrationSourceKind(manifest({ kind: "http" }))).toBeUndefined();
-    expect(getIntegrationSourceKind(manifest(undefined))).toBeUndefined();
+  it.each<[unknown, ReturnType<typeof getIntegrationSourceKind>]>([
+    [{ kind: "local" }, "local"],
+    [{ kind: "none" }, "none"],
+    [{ kind: "http" }, undefined],
+    [undefined, undefined],
+  ])("getIntegrationSourceKind(%j) is %p", (source, expected) => {
+    expect(getIntegrationSourceKind(manifest(source))).toBe(expected);
   });
 
-  it("getRemoteSource returns url and transport only when both are usable", () => {
-    expect(
-      getRemoteSource(
-        manifest({ kind: "remote", remote: { url: "https://x/mcp", transport: "sse" } }),
-      ),
-    ).toEqual({ url: "https://x/mcp", transport: "sse" });
-    expect(
-      getRemoteSource(
-        manifest({ kind: "remote", remote: { url: "https://x/mcp", transport: "ws" } }),
-      ),
-    ).toBeNull();
-    expect(
-      getRemoteSource(manifest({ kind: "remote", remote: { url: 1, transport: "sse" } })),
-    ).toBeNull();
-    expect(
-      getRemoteSource(
-        manifest({ kind: "local", remote: { url: "https://x/mcp", transport: "sse" } }),
-      ),
-    ).toBeNull();
+  const remote = (url: unknown, transport: unknown, kind = "remote") =>
+    manifest({ kind, remote: { url, transport } });
+
+  it.each<[string, IntegrationManifest, ReturnType<typeof getRemoteSource>]>([
+    ["sse", remote("https://x/mcp", "sse"), { url: "https://x/mcp", transport: "sse" }],
+    [
+      "streamable-http",
+      remote("https://x/mcp", "streamable-http"),
+      { url: "https://x/mcp", transport: "streamable-http" },
+    ],
+    ["an unknown transport", remote("https://x/mcp", "ws"), null],
+    ["a transport in another case", remote("https://x/mcp", "STREAMABLE-HTTP"), null],
+    ["an empty transport", remote("https://x/mcp", ""), null],
+    ["websocket", remote("https://x/mcp", "websocket"), null],
+    ["a non-string url", remote(1, "sse"), null],
+    ["a non-remote kind", remote("https://x/mcp", "sse", "local"), null],
+  ])("getRemoteSource with %s", (_, source, expected) => {
+    expect(getRemoteSource(source)).toEqual(expected);
   });
 });

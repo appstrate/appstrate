@@ -16,6 +16,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import {
+  exitCode,
+  parseArguments,
   parseBefore,
   runMigrateRuntimeTools,
 } from "../../../../../scripts/migration/0053-migrate-runtime-tools.ts";
@@ -52,6 +54,14 @@ async function seedAgent(id: string, manifest: Manifest, recent = false): Promis
     manifest,
     ...(recent ? {} : { createdAt: WRITTEN }),
   });
+}
+
+async function draftLockOf(id: string): Promise<number> {
+  const [row] = await db
+    .select({ lock: packages.lockVersion })
+    .from(packages)
+    .where(eq(packages.id, id));
+  return row!.lock;
 }
 
 async function storedOf(id: string): Promise<Manifest[]> {
@@ -153,6 +163,7 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     await seedAgent(id, agentManifest(id, c.extra));
 
     const result = await run(true);
+    expect(exitCode(result)).toBe(0);
     for (const counts of [result.draft, result.version]) {
       expect(counts.rewritten).toBe(1);
       expect(counts.outputSchemaAdded).toBe(c.output === OPEN_OUTPUT ? 1 : 0);
@@ -204,6 +215,7 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
 
     const lines: string[] = [];
     const result = await run(true, lines);
+    expect(exitCode(result)).toBe(1);
     const ids = Object.keys(seeded).sort();
     expect(result.version).toMatchObject({
       rewritten: 0,
@@ -223,6 +235,18 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     expect(lines).toContain("malformed (fix by hand):");
     expect(lines).toContain(`  ${ids[0]} (draft)`);
     expect(lines.some((l) => l.includes("re-run with the same --before"))).toBe(true);
+  });
+
+  it("advances the lock version of a rewritten draft only, so a stale editor save is refused", async () => {
+    await seedAgent("@migr/agent", agentManifest("@migr/agent", { runtime_tools: ["log"] }));
+    await seedAgent("@migr/recent", agentManifest("@migr/recent", {}), true);
+    const [agent, recent] = [await draftLockOf("@migr/agent"), await draftLockOf("@migr/recent")];
+
+    await run(false);
+    expect(await draftLockOf("@migr/agent")).toBe(agent);
+    await run(true);
+    expect(await draftLockOf("@migr/agent")).toBe(agent + 1);
+    expect(await draftLockOf("@migr/recent")).toBe(recent);
   });
 
   it("writes nothing on a dry run, and nothing on a second apply", async () => {
@@ -253,6 +277,8 @@ describe("scripts/migration/0053 — --before", () => {
     ["no offset", "2026-11-15T09:30:00"],
     ["no seconds", "2026-11-15T09:30Z"],
     ["an impossible date", "2026-02-30T09:30:00Z"],
+    ["hour 24", "2026-11-15T24:00:00Z"],
+    ["an offset of 24 hours", "2026-11-15T10:30:00+24:00"],
     ["a future instant", "2026-11-15T12:00:01Z"],
   ])("refuses %s", (_, value) => {
     expect(parseBefore(value, NOW)).toHaveProperty("refusal");
@@ -263,8 +289,33 @@ describe("scripts/migration/0053 — --before", () => {
     ["a fraction", "2026-11-15T09:30:00.25Z", "2026-11-15T09:30:00.250Z"],
     ["a positive offset", "2026-11-15T10:30:00+01:00", "2026-11-15T09:30:00.000Z"],
     ["a negative offset", "2026-11-15T04:30:00-05:00", "2026-11-15T09:30:00.000Z"],
+    ["now itself", "2026-11-15T12:00:00Z", "2026-11-15T12:00:00.000Z"],
   ])("accepts %s", (_, value, instant) => {
     const parsed = parseBefore(value, NOW);
     expect("before" in parsed && parsed.before.toISOString()).toBe(instant);
+  });
+});
+
+describe("scripts/migration/0053 — exit code", () => {
+  const NOW = Date.parse("2026-11-15T12:00:00Z");
+  it.each([
+    ["an unknown flag", ["--before", "2026-11-15T09:30:00Z", "--force"]],
+    ["no --before", ["--apply"]],
+    ["a refused --before", ["--before", "2026-11-15"]],
+  ])("2 for %s", (_, args) => {
+    const parsed = parseArguments(args, NOW);
+    expect("refusal" in parsed && exitCode(parsed)).toBe(2);
+  });
+
+  it("reads the arguments it accepts", () => {
+    expect(parseArguments(["--before", "2026-11-15T09:30:00Z", "--apply"], NOW)).toEqual({
+      apply: true,
+      before: new Date("2026-11-15T09:30:00Z"),
+    });
+  });
+
+  // A completed run: 0 when clean, 1 with a malformed manifest left (asserted on real runs above).
+  it("1 for a failure", () => {
+    expect(exitCode({ failure: new Error("lock timeout") })).toBe(1);
   });
 });

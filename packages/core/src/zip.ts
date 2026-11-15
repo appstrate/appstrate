@@ -10,7 +10,7 @@ import {
   type PackageType,
   type IntegrationManifest,
   type McpServerManifest,
-  type RetiredVocabularyPolicy,
+  type RetiredDependencyKeysPolicy,
 } from "./validation.ts";
 import {
   checkCompanionFiles,
@@ -307,16 +307,16 @@ export interface ParsePackageZipOptions {
   /** Maximum compressed size in bytes. Defaults to 10 MB. */
   maxSize?: number;
   /**
-   * How the embedded manifest's retired vocabulary is treated —
+   * How the embedded manifest's retired `dependencies` keys are treated —
    * forwarded verbatim to `validateManifest`. Defaults to `"reject"`, because
    * a ZIP is author input unless the caller knows otherwise.
    *
    * Pass `"tolerate"` ONLY when the archive is content the platform already holds
    * and cannot repair in place (a re-import of a published, integrity-checked
    * artifact). See the doctrine on
-   * {@link import("./validation.ts").RetiredVocabularyPolicy}.
+   * {@link import("./validation.ts").RetiredDependencyKeysPolicy}.
    */
-  retiredVocabulary?: RetiredVocabularyPolicy;
+  retiredDependencyKeys?: RetiredDependencyKeysPolicy;
 }
 
 /**
@@ -411,7 +411,7 @@ export function parsePackageZip(
   }
 
   const validation = validateManifest(manifestRaw, {
-    retiredVocabulary: opts.retiredVocabulary ?? "reject",
+    retiredDependencyKeys: opts.retiredDependencyKeys ?? "reject",
   });
   if (!validation.valid) {
     const detail = validation.errors.join("; ");

@@ -125,9 +125,31 @@ describe("agent Paramètres", () => {
   });
 
   it("opens a panel of its own for every rail entry", () => {
+    // A text only its own panel shows, per section.
+    const ownText: Record<string, keyof typeof agentsFr> = {
+      files: "detail.files.version",
+      versions: "version.noVersions",
+      model: "detail.configuration.modelIntro",
+      proxy: "detail.configuration.proxyIntro",
+      inputs: "detail.configuration.inputsDescription",
+      connections: "detail.configuration.connectionsDescription",
+      schedules: "detail.configuration.schedulesDescription",
+      general: "editor.description.general",
+      schema: "editor.description.schema",
+      skills: "editor.description.skills",
+      integrations: "editor.description.integrations",
+    };
     const ids = railIds(rail);
-    expect(ids.length).toBeGreaterThan(AGENT_DEFINITION_SECTIONS.length);
-    const panels = ids.map((id) => panel(renderSection(id)));
-    expect(new Set(panels).size).toBe(ids.length);
+    expect(ids).toEqual(Object.keys(ownText));
+    const panels = new Map(ids.map((id) => [id, panel(renderSection(id))]));
+    for (const [id, html] of panels) {
+      for (const [other, key] of Object.entries(ownText)) {
+        expect({ id, key, shown: html.includes(agentsFr[key]) }).toEqual({
+          id,
+          key,
+          shown: other === id,
+        });
+      }
+    }
   });
 });

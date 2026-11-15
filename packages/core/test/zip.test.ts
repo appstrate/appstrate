@@ -275,7 +275,7 @@ describe("parsePackageZip", () => {
   });
 
   it("tolerates a retired dependency key, untouched, when the caller opts in", () => {
-    const result = parsePackageZip(legacyAgentZip(), { retiredVocabulary: "tolerate" });
+    const result = parsePackageZip(legacyAgentZip(), { retiredDependencyKeys: "tolerate" });
     const deps = (result.manifest as Record<string, unknown>).dependencies;
     expect(deps).toEqual({ tools: { "@test/fetch": "^1.0.0" } });
   });

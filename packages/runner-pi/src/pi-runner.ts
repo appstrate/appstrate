@@ -504,7 +504,7 @@ export class PiRunner {
           runId,
           now: Date.now,
           emit,
-          drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+          settlePending: () => bridge?.drainPending() ?? Promise.resolve(),
           eventSink,
           usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
           terminalStatus: "timeout",
@@ -578,7 +578,7 @@ export class PiRunner {
         runId,
         now: Date.now,
         emit,
-        drainAndEmit: () => bridge?.drainPending() ?? Promise.resolve(),
+        settlePending: () => bridge?.drainPending() ?? Promise.resolve(),
         eventSink,
         usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
         stamp: (result) => {
@@ -767,7 +767,7 @@ export class PiRunner {
       // Abort the SDK loop as soon as `output` has settled the run
       // (delivered, or refused too often). `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
-      onTerminalTool: () => {
+      onOutputSettled: () => {
         void session.abort().catch(() => {});
       },
     });
@@ -984,7 +984,7 @@ export async function maybeRepromptForOutput(opts: {
 }): Promise<boolean> {
   const { session, bridge, outputRequired, sink, runId, signal } = opts;
   if (!outputRequired) return false;
-  if (bridge.terminalToolCompleted) return false;
+  if (bridge.outputCompleted) return false;
   if (signal?.aborted) return false;
   if (bridge.getTerminalError() !== undefined) return false;
 
@@ -1158,7 +1158,7 @@ export interface SessionBridgeHandle {
    * whether the agent still owes an `output` call
    * ({@link maybeRepromptForOutput}).
    */
-  readonly terminalToolCompleted: boolean;
+  readonly outputCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
   /**
@@ -1396,9 +1396,9 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 function isRunnerEarlyStopAbort(
   stopReason: string | undefined,
   errorMessage: string | undefined,
-  runnerStoppedLoop: boolean,
+  outputSettled: boolean,
 ): boolean {
-  return runnerStoppedLoop && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
+  return outputSettled && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
 }
 
 /**
@@ -1406,7 +1406,7 @@ function isRunnerEarlyStopAbort(
  * invites a retry, which never ends for a payload the model cannot fix (an
  * output schema no value satisfies).
  */
-export const MAX_TERMINAL_TOOL_REJECTIONS = 5;
+export const MAX_OUTPUT_REJECTIONS = 5;
 
 interface SessionBridgeOptions {
   /**
@@ -1417,10 +1417,10 @@ interface SessionBridgeOptions {
   outputRequired?: boolean;
   /**
    * Invoked once, synchronously, when `output` settles the run: its
-   * first success, or {@link MAX_TERMINAL_TOOL_REJECTIONS} refusals (the run
+   * first success, or {@link MAX_OUTPUT_REJECTIONS} refusals (the run
    * then fails). The runner uses this to abort the SDK loop.
    */
-  onTerminalTool?: () => void;
+  onOutputSettled?: () => void;
   /**
    * Context window (tokens) the session actually runs against, straight off
    * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
@@ -1450,10 +1450,10 @@ export function installSessionBridge(
   // assistant turn, which must NOT be read as a terminal failure. Exposed
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
-  let terminalToolCompleted = false;
+  let outputCompleted = false;
   let outputRejections = 0;
   let outputExhausted: RunError | undefined;
-  const runnerStoppedLoop = (): boolean => terminalToolCompleted || outputExhausted !== undefined;
+  const outputSettled = (): boolean => outputCompleted || outputExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
   let totalUsage: TokenUsage = zeroTokenUsage();
@@ -1572,7 +1572,7 @@ export function installSessionBridge(
         // 503 latched earlier in the run — which a read-time guard would do.
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, outputSettled())
         ) {
           lastUpstreamStopReason = last.stopReason;
           lastUpstreamErrorMessage = last.errorMessage;
@@ -1637,7 +1637,7 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, outputSettled())
         ) {
           // The classification rides the event's `data`, which the platform
           // writes to `run_logs.data` (jsonb) — the same route the watchdog's
@@ -1762,14 +1762,14 @@ export function installSessionBridge(
         );
         // The first verdict stands: calls of the same batch still settle
         // after the abort.
-        if (runnerStoppedLoop() || !outputRequired || tool !== OUTPUT_TOOL_NAME) break;
+        if (outputSettled() || !outputRequired || tool !== OUTPUT_TOOL_NAME) break;
         if (e.isError !== true) {
-          terminalToolCompleted = true;
-          options.onTerminalTool?.();
+          outputCompleted = true;
+          options.onOutputSettled?.();
           break;
         }
         outputRejections += 1;
-        if (outputRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
+        if (outputRejections >= MAX_OUTPUT_REJECTIONS) {
           outputExhausted = {
             code: "terminal_tool_rejected",
             message:
@@ -1777,7 +1777,7 @@ export function installSessionBridge(
               "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
           };
           fire(buildError({ runId, timestamp: Date.now() }, outputExhausted.message));
-          options.onTerminalTool?.();
+          options.onOutputSettled?.();
         }
         break;
       }
@@ -1793,8 +1793,8 @@ export function installSessionBridge(
   });
 
   return {
-    get terminalToolCompleted(): boolean {
-      return terminalToolCompleted;
+    get outputCompleted(): boolean {
+      return outputCompleted;
     },
     getUsage(): TokenUsage {
       return { ...totalUsage };
@@ -1811,11 +1811,7 @@ export function installSessionBridge(
       // A trailing "aborted" turn AFTER a successful `output` is the
       // runner's own early-stop, not a failure.
       if (
-        isRunnerEarlyStopAbort(
-          lastAssistantStopReason,
-          lastAssistantErrorMessage,
-          terminalToolCompleted,
-        )
+        isRunnerEarlyStopAbort(lastAssistantStopReason, lastAssistantErrorMessage, outputCompleted)
       ) {
         return undefined;
       }

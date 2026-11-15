@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
+  `agentManifestSchema` does not declare it: `runtime_tools` is an undeclared key, which nothing
+  reads. The option that tells the author and stored directions apart covers the retired
+  `dependencies` keys only, and is renamed: `RetiredRuntimeToolsPolicy` → **`RetiredDependencyKeysPolicy`**,
+  `ValidateManifestOptions.retiredRuntimeTools` /
+  `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredDependencyKeys`**, with the values
+  `"reject"` and **`"tolerate"`** (was `"drop"`).
+
+- **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
+  #2199). `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
+  (`"^1.0.0"`) is added when
+  `dependencies.integrations` does not name that id, and
+  `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
+  table names it; the caller's own entries are kept. An absent `output` defaults to the open
+  object schema. The `runtime_tools` default and the refusal of a non-array
+  `manifest.runtime_tools` are removed.
+
+- **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
+  the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
+  resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
+  chat injects the bytes `resources/read` answers. A `loadEnforcedChatSkills` implementation
+  returns both. (#2175)
+
 - **BREAKING: `@appstrate/core/runtime-tool-defs` is removed** (#2197, #2199), with
   `buildRuntimeToolDefs`, `BuildRuntimeToolDefsOptions`, `buildOutputToolDef`,
   `buildPublishFileDef`,
@@ -35,36 +58,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DrainLogger`. `SidecarLaunchSpec.outputSchema` and `SidecarLaunchSpec.runtimeTools`
   (`@appstrate/core/sidecar-types`) are removed.
 
-- **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
-  `agentManifestSchema` does not declare it, and `dropRetiredRuntimeTools`,
-  `ValidateManifestResult.droppedRuntimeTools` and `ParsedPackageZip.droppedRuntimeTools` are
-  removed: `runtime_tools` is an undeclared key, which nothing reads. The option that tells the
-  author and stored directions apart covers the retired `dependencies` keys only, and is
-  renamed: `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**,
-  `ValidateManifestOptions.retiredRuntimeTools` /
-  `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredVocabulary`**, with the values
-  `"reject"` and **`"tolerate"`** (was `"drop"`).
-
-- **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
-  #2199). `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
-  (`"^1.0.0"`) is added when
-  `dependencies.integrations` does not name that id, and
-  `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
-  table names it; the caller's own entries are kept. An absent `output` defaults to the open
-  object schema. The `runtime_tools` default and the refusal of a non-array
-  `manifest.runtime_tools` are removed.
-
-- **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
-  the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
-  resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
-  chat injects the bytes `resources/read` answers. A `loadEnforcedChatSkills` implementation
-  returns both. (#2175)
+- **BREAKING: `dropRetiredRuntimeTools`, `ValidateManifestResult.droppedRuntimeTools` and
+  `ParsedPackageZip.droppedRuntimeTools` are removed** (`@appstrate/core/validation`, #2199):
+  nothing drops `runtime_tools` any more, since nothing reads it.
 
 ### Added
 
 - **`@appstrate/core/integration`**: `platformToolName(tool)`, the exposed name of a tool of
   `@appstrate/platform`; `getIntegrationSourceKind` and `getRemoteSource`, the readers of an
   integration manifest's `source`.
+
+- **`INLINE_MANIFEST_RULE`** (`@appstrate/core/run-and-wait-client`, #2203): the sentence
+  describing the defaults `run_and_wait` applies to an inline manifest, for the tool descriptions
+  and prompts that state it. (#2203)
 
 - **`PLATFORM_INTEGRATION_ID`** and **`PLATFORM_INTEGRATION_RANGE`**
   (`@appstrate/core/integration`, #2199): `"@appstrate/platform"`, the id of the system

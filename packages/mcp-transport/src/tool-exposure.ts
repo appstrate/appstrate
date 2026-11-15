@@ -3,8 +3,9 @@
 
 /**
  * How an integration's upstream tool reaches the agent, shared by every host that exposes MCP
- * tools to it (the sidecar's McpHost, the CLI's remote integrations): which upstream tools are
- * admitted, and the descriptor the model sees under the exposed `{namespace}__{tool}` name.
+ * tools to it (the sidecar's McpHost, the CLI's remote integrations): which upstream tools the
+ * agent's selection admits ({@link toolExclusion}), then the descriptor the model sees under the
+ * exposed `{namespace}__{tool}` name ({@link exposeTool}).
  */
 
 import { allocateMcpToolName } from "@appstrate/core/naming";
@@ -17,27 +18,22 @@ import {
 } from "./sanitize.ts";
 
 /** Why an upstream tool is not exposed by {@link exposeTool}. */
-export type ToolExposureExclusion =
-  "allowlist" | "hidden_tools" | "schema_too_large_after_sanitisation" | "name_collision";
+export type ToolExposureExclusion = "schema_too_large_after_sanitisation" | "name_collision";
 
 export interface ToolExposureOptions {
   namespace: string;
-  allowlist: ReadonlySet<string> | null;
-  hidden: ReadonlySet<string> | null;
   /** Whether an exposed name is held already. */
   isTaken: (name: string) => boolean;
 }
 
 /**
- * The descriptor the model sees for the upstream `tool`, or why it is not exposed: excluded by
- * the selection, too large once sanitised, or left without a free name.
+ * The descriptor the model sees for the upstream `tool` the selection admits, or why it is not
+ * exposed: too large once sanitised, or left without a free name.
  */
 export function exposeTool(
   tool: Tool,
   opts: ToolExposureOptions,
 ): { descriptor: Tool } | { exclusion: ToolExposureExclusion } {
-  const excluded = toolExclusion(tool.name, opts.allowlist, opts.hidden);
-  if (excluded) return { exclusion: excluded };
   const sanitised = sanitiseToolDescriptor(tool);
   if (!sanitised) return { exclusion: "schema_too_large_after_sanitisation" };
   let name: string;

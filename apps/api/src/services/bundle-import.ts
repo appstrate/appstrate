@@ -376,7 +376,7 @@ export async function importBundle(
         // rejecting here would abort the ENTIRE bundle (every co-packaged skill
         // and integration with it), with no recourse for the operator. The key
         // is tolerated and surfaced as an import warning below.
-        return parsePackageZip(getReconstructedPackage(), { retiredVocabulary: "tolerate" });
+        return parsePackageZip(getReconstructedPackage(), { retiredDependencyKeys: "tolerate" });
       } catch (err) {
         throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
       }
@@ -456,7 +456,7 @@ export async function importBundle(
     }
 
     // READ direction (see the parse above): this manifest was validated with
-    // `retiredVocabulary: "tolerate"`, so a retired
+    // `retiredDependencyKeys: "tolerate"`, so a retired
     // AFPS 1.x `dependencies` key (`tools` / `providers`) is tolerated instead
     // of rejected. It is inert — nothing reads it — so the import succeeds; the
     // warning is how the operator learns the dependencies declared under it
@@ -757,13 +757,15 @@ function assertBundleScopesNotReserved(bundle: Bundle): void {
 }
 
 /**
- * Refuse a runtime-bound integration anywhere in the bundle, dependencies included: the binding
- * makes the platform serve the integration's tools with the run's authority, so only a system
- * package may carry the key (`findRuntimeBinding`). Unlike the root-only gates, a dependency is judged too — no stored
- * package can carry the key, so the refusal never blocks a bundle of already-published copies.
+ * Refuse a runtime-bound dependency integration (`findRuntimeBinding`; the root is judged by
+ * {@link assertBundleRootConforms}): the binding makes the platform serve its tools with the
+ * run's authority, so only a system package may carry the key. Unlike the root-only gates, a
+ * dependency is judged — no stored package can carry the key, so the refusal never blocks a
+ * bundle of already-published copies.
  */
 function assertBundleRuntimeBindingsSystemOnly(bundle: Bundle): void {
   for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root || pkg.manifest.type !== "integration") continue;
     const packageId = parsePackageIdentity(identity)?.packageId;
     if (packageId && isSystemPackage(packageId)) continue;
     assertNoManifestViolations(findRuntimeBinding(pkg.manifest), `${identity}: `);

@@ -17,7 +17,7 @@
  *
  * On failure this throws {@link ApiError} with one of the codes:
  *   - 400 `missing_run_id`
- *   - 404 `run_not_found`
+ *   - 404 `not_found`
  *   - 409 `message_replayed`      (upload and call guards only — see below)
  *   - 410 `run_sink_closed` | `run_sink_expired`
  *   - 429 `rate_limited`

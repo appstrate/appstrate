@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+import { beforeEach, describe, it, expect } from "bun:test";
 import {
   bootIntegrations,
   connectPlatformIntegration,
@@ -9,7 +9,11 @@ import {
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
-import { handlerFetch, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
+import {
+  forgetProtocolEras,
+  handlerFetch,
+  legacyMcpHandler,
+} from "@appstrate/mcp-transport/testing";
 
 /**
  * An integration bound to the runtime (`server.platformEndpoint`): the sidecar
@@ -37,13 +41,21 @@ const log: AppstrateToolDefinition = {
   handler: async () => ({ content: [{ type: "text", text: "Logged" }] }),
 };
 
+// A remembered era would hide a probe.
+beforeEach(() => forgetProtocolEras());
+
 describe("connectPlatformIntegration", () => {
   it("opens {platformApiUrl}/internal/mcp with the run token on every request", async () => {
     const serve = handlerFetch(legacyMcpHandler({ tools: [log] }));
-    const seen: { url: string; auth: string | null }[] = [];
+    const seen: { url: string; auth: string | null; rpcMethod?: string }[] = [];
     const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const request = new Request(String(input), init);
-      seen.push({ url: request.url, auth: request.headers.get("authorization") });
+      const body = await request.clone().text();
+      seen.push({
+        url: request.url,
+        auth: request.headers.get("authorization"),
+        ...(body ? { rpcMethod: (JSON.parse(body) as { method?: string }).method } : {}),
+      });
       return serve(request);
     }) as typeof fetch;
 
@@ -58,7 +70,12 @@ describe("connectPlatformIntegration", () => {
     } finally {
       await client.close();
     }
-    expect(seen.length).toBeGreaterThan(0);
+    // Built by `createMcpServer`, legacy by construction: no era probe.
+    expect(seen.flatMap((request) => request.rpcMethod ?? [])).toEqual([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+    ]);
     for (const request of seen) {
       expect(request.url).toBe(`${PLATFORM_API_URL}/internal/mcp`);
       expect(request.auth).toBe("Bearer run-token");

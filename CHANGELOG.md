@@ -21,28 +21,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the window** (#2197,
   #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools it had,
   an agent that selected `output` without an `output.schema` has no `output` tool, and nothing
-  reports it. In order:
-  1. Rehearse it on a restored production dump.
-  2. Wait for zero `running` runs (a container started before the deploy posts its notes, pins
-     and logs in a finalize body this release does not read), stop the app, `pg_dump`.
-  3. Run the migrations (on the embedded database, start the platform once and stop it).
-  4. With the platform's whole environment loaded (`set -a && . ./.env && set +a`;
-     `PGLITE_DATA_DIR` names an embedded database):
-     `bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>` (dry run), then
-     the same with `--apply`. `--before` is an RFC 3339 instant with `Z` or an offset, after the
-     app stopped and before it restarts (the `pg_dump` time, for example), and the SAME value on
-     every re-run. Too early, and the agents saved after it without the old field keep no
-     `recall_memory` / `run_history`; a later value on a re-run adds `@appstrate/platform` back
-     to agents whose authors removed it after the release.
-  5. While it lists a malformed manifest it exits 1: that agent is left untouched and runs
-     without the tools (the other rewrites stay committed). Fix each by hand and re-run with the
-     same `--before`.
-  6. Start the app.
-
-  An agent that selected `output` without a schema gains the open object schema: it keeps the
-  `output` tool and its corrective turn, and the platform prompt now tells the model it MUST
-  call `output` exactly once, last; nothing is required, so a run that never calls it still
-  succeeds. Rollback: restore the `pg_dump`. Detail in `scripts/migration/README.md`.
+  reports it. It runs with the release's other window scripts, after the migrations and before
+  the app starts, in the order and with the commands of `scripts/migration/README.md`, "Release
+  beta.69" (embedded database included: the backup is a copy of the stopped `PGLITE_DATA_DIR`).
+  Rehearse it on a restored production dump first.
+  - `--before` is required: the wall-clock instant once the app is stopped, in RFC 3339 with `Z`
+    or an offset, and the SAME value on every re-run.
+  - It exits 1 while it lists a malformed manifest: that agent is left untouched and runs
+    without the tools. Fix each by hand and re-run with the same `--before`.
+  - An agent that selected `output` without a schema gains the open object schema, so it keeps
+    the `output` tool.
+  - Rollback: restore the backup.
 
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
@@ -160,12 +149,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `unread_count` on `GET /api/agents`) and
     `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
-- **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). The key binds an
-  integration to the runtime that executes the run: the platform serves its tools with the run's
-  authority (the run token is never sent to the integration's own endpoint), so only a system
-  package may declare it. Creating or updating an organization integration that carries it (its
-  manifest or its `manifest.json` file), forking one, and importing a bundle in which any
-  non-system package carries it, dependencies included, answer `400`.
+- **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). Only a system
+  package may bind an integration to the runtime, whose tools the platform serves with the run's
+  authority. Saving, forking or importing an organization integration that carries the key now
+  answers `400`.
 
 - **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
   to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP

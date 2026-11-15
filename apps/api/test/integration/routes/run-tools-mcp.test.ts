@@ -17,7 +17,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
-import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedEndUser,
+  seedRun,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { addMemory, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { errorHandler } from "../../../src/middleware/error-handler.ts";
@@ -182,6 +188,8 @@ describe("run MCP server", () => {
         ["log", { level: "info", message: "x".repeat(2001) }],
         ["note", { content: "x".repeat(2001) }],
         ["run_history", { limit: 51 }],
+        ["recall_memory", { limit: 51 }],
+        ["recall_memory", { q: "x".repeat(2001) }],
       ] as const) {
         const result = await callTool(path, bearer(run.id), tool, args);
         expect(result.isError).toBe(true);
@@ -241,6 +249,29 @@ describe("run MCP server", () => {
       expect(byContent("team fact")).toMatchObject({ actorType: "shared", actorId: null });
       expect(byContent({ tone: "dry" })).toMatchObject({ key: "persona", pinned: true });
       expect(rows).toHaveLength(3);
+    });
+
+    it("`log`, `note`, `pin` and `notify` write in the run's space, not the agent's home", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId });
+      await seedSpacePackage(space.id, pkgId);
+      const run = await seedRunningRun({ spaceId: space.id });
+      for (const [tool, args] of [
+        ["log", { level: "info", message: "elsewhere" }],
+        ["note", { content: "fact" }],
+        ["pin", { key: "persona", content: "dry" }],
+        ["notify", { title: "t", message: "m" }],
+      ] as const) {
+        expect((await callTool(path, bearer(run.id), tool, args)).isError).toBeUndefined();
+      }
+      const memories = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.runId, run.id));
+      expect(memories.map((r) => r.spaceId)).toEqual([space.id, space.id]);
+      const sent = await db.select().from(notifications).where(eq(notifications.runId, run.id));
+      expect(sent.map((r) => r.spaceId)).toEqual([space.id]);
+      // A run log has no space column: it belongs to the run, which lives in that space.
+      expect(await db.select().from(runLogs).where(eq(runLogs.runId, run.id))).toHaveLength(1);
     });
 
     it('`pin("checkpoint")` is read back by the next run\'s `run_history`', async () => {
@@ -305,6 +336,44 @@ describe("run MCP server", () => {
       const result = await callTool(path, bearer(run.id), "recall_memory", {});
       const body = JSON.parse(result.content[0]!.text) as { memories: unknown[] };
       expect(body.memories).toEqual([]);
+    });
+
+    it("`run_history` and `recall_memory` never return another member's run or archive", async () => {
+      const other = await memberContext(ctx, "member");
+      const theirs = await seedRunningRun({
+        userId: other.user.id,
+        status: "success",
+        checkpoint: { secret: true },
+      });
+      await addMemory(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "user", id: other.user.id },
+        "secret member memory",
+        theirs.id,
+      );
+      const run = await seedRunningRun();
+      const history = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      expect((JSON.parse(history.content[0]!.text) as { data: unknown[] }).data).toEqual([]);
+      const recalled = await callTool(path, bearer(run.id), "recall_memory", {});
+      expect((JSON.parse(recalled.content[0]!.text) as { memories: unknown[] }).memories).toEqual(
+        [],
+      );
+    });
+
+    it("`run_history` without `fields` returns the checkpoint and not the result", async () => {
+      await seedRunningRun({ status: "success", checkpoint: { n: 1 }, result: { output: 1 } });
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "run_history", {});
+      const body = JSON.parse(result.content[0]!.text) as {
+        data: Array<Record<string, unknown>>;
+      };
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({ checkpoint: { n: 1 } });
+      expect(body.data[0]).not.toHaveProperty("result");
     });
 
     it("`run_history` excludes the current run and honours `limit` and `fields`", async () => {
@@ -451,6 +520,7 @@ describe("run MCP server", () => {
       const run = await seedRunningRun();
       const result = await callTool(path, bearer(run.id), "pin", { key: "Bad Key", content: 1 });
       expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("key: ");
       const rows = await db
         .select()
         .from(packagePersistence)

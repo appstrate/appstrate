@@ -33,7 +33,7 @@ function endTurn(session: FakeSession, msg: unknown): void {
   session.emit({ type: "message_end" });
 }
 
-/** Successful `output` tool call — the terminal-tool early stop. */
+/** Successful `output` tool call — the early stop. */
 function callOutput(session: FakeSession): void {
   session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
 }
@@ -144,7 +144,7 @@ describe("maybeRepromptForOutput — guards", () => {
     expect(repromptEvents(sink.events)).toHaveLength(0);
   });
 
-  it("does NOT re-prompt a session whose last turn ended aborted (no terminal tool completed)", async () => {
+  it("does NOT re-prompt a session whose last turn ended aborted (no `output` completed)", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });

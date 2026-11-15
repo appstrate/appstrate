@@ -36,10 +36,7 @@
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
-import {
-  isOfferedSystemIntegration,
-  listSystemIntegrationIds,
-} from "./integration-client-registry.ts";
+import { listSystemIntegrationIds } from "./integration-client-registry.ts";
 import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 
 /** The catalog columns the rule reads — every caller already has them. */
@@ -49,6 +46,11 @@ export interface ActivatablePackage {
   source: string | null;
 }
 
+/** The integration ids active without a row: the offered ones and the runtime-bound ones. */
+function activeWithoutRowIntegrationIds(): ReadonlySet<string> {
+  return new Set([...listSystemIntegrationIds(), ...listRuntimeBoundSystemIntegrationIds()]);
+}
+
 /**
  * Is the package active in a space that holds NO placement row for it?
  *
@@ -56,11 +58,7 @@ export interface ActivatablePackage {
  * package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
-  if (pkg.type === "integration") {
-    return (
-      isOfferedSystemIntegration(pkg.id) || listRuntimeBoundSystemIntegrationIds().includes(pkg.id)
-    );
-  }
+  if (pkg.type === "integration") return activeWithoutRowIntegrationIds().has(pkg.id);
   return pkg.source === "system";
 }
 
@@ -87,7 +85,7 @@ export function isActiveHere(
  * twin instead of approximating it with `source = 'system'`.
  */
 export function activeHereSql() {
-  const offered = [...listSystemIntegrationIds(), ...listRuntimeBoundSystemIntegrationIds()];
+  const offered = [...activeWithoutRowIntegrationIds()];
   const systemDefault = or(
     and(ne(packages.type, "integration"), eq(packages.source, "system")),
     and(

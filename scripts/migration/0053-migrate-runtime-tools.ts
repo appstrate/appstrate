@@ -5,21 +5,20 @@
  * 0053 — every stored agent manifest moved from `runtime_tools` to the
  * `@appstrate/platform` integration (#2197, #2199):
  *
- *   set -a && . ./.env && set +a && \
- *     bun scripts/migration/0053-migrate-runtime-tools.ts --before <RFC 3339 instant> [--apply]
+ *   bun scripts/migration/0053-migrate-runtime-tools.ts --before <RFC 3339 instant> [--apply]
  *
- * Run in the window of the release that ships #2199, once no run is `running`, the app stopped,
- * `pg_dump` first, after the migrations. Dry run by default (rolled back); `--apply` commits. One
- * transaction. It needs the platform's whole environment (`@appstrate/db/client` validates it),
- * targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`),
- * and prints the database it targets before anything else.
+ * Where and with which environment it runs: `scripts/migration/README.md`, "Where each command
+ * runs"; when: "Release beta.69" there, which orders the window scripts. Dry run by default
+ * (rolled back); `--apply` commits. One transaction. It needs the platform's whole environment
+ * (`@appstrate/db/client` validates it), targets `DATABASE_URL` or `PGLITE_DATA_DIR`
+ * (`lib/database-target.ts`), and prints the database it targets before anything else.
  *
  * `--before` is required: an RFC 3339 instant with `Z` or a numeric offset
- * (`2026-11-15T09:30:00Z`), after the app stopped and before it restarts (the `pg_dump` time,
- * for example), and the SAME value on every re-run. Anything else — a date alone, no offset, a
- * future instant — exits 2. Too early, and the agents saved after it without the old field keep
- * no `recall_memory` / `run_history`; a later value on a re-run adds `@appstrate/platform` back
- * to agents whose authors removed it after the release.
+ * (`2026-11-15T09:30:00Z`): the wall-clock instant once the platform is stopped (step 1 of
+ * "Release beta.69"), and the SAME value on every re-run. Anything else — a date alone, no
+ * offset, an impossible date, a future instant — exits 2. Too early, and the agents saved after
+ * it without the old field keep no `recall_memory` / `run_history`; a later value on a re-run
+ * adds `@appstrate/platform` back to agents whose authors removed it after the release.
  *
  * `log`, `note`, `pin`, `recall_memory`, `run_history` and `notify` are tools of
  * the `@appstrate/platform` system integration: an agent receives them by
@@ -39,12 +38,15 @@
  *   3. a `runtime_tools` selecting `output` without a non-empty `output.schema`
  *      gets `output.schema` = `{ type: "object", properties: {},
  *      additionalProperties: true }`, the open schema an inline run receives
- *      (`run-and-wait-client.ts`): the agent keeps its `output` tool and the one
- *      corrective turn a run that ends without calling it already got, and the
- *      platform prompt now tells the model it MUST call `output` exactly once, as
- *      its final action; the schema requires no property, so a run that never
- *      calls it still succeeds;
+ *      (`run-and-wait-client.ts`): the agent keeps its `output` tool, a run that
+ *      ends without calling it gets one corrective turn, and the platform prompt
+ *      tells the model to call `output` exactly once, as its final action; the
+ *      schema requires no property, so a run that never calls it still succeeds;
  *   4. `runtime_tools` is removed.
+ *
+ * A rewritten draft's `lock_version` is incremented with it, as every draft write does: an
+ * editor tab opened before the window then saves against a stale `If-Match` and is refused,
+ * instead of writing the pre-migration manifest back.
  *
  * Why `--before`: an agent without the dependency is a legitimate state once its
  * author removes it, so that arm is bounded to the manifests that predate the
@@ -59,16 +61,19 @@
  * `dependencies.integrations`, `integrations_configuration` or its
  * `"@appstrate/platform"` entry present but not an object, or `output` not an
  * object when step 3 applies — is left untouched and listed, and its agent runs
- * without the platform tools. While one remains the script exits 1, in both
- * modes; with `--apply` the rewrite of the others stays committed. Fix each by
- * hand, then re-run with the same `--before`. Per store, the script prints how
- * many manifests still carry `runtime_tools` and how many written before
- * `--before` still lack the dependency: each is one of those listed.
+ * without the platform tools. Fix each by hand, then re-run with the same
+ * `--before`. Per store, the script prints how many manifests still carry
+ * `runtime_tools` and how many written before `--before` still lack the
+ * dependency: each is one of those listed.
  *
  * Published archives are not rewritten: a run of a published version and its
  * bundle export take the jsonb manifest of the version row
  * (`resolveAgentRunVersion`, `registry-run-resolver.ts`, `withCatalogManifest`);
  * the archive supplies the prompt and the other files.
+ *
+ * Exit codes: 2, refused arguments or neither database variable set (nothing opened); 1, either
+ * a failure (nothing committed) or a malformed manifest left (with `--apply`, the rewrite of the
+ * others committed); 0, clean.
  *
  * Rehearsal: exercised on PGlite against seeded manifests
  * (`apps/api/test/integration/db/runtime-tools-migration.test.ts`); not yet run
@@ -84,7 +89,7 @@ import { table } from "./lib/report-table.ts";
 
 class DryRunRollback extends Error {}
 
-/** The two stores of an agent manifest: its column, when it was written, and how a row is named. */
+/** The two stores of an agent manifest: column, write time, row label, what else a rewrite sets. */
 const STORES = [
   {
     table: "package_versions",
@@ -92,6 +97,7 @@ const STORES = [
     writtenAt: "created_at",
     rowLabel: `package_id || '@' || version`,
     key: "version",
+    alsoSet: "",
   },
   {
     table: "packages",
@@ -99,6 +105,8 @@ const STORES = [
     writtenAt: "updated_at",
     rowLabel: `id || ' (draft)'`,
     key: "draft",
+    /** The draft's `If-Match` token (`sendPackageDetail`), advanced like every draft write. */
+    alsoSet: ", lock_version = lock_version + 1",
   },
 ] as const;
 
@@ -218,7 +226,7 @@ export async function runMigrateRuntimeTools(options: {
         const outputSchemaAdded = await n(`SELECT count(*)::int AS n FROM ${store.table}
           WHERE ${target} AND ${wellFormed(m)} AND ${gainsOutputSchema(m)}`);
         const rewritten = await n(`WITH r AS (UPDATE ${store.table}
-            SET ${m} = ${withPlatform(m)}
+            SET ${m} = ${withPlatform(m)}${store.alsoSet}
             WHERE ${target} AND ${wellFormed(m)}
             RETURNING 1)
           SELECT count(*)::int AS n FROM r`);
@@ -278,7 +286,7 @@ export async function runMigrateRuntimeTools(options: {
 
 /** RFC 3339 date-time with a `Z` or numeric offset (§5.6), seconds required, fraction optional. */
 const RFC3339_INSTANT =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
 /**
  * `--before`, or why it is refused: an RFC 3339 instant with `Z` or a numeric offset, a real
@@ -296,78 +304,72 @@ export function parseBefore(
       refusal: `--before ${value} is not an RFC 3339 instant with Z or an offset (2026-11-15T09:30:00Z)`,
     };
   }
-  const [y, mo, d, h, mi, s] = match.slice(1, 7).map(Number) as [
-    number,
-    number,
-    number,
-    number,
-    number,
-    number,
-  ];
-  const wall = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
-  const offsetHours = Number(match[9] ?? 0);
-  const offsetMinutes = Number(match[10] ?? 0);
+  const time = Date.parse(value);
+  const offsetMinutes =
+    (match[1] === "-" ? -1 : 1) * (Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0));
+  // `Date.parse` rolls an impossible date over (30 February reads as 2 March, 24:00 as the next
+  // day): the instant, read back at its own offset, must give the wall clock written.
   if (
-    wall.getUTCFullYear() !== y ||
-    wall.getUTCMonth() !== mo - 1 ||
-    wall.getUTCDate() !== d ||
-    wall.getUTCHours() !== h ||
-    wall.getUTCMinutes() !== mi ||
-    wall.getUTCSeconds() !== s ||
-    offsetHours > 23 ||
-    offsetMinutes > 59
+    Number.isNaN(time) ||
+    new Date(time + offsetMinutes * 60_000).toISOString().slice(0, 19) !== value.slice(0, 19)
   ) {
     return { refusal: `--before ${value} is not a valid date and time` };
   }
-  const sign = match[8] === "-" ? -1 : 1;
-  const fraction = match[7] ? Math.trunc(Number(match[7]) * 1000) : 0;
-  const before = new Date(
-    wall.getTime() + fraction - sign * (offsetHours * 60 + offsetMinutes) * 60_000,
-  );
-  if (before.getTime() > now) return { refusal: `--before ${value} is in the future` };
-  return { before };
+  if (time > now) return { refusal: `--before ${value} is in the future` };
+  return { before: new Date(time) };
 }
 
 const USAGE =
   "usage: bun scripts/migration/0053-migrate-runtime-tools.ts --before <RFC 3339 instant, the same on every run> [--apply]";
 
-function exitWithUsage(reason: string): never {
-  process.stdout.write(`${reason} — ${USAGE}\n`);
-  process.exit(2);
-}
-
-/** The arguments, or exit 2 with the usage. */
-function parseArguments(): { apply: boolean; before: Date } {
+/** The arguments, or why they are refused. */
+export function parseArguments(
+  args: string[],
+  now: number,
+): { apply: boolean; before: Date } | { refusal: string } {
   let values: { apply?: boolean; before?: string };
   try {
     ({ values } = parseArgs({
-      args: process.argv.slice(2),
+      args,
       options: { apply: { type: "boolean" }, before: { type: "string" } },
       strict: true,
     }));
   } catch (error) {
-    exitWithUsage(getErrorMessage(error));
+    return { refusal: getErrorMessage(error) };
   }
-  const parsed = parseBefore(values.before, Date.now());
-  if ("refusal" in parsed) exitWithUsage(parsed.refusal);
-  return { apply: values.apply === true, before: parsed.before };
+  const parsed = parseBefore(values.before, now);
+  return "refusal" in parsed ? parsed : { apply: values.apply === true, before: parsed.before };
+}
+
+/** The exit code of an outcome: refused arguments, a failure, or the counts of a completed run. */
+export function exitCode(
+  outcome: { refusal: string } | { failure: unknown } | Record<Store["key"], StoreCounts>,
+): 0 | 1 | 2 {
+  if ("refusal" in outcome) return 2;
+  if ("failure" in outcome) return 1;
+  return STORES.some((s) => outcome[s.key].malformed.length > 0) ? 1 : 0;
 }
 
 if (import.meta.main) {
-  const { apply, before } = parseArguments();
+  const args = parseArguments(process.argv.slice(2), Date.now());
+  if ("refusal" in args) {
+    process.stdout.write(`${args.refusal} — ${USAGE}\n`);
+    process.exit(exitCode(args));
+  }
+  const { apply, before } = args;
   exitUnlessDatabaseNamed();
-  let code = 1;
+  let outcome: Parameters<typeof exitCode>[0];
   let closeDb: (() => Promise<void>) | undefined;
   try {
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0053 — ${apply ? "APPLY" : "DRY RUN"}, before ${before.toISOString()}`);
-    const result = await runMigrateRuntimeTools({ apply, before, out });
-    code = STORES.some((s) => result[s.key].malformed.length > 0) ? 1 : 0;
-  } catch (error) {
-    process.stdout.write(`0053: FAILED, nothing committed — ${getErrorMessage(error)}\n`);
+    outcome = await runMigrateRuntimeTools({ apply, before, out });
+  } catch (failure) {
+    outcome = { failure };
+    process.stdout.write(`0053: FAILED, nothing committed — ${getErrorMessage(failure)}\n`);
   } finally {
     await closeDb?.();
   }
-  process.exit(code);
+  process.exit(exitCode(outcome));
 }

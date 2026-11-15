@@ -445,8 +445,8 @@ describe("PiRunner.run — timeout watchdog names the cause for a HUMAN", () => 
 });
 
 describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
-  /** Complete a terminal tool, which flips the bridge's early-stop flag. */
-  function completeTerminalTool(session: FakeSession): void {
+  /** Complete `output`, which flips the bridge's early-stop flag. */
+  function completeOutput(session: FakeSession): void {
     session.emit({ type: "tool_execution_end", toolName: "output", toolCallId: "c1" });
   }
 
@@ -458,7 +458,7 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
       outputRequired: true,
     });
-    completeTerminalTool(session);
+    completeOutput(session);
     endTurn(session, {
       role: "assistant",
       stopReason: "aborted",
@@ -482,14 +482,14 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
       errorMessage: "upstream 503",
       content: [],
     });
-    completeTerminalTool(session);
+    completeOutput(session);
     endTurn(session, { role: "assistant", stopReason: "aborted", content: [] });
     expect(handle.getLastUpstreamError()?.message).toBe("upstream 503");
   });
 
-  it("STILL latches a provider-side abort when no terminal tool ran", () => {
-    // The guard is gated on `terminalToolCompleted` — an abort with no
-    // terminal tool behind it is a genuine upstream failure, not our own stop.
+  it("STILL latches a provider-side abort when no `output` ran", () => {
+    // The guard is gated on `outputCompleted` — an abort with no
+    // `output` behind it is a genuine upstream failure, not our own stop.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
       outputRequired: true,

@@ -22,7 +22,8 @@ import { forgetProtocolEras, legacyMcpHandler } from "@appstrate/mcp-transport/t
 import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
 import { buildRemoteMcpExtensions } from "../src/commands/run/remote-mcp.ts";
 import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
-import { cliPromptInputs } from "../src/commands/run.ts";
+import { buildIntegrationTools, cliPromptInputs } from "../src/commands/run.ts";
+import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 
 const DOCS = "@acme/docs";
 
@@ -323,6 +324,65 @@ describe("run --local --integrations none", () => {
   });
 });
 
+describe("run --local — the runner's tool factories", () => {
+  // `factories` is what the runtime-ready event counts as `extensions`.
+  it("holds the api_call tools and the remote MCP tools together", async () => {
+    const MAIL = "@acme/mail";
+    const base = makeBundle();
+    const root = base.packages.get(base.root)!;
+    const packages = new Map<string, unknown>(base.packages);
+    packages.set(base.root, {
+      ...root,
+      manifest: {
+        ...root.manifest,
+        dependencies: { integrations: { [DOCS]: "^1.0.0", [MAIL]: "^1.0.0" } },
+        integrations_configuration: { [MAIL]: { tools: ["api_call"] } },
+      },
+    });
+    packages.set(`${MAIL}@1.0.0`, {
+      identity: `${MAIL}@1.0.0`,
+      manifest: {
+        name: MAIL,
+        version: "1.0.0",
+        schema_version: "0.1",
+        type: "integration",
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { main: {} } } },
+        auths: {
+          main: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/**"],
+            credentials: { schema: {} },
+            delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+          },
+        },
+      },
+      files: new Map(),
+      integrity: "",
+    });
+    const resolver: IntegrationApiCallResolver = {
+      resolve: async (refs) =>
+        refs.map((ref) => ({
+          name: `${ref.name}__api_call`,
+          description: ref.name,
+          parameters: { type: "object" },
+          execute: async () => ({ content: [] }),
+        })),
+    };
+    const tools = await buildIntegrationTools({
+      ...runOptions({ ...base, packages } as unknown as Bundle),
+      integrationResolver: resolver,
+    });
+    try {
+      expect(tools.apiCall.factories).toHaveLength(1);
+      expect(tools.remoteMcp.factories).toHaveLength(2);
+      expect(tools.factories).toEqual([...tools.apiCall.factories, ...tools.remoteMcp.factories]);
+    } finally {
+      await tools.remoteMcp.close();
+    }
+  });
+});
+
 /** An agent declaring one unauthenticated remote integration per URL, in this order. */
 function makeMultiBundle(urls: readonly string[]): Bundle {
   const base = makeBundle();
@@ -366,7 +426,7 @@ describe("run --local — several remote integrations", () => {
       hostname: "127.0.0.1",
       port: 0,
       fetch: async (req) => {
-        await Bun.sleep(150);
+        await Bun.sleep(25);
         return handler(req);
       },
     });
@@ -390,7 +450,7 @@ describe("run --local — several remote integrations", () => {
         `http://127.0.0.1:${silent.port}/mcp`,
         serverUrl,
       ]);
-      const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 1_000 });
+      const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 300 });
       try {
         expect(maxInFlight).toBe(2);
         expect(tools.map((t) => t.name)).toEqual(["acme_server0__a", "acme_server3__a"]);
@@ -419,6 +479,8 @@ describe("run --local — integration bound to the runtime", () => {
   };
   interface SeenRequest {
     method: string;
+    /** The JSON-RPC method of a POST. */
+    rpcMethod?: string;
     msgId: string | null;
     authorization: string | null;
     verified: boolean;
@@ -447,6 +509,7 @@ describe("run --local — integration bound to the runtime", () => {
           }).ok;
         seen.push({
           method: req.method,
+          ...(body ? { rpcMethod: (JSON.parse(body) as { method?: string }).method } : {}),
           msgId,
           authorization: req.headers.get("authorization"),
           verified,
@@ -490,6 +553,13 @@ describe("run --local — integration bound to the runtime", () => {
     );
     // A fresh message id per request.
     expect(new Set(posts.map((request) => request.msgId)).size).toBe(posts.length);
+    // The server is legacy by construction: no era probe spends a signed request.
+    expect(posts.map((request) => request.rpcMethod)).toEqual([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call",
+    ]);
   });
 
   it("refuses the integration when the signature is made with another secret", async () => {
@@ -502,7 +572,7 @@ describe("run --local — integration bound to the runtime", () => {
       {
         id: DOCS,
         reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error,
-        detail: expect.stringContaining("401"),
+        detail: expect.stringContaining("invalid signature"),
       },
     ]);
   });

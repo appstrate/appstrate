@@ -352,11 +352,6 @@ export function listSystemIntegrationIds(): string[] {
   return [...ensureInitialized().ids];
 }
 
-/** Is `id` one of {@link listSystemIntegrationIds}, without copying the list? */
-export function isOfferedSystemIntegration(id: string): boolean {
-  return ensureInitialized().ids.has(id);
-}
-
 /** Resolve a system client by its id, or `null` when unknown. */
 export function getSystemIntegrationClientById(
   id: string,

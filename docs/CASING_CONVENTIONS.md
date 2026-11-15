@@ -283,7 +283,7 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 **Files**: `packages/afps-runtime/src/runner/event-builders.ts`, `packages/afps-runtime/src/types/run-result.ts`
 
-**Rule**: event envelopes and payloads are camelCase — `BaseEnvelope`: `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
+**Rule**: event envelopes and payloads are camelCase — the `RunEvent` envelope (`@afps-spec/types`, re-exported by `packages/afps-runtime/src/types/index.ts`): `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
 
 The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{runId}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
 

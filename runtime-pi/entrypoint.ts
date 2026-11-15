@@ -430,10 +430,8 @@ try {
 await removeAgentPackage({ workspace: WORKSPACE, die });
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
-// No extension count here: `extensionFactories` is still empty at this point —
-// nothing is pushed into it until Phase C/D, ~125 lines below — so the count
-// was structurally always 0 and the breadcrumb was reporting the declaration,
-// not the load. The honest total is emitted on `runtime ready`.
+// No extension count here: `extensionFactories` stays empty until the sidecar's
+// MCP tools are wired below. The total is emitted on `runtime ready`.
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
 // The agent's declared output schema: its presence gives the run the `output`
@@ -444,11 +442,10 @@ const outputSchema = readDeclaredOutputSchema(bundle.packages.get(bundle.root)?.
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
 //   - `{ns}__api_call({ method, target, … })` — credential-injecting proxy.
-//   - `{ns}__{tool}` — every tool of a spawned, remote or platform-bound
-//     integration (`appstrate_platform__recall_memory`, …).
-// The agent LLM never sees the sidecar URL; the contract ("agent never
-// talks to the sidecar directly") is enforced via the env-var deletion
-// in 2d below.
+//   - `{ns}__{tool}` — every tool of a spawned or remote integration, the
+//     one bound to the runtime included (`appstrate_platform__recall_memory`, …).
+// The agent LLM never sees the sidecar URL: `SIDECAR_URL` and its token never
+// enter this process's environment (`@appstrate/runner-pi/secret-env`).
 
 const sidecarUrl = env.sidecarUrl;
 const sidecarAuthToken = env.sidecarAuthToken;

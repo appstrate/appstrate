@@ -70,7 +70,7 @@ export async function loadSystemPackages(dir: string): Promise<LoadSystemPackage
     }
 
     try {
-      // WRITE direction (default `retiredVocabulary: "reject"`): these
+      // WRITE direction (default `retiredDependencyKeys: "reject"`): these
       // archives are built from repo-authored sources, so a retired
       // `dependencies` key is a source bug to fix at the source, not legacy
       // to tolerate. It surfaces as a per-file warning below.

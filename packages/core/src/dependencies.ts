@@ -42,7 +42,7 @@ export interface Dependencies {
  * The rejection below is a POLICY on author input, not a shape constraint —
  * which is what lets already-published manifests carrying a retired key keep
  * validating (and therefore keep running) forever. See
- * {@link import("./validation.ts").RetiredVocabularyPolicy}.
+ * {@link import("./validation.ts").RetiredDependencyKeysPolicy}.
  */
 const RETIRED_DEPENDENCY_KEYS = {
   tools: "mcp_servers",

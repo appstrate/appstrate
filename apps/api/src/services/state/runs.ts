@@ -87,6 +87,8 @@ import type {
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
 export const RUN_HISTORY_LIMIT_DEFAULT = 10;
+/** Most past runs one `run_history` call returns. */
+export const RUN_HISTORY_LIMIT_MAX = 50;
 
 /**
  * The `@scope/name` a run's agent is known by, recovered for the case where the

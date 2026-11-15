@@ -96,9 +96,7 @@ export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFac
       name: tool.name,
       label: tool.name,
       description: tool.description ?? `Integration tool: ${tool.name}`,
-      parameters: unsafeSchema<Record<string, unknown>>(
-        (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
-      ),
+      parameters: unsafeSchema<Record<string, unknown>>(tool.inputSchema),
       async execute(toolCallId, params, signal) {
         const startedAt = Date.now();
         const event = { runId, tool: tool.name, toolCallId };

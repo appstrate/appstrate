@@ -5,6 +5,7 @@
  * shared by its two mounts: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`.
  */
 
+import { RUN_ROUTE_RATE_PER_MIN } from "../../middleware/rate-limit.ts";
 import { jsonRpcErrorContent, mcpTransportResponses, problemContent } from "../responses.ts";
 
 export const RUN_TOOLS_MCP_DESCRIPTION =
@@ -14,7 +15,7 @@ export const RUN_TOOLS_MCP_DESCRIPTION =
   "log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's " +
   "checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to " +
   "each recipient of the run (whoever launched it, else the org's owners and admins), once per " +
-  "run. Rate-limited to 200 " +
+  `run. Rate-limited to ${RUN_ROUTE_RATE_PER_MIN} ` +
   "requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) " +
   "is refused with 400 (`-32600`).";
 

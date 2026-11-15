@@ -659,170 +659,97 @@ describe("launchRunAndWait launch body", () => {
     );
   });
 
-  it("kind:inline adds the platform entry beside a caller-declared integration", async () => {
+  /** The manifest `launchRunAndWait` sends for an inline run of `manifest`. */
+  async function materialized(manifest: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { fetchImpl, captured } = captureLaunch();
-
     const result = await launchRunAndWait(
-      {
-        kind: "inline",
-        manifest: {
-          display_name: "Tri des e-mails",
-          dependencies: {
-            integrations: { "@appstrate/gmail": "^1.2.0" },
-            skills: { "@acme/triage": "^1.0.0" },
-          },
-          integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
-          output: {},
-        },
-        prompt: "Sort the inbox.",
-      },
+      { kind: "inline", manifest, prompt: "do it" },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
-
     expect(result.ok).toBe(true);
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({
-      integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.0.0" },
-      skills: { "@acme/triage": "^1.0.0" },
-    });
-    expect(manifest?.integrations_configuration).toEqual({
-      "@appstrate/gmail": { tools: ["api_call"] },
-      "@appstrate/platform": { tools: ["log"] },
-    });
-    expect(manifest?.output).toEqual({});
-  });
+    return (captured()?.body as { manifest: Record<string, unknown> }).manifest;
+  }
 
-  it("kind:inline adds the platform entry to dependencies that declare no integrations", async () => {
-    const { fetchImpl, captured } = captureLaunch();
+  const PLATFORM_DEPENDENCY = { integrations: { "@appstrate/platform": "^1.0.0" } };
 
-    await launchRunAndWait(
+  // `configuration: undefined` asserts the manifest has no `integrations_configuration`.
+  it.each<[string, Record<string, unknown>, unknown, unknown]>([
+    [
+      "adds the platform entry beside a caller-declared integration",
       {
-        kind: "inline",
-        manifest: { display_name: "Avec skill", dependencies: { skills: { "@acme/x": "*" } } },
-        prompt: "do it",
-      },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
-
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({
-      skills: { "@acme/x": "*" },
-      integrations: { "@appstrate/platform": "^1.0.0" },
-    });
-  });
-
-  it("kind:inline keeps a caller-written platform entry exactly", async () => {
-    const { fetchImpl, captured } = captureLaunch();
-
-    await launchRunAndWait(
-      {
-        kind: "inline",
-        manifest: {
-          display_name: "Sans journal",
-          dependencies: { integrations: { "@appstrate/platform": "^1.4.0" } },
-          integrations_configuration: { "@appstrate/platform": { tools: [] } },
+        dependencies: {
+          integrations: { "@appstrate/gmail": "^1.2.0" },
+          skills: { "@acme/triage": "^1.0.0" },
         },
-        prompt: "do it",
+        integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
       },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
-
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({
-      integrations: { "@appstrate/platform": "^1.4.0" },
-    });
-    expect(manifest?.integrations_configuration).toEqual({
-      "@appstrate/platform": { tools: [] },
-    });
-  });
-
-  it("kind:inline injects no platform configuration when the caller declares the dependency alone", async () => {
-    const { fetchImpl, captured } = captureLaunch();
-
-    await launchRunAndWait(
       {
-        kind: "inline",
-        manifest: {
-          display_name: "Tous les outils",
-          dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
-        },
-        prompt: "do it",
+        integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.0.0" },
+        skills: { "@acme/triage": "^1.0.0" },
       },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
-
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({
-      integrations: { "@appstrate/platform": "^1.0.0" },
-    });
-    // The integration's `default_tools` apply: nothing narrows them to `log`.
-    expect(manifest).not.toHaveProperty("integrations_configuration");
-  });
-
-  it("kind:inline adds the dependency beside a caller-written platform configuration", async () => {
-    const { fetchImpl, captured } = captureLaunch();
-
-    await launchRunAndWait(
       {
-        kind: "inline",
-        manifest: {
-          display_name: "Notes",
-          integrations_configuration: { "@appstrate/platform": { tools: ["note"] } },
-        },
-        prompt: "do it",
+        "@appstrate/gmail": { tools: ["api_call"] },
+        "@appstrate/platform": { tools: ["log"] },
       },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
-
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({
-      integrations: { "@appstrate/platform": "^1.0.0" },
-    });
-    expect(manifest?.integrations_configuration).toEqual({
-      "@appstrate/platform": { tools: ["note"] },
-    });
-  });
-
-  it("kind:inline leaves a non-object dependencies value as written, for validation to refuse", async () => {
-    for (const dependencies of ["^1.0.0", { integrations: [] }]) {
-      const { fetchImpl, captured } = captureLaunch();
-
-      await launchRunAndWait(
-        { kind: "inline", manifest: { display_name: "Malformé", dependencies }, prompt: "do it" },
-        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-      );
-
-      const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-        ?.manifest;
-      expect(manifest?.dependencies).toEqual(dependencies);
+    ],
+    [
+      "adds the platform entry to dependencies that declare no integrations",
+      { dependencies: { skills: { "@acme/x": "*" } } },
+      { skills: { "@acme/x": "*" }, ...PLATFORM_DEPENDENCY },
+      { "@appstrate/platform": { tools: ["log"] } },
+    ],
+    [
+      "keeps a caller-written platform entry exactly",
+      {
+        dependencies: { integrations: { "@appstrate/platform": "^1.4.0" } },
+        integrations_configuration: { "@appstrate/platform": { tools: [] } },
+      },
+      { integrations: { "@appstrate/platform": "^1.4.0" } },
+      { "@appstrate/platform": { tools: [] } },
+    ],
+    [
+      "injects no platform configuration when the caller declares the dependency alone",
+      { dependencies: PLATFORM_DEPENDENCY },
+      PLATFORM_DEPENDENCY,
+      undefined,
+    ],
+    [
+      "adds the dependency beside a caller-written platform configuration",
+      { integrations_configuration: { "@appstrate/platform": { tools: ["note"] } } },
+      PLATFORM_DEPENDENCY,
+      { "@appstrate/platform": { tools: ["note"] } },
+    ],
+    [
+      "leaves a non-object dependencies value as written",
+      { dependencies: "^1.0.0" },
+      "^1.0.0",
+      undefined,
+    ],
+    [
+      "leaves a non-object dependencies.integrations value as written",
+      { dependencies: { integrations: [] } },
+      { integrations: [] },
+      undefined,
+    ],
+    [
+      "leaves a non-object integrations_configuration string as written",
+      { integrations_configuration: "log" },
+      PLATFORM_DEPENDENCY,
+      "log",
+    ],
+    [
+      "leaves a non-object integrations_configuration array as written",
+      { integrations_configuration: ["log"] },
+      PLATFORM_DEPENDENCY,
+      ["log"],
+    ],
+  ])("kind:inline %s", async (_, fields, dependencies, configuration) => {
+    const manifest = await materialized({ display_name: "Inline", ...fields });
+    expect(manifest.dependencies).toEqual(dependencies);
+    if (configuration === undefined) {
       expect(manifest).not.toHaveProperty("integrations_configuration");
-    }
-  });
-
-  it("kind:inline leaves a non-object integrations_configuration as written, for validation to refuse", async () => {
-    for (const integrations_configuration of ["log", ["log"]]) {
-      const { fetchImpl, captured } = captureLaunch();
-
-      await launchRunAndWait(
-        {
-          kind: "inline",
-          manifest: { display_name: "Malformé", integrations_configuration },
-          prompt: "do it",
-        },
-        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-      );
-
-      const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-        ?.manifest;
-      expect(manifest?.integrations_configuration).toEqual(integrations_configuration);
-      expect(manifest?.dependencies).toEqual({
-        integrations: { "@appstrate/platform": "^1.0.0" },
-      });
+    } else {
+      expect(manifest.integrations_configuration).toEqual(configuration);
     }
   });
 

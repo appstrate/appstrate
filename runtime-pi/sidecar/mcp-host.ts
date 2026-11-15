@@ -490,36 +490,31 @@ export class McpHost {
       return true;
     };
     for (const tool of admitted) {
+      // A claimed tool needs no name of its own.
+      if (claim(tool.name)) continue;
       // Trusted first-party upstreams (our own in-process api_call server) are neither sanitised
       // nor renamed: their audited docs and canonical names (`api_call__primary`) reach the agent.
       let descriptor: Tool;
       if (trusted) {
-        if (claim(tool.name)) continue;
         descriptor = { ...tool, name: `${normalisedNs}__${tool.name}` };
       } else {
         const exposure = exposeTool(tool, {
           namespace: normalisedNs,
-          allowlist: null,
-          hidden: null,
           isTaken: (name) => this.toolToNamespace.has(name),
         });
         if ("exclusion" in exposure) {
-          const { exclusion } = exposure;
-          // A claimed tool needs no name of its own.
-          if (exclusion === "name_collision" && claim(tool.name)) continue;
           this.options.onLog?.({
             source: `host:${normalisedNs}`,
             level: "warn",
             data: {
               event: "tool_rejected",
-              reason: exclusion,
-              ...(exclusion === "name_collision" ? { namespace: normalisedNs } : {}),
+              reason: exposure.exclusion,
+              namespace: normalisedNs,
               originalName: tool.name,
             },
           });
           continue;
         }
-        if (claim(tool.name)) continue;
         descriptor = exposure.descriptor;
       }
       const finalName = descriptor.name;

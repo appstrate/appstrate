@@ -202,7 +202,7 @@ describe("validateManifest", () => {
         skills: { "@test/skill": "^1.0.0" },
       },
     });
-    const result = validateManifest(stored, { retiredVocabulary: "tolerate" });
+    const result = validateManifest(stored, { retiredDependencyKeys: "tolerate" });
     expect(result.valid).toBe(true);
     const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
       string,

@@ -80,6 +80,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
 import { buildRemoteMcpExtensions, type RemoteMcpExtensions } from "./run/remote-mcp.ts";
+import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
 import { parseRunTarget } from "./run/package-spec.ts";
 import { fetchBundleForRun } from "./run/bundle-fetch.ts";
@@ -331,8 +332,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
   // and exposes a single AbortSignal we pass to the runner. Cleanup
-  // (heartbeat stop, safety-net finalize POST, workspace teardown) is
-  // factored into one idempotent function and registered as a shutdown
+  // (heartbeat stop, safety-net finalize POST, MCP connections close,
+  // workspace teardown) is factored into one idempotent function and registered as a shutdown
   // hook AND awaited from the `finally` below. The coordinator awaits
   // the hook before exiting, so the platform sees an explicit
   // `cancelled` finalize instead of waiting on the heartbeat watchdog
@@ -455,15 +456,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     const emitEvent: RuntimeEventEmitter = (event) => {
       sink.handle(event as RunEvent).catch(() => {});
     };
-    const apiCall = await buildApiCallExtensionFactory({
+    const integrationTools = await buildIntegrationTools({
       bundle: boundBundle,
       integrationResolver,
-      runId: emittedRunId,
-      workspace: workspaceDir,
-      emitEvent,
-    });
-    remoteMcp = await buildRemoteMcpExtensions({
-      bundle: boundBundle,
       ...(reportSession
         ? {
             runToolsMcp: {
@@ -472,13 +467,13 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
             },
           }
         : {}),
-      takenToolNames: apiCall.toolNames,
       runId: emittedRunId,
       workspace: workspaceDir,
       emit: emitEvent,
       signal: shutdownSignal,
     });
-    const extensionFactories = [...apiCall.factories, ...remoteMcp.factories];
+    const { apiCall, factories: extensionFactories } = integrationTools;
+    remoteMcp = integrationTools.remoteMcp;
     if (!opts.json) {
       if (apiCall.factories.length > 0) {
         process.stderr.write(`→ wired ${apiCall.factories.length} integration api_call tool(s)\n`);
@@ -821,6 +816,30 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
     );
   }
   return resolved.profileName;
+}
+
+/**
+ * The run's integration tools in one allocation: the `{ns}__api_call` tools, then the remote MCP
+ * tools past the names those hold. `factories` is every tool factory the runner is given.
+ */
+export async function buildIntegrationTools(
+  opts: Omit<Parameters<typeof buildRemoteMcpExtensions>[0], "takenToolNames"> & {
+    integrationResolver: IntegrationApiCallResolver;
+  },
+) {
+  const { integrationResolver, ...remoteOptions } = opts;
+  const apiCall = await buildApiCallExtensionFactory({
+    bundle: opts.bundle,
+    integrationResolver,
+    runId: opts.runId,
+    workspace: opts.workspace,
+    emitEvent: opts.emit,
+  });
+  const remoteMcp = await buildRemoteMcpExtensions({
+    ...remoteOptions,
+    takenToolNames: apiCall.toolNames,
+  });
+  return { apiCall, remoteMcp, factories: [...apiCall.factories, ...remoteMcp.factories] };
 }
 
 /**

@@ -559,9 +559,10 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  * caller registers them on the McpHost, which applies the `{ns}__` prefix
  * (yielding the `{ns}__api_call` name) + tool-name validation.
  *
- * Both run in-process: `api_call` calls {@link executeApiCall} directly via
+ * `api_call` runs in-process: it calls {@link executeApiCall} directly via
  * {@link ApiCallToolDeps.proxyDeps}, without a Hono HTTP envelope, with the
- * integration's credential adapters injected per call.
+ * integration's credential adapters injected per call. `api_upload` runs
+ * agent-side.
  *
  * When an `api_call` upstream response is binary, exceeds the
  * per-call token cap, or would push the run-level cumulative budget

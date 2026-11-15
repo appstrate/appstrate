@@ -2,11 +2,9 @@
 
 /**
  * Appstrate platform system prompt — thin shim over the runtime's
- * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
- * every section (System, with Environment / Communication / Integrations;
- * Unavailable Integrations / User Input / Files / Checkpoint / Pinned Slots /
- * Memory / Deliverables / Output Format) happens in the runtime from the parsed Bundle; this function only adds the
- * overrides that are platform-specific:
+ * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Every section is
+ * derived in the runtime from the parsed Bundle (see `renderPlatformPrompt`);
+ * this function only adds the overrides that are platform-specific:
  *
  *   - `platformName`: `"Appstrate"`
  *   - `uploads`: DB-stored files with platform-sanitised paths

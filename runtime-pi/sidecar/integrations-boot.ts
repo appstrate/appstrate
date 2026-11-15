@@ -526,6 +526,7 @@ async function connectStreamableHttp(
   fetchFn: typeof fetch,
   clientInfo: { name: string; version: string },
   deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs">,
+  era: "auto" | "legacy" = "auto",
 ): Promise<AppstrateMcpClient> {
   const createClient = deps.createClient ?? createMcpHttpClient;
   const toolTimeoutMs = toolTimeoutMsFromEnv();
@@ -533,6 +534,7 @@ async function connectStreamableHttp(
     createClient(endpoint, {
       fetch: fetchFn,
       clientInfo,
+      era,
       onWarning: (message, data) =>
         logger.warn(message, { integrationId: spec.integrationId, ...data }),
       retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
@@ -769,6 +771,8 @@ export async function connectPlatformIntegration(
     platformFetch,
     { name: "appstrate-sidecar-platform-integration", version: "0.1.0" },
     deps,
+    // Built by `createMcpServer`, legacy by construction: no era probe per run.
+    "legacy",
   );
 }
 
