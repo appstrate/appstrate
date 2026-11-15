@@ -112,6 +112,20 @@ describe("withToolIntegration", () => {
     expect(long!.title!.endsWith("[truncated]")).toBe(true);
   });
 
+  it("falls back to the annotations' title when the title is empty once sanitised", () => {
+    for (const title of ["", "\u200B"]) {
+      expect(
+        readToolIntegration(
+          withToolIntegration(
+            tool("docs__a"),
+            "@acme/docs",
+            tool("a", { title, annotations: { title: "Find" } }),
+          ),
+        ),
+      ).toEqual({ id: "@acme/docs", tool: "a", title: "Find" });
+    }
+  });
+
   it("omits a title the server does not give, or that is empty once sanitised", () => {
     const descriptor = tool("docs__a");
     expect(readToolIntegration(withToolIntegration(descriptor, "@acme/docs", tool("a")))).toEqual({

@@ -27,7 +27,11 @@ import {
   cliPromptInputs,
   unavailableIntegrationLines,
 } from "../src/commands/run.ts";
-import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
+import {
+  apiCallToolName,
+  readApiCallSurfaces,
+  type IntegrationApiCallResolver,
+} from "@appstrate/afps-runtime/resolvers";
 
 const DOCS = "@acme/docs";
 
@@ -416,10 +420,10 @@ describe("run --local — the runner's tool factories", () => {
       integrity: "",
     });
     const resolver: IntegrationApiCallResolver = {
-      resolve: async (refs) =>
-        refs.map((ref) => ({
-          name: `${ref.name}__api_call`,
-          description: ref.name,
+      resolve: async (refs, bundle) =>
+        readApiCallSurfaces(bundle, refs).map((meta) => ({
+          name: apiCallToolName(meta),
+          description: meta.name,
           parameters: { type: "object" },
           execute: async () => ({ content: [] }),
         })),

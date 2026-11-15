@@ -18,7 +18,11 @@ import { parseLaunchItems } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
 import { cliPromptInputs } from "../src/commands/run.ts";
 import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
-import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
+import {
+  apiCallToolName,
+  readApiCallSurfaces,
+  type IntegrationApiCallResolver,
+} from "@appstrate/afps-runtime/resolvers";
 
 const GMAIL = "@appstrate/gmail";
 const NOTION = "@appstrate/notion";
@@ -94,10 +98,10 @@ const WARNINGS = parseLaunchItems([
 ]);
 
 const fakeResolver: IntegrationApiCallResolver = {
-  resolve: async (refs) =>
-    refs.map((ref) => ({
-      name: `${ref.name}__api_call`,
-      description: ref.name,
+  resolve: async (refs, bundle) =>
+    readApiCallSurfaces(bundle, refs).map((meta) => ({
+      name: apiCallToolName(meta),
+      description: meta.name,
       parameters: { type: "object" },
       execute: async () => ({ content: [] }),
     })),
@@ -220,9 +224,14 @@ describe("--report local run — integrations bound to none", () => {
 
   it("exposes no tool of an integration bound to none", async () => {
     const bundle = makeBundle();
-    expect(await exposedTools(bundle)).toEqual([`${GMAIL}__api_call`, `${NOTION}__api_call`]);
+    expect(await exposedTools(bundle)).toEqual([
+      "appstrate_gmail__api_call",
+      "appstrate_notion__api_call",
+    ]);
     const ids = unavailableIntegrations(WARNINGS).map((entry) => entry.id);
-    expect(await exposedTools(withoutIntegrations(bundle, ids))).toEqual([`${NOTION}__api_call`]);
+    expect(await exposedTools(withoutIntegrations(bundle, ids))).toEqual([
+      "appstrate_notion__api_call",
+    ]);
   });
 
   it("leaves the bundle untouched when nothing is unavailable", () => {

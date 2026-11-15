@@ -61,10 +61,9 @@ export function exposeTool(
 export function withToolIntegration(descriptor: Tool, integrationId: string, upstream: Tool): Tool {
   const tool = sanitiseTextField(upstream.name, MAX_PARAMETER_DESCRIPTION_BYTES);
   if (!tool) return descriptor;
-  const title = sanitiseTextField(
-    upstream.title ?? upstream.annotations?.title,
-    MAX_PARAMETER_DESCRIPTION_BYTES,
-  );
+  const title = [upstream.title, upstream.annotations?.title]
+    .map((candidate) => sanitiseTextField(candidate, MAX_PARAMETER_DESCRIPTION_BYTES))
+    .find(Boolean);
   const integration: ToolIntegration = { id: integrationId, tool, ...(title ? { title } : {}) };
   return {
     ...descriptor,

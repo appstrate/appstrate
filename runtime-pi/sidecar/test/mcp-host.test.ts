@@ -1066,6 +1066,8 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
       expect(await tools[0]!.handler({}, { signal: undefined as never } as never)).toEqual({
         content: [{ type: "text", text: "trusted" }],
       });
+      // The replacement's own identity, not the replaced `api.call`'s.
+      expect(readToolIntegration(tools[0]!.descriptor)).toEqual({ id: "drive", tool: "api_call" });
     } finally {
       await untrusted.pair.close();
       await trusted.pair.close();

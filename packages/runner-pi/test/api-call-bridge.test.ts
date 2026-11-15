@@ -56,6 +56,11 @@ function bundleWith(
 
 /** Names of the Pi tools the bridge registers for `bundle`, given one resolved tool per auth. */
 async function registeredNames(bundle: ReturnType<typeof bundleWith>, resolved: string[]) {
+  return (await registered(bundle, resolved)).map((t) => t.name);
+}
+
+/** The Pi tool definitions the bridge registers for `bundle`, given the resolved tool names. */
+async function registered(bundle: ReturnType<typeof bundleWith>, resolved: string[]) {
   const { factories } = await buildApiCallExtensionFactory({
     bundle,
     integrationResolver: {
@@ -71,17 +76,17 @@ async function registeredNames(bundle: ReturnType<typeof bundleWith>, resolved: 
     workspace: "/tmp",
     emitEvent: () => {},
   });
-  const names: string[] = [];
+  const definitions: Array<{ name: string }> = [];
   for (const factory of factories) {
-    factory({ registerTool: (t: { name: string }) => names.push(t.name) } as never);
+    factory({ registerTool: (t: { name: string }) => definitions.push(t) } as never);
   }
-  return names;
+  return definitions;
 }
 
 async function registerApiCall(execute: AfpsTool["execute"]) {
   const events: Array<{ type: string; [k: string]: unknown }> = [];
   const tool: AfpsTool = {
-    name: "acme__api_call",
+    name: "acme_api__api_call",
     description: "acme api_call",
     parameters: { type: "object" },
     execute,
@@ -107,6 +112,12 @@ async function registerApiCall(execute: AfpsTool["execute"]) {
     events,
   };
 }
+
+const multiAuth = {
+  ...integrationManifest,
+  _meta: { "dev.appstrate/api": { auths: { main: {}, backup: {} } } },
+  auths: { main: integrationManifest.auths.main, backup: integrationManifest.auths.main },
+};
 
 describe("buildApiCallExtensionFactory", () => {
   it("records the integration and the api_call tool's name within it, as the sidecar names it", async () => {
@@ -200,15 +211,32 @@ describe("buildApiCallExtensionFactory", () => {
   });
 
   it("exposes no api_call the agent did not select", async () => {
-    expect(await registeredNames(bundleWith(undefined), ["acme__api_call"])).toEqual([]);
-    expect(await registeredNames(bundleWith({ tools: [] }), ["acme__api_call"])).toEqual([]);
+    expect(await registeredNames(bundleWith(undefined), ["acme_api__api_call"])).toEqual([]);
+    expect(await registeredNames(bundleWith({ tools: [] }), ["acme_api__api_call"])).toEqual([]);
   });
 
   it("inherits the integration's default_tools when the agent selects nothing", async () => {
     const withDefault = { ...integrationManifest, default_tools: ["api_call"] };
-    expect(await registeredNames(bundleWith(undefined, withDefault), ["acme__api_call"])).toEqual([
-      "acme__api_call",
+    expect(
+      await registeredNames(bundleWith(undefined, withDefault), ["acme_api__api_call"]),
+    ).toEqual(["acme_api__api_call"]);
+  });
+
+  it("pairs each resolved tool with its own auth whatever the order the resolver returns", async () => {
+    const definitions = await registered(
+      bundleWith({ tools: ["api_call__main", "api_call__backup"] }, multiAuth),
+      ["acme_api__api_call__backup", "acme_api__api_call__main"],
+    );
+    expect(definitions.map((d) => [d.name, integrationOf(d)])).toEqual([
+      ["acme_api__api_call__backup", { id: INTEGRATION, tool: "api_call__backup" }],
+      ["acme_api__api_call__main", { id: INTEGRATION, tool: "api_call__main" }],
     ]);
+  });
+
+  it("refuses a resolved tool no integration of the run declares", async () => {
+    await expect(
+      registered(bundleWith({ tools: ["api_call"] }), ["other__api_call"]),
+    ).rejects.toThrow('"other__api_call"');
   });
 
   it("keeps only the selected auth's tool on a multi-auth integration", async () => {
@@ -219,9 +247,9 @@ describe("buildApiCallExtensionFactory", () => {
     };
     expect(
       await registeredNames(bundleWith({ tools: ["api_call__backup"] }, multi), [
-        "acme__api_call__main",
-        "acme__api_call__backup",
+        "acme_api__api_call__main",
+        "acme_api__api_call__backup",
       ]),
-    ).toEqual(["acme__api_call__backup"]);
+    ).toEqual(["acme_api__api_call__backup"]);
   });
 });
