@@ -3,7 +3,7 @@
 /**
  * The chat's conversation list inside the shell's shared sidebar frame. Only
  * this list is lazy-loaded with the chat UI, so loading never blanks the shell.
- * Also publishes the open conversation's title to the trail (`ChatTitleCrumb`).
+ * Also publishes the chat's place in the trail (`ChatTitleCrumb`).
  */
 
 import { useCallback } from "react";
@@ -33,7 +33,7 @@ export function ChatSidebar() {
   return (
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={select}>
-        <ChatTitleCrumb conversationId={conversationId} t={t} can={can} />
+        <ChatTitleCrumb conversationId={conversationId} />
         <ChatConversationList activeId={conversationId} t={t} can={can} />
       </SelectConversationProvider>
     </ChatTransportProvider>

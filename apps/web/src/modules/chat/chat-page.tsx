@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState 
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ChatConversationSettingsButton,
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
@@ -143,6 +144,11 @@ export function ChatModulePage() {
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
+          <ChatConversationSettingsButton
+            activeId={conversationId ?? null}
+            t={translate}
+            can={can}
+          />
           <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <div className="relative flex min-h-0 min-w-0 flex-1">
