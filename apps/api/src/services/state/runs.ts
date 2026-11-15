@@ -1676,7 +1676,8 @@ async function listRunsWithFilter(
       .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
       .leftJoin(packages, eq(packages.id, runs.packageId))
       .where(filter)
-      .orderBy(desc(runs.startedAt))
+      // `id` breaks ties, so an offset page never skips or repeats a row.
+      .orderBy(desc(runs.startedAt), desc(runs.id))
       .limit(limit)
       .offset(offset),
   ]);

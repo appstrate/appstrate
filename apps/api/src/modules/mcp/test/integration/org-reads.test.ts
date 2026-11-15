@@ -250,4 +250,58 @@ describe("lists spanning spaces through invoke_operation", () => {
       );
     });
   }
+
+  it("follows the REST rule in a space whose role grants no mcp:read, which the connection cannot act in", async () => {
+    // `mcp:read` decides the spaces a connection may enter and act in; a list
+    // spanning spaces is the REST read, row by row, whichever door serves it.
+    const trois = (await seedSpace({ orgId: owner.orgId, name: "Trois", visibility: "closed" })).id;
+    const noMcp = await seedSpaceRole({
+      orgId: owner.orgId,
+      permissions: ["runs:read-all", "files:read", "schedules:read"],
+    });
+    await seedSpaceMember({
+      spaceId: trois,
+      userId: member.user.id,
+      presetRole: null,
+      customRoleId: noMcp.id,
+    });
+    const inTrois = await seedSpaceRows(trois);
+    const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    const endpoint = `/api/mcp/o/${owner.orgId}`;
+    const inTroisIds = {
+      runs: [inTrois.runs.owner!, inTrois.runs.member!],
+      files: [inTrois.files.owner!, inTrois.files.member!],
+      schedules: [inTrois.schedule],
+    };
+    for (const operation of Object.keys(OPERATIONS) as Operation[]) {
+      const viaMcp = await invoke(operation, endpoint, token, un);
+      expect(viaMcp).toEqual(await rest(operation));
+      expect(viaMcp).toEqual(expect.arrayContaining(inTroisIds[OPERATIONS[operation]]));
+    }
+
+    // Entering Trois itself is refused: the connection acts there in nothing.
+    const res = await app.request(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        Accept: MCP_ACCEPT,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "invoke_operation",
+          arguments: {
+            operation_id: "listOrgRuns",
+            path_params: { orgId: owner.orgId },
+            space_id: trois,
+          },
+        },
+      }),
+    });
+    const envelope = JSON.parse(await res.text()) as JsonRpcEnvelope;
+    expect(JSON.stringify(envelope)).toContain("unknown_space");
+  });
 });

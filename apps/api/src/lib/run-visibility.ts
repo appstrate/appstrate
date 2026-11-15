@@ -83,7 +83,7 @@ export function ownsRun(
  * the query parameter, so a caller holding `read-all` who asks for `user=me`
  * reads exactly the rows a plain `runs:read` caller reads.
  */
-export function ownRunsFilter(actor: Actor): SQL {
+function ownRunsFilter(actor: Actor): SQL {
   return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
 }
 

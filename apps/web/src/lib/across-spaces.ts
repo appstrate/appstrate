@@ -21,13 +21,18 @@ export function linkedSpacePath(
   return `${path}?${new URLSearchParams({ [ENTER_SPACE_PARAM]: spaceId }).toString()}`;
 }
 
-/** What `useEnterLinkedSpace` does next. Exported for its test. */
+/**
+ * What `useEnterLinkedSpace` does next. `enterable` is `undefined` while the space listing has
+ * not answered; a listing that failed answers `false`, so the page renders its own state instead
+ * of waiting for good. Exported for its test.
+ */
 export function linkedSpaceStep(
   linked: string | null,
   current: string | null,
-  enterable: boolean,
-): "none" | "enter" | "drop" {
+  enterable: boolean | undefined,
+): "none" | "wait" | "enter" | "drop" {
   if (!linked) return "none";
+  if (enterable === undefined) return "wait";
   return enterable && current !== linked ? "enter" : "drop";
 }
 

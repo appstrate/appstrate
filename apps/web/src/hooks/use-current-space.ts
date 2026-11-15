@@ -134,11 +134,15 @@ export function useEnterLinkedSpace(): boolean {
   const [params, setParams] = useSearchParams();
   const linked = params.get(ENTER_SPACE_PARAM);
   const current = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
-  const enterable = !!spaces?.some((s) => s.id === linked && isSpaceEnterable(s));
+  const { data: spaces, isError } = useSpaces();
+  // Undefined until the listing answers; a failed listing cannot prove the space enterable.
+  const enterable = spaces
+    ? spaces.some((s) => s.id === linked && isSpaceEnterable(s))
+    : isError
+      ? false
+      : undefined;
 
   useEffect(() => {
-    if (!spaces) return;
     const step = linkedSpaceStep(linked, current, enterable);
     if (step === "enter" && linked) switchSpace(linked);
     if (step !== "drop") return;
@@ -150,7 +154,7 @@ export function useEnterLinkedSpace(): boolean {
       },
       { replace: true },
     );
-  }, [switchSpace, linked, spaces, enterable, current, setParams]);
+  }, [switchSpace, linked, enterable, current, setParams]);
 
   return !!linked;
 }

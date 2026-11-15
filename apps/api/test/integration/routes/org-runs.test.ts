@@ -19,6 +19,15 @@
  * | API key + `Appstrate-User` (end-user)      | —                                             | 403                                   |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
  * | any                                        | another organization                          | never; its path → 403                 |
+ * | member session                             | own live personal space                       | the member's runs there               |
+ * | owner / admin session                      | a member's live personal space                | never                                 |
+ * | owner / admin session                      | an orphaned personal space (listed, no role)  | never                                 |
+ * | API key of the personal space's owner      | pinned to that personal space                 | none: a delegate reaches no personal space |
+ * | owner session + `X-View-As: org_role=member` | the previewer's own personal space          | never: a persona owns none            |
+ *
+ * A third-party OAuth client (the other `delegate`) is not exercised here: no
+ * core test helper mints one; it shares the API key's `principalKind`, which is
+ * what `callerPersonalOwnerId` reads.
  *
  * The MCP door (`invoke_operation` with a minted instance token) is covered in
  * `modules/mcp/test/integration/org-reads.test.ts`.
@@ -44,6 +53,7 @@ import {
   seedSpaceRole,
 } from "../../helpers/seed.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { removeMember } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
 
@@ -293,6 +303,73 @@ describe("GET /api/orgs/{orgId}/runs", () => {
   it("refuses an organization the caller is not a member of", async () => {
     const res = await app.request(path("", foreignOrgId), { headers: session(owner) });
     expect(res.status).toBe(403);
+  });
+
+  describe("personal spaces (RBAC spec §3.6)", () => {
+    let admin: TestContext;
+
+    /** The caller's own personal space id, from the listing that provisions it. */
+    async function personalSpaceOf(ctx: TestContext): Promise<string> {
+      const listed = await listedSpaces(ctx);
+      const own = listed.filter((space) => space.personal);
+      expect(own).toHaveLength(1);
+      return own[0]!.id;
+    }
+    async function listedSpaces(ctx: TestContext) {
+      const res = await app.request("/api/spaces", {
+        headers: { Cookie: ctx.cookie, "X-Org-Id": owner.orgId },
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: Array<{ id: string; personal: boolean }> }).data;
+    }
+
+    beforeEach(async () => {
+      admin = await memberContext(owner, "admin");
+    });
+
+    it("reaches the member's own live personal space, and nobody else does", async () => {
+      const personal = await personalSpaceOf(member);
+      const run = await seedSpaceRun(personal, member.user.id);
+      expect(ids(await list(session(member)))).toContain(run);
+      expect(ids(await list(session(owner)))).not.toContain(run);
+      expect(ids(await list(session(admin)))).not.toContain(run);
+    });
+
+    it("does not reach an orphaned personal space, listed to admins with no role", async () => {
+      const personal = await personalSpaceOf(member);
+      const run = await seedSpaceRun(personal, member.user.id);
+      await removeMember(owner.orgId, member.user.id, {
+        userId: owner.user.id,
+        firstPartySession: true,
+      });
+      for (const ctx of [owner, admin]) {
+        // Listed to them — and still not reached.
+        expect((await listedSpaces(ctx)).map((space) => space.id)).toContain(personal);
+        expect(ids(await list(session(ctx)))).not.toContain(run);
+      }
+    });
+
+    it("does not reach a personal space through its owner's API key", async () => {
+      const personal = await personalSpaceOf(member);
+      const run = await seedSpaceRun(personal, member.user.id);
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: personal,
+        createdBy: member.user.id,
+        scopes: ["runs:read-all"],
+      });
+      const page = await list({ Authorization: `Bearer ${key.rawKey}` });
+      expect(ids(page)).not.toContain(run);
+      expect(page.total).toBe(0);
+    });
+
+    it("reaches no personal space under a role preview, not even the previewer's", async () => {
+      const personal = await personalSpaceOf(owner);
+      const run = await seedSpaceRun(personal, owner.user.id);
+      expect(ids(await list(session(owner)))).toContain(run);
+      const previewed = await list(session(owner, { "X-View-As": "org_role=member" }));
+      expect(ids(previewed)).not.toContain(run);
+    });
   });
 
   it("leaves GET /api/runs requiring X-Space-Id", async () => {

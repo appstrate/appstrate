@@ -110,7 +110,7 @@ export function RunsPage() {
         user={user}
         kind={kind}
         status={statuses}
-        spaceIds={acrossSpaces ? spaceIds : undefined}
+        spaceIds={spaceIds}
         search={search}
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (

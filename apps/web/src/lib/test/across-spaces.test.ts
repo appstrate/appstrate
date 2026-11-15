@@ -41,6 +41,12 @@ describe("linkedSpaceStep", () => {
     expect(linkedSpaceStep("spc_2", "spc_2", true)).toBe("drop");
     expect(linkedSpaceStep("spc_gone", "spc_1", false)).toBe("drop");
   });
+
+  it("waits for the space listing, and drops the param when it fails", () => {
+    expect(linkedSpaceStep("spc_2", "spc_1", undefined)).toBe("wait");
+    // The hook answers `false` for a listing that errored: the page renders its own state.
+    expect(linkedSpaceStep("spc_2", "spc_1", false)).toBe("drop");
+  });
 });
 
 describe("pollWhileMoving", () => {
