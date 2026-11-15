@@ -4,6 +4,7 @@ import { Alert } from "@appstrate/ui/components/alert";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -53,8 +54,8 @@ import {
   Settings2,
 } from "lucide-react";
 
-type ScheduleTab = "details" | "runs" | "settings";
-const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
+type ScheduleTab = "overview" | "runs" | "settings";
+const SCHEDULE_TABS: readonly ScheduleTab[] = ["overview", "runs", "settings"];
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -70,13 +71,13 @@ export function ScheduleDetailPage() {
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   // The tab stays for every role; without the permission its content says so.
   const readsRuns = canReadRuns(can);
-  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
+  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "overview");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
-    { value: "details", label: t("detail.overview.summary"), icon: LayoutGrid },
+    { value: "overview", label: t("detail.overview.summary"), icon: LayoutGrid },
     { value: "runs", label: t("common:nav.runs"), icon: Play },
     { value: "settings", label: t("common:nav.settings"), icon: Settings2 },
   ];
@@ -147,7 +148,7 @@ export function ScheduleDetailPage() {
           )}
         </DetailTabPanel>
 
-        <DetailTabPanel value="details">
+        <DetailTabPanel value="overview">
           <ScheduleParams schedule={schedule} />
         </DetailTabPanel>
 
@@ -174,6 +175,7 @@ export function ScheduleDetailPage() {
           deleteSchedule.mutate(schedule.id, {
             onSuccess: () => {
               setConfirmOpen(false);
+              toast.success(t("schedule.deleted"));
               navigate("/schedules");
             },
           });

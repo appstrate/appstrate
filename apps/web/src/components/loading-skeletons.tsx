@@ -51,8 +51,6 @@ export function Waiting({ className, children }: { className?: string; children:
   );
 }
 
-const NO_CRUMBS: BreadcrumbEntry[] = [];
-
 const LINE_WIDTHS = ["w-full", "w-11/12", "w-4/5", "w-full", "w-3/4"];
 
 function Lines({ lines }: { lines: number }) {
@@ -82,13 +80,20 @@ export function TextSkeleton({ lines = 3, className }: { lines?: number; classNa
  * replaces it in place. Publishes the part of the trail the page already knows
  * from its address.
  */
-function HeaderBlocks({ breadcrumbs }: { breadcrumbs: BreadcrumbEntry[] }) {
+function HeaderBlocks({
+  breadcrumbs,
+  actions = true,
+}: {
+  breadcrumbs: BreadcrumbEntry[];
+  /** A page with no deed draws no placeholder where its menu will not land. */
+  actions?: boolean;
+}) {
   usePageBreadcrumb(breadcrumbs);
   return (
     <div data-page-header className="mb-4">
       <div className="flex min-h-9 items-center justify-between gap-4">
         <Skeleton className="h-7 w-44" />
-        <Skeleton className="h-8 w-24 shrink-0" />
+        {actions && <Skeleton className="h-8 w-24 shrink-0" />}
       </div>
     </div>
   );
@@ -219,10 +224,21 @@ export function ScheduleDetailSkeleton() {
  * A collection page: title, toolbar, then the table's frame with its header and rows — or the
  * card grid, when `list` names a screen the reader (or its default) shows as cards.
  */
-export function ListPageSkeleton({ list }: { list?: string }) {
+export function ListPageSkeleton({
+  list,
+  titleKey,
+  actions = true,
+}: {
+  list?: string;
+  /** The namespaced key of the page's title, published as its crumb like the page does. */
+  titleKey?: string;
+  /** Whether the page has an Actions menu (`/files` has none). */
+  actions?: boolean;
+}) {
+  const { t } = useTranslation(["common", "settings", "agents"]);
   return (
     <Waiting>
-      <HeaderBlocks breadcrumbs={NO_CRUMBS} />
+      <HeaderBlocks breadcrumbs={titleKey ? [{ label: t(titleKey) }] : []} actions={actions} />
       {list ? <ViewedCollectionBlocks list={list} /> : <CollectionBlocks />}
     </Waiting>
   );

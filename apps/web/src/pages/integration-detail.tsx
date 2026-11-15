@@ -15,7 +15,7 @@ import { IntegrationOverview } from "../components/package-detail/integration-ov
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
-const INTEGRATION_TABS = ["overview", "connections", "configuration"] as const;
+const INTEGRATION_TABS = ["overview", "connections", "settings"] as const;
 import { useTranslation } from "react-i18next";
 import { Link, useParams, useLocation, useNavigate } from "react-router-dom";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
@@ -40,7 +40,9 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ErrorState, ResourceErrorState } from "../components/page-states";
+import { ResourceErrorState } from "../components/page-states";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
+import { isQueryInFlight } from "../lib/query-state";
 import { SettingsSkeleton } from "../components/loading-skeletons";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { SettingsHeading } from "../components/settings/settings-heading";
@@ -194,8 +196,8 @@ function IntegrationSettings({
   return (
     <SettingsRailView
       param="integrationSettings"
-      tab="configuration"
-      label={t("integration.tabs.configuration")}
+      tab="settings"
+      label={t("integration.tabs.settings")}
       groups={groups}
       resolve={resolve}
       definitionSections={DEFINITION_SECTIONS}
@@ -324,7 +326,6 @@ function IntegrationSettings({
  */
 function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
-  // The hint names no button the route would refuse.
   const { mayActivate, activate, pending } = usePackageActivation(packageId);
   return (
     <div
@@ -332,16 +333,18 @@ function ActivationHint({ packageId }: { packageId: string }) {
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
-      {mayActivate && (
+      <DisabledReasonTooltip
+        reason={mayActivate ? null : t("library.cannotActivate", { ns: "common" })}
+      >
         <Button
           size="sm"
           onClick={() => activate()}
-          disabled={pending}
+          disabled={pending || !mayActivate}
           data-testid="detail-activate-btn"
         >
           {t("integrations.btn.activate")}
         </Button>
-      )}
+      </DisabledReasonTooltip>
     </div>
   );
 }
@@ -350,7 +353,8 @@ export function IntegrationDetailPage() {
   const { t } = useTranslation(["settings", "common", "agents"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
-  const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
+  const detailQuery = useIntegrationDetail(packageId || undefined);
+  const { data: detail, error } = detailQuery;
   const { data: pkg, isLoading: pkgLoading } = usePackageDetail(
     "integration",
     packageId || undefined,
@@ -384,8 +388,8 @@ export function IntegrationDetailPage() {
 
   // Only the integration detail gates the page; the package detail brings `source` and
   // follows in place (badges, read-only alert, actions menu).
-  if (isLoading) return <PackageDetailSkeleton type="integration" />;
-  if (error) {
+  if (isQueryInFlight(detailQuery)) return <PackageDetailSkeleton type="integration" />;
+  if (error || !detail) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
     return (
@@ -398,7 +402,6 @@ export function IntegrationDetailPage() {
       </ResourceErrorState>
     );
   }
-  if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const active = detail.active;
   const m = detail.manifest;
@@ -410,7 +413,7 @@ export function IntegrationDetailPage() {
   const tabs: DetailTab<(typeof INTEGRATION_TABS)[number]>[] = [
     { value: "overview", label: t("integration.tabs.overview"), icon: LayoutGrid },
     { value: "connections", label: t("integration.tabs.connections"), icon: Plug },
-    { value: "configuration", label: t("integration.tabs.configuration"), icon: Settings2 },
+    { value: "settings", label: t("integration.tabs.settings"), icon: Settings2 },
   ];
 
   return (
@@ -437,15 +440,21 @@ export function IntegrationDetailPage() {
         }
         actions={
           <>
-            {!active && activation.mayActivate && (
-              <HeaderActionButton
-                primary
-                onClick={() => activation.activate()}
-                disabled={activation.pending}
-                data-testid="detail-activate-btn"
+            {!active && (
+              <DisabledReasonTooltip
+                reason={
+                  activation.mayActivate ? null : t("library.cannotActivate", { ns: "common" })
+                }
               >
-                {t("integrations.btn.activate")}
-              </HeaderActionButton>
+                <HeaderActionButton
+                  primary
+                  onClick={() => activation.activate()}
+                  disabled={activation.pending || !activation.mayActivate}
+                  data-testid="detail-activate-btn"
+                >
+                  {t("integrations.btn.activate")}
+                </HeaderActionButton>
+              </DisabledReasonTooltip>
             )}
             {pkgLoading ? (
               <Skeleton className="size-8 rounded-md" />
@@ -508,7 +517,7 @@ export function IntegrationDetailPage() {
       </DetailTabPanel>
 
       {/* Configuration is admin-only; package files stay readable for every member. */}
-      <DetailTabPanel value="configuration" flush>
+      <DetailTabPanel value="settings" flush>
         {/* Its rail (definition, versions) depends on the package's source. */}
         {pkgLoading ? (
           <SettingsSkeleton className="p-6" />

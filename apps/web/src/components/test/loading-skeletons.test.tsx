@@ -50,6 +50,12 @@ describe("loading skeletons", () => {
     expect(render(<ListPageSkeleton />)).toContain("data-page-header");
   });
 
+  it("draws the action placeholder only for a page that has actions", () => {
+    const placeholder = "h-8 w-24 shrink-0";
+    expect(render(<ListPageSkeleton />)).toContain(placeholder);
+    expect(render(<ListPageSkeleton actions={false} />)).not.toContain(placeholder);
+  });
+
   it("waits as cards for a collection its reader sees as cards, as a table otherwise", () => {
     // Integrations default to cards; agents to a table.
     const cardGrid = "grid-cols-[repeat(auto-fill";

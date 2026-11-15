@@ -16,7 +16,7 @@
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, ExternalLink, LibraryBig } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -63,11 +63,11 @@ import {
 } from "../lib/catalogue-placement";
 import { useUrlModal, useUrlModalTarget } from "../hooks/use-url-modal";
 import { useListParams } from "../lib/list-params";
+import { useQueryTab } from "../hooks/use-query-tab";
 import {
   INTEGRATION_EXECUTIONS,
   integrationExecution,
   integrationProtocol,
-  type IntegrationExecution,
 } from "../lib/integration-collection";
 import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
@@ -132,10 +132,11 @@ export function OrgCatalogueModal({
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
   const list = useListParams(["state", "origin"]);
+  const [execution, setExecution] = useQueryTab("execution", INTEGRATION_EXECUTIONS);
   // Découvrir is BROWSING (cards); Par espace is MANAGING (a table of per-space state). No toggle.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // A tick belongs to one list: another view or kind starts with none.
-  const listKey = `${view}/${active}`;
+  const listKey = `${view}/${active}/${execution}`;
   const [selectedIn, setSelectedIn] = useState(listKey);
   if (selectedIn !== listKey) {
     setSelectedIn(listKey);
@@ -180,7 +181,6 @@ export function OrgCatalogueModal({
     return { ...base, here: "active", activeIn: [...base.activeIn, spaceId] };
   };
 
-  const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
   // The read has an address of its own: reload lands on it, Back leaves it.
   // Looked up in the whole library, not the kind shown nor the rows the filters leave: a link
@@ -449,28 +449,12 @@ export function OrgCatalogueModal({
     { id: "spaces", label: t("catalogue.viewSpaces") },
   ];
   const viewSwitcher = (
-    <div
-      role="tablist"
-      aria-label={t("catalogue.viewLabel")}
-      className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
-    >
-      {views.map((option) => (
-        <Link
-          key={option.id}
-          to={catalogueListAddress(active, option.id, location.search)}
-          role="tab"
-          aria-selected={view === option.id}
-          className={cn(
-            "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-            view === option.id
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {option.label}
-        </Link>
-      ))}
-    </div>
+    <CollectionTabs
+      value={view}
+      label={t("catalogue.viewLabel")}
+      hrefOf={(id) => catalogueListAddress(active, id, location.search)}
+      options={views.map(({ id, label }) => ({ value: id, label }))}
+    />
   );
   const kindRows = CATALOGUE_KINDS.map((type) => (
     <RailLink
@@ -612,10 +596,7 @@ export function OrgCatalogueModal({
               <CollectionTabs
                 value={execution}
                 label={t("integrations.execution.label")}
-                onChange={(next) => {
-                  setSelected(new Set());
-                  setExecution(next);
-                }}
+                onChange={setExecution}
                 options={INTEGRATION_EXECUTIONS.map((value) => ({
                   value,
                   label: t(`integrations.execution.${value}`),

@@ -95,7 +95,7 @@ export function SchedulesListPage() {
         title={t("common:nav.schedules")}
         variant="collection"
         breadcrumbs={[{ label: t("common:nav.schedules") }]}
-        actions={can("schedules:write") ? <PageActionsMenu actions={[createAction]} /> : undefined}
+        actions={<PageActionsMenu actions={[createAction]} />}
       />
 
       <ListToolbar

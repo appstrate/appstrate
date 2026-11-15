@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+/** A detail page's tab, kept in the URL hash. A switch is pushed, so Back undoes it. */
 export function useTabWithHash<T extends string>(
   validTabs: readonly T[],
   defaultTab: T,
@@ -20,7 +21,7 @@ export function useTabWithHash<T extends string>(
   const search = location.search;
   const setActiveTab = useCallback(
     (tab: T) => {
-      navigate({ search, hash: tab === defaultTab ? "" : tab }, { replace: true });
+      navigate({ search, hash: tab === defaultTab ? "" : tab });
     },
     [navigate, defaultTab, search],
   );

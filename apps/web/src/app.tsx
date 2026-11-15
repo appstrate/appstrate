@@ -348,6 +348,17 @@ const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
   "/integrations": "integrations",
 };
 
+/** The collection pages' titles (their crumb) and whether they carry an Actions menu. */
+const LIST_PAGE: Partial<Record<RoutePath, { titleKey: string; actions: boolean }>> = {
+  "/agents": { titleKey: "common:nav.agents", actions: true },
+  "/skills": { titleKey: "settings:packages.type.skills", actions: true },
+  "/mcp-servers": { titleKey: "settings:packages.type.mcp-servers", actions: true },
+  "/integrations": { titleKey: "settings:integrations.title", actions: true },
+  "/schedules": { titleKey: "common:nav.schedules", actions: true },
+  "/runs": { titleKey: "agents:runs.title", actions: true },
+  "/files": { titleKey: "common:nav.files", actions: false },
+};
+
 /** The settings pages that are a table, not rows of fields; the value says whether a toolbar leads. */
 const SETTINGS_TABLES: Partial<Record<RoutePath, boolean>> = {
   "/org-settings/members": false,
@@ -373,7 +384,10 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
-  return <ListPageSkeleton list={LIST_VIEW_OF[path]} />;
+  const page = LIST_PAGE[path];
+  return (
+    <ListPageSkeleton list={LIST_VIEW_OF[path]} titleKey={page?.titleKey} actions={page?.actions} />
+  );
 }
 
 function pageRoute(path: RoutePath) {

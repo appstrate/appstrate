@@ -11,6 +11,7 @@ import { requestScopeChange } from "../../hooks/use-unsaved-changes";
  * the previous scope flashing after a context switch.
  */
 import { useState, type ReactNode } from "react";
+import { useStore } from "zustand";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
@@ -38,6 +39,7 @@ import { useViewer } from "../../hooks/use-auth";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
+import { breadcrumbStore } from "../../stores/breadcrumb-store";
 import {
   activeSettingsItem,
   firstSettingsPath,
@@ -97,6 +99,9 @@ export function UnifiedSettingsLayout() {
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
+  const [badgeTarget, setBadgeTarget] = useState<HTMLDivElement | null>(null);
+  // A page under the item (a webhook) names itself through its own crumb, which the heading shows.
+  const subPageTitle = useStore(breadcrumbStore, (s) => s.overlayPage.entries[0]?.label);
 
   const sections = useSettingsSections();
   const { ready } = usePermissions();
@@ -224,7 +229,19 @@ export function UnifiedSettingsLayout() {
       {!ready && <PanelTitleBlock />}
       {activeItem && (
         <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
-          <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <SettingsHeading
+              className="mb-0 min-w-0"
+              title={
+                subPageTitle ? (
+                  <span className="break-all">{subPageTitle}</span>
+                ) : (
+                  label(activeItem.labelKey)
+                )
+              }
+            />
+            <div ref={setBadgeTarget} className="flex shrink-0 items-center gap-2" />
+          </div>
           <div
             ref={setActionTarget}
             data-page-actions
@@ -237,7 +254,7 @@ export function UnifiedSettingsLayout() {
         data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
       >
-        <SettingsPageActionTargetProvider target={actionTarget}>
+        <SettingsPageActionTargetProvider target={actionTarget} badgeTarget={badgeTarget}>
           <Outlet />
         </SettingsPageActionTargetProvider>
       </div>

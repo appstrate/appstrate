@@ -185,7 +185,7 @@ export function NoClientPicker({
             or not: a non-admin lands on a page that tells them so, which beats
             a dead sentence, and the tab itself is admin-gated anyway. */}
         {canOpenIntegration && (
-          <Link to={`${integrationPath}#configuration`} className="underline underline-offset-2">
+          <Link to={`${integrationPath}#settings`} className="underline underline-offset-2">
             {t("settings:integration.auth.noClientLink")}
           </Link>
         )}

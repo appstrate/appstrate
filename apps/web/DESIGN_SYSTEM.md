@@ -127,9 +127,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
    `className` (`text-primary`, `text-destructive`). A link that loses its label
    under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
-   `PageHeader` with `variant="collection"` is for level-one list pages only:
-   title and actions, no descriptive subtitle, followed by the toolbar at the
-   same spacing on every list. Explanations belong in the content or empty state.
+   `PageHeader` with `variant="collection"` is for level-one pages only (lists and the
+   dashboard): title and actions, followed by the toolbar at the same spacing on every list.
+   `description` is a status line (the dashboard's date and running count), never an
+   explanation: those belong in the content or empty state.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
@@ -149,7 +150,11 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
 4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
    as `tabs`), underlined, an icon each, the tab kept in the URL hash
-   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
+   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string and pushes, so Back
+   undoes a switch). The summary tab is `overview`, the settings one `settings`. A tab that splits
+   a COLLECTION (`CollectionTabs`) is `useQueryTab(name, options)` (`hooks/use-query-tab.ts`, the
+   first option leaves the URL, also pushed); `CollectionTabs` with `hrefOf` draws links when the
+   router owns more than one param (the catalogue's views).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
    tabs for every role** (a package's « Utilisé par » included): what a role may
