@@ -6,18 +6,21 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ResourceErrorState } from "@/components/page-states";
 import { DetailTabPanel, DetailTabs, UnderlineTabList } from "@/components/detail-tabs";
-import { SettingsSkeleton, Waiting } from "@/components/loading-skeletons";
+import { Waiting } from "@/components/loading-skeletons";
 import { SettingsPageBadges } from "@/components/settings/settings-page-actions";
 import { useOverlayPageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { useTabWithHash } from "@/hooks/use-tab-with-hash";
 import { isQueryInFlight } from "@/lib/query-state";
-import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
+import {
+  WebhookDeliveriesTab,
+  WebhookDeliverySkeleton,
+} from "../components/webhook-deliveries-tab";
 import { WebhookSettingsTab } from "../components/webhook-settings-tab";
 import { useWebhook } from "../hooks/use-webhooks";
 
 const WEBHOOK_TABS = ["deliveries", "settings"] as const;
 
-/** The tab bar's box and the panel under it, while the webhook is read. */
+/** The tab bar's box and the first tab's cards under it (the deliveries), while the webhook is read. */
 function WebhookDetailSkeleton() {
   return (
     <Waiting>
@@ -25,7 +28,11 @@ function WebhookDetailSkeleton() {
         <Skeleton className="h-4 w-20" />
         <Skeleton className="h-4 w-20" />
       </div>
-      <SettingsSkeleton />
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <WebhookDeliverySkeleton key={i} />
+        ))}
+      </div>
     </Waiting>
   );
 }

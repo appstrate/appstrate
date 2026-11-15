@@ -28,7 +28,7 @@ import {
 import { ManualSave } from "./settings/manual-save";
 import { useSettingDraft } from "../hooks/use-setting-draft";
 import { ErrorState } from "./page-states";
-import { SettingsSkeleton } from "./loading-skeletons";
+import { FormSkeleton } from "./form-skeleton";
 import { SectionCard } from "./section-card";
 
 /**
@@ -44,15 +44,22 @@ import { SectionCard } from "./section-card";
  * but never turned into a chip is committed on blur and on Save, so it cannot
  * be silently dropped by the button the operator pressed to keep it.
  */
+const NO_CONTACT: BillingContact = { billing_email: null, billing_cc: [] };
+
 export function BillingContactSection() {
   const contactQuery = useBillingContact();
 
-  if (contactQuery.isLoading) return <SettingsSkeleton rows={2} />;
+  // The form itself, inert and empty, so the card lands without a move.
+  if (contactQuery.isLoading) {
+    return (
+      <FormSkeleton>
+        <BillingContactForm contact={NO_CONTACT} />
+      </FormSkeleton>
+    );
+  }
   if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
 
-  return (
-    <BillingContactForm contact={contactQuery.data ?? { billing_email: null, billing_cc: [] }} />
-  );
+  return <BillingContactForm contact={contactQuery.data ?? NO_CONTACT} />;
 }
 
 function BillingContactForm({ contact }: { contact: BillingContact }) {

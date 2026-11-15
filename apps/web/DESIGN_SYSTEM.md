@@ -61,6 +61,16 @@ they start with `packages/` or `e2e/`.
   control (a button, a row being saved), never content on its way; no centred
   spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
   the shell exists there is no page to draw.
+- **A structure change updates its skeletons in the same change**: any change to
+  a screen's structure (frames, sections, toolbar or footer, header lines, tabs,
+  cards, row heights, a surface turning integrated) updates, in that same change,
+  every skeleton that stands for it — the page skeletons of
+  `loading-skeletons.tsx`, the per-component `*Skeleton`s, the `placeholder`
+  props of `DataColumn`/`CardGrid`/`ItemList`, the `skeletonOf` fallbacks and
+  tables of `app.tsx` — so the skeleton and the loaded page keep one shape.
+  Review checks both; a skeleton that keeps an old frame, shadow, tint, radius
+  or line is a defect of the change that left it. A detail page's skeleton draws the
+  tab the address opens on (`#runs`, `#settings`…), not always the first one.
 
 ## 2. The shell
 

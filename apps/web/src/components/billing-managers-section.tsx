@@ -33,7 +33,9 @@ import { memberLabel } from "../lib/members";
 import { ManualSave } from "./settings/manual-save";
 import { useSettingDraft } from "../hooks/use-setting-draft";
 import { ErrorState } from "./page-states";
-import { SettingsSkeleton } from "./loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { Waiting } from "./loading-skeletons";
+import { SkeletonLine } from "./skeleton-line";
 import { SectionCard } from "./section-card";
 
 /** What a row the server would now refuse says about itself. */
@@ -57,7 +59,7 @@ export function BillingManagersSection() {
   const managersQuery = useBillingManagers();
   const orgQuery = useOrgDetail();
 
-  if (managersQuery.isLoading || orgQuery.isLoading) return <SettingsSkeleton rows={1} />;
+  if (managersQuery.isLoading || orgQuery.isLoading) return <BillingManagersSkeleton />;
   if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
@@ -67,6 +69,30 @@ export function BillingManagersSection() {
       saved={(managersQuery.data?.data ?? []).map((m) => m.userId)}
       members={orgQuery.data?.members ?? []}
     />
+  );
+}
+
+/** The card while the managers load: its title and description, one row, the add button. */
+function BillingManagersSkeleton() {
+  const { t } = useTranslation("settings");
+  return (
+    <Waiting>
+      <SectionCard title={t("billingManagers.title")}>
+        <p className="text-muted-foreground text-sm">{t("billingManagers.description")}</p>
+        <ul className="flex flex-col gap-2">
+          <li className="border-border flex items-center gap-3 rounded-lg border p-3">
+            <div className="min-w-0 flex-1">
+              <SkeletonLine className="w-40 text-sm font-medium" />
+              <SkeletonLine className="w-56 text-sm" />
+            </div>
+            <Skeleton className="h-8 w-20" />
+          </li>
+        </ul>
+        <div>
+          <Skeleton className="h-8 w-28" />
+        </div>
+      </SectionCard>
+    </Waiting>
   );
 }
 

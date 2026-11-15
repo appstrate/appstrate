@@ -9,6 +9,7 @@ import { relativeAge } from "@appstrate/core/format";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { ItemList } from "@/components/item-list";
 import { KeysetListFooter } from "@/components/list-toolbar";
+import { SkeletonBadge, SkeletonLine } from "@/components/skeleton-line";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { errorMessage } from "../../../lib/mutation-error";
@@ -42,6 +43,21 @@ function deliveryStatusLabel(d: WebhookDelivery): string {
   return d.status;
 }
 
+/** `WebhookDeliveriesTab`'s card while the deliveries load: its two lines, each in its own box. */
+export function WebhookDeliverySkeleton() {
+  return (
+    <Card className="p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <SkeletonLine className="w-40 font-mono text-sm" />
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <SkeletonBadge className="w-10" />
+        <SkeletonLine className="w-48 text-xs" />
+      </div>
+    </Card>
+  );
+}
+
 export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   const deliveriesQuery = useWebhookDeliveries(webhookId);
@@ -57,6 +73,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
       <ItemList
         items={deliveries}
         itemKey={(d) => d.id}
+        placeholder={<WebhookDeliverySkeleton />}
         isLoading={isLoading}
         isError={failed}
         error={<ErrorState error={error} compact />}
