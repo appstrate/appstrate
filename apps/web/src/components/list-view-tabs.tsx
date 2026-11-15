@@ -20,7 +20,7 @@ export function ListViewTabs({
         if (next === "cards" || next === "table") onChange(next);
       }}
     >
-      <TabsList className="h-9">
+      <TabsList className="h-8 shrink-0 p-0.5">
         <TabsTrigger value="table" aria-label={t("toolbar.viewTable")}>
           <Rows3 className="size-4" />
         </TabsTrigger>

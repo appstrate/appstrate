@@ -376,7 +376,7 @@ function RunDetailBody() {
           />
         </DetailTabPanel>
 
-        <DetailTabPanel value="journal" framed>
+        <DetailTabPanel value="journal">
           <RunExecutionView
             run={enrichedRun}
             logs={allLogs}
