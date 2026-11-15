@@ -423,13 +423,15 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
       toolArguments = parsed.data;
     } else {
       // A typed tool: required arguments present and, when its schema closes its properties, no
-      // unknown key (a missing `properties` allows none); its server validates the rest. Schemas
-      // declaring properties elsewhere (patternProperties, allOf, anyOf, oneOf, $ref) are left to it.
+      // unknown key (a missing `properties` allows none); its server validates the rest. Only the
+      // plain form is judged: `patternProperties` would mean running the server's regexes, and
+      // under composition (allOf, anyOf, oneOf, $ref) validators disagree with JSON Schema's
+      // sibling-only rule, so the platform never refuses what the server might accept.
       const schema = tool.input_schema;
-      const declaredElsewhere = ["patternProperties", "allOf", "anyOf", "oneOf", "$ref"].some(
+      const composed = ["patternProperties", "allOf", "anyOf", "oneOf", "$ref"].some(
         (keyword) => keyword in schema,
       );
-      if (schema.additionalProperties === false && !declaredElsewhere) {
+      if (schema.additionalProperties === false && !composed) {
         const properties = asRecord(schema.properties) ?? {};
         const unknown = Object.keys(call.data.arguments).filter(
           (key) => !Object.hasOwn(properties, key),

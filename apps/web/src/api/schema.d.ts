@@ -17759,8 +17759,11 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
-                            /** @description Present (`true`) when none of the caller's usable connections of this integration is healthy: its owner must reconnect it before it can be used. Omitted otherwise. */
-                            needs_reconnection?: boolean;
+                            /**
+                             * @description Present (`true`) when none of the caller's usable connections of this integration is healthy: its owner must reconnect it before it can be used. Omitted otherwise.
+                             * @enum {boolean}
+                             */
+                            needs_reconnection?: true;
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];

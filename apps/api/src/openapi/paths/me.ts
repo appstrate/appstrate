@@ -902,6 +902,7 @@ export const mePaths = {
                         },
                         needs_reconnection: {
                           type: "boolean",
+                          enum: [true],
                           description:
                             "Present (`true`) when none of the caller's usable connections of this integration is healthy: its owner must reconnect it before it can be used. Omitted otherwise.",
                         },
