@@ -144,11 +144,16 @@ describe("the typed tools of a remote MCP integration", () => {
   let apiKey: string;
 
   /** `GET /api/credential-proxy/tools`, with `query` as its parameters. */
-  const list = async (query: Record<string, string> = {}, key = apiKey) => {
+  const list = async (
+    query: Record<string, string> = {},
+    key = apiKey,
+    extraHeaders: Record<string, string> = {},
+  ) => {
     const res = await getTestApp().request(
       `/api/credential-proxy/tools?${new URLSearchParams(query).toString()}`,
       {
         headers: {
+          ...extraHeaders,
           Authorization: `Bearer ${key}`,
           "X-Org-Id": ctx.orgId,
           "X-Space-Id": ctx.defaultSpaceId,
@@ -530,6 +535,24 @@ describe("the typed tools of a remote MCP integration", () => {
         errors: Record<string, unknown>[];
       };
       expect(bare.errors[0]).not.toHaveProperty("connect_url");
+      expect(server.requests).toHaveLength(0);
+    });
+
+    it("lists an integration to reconnect once, in `not_ready` with one connect_url", async () => {
+      const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: TOKEN });
+      await db
+        .update(integrationConnections)
+        .set({ needsReconnection: true })
+        .where(eq(integrationConnections.id, connectionId));
+
+      const { body } = await list({}, connectKey, OFFERS);
+      expect(body.unlisted).toEqual([]);
+      expect(body.not_ready).toHaveLength(1);
+      expect(body.not_ready[0]).toMatchObject({
+        integration_package_id: ID,
+        proxy_connection: { status: "needs_reconnection" },
+      });
+      expect(body.not_ready[0]!.refusal!.connect_url).toStartWith("http");
       expect(server.requests).toHaveLength(0);
     });
 
@@ -1719,12 +1742,16 @@ describe("the typed tools of a remote MCP integration", () => {
         expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_request_denied");
         expect((await problemOf(res)).code).toBe("call_permission_required");
       }
-      // The listing reads the same refusal: the server is not listed.
+      // The listing tells it once, in `not_ready`: the server is not listed.
       const listed = await list();
       expect(listed.status).toBe(200);
-      expect(listed.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
-        "call_permission_required",
-      ]);
+      expect(listed.body.unlisted).toEqual([]);
+      expect(
+        listed.body.not_ready.map((entry) => [
+          entry.integration_package_id,
+          entry.proxy_connection.status,
+        ]),
+      ).toEqual([[ID, "not_permitted"]]);
       expect(server.requests).toEqual([]);
     });
 

@@ -311,6 +311,24 @@ describe("caller-context prompt hygiene", () => {
     expect(contextText(identity, CONTEXT_OPTS)).toContain("Reply in the user's language (fr)");
   });
 
+  it("renders a needs_reconnection connection as needing its owner's reconnection", () => {
+    const out = contextText(
+      {
+        connections: [
+          {
+            integration_package_id: "@appstrate/gmail",
+            name: "Gmail",
+            source: "own",
+            needs_reconnection: true,
+          },
+          { integration_package_id: "@appstrate/clickup", name: "ClickUp", source: "own" },
+        ],
+      },
+      CONTEXT_OPTS,
+    );
+    expect(out).toMatch(/Gmail[^,]*needs reconnection by its owner/);
+    expect(out).not.toMatch(/ClickUp[^,]*needs reconnection/);
+  });
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the

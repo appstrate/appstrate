@@ -11,7 +11,7 @@ import {
   credentialUrlPolicy,
   urlPolicyRefusalMessage,
 } from "../../src/resolvers/credential-guard.ts";
-import { substituteVars, templateHost } from "../../src/resolvers/template-vars.ts";
+import { substituteVars, templateHost, templateTarget } from "../../src/resolvers/template-vars.ts";
 
 const fields = { api_key: "SECRET" };
 const allowAll = {
@@ -255,6 +255,29 @@ describe("templateHost — the target host a message echoes", () => {
   it("is <templated> when the templated host does not parse, <unparseable> otherwise", () => {
     expect(templateHost("https://{{host}}:{{port}}/x")).toBe("<templated>");
     expect(templateHost("not a url")).toBe("<unparseable>");
+  });
+});
+
+describe("templateTarget — the target a message echoes", () => {
+  it("is origin and path, dropping userinfo, query and fragment", () => {
+    expect(templateTarget("https://u:p@api.example.com/v1/x?key=abc#f")).toBe(
+      "https://api.example.com/v1/x",
+    );
+  });
+
+  it("keeps placeholders literal in host and path", () => {
+    expect(templateTarget("https://{{ sub }}.example.com/{{org}}/x?t={{api_key}}")).toBe(
+      "https://{{sub}}.example.com/{{org}}/x",
+    );
+  });
+
+  it("keeps a whole-base-URL placeholder bare", () => {
+    expect(templateTarget("{{site_url}}/wp-json/x?a=1")).toBe("{{site_url}}/wp-json/x");
+  });
+
+  it("falls back like templateHost when the target does not parse", () => {
+    expect(templateTarget("https://{{host}}:{{port}}/x")).toBe("<templated>");
+    expect(templateTarget("not a url")).toBe("<unparseable>");
   });
 });
 

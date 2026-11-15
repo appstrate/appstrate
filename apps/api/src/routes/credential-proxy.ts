@@ -66,7 +66,7 @@ import {
 // every runner apply one value. The streaming/buffered decision is
 // header-driven (X-Stream-Request), not threshold-driven, so only the hard cap
 // is needed here.
-import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
+import { MAX_STREAMED_BODY_SIZE, templateTarget } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -263,11 +263,14 @@ export function createCredentialProxyRouter() {
       const pipeDeadline = AbortSignal.timeout(STREAMING_PIPE_TIMEOUT_MS);
       const pipeSignal = AbortSignal.any([c.req.raw.signal, pipeDeadline]);
 
+      // Logs carry origin + path only: userinfo, query and fragment can hold credentials.
+      const loggedTarget = templateTarget(target);
+
       const streamLogCtx = {
         requestId: c.get("requestId"),
         orgId,
         integrationId,
-        target,
+        target: loggedTarget,
       };
 
       // Body handling — read raw bytes when present so substitution can
@@ -383,7 +386,7 @@ export function createCredentialProxyRouter() {
           integrationId,
           connectionId: result.connectionId,
           method,
-          target,
+          target: loggedTarget,
           status: result.status,
           runId,
           durationMs,
@@ -470,7 +473,7 @@ export function createCredentialProxyRouter() {
               userId,
               spaceId,
               integrationId,
-              target,
+              target: loggedTarget,
             });
           }
           throw problem;

@@ -493,7 +493,9 @@ export async function executeApiCall(
 
   const calls: PreparedCall[] = [];
   for (const [index, request] of requests.entries()) {
-    const argument = `arguments.requests[${index}].connection_id`;
+    // The refusal names the argument the id came from: the request's own, else the tool-level one.
+    const requestArgument = `arguments.requests[${index}].connection_id`;
+    const argument = request.connection_id === undefined ? "connection_id" : requestArgument;
     const asked = request.connection_id ?? defaultConnectionId;
     // A connection id is a UUID: named in any case, sent as the listing spells it.
     let connectionId = connectionIds.find((id) => id.toLowerCase() === asked?.toLowerCase());
@@ -509,8 +511,8 @@ export async function executeApiCall(
       if (connectionIds.length > 1) {
         return {
           code: "missing_argument",
-          error: `${argument} is required: ${tool.name} reaches several connections.`,
-          arguments: [argument],
+          error: `${requestArgument} is required: ${tool.name} reaches several connections.`,
+          arguments: [requestArgument],
           hint: `Pass one of: ${connectionIds.join(", ")}.`,
         };
       }

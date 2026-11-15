@@ -310,6 +310,40 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
+  it("a target carrying userinfo is refused before anything is sent, secret never echoed", async () => {
+    const fetchFn = mock(async () => new Response("ok")) as unknown as typeof fetch;
+    const resolveHost = mock(publicResolver);
+    for (const url of [
+      "https://user@api.github.com/user",
+      "https://u:s3cr3tpw@api.github.com/user",
+      "https://@api.github.com/user",
+      "  https://u:s3cr3tpw@api.github.com/user",
+      "https:\\\\u:s3cr3tpw@api.github.com/user",
+    ]) {
+      const err = await gate(url, {
+        authorizedUris: ["https://api.github.com/**"],
+        declaredUris: ["https://api.github.com/**"],
+        credentialFields: { token: "s3cr3tpw" },
+        fetchFn,
+        resolveHost,
+      });
+      expect(err?.kind).toBe("not_authorized");
+      expect(err?.redirect).toBe(false);
+      expect(err?.message).toContain("userinfo");
+      expect(err?.message).not.toContain("s3cr3tpw");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(resolveHost).not.toHaveBeenCalled();
+    // `@` in the path or query is not userinfo.
+    expect(
+      await gate("https://api.github.com/users/a@b?x=@y", {
+        authorizedUris: ["https://api.github.com/**"],
+        declaredUris: ["https://api.github.com/**"],
+        resolveHost: publicResolver,
+      }),
+    ).toBeNull();
+  });
+
   it("off-allowlist target is refused before any DNS work", async () => {
     const resolveHost = mock(publicResolver);
     const err = await gate("https://evil.example/x", {

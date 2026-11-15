@@ -449,11 +449,11 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                 inputWrapperOverride={historicalInputWrapper}
               />
             </DetailTabPanel>
-            <DetailTabPanel value="memory" framed>
+            <DetailTabPanel value="memory">
               {tabReads.memory ? (
                 <AgentMemoryTab packageId={packageId} />
               ) : (
-                <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
+                <RoleLimitNotice>{t("detail.roleLimit.memory")}</RoleLimitNotice>
               )}
             </DetailTabPanel>
           </>

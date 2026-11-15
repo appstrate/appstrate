@@ -262,6 +262,58 @@ describe("Me API (/api/me)", () => {
       expect(byId.has("@ctx/other-space")).toBe(false);
     });
 
+    it("flags needs_reconnection only when no usable connection of the integration is healthy", async () => {
+      const flag = (id: string) =>
+        db
+          .update(integrationConnections)
+          .set({ needsReconnection: true })
+          .where(eq(integrationConnections.id, id));
+      const broken = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/broken",
+        userId: ctx.user.id,
+      });
+      await flag(broken);
+      // Two connections of one integration, one broken: the integration stays healthy.
+      const mixedBroken = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/mixed",
+        userId: ctx.user.id,
+      });
+      await flag(mixedBroken);
+      await db.insert(integrationConnections).values({
+        integrationId: "@ctx/mixed",
+        authKey: "google",
+        accountId: "acct-second",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: ["openid"],
+        label: "Second",
+      });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/healthy",
+        userId: ctx.user.id,
+      });
+      for (const id of ["@ctx/broken", "@ctx/mixed", "@ctx/healthy"]) {
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      }
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        connections: { integration_package_id: string; needs_reconnection?: boolean }[];
+      };
+      const byId = new Map(body.connections.map((c) => [c.integration_package_id, c]));
+      expect(byId.get("@ctx/broken")?.needs_reconnection).toBe(true);
+      expect("needs_reconnection" in byId.get("@ctx/mixed")!).toBe(false);
+      expect("needs_reconnection" in byId.get("@ctx/healthy")!).toBe(false);
+    });
+
     describe("connections lists only integrations active in the space", () => {
       afterEach(() => {
         __resetSystemIntegrationsForTest();
