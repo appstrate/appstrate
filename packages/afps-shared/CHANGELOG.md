@@ -20,6 +20,9 @@ consumer's publish rather than the first user's `npm install`.
   when it is a non-empty object, `undefined` otherwise. It is the single reading of "this
   agent declares an output schema", shared by the runner (`output` tool), the platform
   prompt (`## Output Format`) and the platform's output validation at finalize (#2197).
+- **`hasUserinfo(url)`** (`connection-variables`): whether a URL's authority carries userinfo, even
+  empty (`https://@host`), judged as WHATWG parses it. The credential proxy refuses such a target
+  (#2222).
 - **`normalizeSkillMd(content, name)`** (`companion-files`): points a `SKILL.md` frontmatter
   `name` at `name` by rewriting only that line (or prepending it), every other byte as
   authored. The MCP Skills extension and `appstrate code sync` share it (#2175).

@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
   `## Output Format` for every `outputSchema` it receives.
 
+### Changed — `fetchApiCall` refuses a target carrying userinfo (#2222)
+
+- A URL whose authority carries userinfo (`https://user:pass@host/…`, even an empty
+  `https://@host/`) throws `ApiCallRefusedError("not_authorized", …)` before anything is resolved
+  or sent, where its userinfo used to be dropped without a word. The message never echoes the URL.
+
+### Added — `templateTarget` (#2222)
+
+- `templateTarget(template)` names a URL template as a message or log echoes it: origin and
+  normalised path, each `{{key}}` kept literal, userinfo, query and fragment dropped. Shares
+  `templateHost`'s parsing.
+
 ### Changed — `fetchApiCall` returns a redirect off the allowlist (#2154)
 
 - When gated (no `allowAllUris`), a 3xx whose `Location` matches no `authorizedUris` entry is

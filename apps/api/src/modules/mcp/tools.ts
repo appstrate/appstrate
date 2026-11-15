@@ -1745,9 +1745,12 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
-      "its own or shared into the space. " +
+      "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
+      "connection: its owner must reconnect it before use. " +
       (surface.proxies
-        ? "The integration tools you can call with them are listed by `search_integration_tools`. "
+        ? "The integration tools you can call with them are listed by `search_integration_tools`; " +
+          "integrations active in the space without a usable connection are listed there under " +
+          "`not_ready`. "
         : surface.proxiesClosed
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "

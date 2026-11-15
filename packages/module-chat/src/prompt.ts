@@ -251,6 +251,7 @@ interface CallerContext {
         source: string;
         version?: string;
         default_tools?: readonly string[] | "*" | null;
+        needs_reconnection?: boolean;
       }[]
     | null;
   agents?:
@@ -507,7 +508,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     const list = ctx.connections
       .map((c) => {
         const ver = c.version ? `@${c.version}` : "";
-        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
+        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)}${c.needs_reconnection ? "; needs reconnection by its owner" : ""})`;
       })
       .join(", ");
     // Render the connected integrations as data only — the `@scope/name` id (+

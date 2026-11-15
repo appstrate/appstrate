@@ -71,7 +71,6 @@ export function MemoryPanel({
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
-  const isError = pinnedQ.isError || memoriesQ.isError;
 
   const list = useLocalListParams({ type: initialTypes });
   const types = list.values("type", MEMORY_TYPES);
@@ -138,18 +137,6 @@ export function MemoryPanel({
     onDelete: canDelete ? (item) => setToDelete({ kind: item.kind, id: item.id }) : undefined,
   });
 
-  // Empty in BOTH tiers, once both answered: two failed queries also count zero, and a 500 must not draw "no memory yet".
-  if (!isLoading && !isError && allItems.length === 0) {
-    return (
-      <EmptyState
-        message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
-        hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
-        icon={BrainCircuit}
-        compact
-      />
-    );
-  }
-
   const selectedTypeLabel =
     selected?.kind === "pinned"
       ? t("agents:detail.memoryTypePinned")
@@ -157,8 +144,8 @@ export function MemoryPanel({
 
   return (
     <>
-      {/* Run results already own the section heading and outer content padding. */}
-      <section className={isRunView ? "min-w-0" : "min-w-0 p-6"}>
+      {/* Laid on the page like the runs tab: its toolbar, then the table in its own card. */}
+      <section className="min-w-0">
         <ListToolbar
           search={{
             value: list.search,
@@ -181,7 +168,20 @@ export function MemoryPanel({
           rowLabel={(item) => item.key ?? memoryText(item.content)}
           isLoading={isLoading}
           failure={pinnedQ.error ?? memoriesQ.error}
-          empty={<NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />}
+          // Like the runs tab: an empty list keeps its toolbar and says so inside its card; "no
+          // memory yet" only once both tiers answered (two failed reads also count zero).
+          empty={
+            allItems.length === 0 ? (
+              <EmptyState
+                message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
+                hint={isRunView ? undefined : t("detail.memoryEmptyAllHint")}
+                icon={BrainCircuit}
+                compact
+              />
+            ) : (
+              <NoMatchState message={t("agents:list.noMatch")} onReset={list.reset} />
+            )
+          }
         />
       </section>
       {selected !== null && (

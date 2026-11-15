@@ -165,7 +165,7 @@ describe("personal model credentials — instance token", () => {
         body: JSON.stringify({ providerId: "test-oauth", owner_type: ownerType }),
       });
     expect((await mint("org")).status).toBe(403);
-    expect((await mint("user")).status).toBe(200);
+    expect((await mint("user")).status).toBe(201);
   });
 
   it("pairs an organization subscription with an admin's token", async () => {
@@ -183,7 +183,7 @@ describe("personal model credentials — instance token", () => {
       },
       body: JSON.stringify({ providerId: "test-oauth", owner_type: "org" }),
     });
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
   });
 
   it("launches a run on the member's own credential", async () => {

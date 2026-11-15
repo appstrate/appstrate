@@ -315,7 +315,7 @@ For a login this page cannot express, the code route is a local MCP server that 
 | Connecting answers `400 login_rejected`             | Wrong credentials, or a success status other than the one in `success_criteria`                                        | Check the credentials, match `success_criteria`                              |
 | Connecting answers `502 login_upstream_unavailable` | The intranet is unreachable, throttling or failing                                                                     | Check the intranet. If it is on a private address, see step 1                |
 | Import or save refused on `connect.login`           | A criterion the platform does not evaluate (a compound condition, an unquoted string), or `delivery.http.in: "cookie"` | One `<expression> == <value>` per criterion, strings quoted; header delivery |
-| `403 unauthorized_target` on a call                 | The URL is outside `authorized_uris`                                                                                   | Fix the URL, or the pattern                                                  |
+| `403 unauthorized_target` on a call                 | The URL is outside `authorized_uris`, or carries userinfo (`user:pass@host`)                                           | Fix the URL, or the pattern                                                  |
 
 ## Resources
 

@@ -19,6 +19,7 @@ import {
   type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
+import { MAX_LISTED_SCOPES } from "../../../../src/modules/mcp/integration-tool-catalog.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import {
@@ -512,6 +513,18 @@ describe("call_integration_tool — tool", () => {
       });
       expect(calls).toHaveLength(0);
     }
+  });
+
+  it("names the tool-level connection_id when that is the value refused", async () => {
+    const { payload, calls } = await callWith({
+      tool: TOOL,
+      arguments: { requests: [get()] },
+      connection_id: "2b0d7c4e-5f6a-4b8c-9d1e-3f2a1b0c9d8e",
+    });
+    expect(payload).toMatchObject({ code: "invalid_argument", arguments: ["connection_id"] });
+    expect(payload.error).toContain("connection_id names none");
+    expect(payload.error).not.toContain("requests[");
+    expect(calls).toHaveLength(0);
   });
 
   it("takes a connection_id in any case, and sends it as listed", async () => {
@@ -1131,6 +1144,121 @@ describe("typed tools of a remote MCP integration", () => {
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
     expect(parseResult(result)).toMatchObject({ code: "missing_argument" });
     expect(callTool(made.calls)).toBeUndefined();
+  });
+
+  it("refuses an unknown key when the schema closes its properties, sending nothing", async () => {
+    const closed = { ...inputSchema, additionalProperties: false };
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, {
+      listing: listingOf([remoteTool({ input_schema: closed })]),
+    });
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler(
+        { tool: "acme_docs__search", arguments: { q: "x", limt: 3, constructor: 1 } },
+        noExtra,
+      );
+    expect(result.isError).toBe(true);
+    // An inherited key of `properties` (`constructor`) is not a declared one.
+    expect(parseResult(result)).toMatchObject({
+      code: "unknown_argument",
+      arguments: ["arguments.limt", "arguments.constructor"],
+    });
+    expect(callTool(made.calls)).toBeUndefined();
+  });
+
+  it("treats a closed schema without properties as allowing no key", async () => {
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, {
+      listing: listingOf([
+        remoteTool({ input_schema: { type: "object", additionalProperties: false } }),
+      ]),
+    });
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(parseResult(result)).toMatchObject({
+      code: "unknown_argument",
+      arguments: ["arguments.q"],
+    });
+    expect(callTool(made.calls)).toBeUndefined();
+  });
+
+  it.each([
+    ["allOf", { allOf: [{ properties: { q: { type: "string" } } }] }],
+    ["$ref", { $ref: "#/$defs/args", $defs: { args: { properties: { q: { type: "string" } } } } }],
+  ])("leaves a closed schema declaring properties through %s to the server", async (_k, extra) => {
+    const made = makeTools(
+      CALL_OWN,
+      () => Response.json({ result: { content: [{ type: "text", text: "ok" }] } }),
+      true,
+      {
+        listing: listingOf([
+          remoteTool({ input_schema: { type: "object", additionalProperties: false, ...extra } }),
+        ]),
+      },
+    );
+    await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(callTool(made.calls)).toBeDefined();
+  });
+
+  it("leaves unknown keys to the server when the schema does not close its properties", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      () => Response.json({ result: { content: [{ type: "text", text: "ok" }] } }),
+      true,
+      fixture,
+    );
+    await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x", extra: 1 } }, noExtra);
+    expect(callTool(made.calls)).toBeDefined();
+  });
+
+  it("relays a tool's own isError result as is", async () => {
+    const upstream = { content: [{ type: "text" as const, text: "bad q" }], isError: true };
+    const made = makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture);
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(result).toEqual(upstream);
+  });
+
+  it("explains missing_scopes in a typed tool's usage only", async () => {
+    const remote = await makeTools(CALL_OWN, undefined, true, fixture)
+      .byName.get("search_integration_tools")!
+      .handler({ integration: REMOTE }, noExtra);
+    const apiCall = await makeTools(CALL_OWN)
+      .byName.get("search_integration_tools")!
+      .handler({ integration: INTEGRATION }, noExtra);
+    const remoteUsage = (parseResult(remote).best_match as { usage: string }).usage;
+    const apiUsage = (parseResult(apiCall).best_match as { usage: string }).usage;
+    expect(remoteUsage).toContain("`missing_scopes`");
+    expect(apiUsage).not.toContain("missing_scopes");
+    expect(apiUsage).toContain("`scopes_granted_count`");
+    expect(remoteUsage).toContain("`scopes_granted_count`");
+  });
+
+  it("caps a connection's scopes_granted, giving the total only when cut", async () => {
+    const many = Array.from({ length: MAX_LISTED_SCOPES + 5 }, (_, i) => `scope.${i}`);
+    const few = ["a", "b"];
+    const search = async (scopes: string[]) => {
+      const made = makeTools(CALL_OWN, undefined, true, {
+        listing: listingOf([remoteTool({ connections: [connection({ scopes_granted: scopes })] })]),
+      });
+      const payload = parseResult(
+        await made.byName
+          .get("search_integration_tools")!
+          .handler({ integration: REMOTE }, noExtra),
+      );
+      return (payload.connections as Record<string, unknown>[])[0]!;
+    };
+    const cut = await search(many);
+    expect(cut.scopes_granted).toEqual(many.slice(0, MAX_LISTED_SCOPES));
+    expect(cut.scopes_granted_count).toBe(many.length);
+    const whole = await search(few);
+    expect(whole.scopes_granted).toEqual(few);
+    expect("scopes_granted_count" in whole).toBe(false);
   });
 
   it("relays the route's refusal as an error result", async () => {

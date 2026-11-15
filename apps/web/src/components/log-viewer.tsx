@@ -236,6 +236,8 @@ interface LogViewerProps {
   onSelectEntry: (entryId: string | null) => void;
   /** Read once at mount: the caller keys the viewer on it to apply a new focus. */
   initialFocus?: JournalOverviewFilter;
+  /** The open row's inspector, drawn beside the list inside the journal's card. */
+  inspector?: ReactNode;
 }
 
 export type JournalOverviewFilter = "tools" | "warnings" | "errors";
@@ -288,6 +290,7 @@ export function LogViewer({
   selectedEntryId,
   onSelectEntry,
   initialFocus,
+  inspector,
 }: LogViewerProps) {
   const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -438,7 +441,7 @@ export function LogViewer({
     : "grid-cols-[10rem_minmax(22rem,1fr)_6rem]";
 
   return (
-    <div className="bg-card overflow-hidden">
+    <div className="min-w-0">
       <ListToolbar
         search={{ value: query, onChange: setQuery, placeholder: t("log.search") }}
         filters={filters}
@@ -467,130 +470,146 @@ export function LogViewer({
         }
       />
 
-      <div className="overflow-x-auto">
-        <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
-          <div
-            className={cn(
-              "border-border bg-muted/40 text-muted-foreground grid items-center gap-4 border-y px-4 py-2 text-xs font-semibold tracking-wide uppercase",
-              journalGrid,
-            )}
-          >
-            {showTimestamps && <span>{t("log.timestamp")}</span>}
-            <span>{t("log.filterType")}</span>
-            <span>{t("log.columnEvent")}</span>
-            <span>{t("run.infoDuration")}</span>
-          </div>
+      {/* The journal's own card, like a table's: the event list and, when a row is open, its
+          inspector beside it — the toolbar above stays on the page. */}
+      <div
+        className={cn(
+          "bg-card grid min-w-0 overflow-hidden rounded-lg border",
+          inspector && "lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]",
+        )}
+      >
+        <div className="min-w-0 overflow-x-auto">
+          <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
+            <div
+              className={cn(
+                "border-border bg-muted/40 text-muted-foreground grid items-center gap-4 border-b px-4 py-2 text-xs font-semibold tracking-wide uppercase",
+                journalGrid,
+              )}
+            >
+              {showTimestamps && <span>{t("log.timestamp")}</span>}
+              <span>{t("log.filterType")}</span>
+              <span>{t("log.columnEvent")}</span>
+              <span>{t("run.infoDuration")}</span>
+            </div>
 
-          <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
-            {isLoading && entries.length === 0 ? (
-              <Waiting>
-                <div className="flex flex-col gap-2 p-4">
-                  {Array.from({ length: 8 }, (_, i) => (
-                    <Skeleton key={i} className="h-8 w-full" />
-                  ))}
-                </div>
-              </Waiting>
-            ) : visibleEntries.length === 0 ? (
-              <div className="flex h-full items-center justify-center">
-                {entries.length === 0 ? (
-                  <EmptyState compact icon={ScrollText} message={t("log.empty")} />
-                ) : (
-                  <EmptyState
-                    compact
-                    icon={SearchX}
-                    message={t("log.noMatches")}
-                    hint={t("log.noMatchesHint")}
-                  >
-                    {hasActiveQueryOrFilters && (
-                      <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
-                        {t("common:toolbar.clearAll")}
-                      </Button>
-                    )}
-                  </EmptyState>
-                )}
-              </div>
-            ) : (
-              <div
-                style={{
-                  height: virtualizer.getTotalSize(),
-                  width: "100%",
-                  position: "relative",
-                }}
-              >
-                {virtualizer.getVirtualItems().map((virtualRow) => {
-                  const entry = visibleEntries[virtualRow.index]!;
-                  const isSelected = selectedEntryId === entry.id;
-                  return (
-                    <div
-                      key={entry.id}
-                      data-index={virtualRow.index}
-                      ref={virtualizer.measureElement}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
+            <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
+              {isLoading && entries.length === 0 ? (
+                <Waiting>
+                  <div className="flex flex-col gap-2 p-4">
+                    {Array.from({ length: 8 }, (_, i) => (
+                      <Skeleton key={i} className="h-8 w-full" />
+                    ))}
+                  </div>
+                </Waiting>
+              ) : visibleEntries.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  {entries.length === 0 ? (
+                    <EmptyState compact icon={ScrollText} message={t("log.empty")} />
+                  ) : (
+                    <EmptyState
+                      compact
+                      icon={SearchX}
+                      message={t("log.noMatches")}
+                      hint={t("log.noMatchesHint")}
                     >
-                      <button
-                        type="button"
-                        className={cn(
-                          "hover:bg-muted/50 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
-                          journalGrid,
-                          isSelected && "bg-muted/40",
-                        )}
-                        onClick={() => onSelectEntry(isSelected ? null : entry.id)}
-                        aria-pressed={isSelected}
+                      {hasActiveQueryOrFilters && (
+                        <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
+                          {t("common:toolbar.clearAll")}
+                        </Button>
+                      )}
+                    </EmptyState>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    height: virtualizer.getTotalSize(),
+                    width: "100%",
+                    position: "relative",
+                  }}
+                >
+                  {virtualizer.getVirtualItems().map((virtualRow) => {
+                    const entry = visibleEntries[virtualRow.index]!;
+                    const isSelected = selectedEntryId === entry.id;
+                    return (
+                      <div
+                        key={entry.id}
+                        data-index={virtualRow.index}
+                        ref={virtualizer.measureElement}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
                       >
-                        {showTimestamps && (
-                          <span className="text-muted-foreground font-mono text-xs">
-                            {formatTimestamp(entry.createdAt, i18n.language)}
+                        <button
+                          type="button"
+                          className={cn(
+                            "hover:bg-muted/50 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
+                            journalGrid,
+                            isSelected && "bg-muted/40",
+                          )}
+                          onClick={() => onSelectEntry(isSelected ? null : entry.id)}
+                          aria-pressed={isSelected}
+                        >
+                          {showTimestamps && (
+                            <span className="text-muted-foreground font-mono text-xs">
+                              {formatTimestamp(entry.createdAt, i18n.language)}
+                            </span>
+                          )}
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-4 shrink-0 items-center justify-center">
+                              {entry.kind === "tool" ? (
+                                <ToolStatus status={entry.status} />
+                              ) : (
+                                <ExecutionEntryIcon entry={entry} />
+                              )}
+                            </span>
+                            <span className="text-muted-foreground truncate text-xs">
+                              {t(`log.type.${journalType(entry)}`)}
+                            </span>
                           </span>
-                        )}
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="flex size-4 shrink-0 items-center justify-center">
+                          <span
+                            className={cn(
+                              "text-foreground min-w-0",
+                              entry.kind === "tool"
+                                ? "truncate"
+                                : "break-words whitespace-pre-wrap",
+                              entry.level && levelColors[entry.level],
+                            )}
+                          >
                             {entry.kind === "tool" ? (
-                              <ToolStatus status={entry.status} />
+                              <>
+                                <span className="font-medium">{entry.tool}</span>
+                                {entry.detail && (
+                                  <span className="text-muted-foreground"> · {entry.detail}</span>
+                                )}
+                              </>
                             ) : (
-                              <ExecutionEntryIcon entry={entry} />
+                              entry.message
                             )}
                           </span>
-                          <span className="text-muted-foreground truncate text-xs">
-                            {t(`log.type.${journalType(entry)}`)}
+                          <span className="text-muted-foreground text-right text-xs tabular-nums">
+                            {entry.kind === "tool" && entry.durationMs !== undefined
+                              ? formatDuration(entry.durationMs)
+                              : ""}
                           </span>
-                        </span>
-                        <span
-                          className={cn(
-                            "text-foreground min-w-0",
-                            entry.kind === "tool" ? "truncate" : "break-words whitespace-pre-wrap",
-                            entry.level && levelColors[entry.level],
-                          )}
-                        >
-                          {entry.kind === "tool" ? (
-                            <>
-                              <span className="font-medium">{entry.tool}</span>
-                              {entry.detail && (
-                                <span className="text-muted-foreground"> · {entry.detail}</span>
-                              )}
-                            </>
-                          ) : (
-                            entry.message
-                          )}
-                        </span>
-                        <span className="text-muted-foreground text-right text-xs tabular-nums">
-                          {entry.kind === "tool" && entry.durationMs !== undefined
-                            ? formatDuration(entry.durationMs)
-                            : ""}
-                        </span>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
+        {inspector && (
+          <aside className="border-border min-w-0 border-t lg:border-t-0 lg:border-l">
+            {inspector}
+          </aside>
+        )}
       </div>
     </div>
   );

@@ -39,6 +39,7 @@ import {
   type PreparedApiCallRequest,
   redactionFields,
   templateHost,
+  templateTarget,
   URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
   type CookieJar,
@@ -379,7 +380,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       credentialForwarded = sent.credentialsForwarded;
       return sent.response;
     } catch (err) {
-      throw toProxyCallError(err, input.integrationId, redactedHost, connectionId);
+      throw toProxyCallError(err, input.integrationId, input.target, connectionId);
     }
   };
 
@@ -563,9 +564,10 @@ export function bodyReadError(
 function toProxyCallError(
   err: unknown,
   integrationId: string,
-  redactedHost: string,
+  target: string,
   connectionId: string,
 ): Error {
+  const redactedHost = templateHost(target);
   const failure = classifyApiCallFailure(err);
   // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
   const sent =
@@ -576,13 +578,19 @@ function toProxyCallError(
       : undefined;
   switch (failure.code) {
     case "unauthorized_target":
-    case "blocked_target":
+    case "blocked_target": {
+      // An authorization refusal is about the URL (the host may be allowed); an SSRF one, the host.
+      const named = failure.redirect
+        ? ""
+        : failure.code === "unauthorized_target"
+          ? ` (${templateTarget(target)})`
+          : ` (host ${redactedHost})`;
       return new ProxyCallError(
         failure.code,
-        `Integration ${integrationId}: ${failure.message}` +
-          (failure.redirect ? "" : ` (host ${redactedHost})`),
+        `Integration ${integrationId}: ${failure.message}${named}`,
         sent,
       );
+    }
     case "upstream_unresolvable":
       return new ProxyCallError(failure.code, failure.message, sent);
     case "credential_unusable":
