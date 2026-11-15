@@ -43,7 +43,9 @@ import { refreshPackageLists } from "../../hooks/use-mutations";
 
 export function ChatModulePage() {
   // The package-authoring preference is per user: bind it before the composer paints.
-  const userId = useAuth().user?.id ?? null;
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const userName = user?.name ?? null;
   useLayoutEffect(() => bindPackageAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
@@ -159,6 +161,7 @@ export function ChatModulePage() {
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
               onPackagesChanged={onPackagesChanged}
+              userName={userName}
             />
           </div>
           <ConversationSidebar

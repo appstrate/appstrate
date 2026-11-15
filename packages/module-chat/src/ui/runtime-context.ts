@@ -144,6 +144,8 @@ export interface ChatHost {
    * packages, as its own editor and import dialog do after a write.
    */
   onPackagesChanged: () => void;
+  /** The signed-in user's display name, for the new-conversation greeting. */
+  userName?: string | null;
 }
 
 /**

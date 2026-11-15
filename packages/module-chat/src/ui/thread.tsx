@@ -16,6 +16,7 @@ import {
   AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
+  useAui,
   useAuiEvent,
   useAuiState,
   unstable_useComposerInput,
@@ -25,6 +26,8 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
+  ListPlusIcon,
+  PencilIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
   SquareIcon,
@@ -33,6 +36,7 @@ import {
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -54,18 +58,29 @@ import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
+import {
+  firstName,
+  flushDecision,
+  joinQueued,
+  type MessageQueue,
+  type QueueSnapshot,
+} from "./message-queue.ts";
 
 export function Thread({
   composerTools,
   composerSlot,
   initialComposerDraft,
+  messageQueue,
 }: {
   /** Left of the composer's bottom row: the "+" menu and the active-setting chips. */
   composerTools?: React.ReactNode;
   /** Right of it, before send: the model picker. */
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
+  /** Messages typed while the agent answers; created by the conversation, which also marks Stop on it. */
+  messageQueue: MessageQueue;
 }) {
+  useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
   const { can, t } = useChatHost();
@@ -100,6 +115,7 @@ export function Thread({
             composerSlot={composerSlot}
             initialComposerDraft={initialComposerDraft}
             draftSeededRef={draftSeededRef}
+            queue={messageQueue}
           />
         </AuiIf>
 
@@ -123,6 +139,7 @@ export function Thread({
                 slot={composerSlot}
                 initialDraft={initialComposerDraft}
                 draftSeededRef={draftSeededRef}
+                queue={messageQueue}
               />
               <Disclaimer />
             </ThreadPrimitive.ViewportFooter>
@@ -140,33 +157,29 @@ export function Thread({
   );
 }
 
-// Generic, instance-agnostic prompts — must not reference any specific
-// agent/package or org data (this UI ships to every Appstrate user).
-const WELCOME_SUGGESTION_KEYS = [
-  "welcome.suggestion.capabilities",
-  "welcome.suggestion.agents",
-  "welcome.suggestion.runs",
-  "welcome.suggestion.files",
-];
-
 function ThreadWelcome({
   composerTools,
   composerSlot,
   initialComposerDraft,
   draftSeededRef,
+  queue,
 }: {
   composerTools?: React.ReactNode;
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
+  queue: MessageQueue;
 }) {
-  const { can, t } = useChatHost();
+  const { can, t, userName } = useChatHost();
   const canWrite = can("chat:write");
+  const name = firstName(userName);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
-      <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
+      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
-          <p className="text-lg font-medium">Appstrate Chat</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {name ? t("welcome.greeting", { name }) : t("welcome.greetingAnonymous")}
+          </h1>
           <p className="text-muted-foreground mt-1 text-sm">
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
@@ -177,27 +190,8 @@ function ThreadWelcome({
           slot={composerSlot}
           initialDraft={initialComposerDraft}
           draftSeededRef={draftSeededRef}
+          queue={queue}
         />
-        {canWrite && (
-          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-            {WELCOME_SUGGESTION_KEYS.map((key) => (
-              <ThreadPrimitive.Suggestion
-                key={key}
-                prompt={t(key)}
-                method="replace"
-                autoSend
-                asChild
-              >
-                <button
-                  type="button"
-                  className="bg-card hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
-                >
-                  {t(key)}
-                </button>
-              </ThreadPrimitive.Suggestion>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -370,19 +364,128 @@ function ComposerAttachmentError() {
   );
 }
 
+/** Sends everything queued as ONE user message, then empties the queue. */
+function sendQueued(aui: ReturnType<typeof useAui>, queue: MessageQueue) {
+  const text = joinQueued(queue.getSnapshot().items);
+  queue.clear();
+  aui.thread().append({ content: [{ type: "text", text }] });
+}
+
+/**
+ * Sends the queue when a turn ends (error included). A turn the user stopped
+ * keeps its queue: the composer offers a manual send instead. Lives in `Thread`,
+ * which outlives both composers (welcome and footer).
+ */
+function useQueueFlush(queue: MessageQueue) {
+  const aui = useAui();
+  const running = useAuiState((s) => s.thread.isRunning);
+  const wasRunning = React.useRef(false);
+  React.useEffect(() => {
+    const decision = flushDecision({
+      wasRunning: wasRunning.current,
+      running,
+      snapshot: queue.getSnapshot(),
+    });
+    const ended = wasRunning.current && !running;
+    wasRunning.current = running;
+    if (decision === "send") sendQueued(aui, queue);
+    // A Stop only holds the queue for the turn it stopped.
+    else if (ended) queue.releaseStop();
+  }, [running, aui, queue]);
+}
+
+/** The queued messages, as a compact list at the top of the composer card. */
+function QueuedMessages({
+  queue,
+  running,
+  composerEmpty,
+  onEdit,
+}: {
+  queue: MessageQueue;
+  running: boolean;
+  composerEmpty: boolean;
+  onEdit: (text: string) => void;
+}) {
+  const { t } = useChatHost();
+  const aui = useAui();
+  const { items }: QueueSnapshot = React.useSyncExternalStore(
+    queue.subscribe,
+    queue.getSnapshot,
+    queue.getSnapshot,
+  );
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-1 flex flex-col gap-1 border-b pb-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground text-xs font-medium">
+          {t(running ? "composer.queue.title" : "composer.queue.titleHeld")}
+        </p>
+        {!running && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => sendQueued(aui, queue)}
+          >
+            {t("composer.queue.sendNow")}
+          </Button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-0.5">
+        {items.map((text, index) => (
+          // Texts may repeat and the list only ever shrinks or appends: the index is the identity.
+          <li key={index} className="text-muted-foreground flex items-center gap-1 text-xs">
+            <span className="min-w-0 flex-1 truncate" title={text}>
+              {text}
+            </span>
+            <IconButton
+              label={t("composer.queue.edit")}
+              className="size-6"
+              disabled={!composerEmpty}
+              onClick={() => {
+                queue.remove(index);
+                onEdit(text);
+              }}
+            >
+              <PencilIcon />
+            </IconButton>
+            <IconButton
+              label={t("composer.queue.remove")}
+              className="size-6"
+              onClick={() => queue.remove(index)}
+            >
+              <XIcon />
+            </IconButton>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Composer({
   tools,
   slot,
   initialDraft,
   draftSeededRef,
+  queue,
 }: {
   tools?: React.ReactNode;
   slot?: React.ReactNode;
   initialDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
+  queue: MessageQueue;
 }) {
   const { can, t } = useChatHost();
   const composer = unstable_useComposerInput();
+  const running = useAuiState((s) => s.thread.isRunning);
+  const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // Only text is queued: attachments stay in the composer until the next real send.
+  const canQueue = running && !hasAttachments && composer.value.trim() !== "";
+  const enqueue = () => {
+    if (canQueue && queue.add(composer.value)) composer.setText("");
+  };
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
       return;
@@ -404,6 +507,12 @@ function Composer({
     <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
       {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
+      <QueuedMessages
+        queue={queue}
+        running={running}
+        composerEmpty={composer.value.trim() === ""}
+        onEdit={composer.setText}
+      />
       <div className="flex flex-wrap gap-1.5 empty:hidden">
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
@@ -413,6 +522,13 @@ function Composer({
         autoFocus
         addAttachmentOnPaste
         placeholder={t("composer.placeholder")}
+        onKeyDown={(e) => {
+          // While the agent answers the primitive ignores Enter; it queues instead.
+          if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
+          if (e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          enqueue();
+        }}
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
@@ -432,6 +548,18 @@ function Composer({
             </ComposerPrimitive.Send>
           </ThreadPrimitive.If>
           <ThreadPrimitive.If running>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="size-8 shrink-0 rounded-lg"
+              aria-label={t("composer.queue.add")}
+              title={t("composer.queue.add")}
+              disabled={!canQueue}
+              onClick={enqueue}
+            >
+              <ListPlusIcon />
+            </Button>
             <ComposerPrimitive.Cancel asChild>
               <Button
                 type="button"
@@ -667,10 +795,10 @@ const IconButton = React.forwardRef<
     type="button"
     variant="ghost"
     size="icon"
-    className="text-muted-foreground size-7 [&_svg]:size-3.5"
     aria-label={label}
     title={label}
     {...props}
+    className={cn("text-muted-foreground size-7 [&_svg]:size-3.5", props.className)}
   >
     {children}
   </Button>

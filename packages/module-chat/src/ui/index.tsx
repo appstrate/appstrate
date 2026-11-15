@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { Thread } from "./thread.tsx";
+import { createMessageQueue } from "./message-queue.ts";
 import {
   ChatHeadersProvider,
   ChatHostProvider,
@@ -170,6 +171,8 @@ export interface ChatPageProps {
   formatBytes: ChatHost["formatBytes"];
   /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
   onPackagesChanged: ChatHost["onPackagesChanged"];
+  /** The user's display name, greeted on a new conversation (see `ChatHost`). */
+  userName?: ChatHost["userName"];
 }
 
 export function ChatPage({
@@ -188,6 +191,7 @@ export function ChatPage({
   modelCredentials,
   formatBytes,
   onPackagesChanged,
+  userName,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -286,6 +290,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
+      userName,
     }),
     [
       onOpenFile,
@@ -297,6 +302,7 @@ export function ChatPage({
       modelCredentials,
       formatBytes,
       onPackagesChanged,
+      userName,
     ],
   );
 
@@ -742,10 +748,15 @@ function ConversationInner({
   // real user stop must also hit the dedicated server endpoint. Start that
   // independent request before aborting the local stream so it cannot be
   // mistaken for an ordinary disconnect.
+  //
+  // Every stop path (button, Escape) lands here, so this is also where the
+  // message queue learns the user stopped: its messages are then held, not sent.
+  const [messageQueue] = useState(createMessageQueue);
   const stop = useCallback(() => {
+    messageQueue.markStopped();
     void stopSession(getHeaders, id).catch(() => {});
     return chat.stop();
-  }, [chat, getHeaders, id]);
+  }, [chat, getHeaders, id, messageQueue]);
   const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
@@ -756,6 +767,7 @@ function ConversationInner({
         composerTools={composerTools}
         composerSlot={composerSlot}
         initialComposerDraft={initialComposerDraft}
+        messageQueue={messageQueue}
       />
     </AssistantRuntimeProvider>
   );
