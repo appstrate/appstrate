@@ -4,6 +4,8 @@ Status: proposed, 2026-09-09. Two deliverables, two PRs, in this order.
 Per-package visibility (`packages.visibility` / `owner_user_id`) is deliberately
 out of scope — it is the next plan and builds on the predicates introduced here.
 
+> Note: the `mcp-server` package type was retired by #2226 (a local integration carries its server inline). This plan's mentions of `mcp-servers:read`, `dependencies.mcp_servers`, `/api/packages/mcp-servers*` and the "MCP servers" sidebar entry are historical.
+
 Context: a customer runs a shared agent with colleagues. Today every member
 holding `runs:read` reads every run in the space (prompts, logs, outputs), and
 the lowest preset that can launch an agent (`operator`) also reads the agent's

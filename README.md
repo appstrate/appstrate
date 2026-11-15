@@ -41,8 +41,8 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Hardware-isolated execution** (opt-in) — Run each agent in a dedicated [Firecracker](https://firecracker-microvm.github.io/) microVM for a KVM hardware boundary around the whole run, instead of a shared-kernel container. A workload escape compromises a throwaway guest kernel, not the host. See [Firecracker architecture](./docs/architecture/FIRECRACKER.md)
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
-- **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
-- **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
+- **Package import** — Import agents, skills, and integrations from ZIP/AFPS files
+- **Skills & local MCP servers** — Extend agent capabilities with SKILL.md instructions and local integrations that carry their MCP server inline (`server.type ∈ node | python | binary | uv`); `.mcpb` bundles import and export
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
 - **API keys** — Programmatic access via `apst_*` prefixed API keys

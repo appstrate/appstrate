@@ -1,6 +1,6 @@
 ---
 title: AFPS Packages
-description: The four package types, drafts and versions, importing and exporting, and system packages.
+description: The three package types, drafts and versions, importing and exporting, and system packages.
 ---
 
 Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/resources/afps-specification).
@@ -112,4 +112,4 @@ Creating a package needs the type's `write` permission (`agents:write`, `skills:
 
 ## System packages
 
-The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more). They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).

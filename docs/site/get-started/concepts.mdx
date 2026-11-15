@@ -40,7 +40,7 @@ An agent is the core unit of work. It is defined by a **prompt** that describes 
 An agent package declares:
 
 - An **input schema** (JSON Schema) for the parameters a person or a schedule supplies at launch, and an optional **output schema** the result must satisfy. A space can store default input values and lock some of them.
-- **Dependencies**: the [skills](/features/skills), MCP servers and integrations it uses.
+- **Dependencies**: the [skills](/features/skills) and integrations it uses.
 - **Runtime tools**: built-in tools such as `output`, `log`, `note`, `pin` and `publish_file`.
 
 An agent also gets persistence across runs:
@@ -91,7 +91,7 @@ Deep-dive: [Features / Runs](/features/runs) and [Features / Sandbox and Sidecar
 
 ## Packages
 
-Everything you author or install is a **package** in the open AFPS format (**A**gent **F**ormat **P**ackaging **S**tandard): a ZIP archive with a `manifest.json` at its root. There are four types:
+Everything you author or install is a **package** in the open AFPS format (**A**gent **F**ormat **P**ackaging **S**tandard): a ZIP archive with a `manifest.json` at its root. There are three types:
 
 | Type          | What it contains                                                                      |
 | ------------- | ------------------------------------------------------------------------------------- |
