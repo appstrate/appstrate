@@ -64,7 +64,12 @@ import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
-import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
+import {
+  useIntegrationMcpbExport,
+  usePackageDetail,
+  usePackageDownload,
+  type Versioned,
+} from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
@@ -357,6 +362,7 @@ export function IntegrationDetailPage() {
   );
   const activation = usePackageActivation(packageId);
   const downloadPackage = usePackageDownload(scope, name);
+  const exportMcpb = useIntegrationMcpbExport(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
   // id (withheld unless this caller reaches that space) and the write verdict.
@@ -457,6 +463,7 @@ export function IntegrationDetailPage() {
                 isHistoricalVersion={false}
                 downloadVersion={version}
                 onDownload={downloadPackage}
+                onExportMcpb={detail?.manifest.source?.kind === "local" ? exportMcpb : undefined}
                 isActiveHere={active}
               />
             )}

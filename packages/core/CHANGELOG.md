@@ -55,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/mcpb`** — the MCP Bundle projection of a `local` integration (AFPS §7.1.1):
+  **`mcpbFromIntegration(manifest, files?)`** emits a strict MCPB `manifest.json` (delivery.env
+  credentials become sensitive `user_config`), **`integrationFromMcpb(raw, scope)`** builds the
+  integration from one (sensitive `user_config` becomes a `custom` auth delivered in env),
+  **`isMcpbManifest(raw)`** tells the two manifest kinds apart, and both refuse what they cannot
+  carry with **`McpbProjectionError`** (`McpbProjectionErrorCode`). Types **`McpbManifest`**,
+  **`McpbUserConfigEntry`**.
+- **`resolveIntegrationToolCatalog`** takes **`listedTools`**: the tools the running server
+  listed, which stand for the catalog when the caller passes them (a remote source with
+  `allow_undeclared_tools`).
 - **Local server accessors** (`@appstrate/core/integration`, `@appstrate/core/mcp-server`):
   **`LocalServer`**, **`getLocalServer(manifest)`** and **`getLocalServerTools(manifest)`** read
   `source.server` of a `local` integration; **`getLocalServerEnv(manifest)`** returns its literal

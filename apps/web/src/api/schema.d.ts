@@ -3486,7 +3486,7 @@ export interface paths {
         put?: never;
         /**
          * Import a package from ZIP
-         * @description Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.
+         * @description Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Accepts `.afps`, `.zip` and `.mcpb` files. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.
          */
         post: operations["importPackage"];
         delete?: never;
@@ -3585,6 +3585,26 @@ export interface paths {
          * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
          */
         patch: operations["updateIntegrationPackage"];
+        trace?: never;
+    };
+    "/api/packages/integrations/{scope}/{name}/mcpb": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a local integration as an MCP Bundle (.mcpb)
+         * @description Export a published version (or the author's draft) of a `local` integration as a `.mcpb` MCP Bundle (AFPS §7.1.1): the strict MCPB `manifest.json` projected from the integration, plus every payload file of the archive verbatim; the integration's own `manifest.json` and `INTEGRATION.md` are dropped. Guarded as the archive download is — visibility, `integrations:read`, then `restrict_package_copy` for a published version; naming the draft is an author's act (`403 draft_not_writable`). A package that is not a local integration answers `422 mcpb_not_local`; one the MCPB form cannot carry faithfully (a credential delivered as a file or over HTTP, more than one auth method, connection variables) answers `422` with `mcpb_unsupported_auth` or `mcpb_unsupported_variables`. Rate-limited to 50 requests/minute.
+         */
+        get: operations["exportIntegrationMcpb"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/packages/integrations/{scope}/{name}/versions": {
@@ -21313,7 +21333,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description ZIP file containing the package
+                     * @description ZIP file containing the package, or a `.mcpb` MCP Bundle (converted to a local integration named `@<org slug>/<mcpb name>`, payload kept verbatim — AFPS §7.1.1). A bundle the projection cannot carry answers 400 with `mcpb_invalid_manifest` or `mcpb_unsupported_user_config`.
                      */
                     file: Blob;
                 };
@@ -21397,7 +21417,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.
+                     * @description `.afps-bundle` (preferred), `.afps`, `.mcpb` or `.zip` archive — detected automatically via the bundle.json marker. A `.mcpb` (an MCP Bundle whose root `manifest.json` carries `manifest_version`) is converted to a local integration named `@<org slug>/<mcpb name>` first (AFPS §7.1.1).
                      */
                     file: Blob;
                 };
@@ -21783,6 +21803,61 @@ export interface operations {
                 };
             };
             428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    exportIntegrationMcpb: {
+        parameters: {
+            query?: {
+                /** @description Exact version, dist-tag, semver range, or the literal `draft`. Defaults to `latest`. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The MCP Bundle. */
+            200: {
+                headers: {
+                    /** @description Attachment filename: `<name>-<version>.mcpb`. */
+                    "Content-Disposition"?: string;
+                    /** @description Archive size in bytes. */
+                    "Content-Length"?: string;
+                    /** @description Always `private, no-cache`. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Space-Id`. */
+                    Vary?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": Blob;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Insufficient permissions — `integrations:read`; `draft_not_writable` when `draft` is asked by a caller who cannot WRITE the package; or `package_copy_restricted` under `restrict_package_copy`. */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The package has no faithful MCPB form: `mcpb_not_local`, `mcpb_unsupported_auth` or `mcpb_unsupported_variables` (RFC 9457 problem+json), or its archive is unreadable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     listIntegrationPackageVersions: {

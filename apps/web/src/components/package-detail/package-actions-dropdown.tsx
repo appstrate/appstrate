@@ -91,6 +91,8 @@ interface PackageActionsDropdownProps {
   isHistoricalVersion: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
+  /** Export as an MCP Bundle (`.mcpb`); passed only for a local integration. */
+  onExportMcpb?: (version: string) => void;
   /**
    * ACTIVE in the current space; `undefined` (unknown) offers neither switch. Bundle export runs the
    * execution gate (`isPackageActiveHere`), so a package placed but switched off answers 404.
@@ -122,6 +124,7 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   downloadVersion,
   onDownload,
+  onExportMcpb,
   isActiveHere,
   onCreateVersion,
   createVersionBlockedReason,
@@ -196,6 +199,14 @@ export function PackageActionsDropdown({
       label: t("btn.download", { ns: "common" }),
       hidden: !canExport,
       onSelect: () => onDownload?.(downloadVersion!),
+    },
+    {
+      id: "mcpb",
+      group: "build",
+      icon: Download,
+      label: t("integrations.exportMcpb", { ns: "settings" }),
+      hidden: !canExport || !onExportMcpb,
+      onSelect: () => onExportMcpb?.(downloadVersion!),
     },
     {
       id: "create-version",

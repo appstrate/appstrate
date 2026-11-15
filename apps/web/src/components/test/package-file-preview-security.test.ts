@@ -72,6 +72,7 @@ const CALLERS = [
     from: '"../lib/blob-download"',
     calls: [
       'parseAs: "blob", }), `${stripScope(scope)}-${name}-${version}.afps`',
+      'parseAs: "blob", }), `${name}-${version}.mcpb`',
       'parseAs: "blob", }), `${stripScope(scope)}-${name}.afps-bundle`',
     ],
   },

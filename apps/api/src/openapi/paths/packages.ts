@@ -263,7 +263,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.",
+                    "`.afps-bundle` (preferred), `.afps`, `.mcpb` or `.zip` archive — detected automatically via the bundle.json marker. A `.mcpb` (an MCP Bundle whose root `manifest.json` carries `manifest_version`) is converted to a local integration named `@<org slug>/<mcpb name>` first (AFPS §7.1.1).",
                 },
               },
             },
@@ -375,7 +375,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Accepts `.afps`, `.zip` and `.mcpb` files. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -400,7 +400,8 @@ export const packagesPaths = {
                 file: {
                   type: "string",
                   format: "binary",
-                  description: "ZIP file containing the package",
+                  description:
+                    "ZIP file containing the package, or a `.mcpb` MCP Bundle (converted to a local integration named `@<org slug>/<mcpb name>`, payload kept verbatim — AFPS §7.1.1). A bundle the projection cannot carry answers 400 with `mcpb_invalid_manifest` or `mcpb_unsupported_user_config`.",
                 },
               },
             },
@@ -784,6 +785,74 @@ export const packagesPaths = {
             },
           },
         },
+      },
+    },
+  },
+  "/api/packages/integrations/{scope}/{name}/mcpb": {
+    get: {
+      operationId: "exportIntegrationMcpb",
+      tags: ["Packages"],
+      summary: "Export a local integration as an MCP Bundle (.mcpb)",
+      description:
+        "Export a published version (or the author's draft) of a `local` integration as a `.mcpb` MCP Bundle (AFPS §7.1.1): the strict MCPB `manifest.json` projected from the integration, plus every payload file of the archive verbatim; the integration's own `manifest.json` and `INTEGRATION.md` are dropped. Guarded as the archive download is — visibility, `integrations:read`, then `restrict_package_copy` for a published version; naming the draft is an author's act (`403 draft_not_writable`). A package that is not a local integration answers `422 mcpb_not_local`; one the MCPB form cannot carry faithfully (a credential delivered as a file or over HTTP, more than one auth method, connection variables) answers `422` with `mcpb_unsupported_auth` or `mcpb_unsupported_variables`. Rate-limited to 50 requests/minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          description:
+            "Exact version, dist-tag, semver range, or the literal `draft`. Defaults to `latest`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The MCP Bundle.",
+          headers: {
+            "Content-Disposition": {
+              description: "Attachment filename: `<name>-<version>.mcpb`.",
+              schema: { type: "string" },
+            },
+            "Content-Length": {
+              description: "Archive size in bytes.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Always `private, no-cache`.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Space-Id`.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — `integrations:read`; `draft_not_writable` when `draft` is asked by a caller who cannot WRITE the package; or `package_copy_restricted` under `restrict_package_copy`.",
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "422": {
+          description:
+            "The package has no faithful MCPB form: `mcpb_not_local`, `mcpb_unsupported_auth` or `mcpb_unsupported_variables` (RFC 9457 problem+json), or its archive is unreadable.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

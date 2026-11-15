@@ -112,6 +112,13 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { findUnexposedDefaultTools, type IntegrationManifest } from "@appstrate/core/integration";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
+import {
+  buildMcpbArchive,
+  convertMcpbArchive,
+  MCPB_EXTENSION,
+  mcpbProblem,
+} from "../services/mcpb.ts";
+import { McpbProjectionError } from "@appstrate/core/mcpb";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -2333,7 +2340,15 @@ export function createPackagesRouter() {
    * drop; a single rejected upload is locally repairable, since the error names
    * the offending field and value.
    */
-  async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
+  async function parseZipWithSkillFallback(
+    rawUpload: Buffer,
+    orgSlug: string,
+  ): Promise<ParsedImport> {
+    // A raw MCP Bundle becomes its integration archive first, so the bytes published below are
+    // the converted ones and every write-path rule judges the integration (AFPS §7.1.1).
+    const upload = Buffer.from(
+      await convertMcpbArchive(new Uint8Array(rawUpload), { slug: orgSlug }),
+    );
     const zipBytes = new Uint8Array(upload);
     try {
       const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
@@ -2577,8 +2592,13 @@ export function createPackagesRouter() {
       throw invalidRequest("File is required", "file");
     }
     const ext = file.name.toLowerCase();
-    if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
-      throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
+    if (
+      !ext.endsWith(".afps-bundle") &&
+      !ext.endsWith(".afps") &&
+      !ext.endsWith(".zip") &&
+      !ext.endsWith(MCPB_EXTENSION)
+    ) {
+      throw invalidRequest("Only .afps-bundle, .afps, .mcpb, and .zip files are accepted", "file");
     }
 
     const expectedType = readExpectedImportType(c);
@@ -2639,8 +2659,12 @@ export function createPackagesRouter() {
     if (!file || !(file instanceof File)) {
       throw invalidRequest("No file provided");
     }
-    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
-      throw invalidRequest("Only .afps and .zip files are accepted");
+    if (
+      !file.name.endsWith(".afps") &&
+      !file.name.endsWith(".zip") &&
+      !file.name.endsWith(MCPB_EXTENSION)
+    ) {
+      throw invalidRequest("Only .afps, .mcpb and .zip files are accepted");
     }
     const expectedType = readExpectedImportType(c);
 
@@ -2863,6 +2887,87 @@ export function createPackagesRouter() {
     });
     return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
   });
+
+  // GET /api/packages/integrations/:scope/:name/mcpb — a LOCAL integration as an MCP Bundle
+  // (`.mcpb`, AFPS §7.1.1): a published version (`?version=`, default `latest`), or the draft.
+  // Guarded as the archive download is — visibility, then `integrations:read`, then the copy
+  // restriction (the bundle leaves the platform as the archive does); the draft is an author's act.
+  router.get(
+    `/integrations/${SCOPED_PACKAGE_ROUTE}/mcpb`,
+    rateLimit(50),
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = getItemId(c);
+      const orgId = c.get("orgId");
+      const spaceId = c.get("spaceId");
+      const versionSpec = c.req.query("version") ?? "latest";
+
+      if (!(await isPackageReadableInSpace(spaceId, packageId))) {
+        throw notFound("Package not found");
+      }
+      const [pkg] = await db
+        .select({
+          id: packages.id,
+          type: packages.type,
+          source: packages.source,
+          homeSpaceId: packages.homeSpaceId,
+          orgId: packages.orgId,
+          draftManifest: packages.draftManifest,
+          draftContent: packages.draftContent,
+        })
+        .from(packages)
+        .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+        .limit(1);
+      if (!pkg) throw notFound("Package not found");
+      await requirePackageReadPermission(c, pkg.type);
+      if (pkg.type !== "integration") {
+        throw mcpbProblem(
+          new McpbProjectionError("mcpb_not_local", `'${packageId}' is not an integration`),
+          422,
+        );
+      }
+
+      const isDraft = versionSpec === VERSION_SELECTOR_DRAFT;
+      if (isDraft) {
+        await assertDraftSelectorAllowed(c, pkg.id, VERSION_SELECTOR_DRAFT);
+      } else {
+        await assertPackageCopyAllowed(
+          c,
+          { ...pkg, type: pkg.type as PackageType },
+          { orgId, accessible: await packageAccessSpaces(c) },
+        );
+      }
+
+      const validator = await resolvePackageFileValidator(pkg, versionSpec);
+      const snapshot = await readPackageSnapshot(pkg, validator);
+      let built: ReturnType<typeof buildMcpbArchive>;
+      try {
+        built = buildMcpbArchive(snapshot.files);
+      } catch (err) {
+        if (err instanceof McpbProjectionError) throw mcpbProblem(err, 422);
+        throw err;
+      }
+      const manifest = built.manifest as unknown as Record<string, unknown>;
+      const shownVersion =
+        validator.kind === "version"
+          ? validator.version
+          : typeof manifest.version === "string"
+            ? manifest.version
+            : VERSION_SELECTOR_DRAFT;
+      const filename = `${c.req.param("name")}-${isDraft ? VERSION_SELECTOR_DRAFT : shownVersion}${MCPB_EXTENSION}`;
+      return new Response(new Uint8Array(built.archive), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": attachmentDisposition(filename),
+          "Content-Length": String(built.archive.byteLength),
+          "Cache-Control": "private, no-cache",
+          Vary: "X-Org-Id, X-Space-Id",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    },
+  );
 
   return router;
 }

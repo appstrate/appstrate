@@ -385,7 +385,7 @@
   "import.dropText": "Glissez un fichier AFPS, AFPS-bundle ou ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",
   "import.importing": "Import en cours...",
-  "import.errZip": "Seuls les fichiers .afps, .afps-bundle et .zip sont acceptés",
+  "import.errZip": "Seuls les fichiers .afps, .afps-bundle, .mcpb et .zip sont acceptés",
   "bundle.download": "Télécharger le bundle (avec dépendances)",
   "bundle.requiresVersion": "Publiez d'abord une version de l'agent",
   "import.errSize": "Le fichier dépasse 10 Mo",

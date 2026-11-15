@@ -38,7 +38,8 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
   const lower = f.name.toLowerCase();
-  if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
+  const accepted = [".afps", ".afps-bundle", ".mcpb", ".zip"];
+  if (!accepted.some((extension) => lower.endsWith(extension))) {
     return "import.errZip";
   }
   return f.size > MAX_SIZE ? "import.errSize" : null;
@@ -177,7 +178,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".afps,.afps-bundle,.zip"
+          accept=".afps,.afps-bundle,.mcpb,.zip"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
