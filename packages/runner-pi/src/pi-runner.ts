@@ -248,8 +248,8 @@ export interface PiRunnerOptions {
   agentDir?: string;
   /**
    * Tool extension factories to load into the Pi SDK session. AFPS does
-   * not mandate where tools come from — in AFPS tools come from spawned
-   * `mcp-server` packages and integrations; callers map those to Pi
+   * not mandate where tools come from — in AFPS tools come from the MCP
+   * servers of spawned integrations; callers map those to Pi
    * extension factories before constructing the runner. Default: empty
    * (no extensions).
    */

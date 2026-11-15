@@ -14,13 +14,25 @@ import type { DepEntry } from "../src/dependencies.ts";
 describe("findRetiredDependencyKeys", () => {
   it("finds dependencies.tools", () => {
     expect(findRetiredDependencyKeys({ dependencies: { tools: { "@a/b": "^1.0.0" } } })).toEqual([
-      { key: "tools", replacement: "mcp_servers" },
+      {
+        key: "tools",
+        guidance: expect.stringContaining("declared inline on their local integration"),
+      },
     ]);
+  });
+
+  it("finds dependencies.mcp_servers and points at the inline source.server", () => {
+    const found = findRetiredDependencyKeys({
+      dependencies: { mcp_servers: { "@a/m": "^1.0.0" } },
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.key).toBe("mcp_servers");
+    expect(found[0]!.guidance).toContain("source.server");
   });
 
   it("finds dependencies.providers", () => {
     expect(findRetiredDependencyKeys({ dependencies: { providers: {} } })).toEqual([
-      { key: "providers", replacement: "integrations" },
+      { key: "providers", guidance: "renamed to `dependencies.integrations`" },
     ]);
   });
 
@@ -29,7 +41,6 @@ describe("findRetiredDependencyKeys", () => {
       findRetiredDependencyKeys({
         dependencies: {
           skills: { "@a/s": "^1.0.0" },
-          mcp_servers: { "@a/m": "^1.0.0" },
           integrations: { "@a/i": "^1.0.0" },
           _meta: { "dev.appstrate/x": 1 },
         },
@@ -176,23 +187,7 @@ describe("extractDependencies", () => {
     expect(deps.find((d) => d.depType === "integration")).toBeDefined();
   });
 
-  it("manifest with mcp_servers — AFPS first-class dep map", () => {
-    const manifest = {
-      dependencies: {
-        mcp_servers: { "@acme/gmail-server": "^1.0.0", "@acme/github-server": "~2.0.0" },
-      },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(2);
-
-    const gmail = deps.find((d) => d.depName === "gmail-server");
-    expect(gmail).toBeDefined();
-    expect(gmail!.depScope).toBe("@acme");
-    expect(gmail!.depType).toBe("mcp-server");
-    expect(gmail!.versionRange).toBe("^1.0.0");
-  });
-
-  it("manifest with all three dep categories (skills + mcp_servers + integrations)", () => {
+  it("ignores a retired mcp_servers map: it is no dependency category any more", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0" },
@@ -201,17 +196,7 @@ describe("extractDependencies", () => {
       },
     };
     const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(3);
-    expect(deps.find((d) => d.depType === "skill")).toBeDefined();
-    expect(deps.find((d) => d.depType === "mcp-server")).toBeDefined();
-    expect(deps.find((d) => d.depType === "integration")).toBeDefined();
-  });
-
-  it("throws on invalid scoped name in mcp_servers", () => {
-    const manifest = {
-      dependencies: { mcp_servers: { "no-scope": "^1.0.0" } },
-    };
-    expect(() => extractDependencies(manifest)).toThrow("Invalid scoped package name: no-scope");
+    expect(deps.map((d) => d.depType).sort()).toEqual(["integration", "skill"]);
   });
 
   it("throws when a dependency value is not a string (§4.1)", () => {
@@ -737,16 +722,13 @@ describe("detectCycle", () => {
     expect(result.hasCycle).toBe(false);
   });
 
-  it("detects a cycle that crosses an mcp-server hop", async () => {
-    // integration → mcp-server → integration (back to root)
-    // Confirms `depType: "mcp-server"` flows through cycle detection
-    // just like skill/integration — regression guard for the dep
-    // extractor previously ignoring `dependencies.mcp_servers`.
+  it("detects a cycle that crosses an integration hop", async () => {
+    // integration → skill → integration (back to root)
     const deps: DepEntry[] = [
-      { depScope: "@acme", depName: "mcp-srv", depType: "mcp-server", versionRange: "^1.0.0" },
+      { depScope: "@acme", depName: "skill-x", depType: "skill", versionRange: "^1.0.0" },
     ];
     const resolveDeps = async (_scope: string, name: string): Promise<DepEntry[]> => {
-      if (name === "mcp-srv") {
+      if (name === "skill-x") {
         return [
           { depScope: "@acme", depName: "integ-a", depType: "integration", versionRange: "^1.0.0" },
         ];

@@ -18,7 +18,6 @@ import { isValidRange } from "./semver.ts";
  */
 export interface Dependencies {
   skills?: Record<string, string>;
-  mcp_servers?: Record<string, string>;
   integrations?: Record<string, string>;
 }
 
@@ -27,8 +26,10 @@ export interface Dependencies {
 // ─────────────────────────────────────────────
 
 /**
- * The `dependencies` map keys AFPS 1.x defined and AFPS 2.0 retired, each
- * mapped to the key that replaced it.
+ * The `dependencies` map keys the spec retired, each mapped to the guidance an author needs:
+ * what replaced it. `tools` and `mcp_servers` have no replacement key — a local MCP server is
+ * declared inline on its `local` integration (`source.server`), which is what an integration
+ * dependency already pulls in.
  *
  * A table rather than a chain of per-key `if`s so the two directions that
  * consume it — the author-input rejection ({@link findRetiredDependencyKeys},
@@ -44,10 +45,13 @@ export interface Dependencies {
  * validating (and therefore keep running) forever. See
  * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
  */
+const MCP_SERVER_GUIDANCE =
+  "MCP servers are now declared inline on their local integration (`source.server`); depend on that integration instead";
 const RETIRED_DEPENDENCY_KEYS = {
-  tools: "mcp_servers",
-  providers: "integrations",
-} as const satisfies Record<string, keyof Dependencies>;
+  tools: MCP_SERVER_GUIDANCE,
+  mcp_servers: MCP_SERVER_GUIDANCE,
+  providers: "renamed to `dependencies.integrations`",
+} as const satisfies Record<string, string>;
 
 /** A `dependencies` map key retired by AFPS 2.0. */
 export type RetiredDependencyKey = keyof typeof RETIRED_DEPENDENCY_KEYS;
@@ -56,8 +60,8 @@ export type RetiredDependencyKey = keyof typeof RETIRED_DEPENDENCY_KEYS;
 export interface RetiredDependencyKeyUse {
   /** The retired key as it appears in the manifest (e.g. `"tools"`). */
   key: RetiredDependencyKey;
-  /** The AFPS 2.0 key that replaced it (e.g. `"mcp_servers"`). */
-  replacement: keyof Dependencies;
+  /** What replaced it, as a sentence fragment for the refusal / warning message. */
+  guidance: string;
 }
 
 /**
@@ -76,12 +80,12 @@ export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyK
   if (typeof deps !== "object" || deps === null || Array.isArray(deps)) return [];
 
   const found: RetiredDependencyKeyUse[] = [];
-  for (const [key, replacement] of Object.entries(RETIRED_DEPENDENCY_KEYS)) {
+  for (const [key, guidance] of Object.entries(RETIRED_DEPENDENCY_KEYS)) {
     // `hasOwnProperty.call`, not `Object.hasOwn` — core is compiled against
     // the web app's older `lib` target too. Own-property only: an inherited
     // key was not authored.
     if (Object.prototype.hasOwnProperty.call(deps, key)) {
-      found.push({ key: key as RetiredDependencyKey, replacement });
+      found.push({ key: key as RetiredDependencyKey, guidance });
     }
   }
   return found;
@@ -162,14 +166,14 @@ export interface DepEntry {
   /** Package name without scope (e.g. "my-skill"). */
   depName: string;
   /** The dependency category. */
-  depType: "skill" | "mcp-server" | "integration";
+  depType: "skill" | "integration";
   /** Semver version range (e.g. "^1.0.0"). */
   versionRange: string;
 }
 
 /**
  * Extract dependency entries from a manifest's `dependencies` field.
- * Parses scoped names from the skills, mcp_servers, and integrations
+ * Parses scoped names from the skills and integrations
  * dependency maps. Per AFPS §4.1 each value is a bare semver range string.
  * Per-integration agent configuration (`tools`/`scopes`/`auth_key`) lives in
  * the top-level `integrations_configuration` map and is read via
@@ -185,11 +189,10 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   if (!dependencies) return [];
 
   const deps: DepEntry[] = [];
-  const { skills = {}, mcp_servers = {}, integrations = {} } = dependencies;
+  const { skills = {}, integrations = {} } = dependencies;
 
   const maps: [Record<string, string>, DepEntry["depType"]][] = [
     [skills, "skill"],
-    [mcp_servers, "mcp-server"],
     [integrations, "integration"],
   ];
 
@@ -326,10 +329,7 @@ export function parseManifestIntegrations(
  *
  * Intentionally LENIENT (mirrors the two underlying readers): skills come from
  * `dependencies.skills` keys verbatim, integrations from
- * {@link parseManifestIntegrations}. `mcp_servers` are deliberately excluded —
- * an mcp-server is pinned via its integration's `source.server.version`, not a
- * `dependency_overrides` key (the byte route serves system/published only), so
- * an mcp-server override key must stay an unknown-key 400.
+ * {@link parseManifestIntegrations}.
  */
 export function collectOverridableDependencyIds(manifest: Record<string, unknown>): Set<string> {
   const deps = (manifest.dependencies ?? {}) as { skills?: Record<string, unknown> };

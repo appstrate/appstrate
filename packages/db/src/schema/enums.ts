@@ -43,18 +43,18 @@ export const runStatusEnum = pgEnum("run_status", runStatusValues);
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
 
-export const packageTypeValues = [
-  "agent",
-  "skill",
-  "integration",
-  // AFPS §3.4 — a standalone MCP Bundle (MCPB) package that an
-  // integration's `source.kind: "local"` references via `source.server`.
-  // The integration carries the auth/scope/delivery contract; the mcp-server
-  // package carries the runnable server (entry point + runtime).
-  "mcp-server",
-] as const;
+/**
+ * The labels of the `package_type` pg enum. `mcp-server` is a label kept for the fold script
+ * (`scripts/migration/`); dropped by the follow-up of #2220, never produced by application code.
+ * Postgres cannot drop an enum value in place, so the DB label outlives the package type.
+ * Application code uses {@link PACKAGE_TYPES} / {@link PackageType}, which exclude it.
+ */
+export const packageTypeValues = ["agent", "skill", "integration", "mcp-server"] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
-export type PackageType = (typeof packageTypeValues)[number];
+
+/** The package types the application produces and reads: AFPS §2.1. */
+export const PACKAGE_TYPES = ["agent", "skill", "integration"] as const;
+export type PackageType = (typeof PACKAGE_TYPES)[number];
 
 export const packageSourceValues = ["local", "system"] as const;
 export const packageSourceEnum = pgEnum("package_source", packageSourceValues);

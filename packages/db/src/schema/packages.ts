@@ -15,7 +15,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
+import { packageTypeEnum, packageSourceEnum, type PackageType } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -167,7 +167,7 @@ export const packages = pgTable(
     // default space before it deletes. Inline shadow rows are left homeless
     // for the same reason inverted: one run must not wedge its space.
     homeSpaceId: text("home_space_id").references(() => spaces.id, { onDelete: "restrict" }),
-    type: packageTypeEnum("type").notNull(),
+    type: packageTypeEnum("type").$type<PackageType>().notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
     draftManifest: jsonb("draft_manifest"),
     draftContent: text("draft_content"),
@@ -302,7 +302,7 @@ export const packageVersionDependencies = pgTable(
       .references(() => packageVersions.id, { onDelete: "cascade" }),
     depScope: text("dep_scope").notNull(),
     depName: text("dep_name").notNull(),
-    depType: packageTypeEnum("dep_type").notNull(),
+    depType: packageTypeEnum("dep_type").$type<PackageType>().notNull(),
     /** Flattened semver range string. Canonical polymorphic form lives on `package_versions.manifest`. */
     versionRange: text("version_range").notNull(),
   },

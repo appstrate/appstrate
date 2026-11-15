@@ -297,7 +297,7 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill, mcp-server, or integration dependency with optional metadata. */
+/** A reference to a skill or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
@@ -581,8 +581,6 @@ export interface AgentListItem extends BasePackageListItem {
   dependencies: {
     /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
-    /** Withheld from a summary read — `agents:run` without `agents:read`. */
-    mcp_servers?: Record<string, string>;
     integrations: Record<string, string>;
   };
   running_runs: number;
@@ -625,11 +623,6 @@ export interface AgentDetail {
       description?: string;
       home_writable: boolean;
     }[];
-    /**
-     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
-     * Composition too: withheld from a summary read, with `skills`.
-     */
-    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
@@ -811,8 +804,8 @@ export interface OrgPackageItem extends BasePackageListItem {
 export interface IntegrationIndexItem extends OrgPackageItem {
   /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
   source_kind: "local" | "remote" | "none";
-  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
-  server: { name: string; version: string } | null;
+  /** `source.server` of a `local` integration — its runtime type and entry point. `null` otherwise. */
+  server: { type: string; entry_point: string } | null;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is

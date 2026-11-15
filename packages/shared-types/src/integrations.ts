@@ -159,10 +159,10 @@ export interface IntegrationAuthStatus {
 
 /**
  * One entry in the agent-facing tool catalog the picker consumes. Resolved
- * server-side by `resolveIntegrationToolCatalog` from the referenced
- * mcp-server's MCPB `tools[]` minus `hidden_tools` and auto-hidden
+ * server-side by `resolveIntegrationToolCatalog` from a local source's
+ * `source.server.tools` minus `hidden_tools` and auto-hidden
  * connect.tool primitives. Falls back to the integration's sparse
- * `tools_policy{}` keys when the mcp-server is unavailable. Per-tool `policy`
+ * `tools_policy{}` keys when the server declares no `tools`. Per-tool `policy`
  * is attached verbatim from `integration.tools_policy[name]` when declared.
  *
  * Re-exported from `@appstrate/core` rather than duplicated: the resolver

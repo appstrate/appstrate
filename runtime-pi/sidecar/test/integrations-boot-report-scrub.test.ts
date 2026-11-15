@@ -163,7 +163,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
     });
     const fetchFn = (async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("/internal/mcp-server-bundle/")) {
+      if (url.includes("/internal/integration-bundle/")) {
         return new Response(bundle, { status: 200 });
       }
       return new Response(JSON.stringify({ detail: `unexpected: ${url}` }), { status: 404 });

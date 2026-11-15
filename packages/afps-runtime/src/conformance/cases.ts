@@ -594,7 +594,14 @@ const L1_INTEGRATION_MUTUAL_EXCLUSION: ConformanceCase = {
         type: "integration",
         schema_version: "0.1",
         display_name: "Conformance Integration",
-        source: { kind: "local", server: { name: "@afps/conformance-integ", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "main.js",
+            mcp_config: { command: "node", args: ["main.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "api_key",
@@ -724,8 +731,8 @@ const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
 };
 
 // L1.9 — `tools_policy` drives per-tool policy (§7.10). AFPS renamed the
-// legacy `tools` map to `tools_policy` to disambiguate from the
-// mcp-server's `tools[]` catalog. Manifests using the new key MUST
+// legacy `tools` map to `tools_policy` to disambiguate from a local source's
+// `source.server.tools` catalog. Manifests using the new key MUST
 // validate; the new key is what platform helpers read.
 const L1_TOOLS_POLICY: ConformanceCase = {
   id: "L1.9",
@@ -738,7 +745,14 @@ const L1_TOOLS_POLICY: ConformanceCase = {
       type: "integration",
       schema_version: "0.1",
       display_name: "Conformance Integration",
-      source: { kind: "local", server: { name: "@afps/conformance-tp", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "main.js",
+          mcp_config: { command: "node", args: ["main.js"] },
+        },
+      },
       auths: {
         primary: {
           type: "oauth2",
@@ -888,11 +902,11 @@ const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
 //   - skill     → SKILL.md present + a YAML frontmatter `name` (§3.3). NOT
 //                 `description`: §3.3 spells it SHOULD, and the loader reads
 //                 immutable published bundles.
-//   - mcp-server → `server.entry_point` payload present in archive (§3.4)
+//   - local integration → `source.server.entry_point` payload present in archive (§7.1)
 //
 // Each case builds a minimal `.afps` archive with the violation and asserts
 // the loader rejects it. The matching positive cases are covered by L1.1 /
-// L1.6 (mcp-server) and a positive entry_point case below.
+// L1.6 and a positive entry_point case below.
 const SKILL_MANIFEST = {
   name: "@afps/conformance-skill",
   version: "1.0.0",
@@ -900,17 +914,19 @@ const SKILL_MANIFEST = {
   schema_version: "0.1",
 };
 
-const MCP_SERVER_MANIFEST = {
-  manifest_version: "0.3",
-  name: "@afps/conformance-mcp",
+const LOCAL_INTEGRATION_MANIFEST = {
+  name: "@afps/conformance-local",
   version: "1.0.0",
-  type: "mcp-server",
+  type: "integration",
   schema_version: "0.1",
-  display_name: "Conformance MCP Server",
-  server: {
-    type: "node",
-    entry_point: "main.js",
-    mcp_config: { command: "node", args: ["main.js"] },
+  display_name: "Conformance Local Integration",
+  source: {
+    kind: "local",
+    server: {
+      type: "node",
+      entry_point: "main.js",
+      mcp_config: { command: "node", args: ["main.js"] },
+    },
   },
 };
 
@@ -967,13 +983,14 @@ const L1_SKILL_FRONTMATTER_NAME_ONLY: ConformanceCase = {
   },
 };
 
-const L1_MCP_SERVER_ENTRY_POINT_PRESENT: ConformanceCase = {
+const L1_LOCAL_SERVER_ENTRY_POINT_PRESENT: ConformanceCase = {
   id: "L1.12",
   level: "L1",
-  title: "accepts an mcp-server bundle whose server.entry_point file is present (§3.4)",
+  title:
+    "accepts a local integration bundle whose source.server.entry_point file is present (§7.1)",
   run: (adapter) => {
     const bytes = zipSync({
-      "manifest.json": enc(JSON.stringify(MCP_SERVER_MANIFEST)),
+      "manifest.json": enc(JSON.stringify(LOCAL_INTEGRATION_MANIFEST)),
       "main.js": enc("// server"),
     });
     try {
@@ -981,29 +998,32 @@ const L1_MCP_SERVER_ENTRY_POINT_PRESENT: ConformanceCase = {
       const rootPkg = bundle.packages.get(bundle.root);
       if (!rootPkg) return fail("loadBundle returned no root package");
       if (!rootPkg.files.has("main.js")) {
-        return fail("loaded bundle missing server.entry_point file");
+        return fail("loaded bundle missing source.server.entry_point file");
       }
       return pass();
     } catch (err) {
       return fail(
-        `positive mcp-server load rejected: ${err instanceof Error ? err.message : String(err)}`,
+        `positive local integration load rejected: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   },
 };
 
-const L1_MCP_SERVER_ENTRY_POINT_MISSING: ConformanceCase = {
+const L1_LOCAL_SERVER_ENTRY_POINT_MISSING: ConformanceCase = {
   id: "L1.13",
   level: "L1",
-  title: "rejects an mcp-server bundle whose server.entry_point file is absent (§3.4)",
+  title: "rejects a local integration bundle whose source.server.entry_point file is absent (§7.1)",
   run: (adapter) => {
     // entry_point references missing.js, archive contains a stub file at a
     // different path → loader MUST refuse, not defer to spawn-time failure.
     const bytes = zipSync({
       "manifest.json": enc(
         JSON.stringify({
-          ...MCP_SERVER_MANIFEST,
-          server: { ...MCP_SERVER_MANIFEST.server, entry_point: "missing.js" },
+          ...LOCAL_INTEGRATION_MANIFEST,
+          source: {
+            ...LOCAL_INTEGRATION_MANIFEST.source,
+            server: { ...LOCAL_INTEGRATION_MANIFEST.source.server, entry_point: "missing.js" },
+          },
         }),
       ),
       "main.js": enc("// wrong file"),
@@ -1011,7 +1031,7 @@ const L1_MCP_SERVER_ENTRY_POINT_MISSING: ConformanceCase = {
     return expectThrow(
       () => adapter.loadBundle(bytes),
       /entry_point|missing\.js/i,
-      "mcp-server entry_point missing",
+      "local integration entry_point missing",
     );
   },
 };
@@ -1264,8 +1284,8 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_SKILL_MISSING_SKILL_MD,
   L1_SKILL_MISSING_FRONTMATTER_NAME,
   L1_SKILL_FRONTMATTER_NAME_ONLY,
-  L1_MCP_SERVER_ENTRY_POINT_PRESENT,
-  L1_MCP_SERVER_ENTRY_POINT_MISSING,
+  L1_LOCAL_SERVER_ENTRY_POINT_PRESENT,
+  L1_LOCAL_SERVER_ENTRY_POINT_MISSING,
   L1_REJECT_PATH_TRAVERSAL,
   L1_REJECT_ABSOLUTE_PATH,
   L1_REJECT_BACKSLASH,

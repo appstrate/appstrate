@@ -77,7 +77,7 @@ export interface BuildBundleOptions {
  * Walk the root's transitive dependency graph via `catalog`, dedupe by
  * identity, and return the assembled Bundle.
  *
- * Walks `manifest.dependencies.{skills, mcp_servers, integrations}` recursively.
+ * Walks `manifest.dependencies.{skills, integrations}` recursively.
  * Cycles are tolerated (each identity is fetched once); the caller gets
  * a warning via `opts.onWarn`. Dep resolution failures outside
  * `opts.optionalDepTypes` are collected and surfaced as a single
@@ -92,7 +92,7 @@ export async function buildBundleFromCatalog(
 ): Promise<Bundle> {
   const limits = resolveBundleLimits(opts.limits);
   const onWarn = opts.onWarn ?? (() => {});
-  const depTypes = opts.depTypes ?? ["skills", "mcp_servers", "integrations"];
+  const depTypes = opts.depTypes ?? ["skills", "integrations"];
   const optionalDepTypes = new Set(opts.optionalDepTypes ?? []);
   const packages = new Map<PackageIdentity, BundlePackage>();
   const visiting = new Set<PackageIdentity>();
@@ -360,28 +360,20 @@ export function extractRootFromAfps(
 
   const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
-  // AFPS (§3.4 / §11.2) lifted the mcp-server scoped identity to the
-  // manifest root, so every package type — including mcp-server — now
-  // declares its `@scope/name` identity at the top-level `name`. The previous
-  // `_meta["dev.afps/mcp-server"].name` slot is gone.
-  const isMcpServer = manifest.type === "mcp-server";
+  // Every package type declares its `@scope/name` identity at the top-level `name`.
   const rawName = typeof manifest.name === "string" ? manifest.name : undefined;
   const name = rawName ?? null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      isMcpServer
-        ? `mcp-server manifest must declare a scoped root name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`
-        : `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
+      `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
     );
   }
   if (!name.startsWith("@") || !name.includes("/")) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      isMcpServer
-        ? `mcp-server identity name must be scoped (@scope/name), got ${name}`
-        : `manifest.name must be scoped (@scope/name), got ${name}`,
+      `manifest.name must be scoped (@scope/name), got ${name}`,
     );
   }
   const identity = formatPackageIdentity(name as `@${string}/${string}`, version);
@@ -390,9 +382,9 @@ export function extractRootFromAfps(
   // with the platform's ZIP-import path (`@appstrate/core/zip:parsePackageZip`
   // via `@appstrate/afps-shared/companion-files`). Both paths reject the same
   // inputs: agent prompt.md non-empty, skill SKILL.md + frontmatter name,
-  // mcp-server server.entry_point payload present.
+  // a local integration's source.server.entry_point payload present.
   assertCompanionFiles(
-    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    manifest as { type?: unknown; source?: unknown } & Record<string, unknown>,
     entries,
   );
 

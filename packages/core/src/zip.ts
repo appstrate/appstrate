@@ -9,7 +9,6 @@ import {
   type SkillManifest,
   type PackageType,
   type IntegrationManifest,
-  type McpServerManifest,
   type RetiredRuntimeToolsPolicy,
 } from "./validation.ts";
 import {
@@ -250,18 +249,15 @@ export { stripWrapperPrefix };
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
-  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations/mcp-servers). */
+  manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest;
+  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;
   /** The detected package type. */
   type: PackageType;
   /**
-   * Canonical package id — for every package type (agent/skill/integration/
-   * mcp-server) this is the scoped manifest `name`. AFPS (§3.4) lifted
-   * the mcp-server scoped identity to the manifest root, removing the
-   * previous `_meta["dev.afps/mcp-server"].name` indirection.
+   * Canonical package id — for every package type this is the scoped manifest `name`.
    */
   packageId: string;
   /**
@@ -432,16 +428,15 @@ export function parsePackageZip(
 
   const manifest = validation.manifest!;
 
-  // AFPS (§3.4 / §11.2) lifted mcp-server identity to the manifest root,
-  // so every package type now declares its `type` at the top level.
+  // Every package type declares its `type` at the manifest root.
   const type: PackageType | undefined = (manifest as { type?: PackageType }).type;
 
   // Enforce §3.3 / §3.4 companion-file invariants via the shared helper so
   // the platform import path and the runtime bundle loader reject the same
   // inputs. The helper covers: agent prompt.md non-empty, skill SKILL.md +
-  // frontmatter name, mcp-server server.entry_point payload present.
+  // frontmatter name, a local integration's source.server.entry_point payload present.
   const violation = checkCompanionFiles(
-    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    manifest as { type?: unknown; source?: unknown } & Record<string, unknown>,
     companionFilesFromRecord(files),
   );
   if (violation) {
@@ -463,35 +458,25 @@ export function parsePackageZip(
   switch (type) {
     case "agent":
     case "skill": {
-      content = new TextDecoder().decode(files[PACKAGE_CONTENT_FILE[type]!]!);
+      content = new TextDecoder().decode(files[PACKAGE_CONTENT_FILE[type]]!);
       break;
     }
     case "integration": {
       // Integration packages. Bundles carry
       // manifest.json as authoritative; INTEGRATION.md is an optional
-      // agent-facing documentation companion. Vendored server code lives
-      // under `server/` and is left untouched by this parser — the
-      // runtime resolver consumes it directly.
-      const integrationRaw = files[PACKAGE_CONTENT_FILE.integration!];
+      // agent-facing documentation companion. A local integration's server
+      // payload (`server/**`, whatever its entry point needs) is left
+      // untouched by this parser — the runtime resolver consumes it directly.
+      const integrationRaw = files[PACKAGE_CONTENT_FILE.integration];
       content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
-      break;
-    }
-    case "mcp-server": {
-      // mcp-server packages (AFPS §3.4) are MCPB bundles — manifest.json is
-      // authoritative (hence the `null` entry in `PACKAGE_CONTENT_FILE`); the
-      // server payload under `server.entry_point` is left untouched for the
-      // runtime to consume directly.
-      content = manifestText;
       break;
     }
     default:
       throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  // Canonical AFPS identity, type-agnostic: AFPS (§3.4) lifted the
-  // mcp-server scoped identity to the manifest root, so every package type
-  // now stores `@scope/name` at the top-level `name`. The previous
-  // `_meta["dev.afps/mcp-server"].name` fallback is gone.
+  // Canonical AFPS identity, type-agnostic: every package type stores `@scope/name` at the
+  // top-level `name`.
   const packageId = (manifest as { name: string }).name;
 
   return {

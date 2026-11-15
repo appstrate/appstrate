@@ -133,7 +133,6 @@ describe("banned-key walker (test infrastructure)", () => {
       },
       dependencies: {
         skills: { "@x/s": "^1.0.0" },
-        mcp_servers: { "@x/m": "^1.0.0" },
         integrations: { "@x/i": "^1.0.0" },
       },
       runtime_tools: ["output"],

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A `source.kind: "local"` spawn spec MUST name the mcp-server package whose
+ * A `source.kind: "local"` spawn spec MUST name the integration whose
  * bundle the sidecar fetches, extracts and executes. `server.packageId` is
  * optional in TypeScript only because the `server` bag is the collapsed union
  * of the local / remote / serverless shapes — absent on a local spec means the
@@ -24,7 +24,6 @@ import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
 const INTEGRATION_ID = "@tractr/local-integration";
-const SERVER_ID = "@tractr/local-server";
 
 function localSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
   return {
@@ -42,7 +41,7 @@ async function boot(spec: IntegrationSpawnSpec) {
   const bundleUrls: string[] = [];
   const fetchFn = (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.includes("/internal/mcp-server-bundle/")) {
+    if (url.includes("/internal/integration-bundle/")) {
       bundleUrls.push(url);
       // Refuse the bytes — WHICH package was asked for is the whole subject.
       return new Response(JSON.stringify({ detail: "bundle route reached" }), { status: 502 });
@@ -66,7 +65,7 @@ async function boot(spec: IntegrationSpawnSpec) {
 }
 
 describe("local integration spawn — server.packageId is required", () => {
-  it("fails the spec when a local source names no mcp-server package", async () => {
+  it("fails the spec when a local source names no integration id", async () => {
     const { result, bundleUrls } = await boot(
       localSpec({ type: "bun", entry_point: "./server.ts" }),
     );
@@ -83,13 +82,13 @@ describe("local integration spawn — server.packageId is required", () => {
     }
   });
 
-  it("control: a local source naming its mcp-server still fetches THAT package", async () => {
+  it("control: a local source naming its integration fetches that integration's archive", async () => {
     const { result, bundleUrls } = await boot(
-      localSpec({ type: "bun", entry_point: "./server.ts", packageId: SERVER_ID }),
+      localSpec({ type: "bun", entry_point: "./server.ts", packageId: INTEGRATION_ID }),
     );
     try {
       expect(bundleUrls).toHaveLength(1);
-      expect(bundleUrls[0]).toContain(`/internal/mcp-server-bundle/${SERVER_ID}`);
+      expect(bundleUrls[0]).toContain(`/internal/integration-bundle/${INTEGRATION_ID}`);
       // Past the guard — the boot failed on the refused bytes, not on the spec.
       expect(result.failed[0]!.error).toContain("bundle route reached");
     } finally {

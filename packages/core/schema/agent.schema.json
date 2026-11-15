@@ -195,16 +195,6 @@
             "type": "string"
           }
         },
-        "mcp_servers": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
         "integrations": {
           "type": "object",
           "propertyNames": {

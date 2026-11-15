@@ -6,12 +6,10 @@
  *
  * Runs:
  *   - AFPS manifest schema check per package (via `@afps-spec/schema`),
- *     dispatched across the four package types `agent | skill | mcp-server |
- *     integration` via the root-level `type` discriminator (AFPS §3.4
- *     lifted mcp-server identity to the manifest root).
+ *     dispatched across the three package types `agent | skill | integration`
+ *     via the root-level `type` discriminator.
  *   - `schema_version` MAJOR policy check on the types that carry one
- *     (`agent` requires it; `skill`/`integration`/`mcp-server` declare it at
- *     the root — AFPS lifted it there for mcp-server too).
+ *     (`agent` requires it; `skill`/`integration` declare it at the root).
  *   - `type = "agent"` for the root when `agentOnlyRoot` is on
  *   - Prompt template syntax check on the root's `prompt.md` if present
  *   - Cycle + divergent-version detection (non-fatal warnings)
@@ -20,7 +18,6 @@
 import {
   agentManifestSchema,
   skillManifestSchema,
-  mcpServerManifestSchema,
   integrationManifestSchema,
 } from "@afps-spec/schema";
 import type { z } from "zod";
@@ -63,7 +60,7 @@ export interface ValidateBundleOptions {
   /**
    * Require the root package's `type` to be `"agent"`. Default: `true`.
    * The runtime executes agents; a bundle whose root is a skill /
-   * mcp-server / integration won't run end-to-end.
+   * integration won't run end-to-end.
    */
   agentOnlyRoot?: boolean;
 }
@@ -124,9 +121,7 @@ function validatePackage(
   },
 ): void {
   const manifest = pkg.manifest as Record<string, unknown>;
-  // AFPS (§3.4 / §11.2): mcp-server identity was lifted from
-  // `_meta["dev.afps/mcp-server"]` to the manifest root, so the root `type`
-  // discriminator is now authoritative for every package type.
+  // The root `type` discriminator is authoritative for every package type.
   const effectiveType: unknown = manifest["type"];
 
   if (isRoot && ctx.agentOnlyRoot && effectiveType !== "agent") {
@@ -188,10 +183,10 @@ function validatePackage(
 
   // §3.3 / §3.4 companion-file enforcement — single source of truth shared
   // with the platform's ZIP-import path. Flags missing prompt.md (agent),
-  // missing SKILL.md / frontmatter name (skill), and missing
-  // server.entry_point payload (mcp-server) as bundle-level errors.
+  // missing SKILL.md / frontmatter name (skill), and a missing
+  // source.server.entry_point payload (local integration) as bundle-level errors.
   const violation = checkCompanionFiles(
-    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    manifest as { type?: unknown; source?: unknown } & Record<string, unknown>,
     pkg.files,
   );
   if (violation) {
@@ -205,16 +200,9 @@ function validatePackage(
   }
 }
 
-/**
- * The four AFPS package-type schemas. The `tool`/`provider` package types
- * (and their `@afps-spec` schemas) were removed — `mcp-server` (MCPB,
- * §3.4) and `integration` (§3.5/§7) replace them.
- */
+/** The three AFPS package-type schemas (§2.1). */
 type TypeSchema =
-  | typeof agentManifestSchema
-  | typeof skillManifestSchema
-  | typeof mcpServerManifestSchema
-  | typeof integrationManifestSchema;
+  typeof agentManifestSchema | typeof skillManifestSchema | typeof integrationManifestSchema;
 
 function schemaForType(type: unknown): TypeSchema | null {
   switch (type) {
@@ -222,8 +210,6 @@ function schemaForType(type: unknown): TypeSchema | null {
       return agentManifestSchema;
     case "skill":
       return skillManifestSchema;
-    case "mcp-server":
-      return mcpServerManifestSchema;
     case "integration":
       return integrationManifestSchema;
     default:
@@ -238,11 +224,9 @@ function schemaForType(type: unknown): TypeSchema | null {
  *   - `agent`       — `schema_version` is REQUIRED by the AFPS schema, so a
  *     missing/invalid one already surfaces as a MANIFEST_SCHEMA error above.
  *     Here we additionally enforce the runtime's supported-MAJOR policy.
- *   - `skill` / `integration` / `mcp-server` — `schema_version` is OPTIONAL at
- *     the schema level. When present we enforce the MAJOR policy; when absent
- *     we accept it. AFPS lifted `schema_version` to the root of
- *     mcp-server (§3.4), so mcp-server is not exempt — it gets the same
- *     check as skill/integration.
+ *   - `skill` / `integration` — `schema_version` is OPTIONAL at the schema
+ *     level. When present we enforce the MAJOR policy; when absent we accept
+ *     it.
  */
 function checkSchemaVersion(
   type: unknown,
@@ -254,7 +238,7 @@ function checkSchemaVersion(
 
   if (typeof schemaVersion !== "string" || schemaVersion.length === 0) {
     // agent REQUIRES schema_version (already flagged by MANIFEST_SCHEMA);
-    // skill/integration/mcp-server may omit it — accept silently.
+    // skill/integration may omit it — accept silently.
     if (type === "agent") {
       ctx.issues.push({
         code: "SCHEMA_VERSION_MISSING",
@@ -313,7 +297,7 @@ function depIdentities(pkg: BundlePackage, bundle: Bundle): PackageIdentity[] {
   const deps = (pkg.manifest as { dependencies?: unknown }).dependencies;
   if (!deps || typeof deps !== "object") return [];
   const names = new Set<string>();
-  for (const section of ["skills", "mcp_servers", "integrations"] as const) {
+  for (const section of ["skills", "integrations"] as const) {
     const s = (deps as Record<string, unknown>)[section];
     if (s && typeof s === "object" && !Array.isArray(s)) {
       for (const n of Object.keys(s as Record<string, unknown>)) names.add(n);

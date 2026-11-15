@@ -29,7 +29,6 @@ import { runConnectOnce } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@scope/connect-it";
-const SERVER_ID = "@scope/connect-srv";
 const SERVER_VERSION = "1.4.2";
 
 /**
@@ -118,7 +117,7 @@ async function connectRun(
         authorization: headers.get("Authorization"),
       });
     }
-    if (url.includes("/internal/mcp-server-bundle/")) {
+    if (url.includes("/internal/integration-bundle/")) {
       bundleUrls.push(url);
       return new Response(JSON.stringify({ detail: "bundle route reached" }), { status: 502 });
     }
@@ -150,19 +149,18 @@ async function connectRun(
 }
 
 describe("runConnectOnce — the connect spec the platform builder must emit", () => {
-  it("reaches the referenced mcp-server's bundle, at the resolved version", async () => {
+  it("reaches the integration's own bundle, at the resolved version", async () => {
     const { error, bundleUrls } = await connectRun(
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: SERVER_ID,
+        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );
     expect(bundleUrls).toHaveLength(1);
-    // The mcp-server package, NOT the integration's own bundle.
-    expect(bundleUrls[0]).toContain(`/internal/mcp-server-bundle/${SERVER_ID}`);
-    expect(bundleUrls[0]).not.toContain(INTEGRATION_ID);
+    // The integration archive itself carries the server payload.
+    expect(bundleUrls[0]).toContain(`/internal/integration-bundle/${INTEGRATION_ID}`);
     // #588 — the byte route rejects an absent `?version=` past the system
     // short-circuit, so the concrete version has to ride along.
     expect(bundleUrls[0]).toContain(`?version=${SERVER_VERSION}`);
@@ -191,7 +189,7 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: SERVER_ID,
+        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
       () => new Response(JSON.stringify({ detail: "Run not found" }), { status: 404 }),
@@ -212,7 +210,7 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: SERVER_ID,
+        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );
@@ -222,7 +220,7 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
 
   it("calls exactly TWO platform surfaces, both bearing the connect run token", async () => {
     // The platform authorises a connect run against a grant naming ONE
-    // integration and ONE mcp-server, because those are the only two surfaces
+    // integration and the same integration's bundle, because those are the only two surfaces
     // a connect run reaches. This pins that list from the sidecar side, in
     // order: the credentials seed comes FIRST (`runConnectOnce` awaits it
     // before the spawn and throws on any non-2xx), the bundle bytes second.
@@ -234,7 +232,7 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       connectSpec({
         type: "python",
         entry_point: "./server.py",
-        packageId: SERVER_ID,
+        packageId: INTEGRATION_ID,
         version: SERVER_VERSION,
       }),
     );
@@ -250,7 +248,7 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
       },
       {
         method: "GET",
-        path: `/internal/mcp-server-bundle/${SERVER_ID}?version=${SERVER_VERSION}`,
+        path: `/internal/integration-bundle/${INTEGRATION_ID}?version=${SERVER_VERSION}`,
         authorization: "Bearer connect-token",
       },
     ]);

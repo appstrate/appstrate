@@ -7,7 +7,7 @@
  * {@link RunOptions} is what a runner is handed: a loaded bundle, the
  * per-run execution context, the {@link EventSink} that receives every
  * RunEvent the tools emit, and a cancellation token. Tools come from
- * spawned `mcp-server` packages and integrations; credentialled HTTP
+ * the MCP servers of spawned integrations; credentialled HTTP
  * (integration `api_call`) is wired by the runner implementation as
  * pre-built tools, not via a generic in-process resolver.
  *

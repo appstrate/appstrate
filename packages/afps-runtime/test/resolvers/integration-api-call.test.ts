@@ -214,7 +214,14 @@ describe("readApiCallIntegrationMetas", () => {
       "integration.json": JSON.stringify({
         schema_version: "0.1",
         type: "integration",
-        source: { kind: "local", server: { name: "@acme/mcp-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           main: {
             type: "oauth2",

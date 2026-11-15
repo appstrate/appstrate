@@ -13,6 +13,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `formatMaximum` / `formatExclusive*` keywords: they are not JSON Schema 2020-12 and threw a
   `TypeError` at validation time. All formats stay.
 
+### Removed
+
+- **`bundleMcpServer`, `BundleMcpServerInput`, `BundleMcpServerResult`, `BundlerError`,
+  `BunCompatProbeResult`, `BunProbeOptions`, `probeBunCompat`, `DOS_EPOCH_MS`,
+  `packDeterministicZip`, `rewriteManifestForDistribution`, `suggestBundleFileName`,
+  `readVendorSource`, `VendorSource`, `VendorResult`, `VENDOR_META_KEY`,
+  `SOURCE_RESOLUTION_META_KEY`, `SourceResolution`, `vendorNpmPackage`, `vendorPypiPackage`,
+  `resolveNpmVersion`, `resolvePypiVersion`, `pickNpmEntryPoint`, `pickPypiEntryPoint`,
+  `NpmInstallSpec`, `NpmRegistryVersion`, `NpmVendorDeps`, `PypiInstallSpec`, `PypiVendorDeps`,
+  `FetchPypiFn`, `FetchRegistryFn`, `InstallPackageFn`, `InstallPypiFn`** — BREAKING. The whole
+  **`@appstrate/core/mcp-server-bundle`** subpath (the npm/pypi vendoring bundler for `mcp-server`
+  archives) is deleted: the `mcp-server` package type is folded into the `local` integration
+  (AFPS 0.13, `@afps-spec/schema` `^0.13.0`, #2220). A `local` source declares its MCP server
+  inline (`source.server`: `type`, `entry_point`, `mcp_config`, advisory `tools`) and the server
+  payload ships in the integration's own archive.
+- **`mcpServerManifestSchema`, `McpServerManifest`, `mcpServerSchema`** — BREAKING
+  (`@appstrate/core/mcp-server`, `@appstrate/core/validation`, `@appstrate/core/schemas`), with
+  `schema/mcp-server.schema.json`. The `mcp-server` value leaves `PackageType`,
+  `AFPS_SCHEMA_URLS`, `PACKAGE_TYPE_ROUTE_SEGMENT`, `PACKAGE_CONTENT_ENTRY` (every entry is now
+  non-null, so `PACKAGE_CONTENT_FILE` is `Record<PackageType, string>`) and the permission
+  resource `mcp-servers` (`mcp-servers:read|write|delete|share`).
+- **`getMcpServerMcpConfigEnv`, `renderMcpConfigEnv`** — BREAKING (`@appstrate/core/mcp-server`):
+  the `${user_config.*}` bridge is gone (no `user_config`, no `delivery.env.*.user_config_key`).
+  The literal `mcp_config.env` is read with `getLocalServerEnv` (see Added).
+- **`dependencies.mcp_servers`** — BREAKING. It leaves `Dependencies` and `extractDependencies`
+  (`DepEntry.depType` is `"skill" | "integration"`) and is refused on every write path beside
+  `tools`: a local MCP server is declared inline on its integration (`source.server`).
+  `RetiredDependencyKeyUse` carries `guidance` (a sentence) instead of `replacement`.
+- **The `mcpServerTools` input** — BREAKING — of `resolveIntegrationToolCatalog`,
+  `findUnexposedDefaultTools` and `validateAgentIntegrationScopes`: a local source's catalog is
+  its own `source.server.tools`.
+
 ### Changed
 
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
@@ -23,6 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Local server accessors** (`@appstrate/core/integration`, `@appstrate/core/mcp-server`):
+  **`LocalServer`**, **`getLocalServer(manifest)`** and **`getLocalServerTools(manifest)`** read
+  `source.server` of a `local` integration; **`getLocalServerEnv(manifest)`** returns its literal
+  `mcp_config.env`. `getMcpServerRuntime`, `effectiveMcpServerType` and
+  `getMcpServerWorkspaceMount` now read the INTEGRATION manifest (`source.server` and its `_meta`),
+  whose schema validates the `dev.appstrate/workspace` and `dev.appstrate/mcp-server` hints.
+  `findUnexposedDefaultTools` is complete for a local source declaring `source.server.tools`. A
+  `local` integration archive lacking `source.server.entry_point` is refused where archives are
+  validated (`LOCAL_SERVER_MISSING_ENTRY_POINT`, replacing `MCP_SERVER_MISSING_ENTRY_POINT`).
 - **`allowsUndeclaredTools(manifest)`** (`@appstrate/core/integration`): whether an integration
   declares `allow_undeclared_tools: true` (AFPS §7.8), the one reader of that flag for core and the
   platform (#2206).

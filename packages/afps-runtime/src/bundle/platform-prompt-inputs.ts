@@ -6,7 +6,7 @@
  *
  * The bundle is self-describing — its root package holds the prompt
  * template + input/output schemas, and every non-root package
- * declares its own `type` (skill / mcp-server / integration) in its
+ * declares its own `type` (skill / integration) in its
  * manifest. That is enough to compute every section of the platform
  * preamble that does not require live platform state (DB, sidecar,
  * credentials).

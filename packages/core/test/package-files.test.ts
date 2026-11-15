@@ -25,14 +25,12 @@ import { packageTypeEnum, type PackageType } from "../src/validation.ts";
 
 /**
  * The classification the platform runs on, restated independently of the
- * implementation. `null` = the type has no content file at all; its content IS
- * `manifest.json`. Change one, change the other — deliberately.
+ * implementation. Change one, change the other — deliberately.
  */
-const EXPECTED: Record<PackageType, { path: string; required: boolean } | null> = {
+const EXPECTED: Record<PackageType, { path: string; required: boolean }> = {
   agent: { path: "prompt.md", required: true },
   skill: { path: "SKILL.md", required: true },
   integration: { path: "INTEGRATION.md", required: false },
-  "mcp-server": null,
 };
 
 describe("PACKAGE_CONTENT_ENTRY", () => {
@@ -53,19 +51,18 @@ describe("PACKAGE_CONTENT_ENTRY", () => {
     // INTEGRATION.md is absent the import path puts the MANIFEST TEXT in that
     // column, and materializing it would invent a phantom companion.
     const required = packageTypeEnum.options
-      .filter((type) => PACKAGE_CONTENT_ENTRY[type]?.required === true)
+      .filter((type) => PACKAGE_CONTENT_ENTRY[type].required === true)
       .sort();
     expect(required).toEqual(["agent", "skill"]);
   });
 
-  it("gives mcp-server no entry at all — its content is the manifest", () => {
-    expect(PACKAGE_CONTENT_ENTRY["mcp-server"]).toBeNull();
+  it("has no entry for the retired mcp-server package type", () => {
+    expect(Object.keys(PACKAGE_CONTENT_ENTRY)).not.toContain("mcp-server");
   });
 
   it("declares no empty or nested path", () => {
     for (const type of packageTypeEnum.options) {
       const entry = PACKAGE_CONTENT_ENTRY[type];
-      if (entry === null) continue;
       // Bundle-root entries: the ZIP extractor and the overlay both index the
       // flat file map by this exact string.
       expect(entry.path.length).toBeGreaterThan(0);
@@ -77,19 +74,18 @@ describe("PACKAGE_CONTENT_ENTRY", () => {
 describe("PACKAGE_CONTENT_FILE", () => {
   it("is the name-only projection of the table, not a second declaration", () => {
     for (const type of packageTypeEnum.options) {
-      expect(PACKAGE_CONTENT_FILE[type]).toBe(PACKAGE_CONTENT_ENTRY[type]?.path ?? null);
+      expect(PACKAGE_CONTENT_FILE[type]).toBe(PACKAGE_CONTENT_ENTRY[type].path);
     }
   });
 
   it("keeps the published string map byte-for-byte what consumers import", () => {
     // Exported from `@appstrate/core/package-files` since 6.2.0 and read by the
     // SPA (`apps/web/src/lib/package-files.ts`) and the ZIP extractor
-    // (`packages/core/src/zip.ts`) as a plain `Record<PackageType, string | null>`.
+    // (`packages/core/src/zip.ts`) as a plain `Record<PackageType, string>`.
     expect(PACKAGE_CONTENT_FILE).toEqual({
       agent: "prompt.md",
       skill: "SKILL.md",
       integration: "INTEGRATION.md",
-      "mcp-server": null,
     });
   });
 });
@@ -97,7 +93,7 @@ describe("PACKAGE_CONTENT_FILE", () => {
 describe("PACKAGE_TYPE_ROUTE_SEGMENT", () => {
   it("names one distinct collection segment per package type", () => {
     const segments = packageTypeEnum.options.map((type) => PACKAGE_TYPE_ROUTE_SEGMENT[type]);
-    expect(segments).toEqual(["agents", "skills", "mcp-servers", "integrations"]);
+    expect(segments).toEqual(["agents", "skills", "integrations"]);
     expect(new Set(segments).size).toBe(segments.length);
   });
 });

@@ -75,8 +75,7 @@ export async function loadSystemPackages(dir: string): Promise<LoadSystemPackage
       // misspelled `runtime_tools` id is a source bug to fix at the source,
       // not legacy to tolerate. It surfaces as a per-file warning below.
       const parsed = parsePackageZip(new Uint8Array(zipBuffer));
-      // Canonical (scoped) id — for mcp-server this is the AFPS identity name,
-      // not the unscoped MCPB `manifest.name`.
+      // Canonical (scoped) id — the manifest's `name`.
       const canonicalId = parsed.packageId as string | undefined;
 
       if (!canonicalId) {

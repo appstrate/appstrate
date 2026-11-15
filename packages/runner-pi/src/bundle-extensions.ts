@@ -112,7 +112,7 @@ const NOT_MATERIALISED: ReadonlySet<string> = new Set([
   "integration.json",
 ]);
 
-/** An integration's vendored server code: run by the sidecar's runner, never read by the agent. */
+/** A local integration's server payload: run by the sidecar's runner, never read by the agent. */
 const INTEGRATION_SERVER_DIR = "server/";
 
 /**

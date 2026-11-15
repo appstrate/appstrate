@@ -72,7 +72,7 @@ const bundle = zipArtifact({ "server.ts": new TextEncoder().encode("export {};\n
 
 const fetchFn = (async (input: string | URL | Request) => {
   const url = typeof input === "string" ? input : input.toString();
-  if (url.includes("/internal/mcp-server-bundle/")) return new Response(bundle, { status: 200 });
+  if (url.includes("/internal/integration-bundle/")) return new Response(bundle, { status: 200 });
   if (url.includes("/internal/integration-credentials/")) {
     return new Response(
       JSON.stringify({

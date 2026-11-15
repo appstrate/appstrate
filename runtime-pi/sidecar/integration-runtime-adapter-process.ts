@@ -157,12 +157,11 @@ async function requireRunnerIsolation(
   uidPool: RunnerUidPool | string,
 ): Promise<{ wrapper: string; pool: RunnerUidPool }> {
   const wrapper = process.env.APPSTRATE_RUNNER_EXEC;
-  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
   // Explicitly typed so TypeScript narrows past each refusal: a `never`
   // return only narrows through an annotated binding.
   const refuse: (why: string) => never = (why: string) => {
     throw new Error(
-      `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
+      `${spec.integrationId}: refusing to spawn its local server — ` +
         `source.kind "local" runs third-party code, which this adapter spawns only on a uid ` +
         `of its own, through a setuid APPSTRATE_RUNNER_EXEC wrapper onto a uid from the ` +
         `APPSTRATE_RUNNER_UIDS pool (${why}). On the sidecar's uid the runner could read the ` +
@@ -558,12 +557,12 @@ export function createProcessIntegrationRuntimeAdapter({
         procEnv[WORKSPACE_ENV_VAR] = workspaceDir;
       } else if (spec.workspaceMount) {
         // ERROR-level (symmetry with the docker adapter): an opt-in
-        // mcp-server whose runtime env lacks the workspace will
+        // local server whose runtime env lacks the workspace will
         // either crash on first tool call or silently misbehave —
         // operators need to see this on the first run, not buried
         // in a debug log.
         logger.error(
-          "spec declares workspaceMount but launching orchestrator carried no directory handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
+          "spec declares workspaceMount but launching orchestrator carried no directory handle; runner spawned WITHOUT workspace — opt-in local server tools will fail",
           {
             integrationId: spec.integrationId,
             haveHandle: workspaceHandle?.kind ?? "none",

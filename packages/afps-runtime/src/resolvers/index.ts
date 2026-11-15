@@ -18,8 +18,8 @@
  * NOTE: the `Tool` types here are the generic MCP Tool protocol from
  * `@afps-spec/types` — they describe the shape of a tool surfaced to the LLM
  * (e.g. the integration `api_call` tool built by `makeApiCallTool`). In AFPS
- * tools come from spawned `mcp-server` packages (§3.4) and integrations
- * (§3.5), NOT from loading a package `entrypoint` module in-process.
+ * tools come from spawned integration servers (§3.5, §7)
+ * and integrations (§3.5), NOT from loading a package `entrypoint` module in-process.
  *
  * Specification: `afps-spec/spec.md` §8.
  */

@@ -55,7 +55,6 @@
     "./integration": "./src/integration.ts",
     "./mcp-server": "./src/mcp-server.ts",
     "./mcp-server-meta": "./src/mcp-server-meta.ts",
-    "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
     "./package-files": "./src/package-files.ts",
     "./package-file-operations": "./src/package-file-operations.ts",
@@ -113,7 +112,7 @@
     "./model-selectable": "./src/model-selectable.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.12.0",
+    "@afps-spec/schema": "^0.13.0",
     "@appstrate/afps-shared": "^0.13.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",

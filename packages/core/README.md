@@ -50,7 +50,7 @@ import type { AppstrateModule } from "@appstrate/core/module";
 
 | Subpath                                           | What it does                              |
 | ------------------------------------------------- | ----------------------------------------- |
-| `./mcp-server` · `./mcp-server-bundle`            | MCP server definition and bundling.       |
+| `./mcp-server`                                    | Local MCP server run declaration.         |
 | `./runtime-tools-catalog` · `./runtime-tool-defs` | Built-in runtime tools exposed to agents. |
 | `./runtime-event-drain`                           | Runtime event draining.                   |
 | `./sidecar-types`                                 | Sidecar protocol types.                   |

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bun Toolkit reference mcp-server — REAL spawned bun MCP server e2e.
+ * Bun Toolkit reference local integration — REAL spawned bun MCP server e2e.
  *
- * Boots the `@appstrate/bun-toolkit-server` dev fixture (a complex, multi-tool,
+ * Boots the `@appstrate/bun-toolkit` dev fixture (a complex, multi-tool,
  * zero-dependency Bun MCP server, a versioned test fixture under
  * `./fixtures/bun-toolkit/`) through the full `bootIntegrations` loop and
  * exercises its Bun-native tools. Proves a local-source integration whose
- * referenced mcp-server runs end-to-end — including that the spawned process is
+ * inline server runs end-to-end — including that the spawned process is
  * long-lived (bun:sqlite state survives across separate tool calls) and that it
  * genuinely runs on Bun (system_info).
  *
@@ -22,7 +22,6 @@ import * as path from "node:path";
 import { readFileSync } from "node:fs";
 import { zipArtifact } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
-import { mcpServerManifestSchema } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
@@ -32,15 +31,12 @@ const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
-const SERVER_ID = "@appstrate/bun-toolkit-server";
 const NAMESPACE = "buntoolkit";
 
-/** The mcp-server bundle the sidecar fetches + spawns (server code + MCPB manifest). */
-function serverBundleBytes(): Uint8Array {
+/** The integration archive the sidecar fetches + spawns (manifest + server code). */
+function integrationBundleBytes(): Uint8Array {
   return zipArtifact({
-    "manifest.json": new Uint8Array(
-      readFileSync(path.join(FIXTURE_DIR, "mcp-server.manifest.json")),
-    ),
+    "manifest.json": new Uint8Array(readFileSync(path.join(FIXTURE_DIR, "manifest.json"))),
     "server.ts": new Uint8Array(readFileSync(path.join(FIXTURE_DIR, "server.ts"))),
   });
 }
@@ -55,9 +51,9 @@ function spec(): IntegrationSpawnSpec {
       name: INTEG_ID,
       version: "1.0.0",
       // The process adapter runs `.ts` under bun (`HOST_INTERPRETER_BY_TYPE["bun"]`).
-      // The MCPB manifest declares `node` (a valid MCPB type), but this synthetic
+      // The manifest declares `node`, but this synthetic
       // spec pins `bun` so the host subprocess runs the TypeScript entry directly.
-      server: { type: "bun", entry_point: "./server.ts", packageId: SERVER_ID },
+      server: { type: "bun", entry_point: "./server.ts", packageId: INTEG_ID },
     },
     spawnEnv: {},
     // Native-tool subset under test (api_call / fetch_echo need creds + MITM).
@@ -66,10 +62,10 @@ function spec(): IntegrationSpawnSpec {
 }
 
 function makePlatformFetch(): typeof fetch {
-  const bundle = serverBundleBytes();
+  const bundle = integrationBundleBytes();
   return (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.includes("/internal/mcp-server-bundle/")) {
+    if (url.includes("/internal/integration-bundle/")) {
       return new Response(bundle, { status: 200 });
     }
     return new Response(JSON.stringify({ detail: `unexpected platform call: ${url}` }), {
@@ -165,7 +161,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     if (!result.valid) throw new Error(result.errors.join(", "));
 
     const m = result.manifest as unknown as {
-      source: { kind: string; server?: { name: string } };
+      source: { kind: string; server?: { type: string; entry_point: string } };
       _meta?: Record<string, { auths?: Record<string, unknown> }>;
       auths: Record<
         string,
@@ -174,7 +170,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
       tools_policy: Record<string, { required_scopes?: Record<string, string[]> }>;
     };
     expect(m.source.kind).toBe("local");
-    expect(m.source.server?.name).toBe(SERVER_ID);
+    expect(m.source.server?.entry_point).toBe("./server.ts");
     // api_call is additive (vendor `_meta`) on a local source — the `primary`
     // auth is opted into the api_call tool alongside the spawned MCP server.
     expect(m._meta?.["dev.appstrate/api"]?.auths).toHaveProperty("primary");
@@ -182,22 +178,5 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     expect(m.auths.primary!.delivery.http.name).toBe("X-Toolkit-Token");
     expect(m.auths.primary!.delivery.http.value).toBe("{$credential.api_key}");
     expect(m.tools_policy.fetch_echo!.required_scopes).toEqual({ primary: ["read"] });
-  });
-
-  it("the mcp-server manifest is a valid MCPB manifest referencing the server code", () => {
-    const raw = readFileSync(path.join(FIXTURE_DIR, "mcp-server.manifest.json"), "utf-8");
-    const parsed = mcpServerManifestSchema.safeParse(JSON.parse(raw));
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
-    const mcp = parsed.data as unknown as {
-      name: string;
-      type: string;
-      server: { type: string; entry_point: string };
-    };
-    expect(mcp.server.type).toBe("node");
-    expect(mcp.server.entry_point).toBe("./server.ts");
-    // AFPS (§3.4): scoped identity lives at the manifest root.
-    expect(mcp.name).toBe(SERVER_ID);
-    expect(mcp.type).toBe("mcp-server");
   });
 });
