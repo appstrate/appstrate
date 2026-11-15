@@ -492,7 +492,8 @@ describe("0054 — resolution as the runtime did, refusal, bridge", () => {
     await mkServer(ctx.orgId, [{ version: "1.0.0", files: null }]);
     await mkIntegration("1.0.0");
     await expect(run(true)).rejects.toBeInstanceOf(StorageUnreadable);
-    expect(lines.join("\n")).toContain("storage: filesystem");
+    // The storage target is printed before the refusal, whichever backend the tier runs on.
+    expect(lines.join("\n")).toMatch(/^storage: (filesystem|s3 bucket) /m);
     expect(await serverCount()).toBe(1);
   });
 
