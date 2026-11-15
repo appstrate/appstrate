@@ -184,5 +184,6 @@
   "threads.settings.title": "Paramètres de la conversation",
   "threads.settings.description": "Le nom apparaît dans la liste des conversations et en haut de la page.",
   "threads.settings.name": "Nom",
+  "threads.settings.openFor": "Paramètres de « {{title}} »",
   "model.loadFailed": "Modèles indisponibles"
 }

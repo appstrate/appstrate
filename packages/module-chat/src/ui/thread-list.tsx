@@ -310,7 +310,9 @@ function ConversationRow({
           <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
             <button
               type="button"
-              aria-label={t("threads.settings.title")}
+              aria-label={t("threads.settings.openFor", {
+                title: session.title ?? t("threads.new"),
+              })}
               title={t("threads.settings.title")}
               onClick={() => setSettingsOpen(true)}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"

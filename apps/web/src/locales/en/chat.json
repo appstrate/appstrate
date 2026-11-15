@@ -184,5 +184,6 @@
   "threads.settings.title": "Conversation settings",
   "threads.settings.description": "The name shows in the conversation list and at the top of the page.",
   "threads.settings.name": "Name",
+  "threads.settings.openFor": "Settings for “{{title}}”",
   "model.loadFailed": "Models unavailable"
 }
