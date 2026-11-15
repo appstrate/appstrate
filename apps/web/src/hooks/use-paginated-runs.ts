@@ -8,8 +8,8 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import { pollWhileMoving } from "../lib/across-spaces";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun, type ListEnvelope } from "@appstrate/shared-types";
+import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
+import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
 export type RunKindFilter = "all" | "package" | "inline";
@@ -29,13 +29,6 @@ interface UsePaginatedRunsOptions {
   spaceIds?: string[];
   limit: number;
   offset: number;
-}
-
-/** Polled across spaces while a listed run is pending or running. Exported for its test. */
-export function pollWhileActive(page: ListEnvelope<EnrichedRun> | undefined): number | false {
-  return pollWhileMoving(page?.data, (run) =>
-    (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status),
-  );
 }
 
 /**
@@ -128,7 +121,8 @@ export function usePaginatedRuns({
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
     // Each row's space grants it server-side; the current space's gate does not apply.
     enabled: acrossSpaces ? !!orgId : canRead && !!spaceId,
-    refetchInterval: acrossSpaces ? (query) => pollWhileActive(query.state.data) : undefined,
+    // Other spaces' runs, new ones included, reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
+    refetchInterval: acrossSpaces ? ACROSS_SPACES_POLL_MS : undefined,
   });
 }
 

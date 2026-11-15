@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What lists spanning spaces share: the link into another space, its entry, the poll. */
+/** What lists spanning spaces share: the link into another space, and its entry. */
 
 import { describe, expect, it } from "bun:test";
-import {
-  ACROSS_SPACES_POLL_MS,
-  linkedSpacePath,
-  linkedSpaceStep,
-  pollWhileMoving,
-} from "../across-spaces.ts";
+import { linkedSpacePath, linkedSpaceStep } from "../across-spaces.ts";
 
 describe("linkedSpacePath", () => {
   it("leaves a link within the current space as it was", () => {
@@ -31,10 +26,10 @@ describe("linkedSpaceStep", () => {
     expect(linkedSpaceStep(null, "spc_1", false)).toBe("none");
   });
 
-  it("enters an enterable space other than the current one", () => {
-    expect(linkedSpaceStep("spc_2", "spc_1", true)).toBe("enter");
-    // A new tab, before the resolver: entering sets the remembered space it will keep.
-    expect(linkedSpaceStep("spc_2", null, true)).toBe("enter");
+  it("waits while the resolver enters an enterable space other than the current one", () => {
+    expect(linkedSpaceStep("spc_2", "spc_1", true)).toBe("wait");
+    // A cold load, before the resolver has scoped at all.
+    expect(linkedSpaceStep("spc_2", null, true)).toBe("wait");
   });
 
   it("drops the param once in it, or when it cannot be entered", () => {
@@ -46,18 +41,5 @@ describe("linkedSpaceStep", () => {
     expect(linkedSpaceStep("spc_2", "spc_1", undefined)).toBe("wait");
     // The hook answers `false` for a listing that errored: the page renders its own state.
     expect(linkedSpaceStep("spc_2", "spc_1", false)).toBe("drop");
-  });
-});
-
-describe("pollWhileMoving", () => {
-  const moving = (row: { live: boolean }) => row.live;
-
-  it("polls while a row still moves", () => {
-    expect(pollWhileMoving([{ live: false }, { live: true }], moving)).toBe(ACROSS_SPACES_POLL_MS);
-  });
-
-  it("does not poll once nothing moves, nor before an answer", () => {
-    expect(pollWhileMoving([{ live: false }], moving)).toBe(false);
-    expect(pollWhileMoving(undefined, moving)).toBe(false);
   });
 });

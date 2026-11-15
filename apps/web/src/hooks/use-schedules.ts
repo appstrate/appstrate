@@ -15,7 +15,7 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
-import { pollWhileMoving } from "../lib/across-spaces";
+import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
@@ -25,11 +25,6 @@ import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 function useCanReadSchedules(): boolean {
   const { can } = usePermissions();
   return can("schedules:read");
-}
-
-/** Polled across spaces while a listed schedule has a run going. Exported for its test. */
-export function pollWhileScheduleRuns(rows: EnrichedSchedule[] | undefined): number | false {
-  return pollWhileMoving(rows, (schedule) => schedule.running_runs > 0);
 }
 
 /** The current space's schedules, or those of `spaceIds` (`GET /api/orgs/{orgId}/schedules`). */
@@ -46,7 +41,8 @@ export function useAllSchedules(spaceIds?: string[]) {
     queryFn: () => fetchSchedules(orgId, acrossSpaces),
     // Each row's space grants it server-side; the current space's gate does not apply.
     enabled: acrossSpaces ? !!orgId : canRead && !!orgId && !!spaceId,
-    refetchInterval: acrossSpaces ? (query) => pollWhileScheduleRuns(query.state.data) : undefined,
+    // Other spaces' schedules reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
+    refetchInterval: acrossSpaces ? ACROSS_SPACES_POLL_MS : undefined,
   });
 }
 

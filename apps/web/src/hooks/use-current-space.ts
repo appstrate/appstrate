@@ -88,15 +88,18 @@ export function isSpaceEnterable(space: { access: string }): boolean {
 }
 
 /**
- * The space to stand in: remembered while enterable, else default, else a team
- * space (a guest has no default), else the personal one; null when none is.
+ * The space to stand in: the one a link names (`?enterSpace=`) while enterable, else the
+ * remembered one while enterable, else default, else a team space (a guest has no default),
+ * else the personal one; null when none is.
  */
 export function enterableSpaceId(
   remembered: string | null,
   spaces: readonly ResolvableSpace[],
+  linked: string | null = null,
 ): string | null {
   const enterable = spaces.filter(isSpaceEnterable);
   const pick =
+    enterable.find((s) => s.id === linked) ??
     enterable.find((s) => s.id === remembered) ??
     enterable.find((s) => s.isDefault) ??
     enterable.find((s) => !s.personal) ??
@@ -104,9 +107,15 @@ export function enterableSpaceId(
   return pick?.id ?? null;
 }
 
-/** The only path from the remembered space to a scope: none until `GET /api/spaces` proves one enterable, dropped when it stops listing it. Render inside MainLayout. */
+/**
+ * The only path from the remembered (or linked) space to a scope: none until `GET /api/spaces`
+ * proves one enterable, dropped when it stops listing it. A link's `?enterSpace=` is the first
+ * candidate, so a cold load scopes once, to it. Render inside MainLayout (router context).
+ */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
+  const [params] = useSearchParams();
+  const linked = params.get(ENTER_SPACE_PARAM);
   const current = useStore(spaceStore, (s) => s.id);
   const orgId = useStore(orgStore, (s) => s.id);
   const userId = useStore(authStore, (s) => s.user?.id);
@@ -118,19 +127,19 @@ export function useSpaceResolver(): void {
 
   useEffect(() => {
     if (!spaces) return;
-    const next = enterableSpaceId(remembered, spaces);
+    const next = enterableSpaceId(remembered, spaces, linked);
+    // `setId` remembers it: once the param is dropped, the remembered space keeps it.
     if (next !== current) selectSpace(queryClient, next);
-  }, [queryClient, spaces, remembered, current]);
+  }, [queryClient, spaces, remembered, linked, current]);
 }
 
 /**
- * Enters the space a link names (`?enterSpace=`, `lib/across-spaces.ts`) through the one door,
- * `switchSpace`, then drops the param; a space the caller cannot enter is ignored. Answers
- * whether it is still pending: the page waits, or its first reads would go out scoped to the
- * previous space. `setId` remembers the space, so the resolver's next pass keeps it.
+ * The page side of a link's `?enterSpace=` (`lib/across-spaces.ts`): `useSpaceResolver` enters
+ * the space; this waits until it has, then drops the param — at once when the space cannot be
+ * entered or the listing failed. Answers whether the page must still wait: its first reads would
+ * otherwise go out scoped to the previous space.
  */
 export function useEnterLinkedSpace(): boolean {
-  const { switchSpace } = useSpaceSwitcher();
   const [params, setParams] = useSearchParams();
   const linked = params.get(ENTER_SPACE_PARAM);
   const current = useCurrentSpaceId();
@@ -143,9 +152,7 @@ export function useEnterLinkedSpace(): boolean {
       : undefined;
 
   useEffect(() => {
-    const step = linkedSpaceStep(linked, current, enterable);
-    if (step === "enter" && linked) switchSpace(linked);
-    if (step !== "drop") return;
+    if (linkedSpaceStep(linked, current, enterable) !== "drop") return;
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -154,7 +161,7 @@ export function useEnterLinkedSpace(): boolean {
       },
       { replace: true },
     );
-  }, [switchSpace, linked, enterable, current, setParams]);
+  }, [linked, enterable, current, setParams]);
 
   return !!linked;
 }

@@ -2,19 +2,16 @@
 
 /**
  * Which door a page of the Runs list asks: the current space's `GET /api/runs` unless spaces are
- * ticked, then `GET /api/orgs/{orgId}/runs` with them. And a list across spaces polls only while
- * a row still moves (the SSE stream covers the current space only).
+ * ticked, then `GET /api/orgs/{orgId}/runs` with them.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import { makeRun } from "../../test/run-fixture.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { client } = await import("../../api/client.ts");
-const { fetchRunPage, pollWhileActive } = await import("../use-paginated-runs.ts");
-const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
+const { fetchRunPage } = await import("../use-paginated-runs.ts");
 
 const PAGE = { object: "list", data: [], total: 0, hasMore: false };
 
@@ -75,23 +72,5 @@ describe("fetchRunPage", () => {
         },
       ],
     ]);
-  });
-});
-
-describe("pollWhileActive", () => {
-  const page = (...statuses: string[]) =>
-    ({
-      ...PAGE,
-      data: statuses.map((status) => makeRun({ status } as never)),
-    }) as never;
-
-  it("polls while a listed run is pending or running", () => {
-    expect(pollWhileActive(page("success", "running"))).toBe(ACROSS_SPACES_POLL_MS);
-    expect(pollWhileActive(page("pending"))).toBe(ACROSS_SPACES_POLL_MS);
-  });
-
-  it("does not poll once every listed run has ended, nor before an answer", () => {
-    expect(pollWhileActive(page("success", "failed", "cancelled"))).toBe(false);
-    expect(pollWhileActive(undefined)).toBe(false);
   });
 });

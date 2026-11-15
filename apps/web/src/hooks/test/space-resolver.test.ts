@@ -64,6 +64,22 @@ describe("enterableSpaceId", () => {
   });
 });
 
+describe("enterableSpaceId with a link naming a space (`?enterSpace=`)", () => {
+  it("takes the linked space first while it is enterable, so a cold load scopes once", () => {
+    expect(enterableSpaceId("spc_default", spaces, "spc_marketing")).toBe("spc_marketing");
+  });
+
+  it("keeps the remembered space when the linked one cannot be entered — not the default", () => {
+    expect(enterableSpaceId("spc_marketing", spaces, "spc_closed")).toBe("spc_marketing");
+    expect(enterableSpaceId("spc_marketing", spaces, "spc_deleted")).toBe("spc_marketing");
+  });
+
+  it("is unchanged without a link", () => {
+    expect(enterableSpaceId("spc_marketing", spaces, null)).toBe("spc_marketing");
+    expect(enterableSpaceId(null, spaces, null)).toBe("spc_default");
+  });
+});
+
 describe("isSpaceEnterable", () => {
   it("enters on member access only", () => {
     expect(isSpaceEnterable({ access: "member" })).toBe(true);
