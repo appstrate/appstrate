@@ -17,6 +17,7 @@ import {
   personaFor,
   personaMemberships,
 } from "../../lib/view-as.ts";
+import type { SpaceContextRow } from "../../lib/space-lookup.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
 import type { Refusal } from "./tool-results.ts";
@@ -28,7 +29,7 @@ export interface McpSpace {
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
   permissions: ReadonlySet<string>;
-  /** The acts the caller holds there (`deriveMcpSurface` over `permissions`). */
+  /** The acts the caller holds there (`deriveMcpSurface` over `permissions` and the space). */
   surface: McpSurface;
 }
 
@@ -43,11 +44,18 @@ export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
   return [c.get("spaceId"), c.req.param("space")].filter((id): id is string => Boolean(id));
 }
 
-/** The spaces of `GET /api/spaces` where the caller holds a role granting `mcp:read`. */
+/**
+ * The spaces of `GET /api/spaces` where the caller holds a role granting `mcp:read`, each with
+ * the acts `surfaceOf` gives it there.
+ */
 export async function listReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
-): Promise<Omit<McpSpace, "surface">[]> {
+  surfaceOf: (
+    permissions: ReadonlySet<string>,
+    space: Pick<SpaceContextRow, "credentialProxyOpen">,
+  ) => McpSurface,
+): Promise<McpSpace[]> {
   const orgRole = callerOrgRole(c, orgId);
   if (!orgRole) return [];
   const entries = await listSpacesForPrincipal(
@@ -57,7 +65,7 @@ export async function listReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const out: Omit<McpSpace, "surface">[] = [];
+  const out: McpSpace[] = [];
   for (const { space, role } of entries) {
     if (!role) continue;
     const permissions = effectiveInSpace(c, role);
@@ -67,6 +75,7 @@ export async function listReachableSpaces(
       name: space.name,
       role: toSpaceRoleWire(role)!.name,
       permissions,
+      surface: surfaceOf(permissions, space),
     });
   }
   return out;

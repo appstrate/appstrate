@@ -4,17 +4,34 @@
  * A remote MCP server on loopback (Streamable HTTP, stateless, JSON responses), for route tests
  * that reach one through the platform. Configurable tools (paginated by `pageSize`), `serverInfo`,
  * `instructions`, a required bearer, and values a hostile server would have its client echo (a
- * session id, a cursor prefix); records every request. Its protocol era is `legacy` (the
+ * session id, a cursor prefix), a delay (on every request or one method's), event-stream answers;
+ * records every request. Its protocol era is `legacy` (the
  * `initialize` handshake, the default), `modern` (MCP 2026-07-28 only) or `dual`.
  * Served by the fake handlers of `@appstrate/mcp-transport/testing`.
  */
 
-import type { Implementation, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  Implementation,
+  Tool,
+  ToolAnnotations,
+} from "@modelcontextprotocol/sdk/types.js";
 import { legacyMcpHandler, modernMcpHandler } from "@appstrate/mcp-transport/testing";
 
-/** A name alone gets the description `Tool <name>` and no annotations. */
+/**
+ * A name alone gets the description `Tool <name>` and no annotations. A call answers `result`,
+ * else its arguments as JSON text.
+ */
 export type FakeMcpTool =
-  string | { name: string; title?: string; description?: string; annotations?: ToolAnnotations };
+  | string
+  | {
+      name: string;
+      title?: string;
+      description?: string;
+      annotations?: ToolAnnotations;
+      outputSchema?: Tool["outputSchema"];
+      result?: CallToolResult;
+    };
 
 export interface FakeMcpServerOptions {
   tools?: FakeMcpTool[];
@@ -22,12 +39,20 @@ export interface FakeMcpServerOptions {
   pageSize?: number;
   serverInfo?: Implementation;
   instructions?: string;
-  /** The bearer the server accepts; any other `Authorization` answers 401. */
+  /** The bearer the server accepts; any other `Authorization` answers `rejectStatus`. */
   bearer?: string;
+  /** What another `Authorization` than `bearer` answers; 401 when omitted. */
+  rejectStatus?: 401 | 403;
   /** Answered as `Mcp-Session-Id` on every response: the client echoes it on each request. */
   sessionId?: string;
   /** The protocol era the server speaks; `legacy` when omitted. */
   era?: "legacy" | "modern" | "dual";
+  /** Waits this long before answering each request, or only those of `delayedMethod`. */
+  delayMs?: number;
+  /** The JSON-RPC method `delayMs` applies to; every request when omitted. */
+  delayedMethod?: string;
+  /** Answers requests as `text/event-stream` (legacy era only). */
+  sse?: boolean;
 }
 
 export interface FakeMcpServer {
@@ -40,17 +65,21 @@ export interface FakeMcpServer {
   methods: string[];
   /** Every request's headers and body text, in order. */
   requests: { headers: Headers; body: string }[];
+  /** Lists the tools in the reverse order from now on (stateless eras: the next request). */
+  reverseTools(): void;
   stop(): void;
 }
 
 export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServer {
-  const tools = (opts.tools ?? []).map((tool) => ({
-    descriptor: {
-      ...(typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool),
-      inputSchema: { type: "object" as const, properties: {} },
-    },
-    handler: async () => ({ content: [] }),
-  }));
+  const tools = (opts.tools ?? []).map((tool) => {
+    const { result, ...descriptor } =
+      typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool;
+    return {
+      descriptor: { ...descriptor, inputSchema: { type: "object" as const, properties: {} } },
+      handler: async (args: unknown): Promise<CallToolResult> =>
+        result ?? { content: [{ type: "text", text: JSON.stringify(args ?? {}) }] },
+    };
+  });
   const served = {
     tools,
     ...(opts.pageSize !== undefined ? { pageSize: opts.pageSize } : {}),
@@ -62,7 +91,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
   const requests: { headers: Headers; body: string }[] = [];
 
   const era = opts.era ?? "legacy";
-  const legacy = legacyMcpHandler(served);
+  const legacy = legacyMcpHandler({ ...served, ...(opts.sse ? { sse: true } : {}) });
   const handle =
     era === "legacy"
       ? legacy
@@ -76,9 +105,12 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       authorizations.push(req.headers.get("authorization"));
       methods.push(req.method);
       requests.push({ headers: req.headers, body });
+      if (opts.delayMs && (!opts.delayedMethod || body.includes(`"${opts.delayedMethod}"`))) {
+        await Bun.sleep(opts.delayMs);
+      }
       if (new URL(req.url).pathname !== "/mcp") return new Response("not found", { status: 404 });
       if (opts.bearer && req.headers.get("authorization") !== `Bearer ${opts.bearer}`) {
-        return new Response("unauthorized", { status: 401 });
+        return new Response("unauthorized", { status: opts.rejectStatus ?? 401 });
       }
       const res = await handle(
         new Request(req.url, {
@@ -98,6 +130,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     authorizations,
     methods,
     requests,
+    reverseTools: () => void tools.reverse(),
     stop: () => http.stop(true),
   };
 }

@@ -202,6 +202,29 @@ export class ApiError extends Error {
     this.extensions = opts.extensions;
   }
 
+  /**
+   * This error with `changes` applied: every other member (status, code, title, param,
+   * `retryAfter`, field errors, headers, extensions, cause) carries over as it is.
+   */
+  with(
+    changes: Partial<
+      Pick<ConstructorParameters<typeof ApiError>[0], "detail" | "errors" | "extensions" | "cause">
+    >,
+  ): ApiError {
+    return new ApiError({
+      status: this.status,
+      code: this.code,
+      title: this.title,
+      detail: changes.detail ?? this.message,
+      param: this.param,
+      retryAfter: this.retryAfter,
+      errors: changes.errors ?? this.fieldErrors,
+      headers: this.headers,
+      extensions: changes.extensions ?? this.extensions,
+      cause: "cause" in changes ? changes.cause : this.cause,
+    });
+  }
+
   /** Serialise to RFC 9457 Problem Details body. */
   toProblemDetail(requestId: string): ProblemDetail {
     const body: ProblemDetail = {

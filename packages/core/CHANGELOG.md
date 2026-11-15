@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`allowsUndeclaredTools(manifest)`** (`@appstrate/core/integration`): whether an integration
+  declares `allow_undeclared_tools: true` (AFPS §7.8), the one reader of that flag for core and the
+  platform (#2206).
+- **`ApiError.with(changes)`** (`@appstrate/core/api-errors`): the same error with a new `detail`,
+  `errors`, `extensions` or `cause`, every other member carried over (`retryAfter`, headers) (#2206).
 - **`@appstrate/core/model-error`: a structured reason beside the category.**
   **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
   optional `reason` on `ModelErrorClassification` that `classifyModelError` and
