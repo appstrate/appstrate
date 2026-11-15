@@ -14,7 +14,8 @@ import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { SidebarCredits } from "@/components/sidebar-credits";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
-import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
+import { useShellReach, useReachReady } from "@/hooks/use-can-reach";
+import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
@@ -121,7 +122,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { pathname, search } = useLocation();
   useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
-  const canReach = useCanReach();
+  const canReach = useShellReach();
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
@@ -148,9 +149,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
           <PanelLeft className="size-4" />
         </SidebarTrigger>
       </SidebarHeader>
-      <div className="px-2 pt-4 pb-1">
-        <ProductTabs />
-      </div>
+      <ProductTabs />
       <SidebarContent className={cn("gap-0", product === "chat" && "overflow-hidden")}>
         {product === "chat" ? (
           // A refused chat route says so in the page; the list would only fetch what the caller cannot read.
@@ -197,7 +196,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  const unreadRuns = useUnreadRunCount();
+  // The working space's badge: « Vue d'ensemble » neither shows nor asks it.
+  const { on: overview } = useOverviewMode();
+  const unreadRuns = useUnreadRunCount(!overview);
   const collapsed = !isMobile && state === "collapsed";
 
   return (
@@ -237,7 +238,7 @@ export function ShellHeader() {
         {collapsed && (
           <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
             <Menu className="size-4" />
-            {unreadRuns > 0 && (
+            {!overview && unreadRuns > 0 && (
               <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
             )}
           </SidebarTrigger>

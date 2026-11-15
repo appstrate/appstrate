@@ -27,6 +27,8 @@ interface UsePaginatedRunsOptions {
   unread?: boolean;
   /** Several spaces of the org instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
   spaceIds?: string[];
+  /** `false` keeps the query from asking (a badge the shell does not show). */
+  enabled?: boolean;
   limit: number;
   offset: number;
 }
@@ -54,6 +56,7 @@ export function usePaginatedRuns({
   search,
   unread,
   spaceIds,
+  enabled = true,
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
@@ -120,7 +123,7 @@ export function usePaginatedRuns({
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
     // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: acrossSpaces ? !!orgId : canRead && !!spaceId,
+    enabled: enabled && (acrossSpaces ? !!orgId : canRead && !!spaceId),
     // Other spaces' runs, new ones included, reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
     refetchInterval: acrossSpaces ? ACROSS_SPACES_POLL_MS : undefined,
   });

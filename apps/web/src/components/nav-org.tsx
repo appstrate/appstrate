@@ -19,7 +19,9 @@ import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
-import { useCanReach, useReachReady } from "../hooks/use-can-reach";
+import { routeOf } from "../lib/route-match";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useShellReach, useReachReady } from "../hooks/use-can-reach";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -43,9 +45,11 @@ export function NavOrg() {
   // cold settings link is not where the user is.
   const { pathname } = useLocation();
   const visiblePathname = useOverlayPath() ?? pathname;
-  const unread = useUnreadRunCount();
+  // The badges are the working space's: « Vue d'ensemble » neither shows nor asks them.
+  const { on: overview } = useOverviewMode();
+  const unread = useUnreadRunCount(!overview);
   const { data: agents } = useAgents();
-  const canReach = useCanReach();
+  const canReach = useShellReach();
   const ready = useReachReady();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
@@ -55,9 +59,11 @@ export function NavOrg() {
     status: ["running"],
     limit: 1,
     offset: 0,
+    enabled: !overview,
   });
   const hasRunning =
-    (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
+    !overview &&
+    ((agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0);
 
   // Two groups, split by what you are DOING rather than by object type:
   // Activité is what happened (dashboard, runs, files), Construire is what you
@@ -66,7 +72,8 @@ export function NavOrg() {
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
-  // may hold none of them, so no entry is assumed reachable.
+  // may hold none of them, so no entry is assumed reachable. In « Vue d'ensemble »,
+  // only the entries whose page holds the mode (`shownInOverview`).
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
   const activityItems = reachable([
@@ -138,7 +145,11 @@ export function NavOrg() {
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
                   asChild
-                  isActive={visiblePathname.startsWith("/runs")}
+                  // In « Vue d'ensemble » a run's detail was opened from this list.
+                  isActive={
+                    visiblePathname.startsWith("/runs") ||
+                    (overview && routeOf(visiblePathname) === "/agents/:scope/:name/runs/:runId")
+                  }
                   tooltip={t("nav.runs")}
                 >
                   <Link to="/runs">
@@ -148,7 +159,7 @@ export function NavOrg() {
                     <span>{t("nav.runs")}</span>
                   </Link>
                 </SidebarMenuButton>
-                {unread > 0 && (
+                {!overview && unread > 0 && (
                   <SidebarMenuBadge>
                     <CountBadge
                       count={unread}

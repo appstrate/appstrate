@@ -50,6 +50,9 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
+import { useOverviewMode, useOverviewRouteRule } from "./hooks/use-overview-mode";
+import { useSpaces } from "./hooks/use-spaces";
+import { overviewLanding } from "./lib/space-lists";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -263,7 +266,7 @@ const authCallbackRoute = (
  * (`lib/route-access.ts`): a route without one, or one without a page, fails to compile.
  */
 const PAGES: Record<RoutePath, ReactNode> = {
-  "/": <DashboardPage />,
+  "/": <HomePage />,
   "/agents": <PackageIndexPage type="agent" />,
   "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
   "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
@@ -408,6 +411,15 @@ function layoutRoute(layout: LayoutPath) {
   );
 }
 
+/** `/`: the dashboard of the working space, or in « Vue d'ensemble » its first list. */
+function HomePage() {
+  const { on } = useOverviewMode();
+  const { data: spaces, isError } = useSpaces();
+  // The mode is known once the listing is: nothing of the space is read before.
+  if (!spaces && !isError) return <ListPageSkeleton />;
+  return on ? <Navigate to={overviewLanding(spaces)} replace /> : <DashboardPage />;
+}
+
 /** The one boot placeholder every gate renders, so a visitor sees a single uninterrupted spinner. */
 function BootScreen() {
   return (
@@ -430,6 +442,7 @@ function MainLayout() {
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
+  useOverviewRouteRule();
   useGlobalRunSync();
 
   return (

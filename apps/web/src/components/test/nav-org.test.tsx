@@ -6,6 +6,9 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { $api, type components } from "../../api/client.ts";
 import { NavOrg } from "../nav-org.tsx";
 import { orgStore } from "../../stores/org-store.ts";
+import { spaceStore } from "../../stores/space-store.ts";
+import { authStore } from "../../stores/auth-store.ts";
+import { overviewStore } from "../../stores/overview-store.ts";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -18,7 +21,12 @@ installFakeStorage({
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function navFor(permissions: string[]): string {
+function navFor(
+  permissions: string[],
+  spaces: unknown[] = [],
+  overview = false,
+  url = "/",
+): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
     id: "org_nav",
@@ -35,22 +43,40 @@ function navFor(permissions: string[]): string {
     ...orgStore.getInitialState(),
     id: org.id,
   });
+  // « Vue d'ensemble » chosen by this reader in this org, or not.
+  const chosen = [
+    spyOn(authStore, "getInitialState").mockReturnValue({
+      ...authStore.getInitialState(),
+      user: { id: "u_nav", email: "u@example.test", emailVerified: true },
+    }),
+    spyOn(overviewStore, "getInitialState").mockReturnValue({
+      ...overviewStore.getInitialState(),
+      chosen: overview ? { [`u_nav:${org.id}`]: true } : {},
+    }),
+  ];
+  // Standing in the first space listed, as the resolver would.
+  const current = spyOn(spaceStore, "getInitialState").mockReturnValue({
+    ...spaceStore.getInitialState(),
+    id: (spaces[0] as { id?: string } | undefined)?.id ?? null,
+  });
   queryClient.setQueryData(["orgs"], [org]);
   // No space to enter: the permission set is the org's, and the navigation answers at once.
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": org.id } } })
       .queryKey,
-    { object: "list", hasMore: false, data: [] },
+    { object: "list", hasMore: false, data: spaces },
   );
   try {
     return render(
       <SidebarProvider>
         <NavOrg />
       </SidebarProvider>,
-      { queryClient },
+      { queryClient, initialEntries: [url] },
     );
   } finally {
     snapshot.mockRestore();
+    current.mockRestore();
+    for (const stub of chosen) stub.mockRestore();
   }
 }
 
@@ -85,5 +111,45 @@ describe("the main navigation", () => {
     );
     expect(order.every((position) => position >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+});
+
+describe("the navigation in « Vue d'ensemble »", () => {
+  const space = (id: string, permissions: string[]) => ({
+    id,
+    access: "member",
+    permissions,
+    personal: false,
+    isDefault: id === "spc_a",
+    name: id,
+  });
+  // The working space reads no run; another one does.
+  const spaces = [
+    space("spc_a", ["agents:read", "skills:read", "files:read"]),
+    space("spc_b", ["runs:read", "schedules:read"]),
+  ];
+  const working = ["agents:read", "skills:read", "files:read"];
+
+  it("keeps the lists some space admits, and hides what belongs to one space", () => {
+    const html = navFor(working, spaces, true);
+    for (const label of ["Fichiers", "Runs", "Planifications"]) {
+      expect(html).toContain(`<span>${label}</span>`);
+    }
+    for (const label of ["Dashboard", "Agents", "Skills"]) {
+      expect(html).not.toContain(`<span>${label}</span>`);
+    }
+  });
+
+  it("leaves the navigation of the working space as it was out of the mode", () => {
+    const html = navFor(working, spaces, false);
+    expect(html).toContain("<span>Agents</span>");
+    expect(html).toContain("<span>Dashboard</span>");
+    expect(html).not.toContain("<span>Runs</span>");
+  });
+
+  it("reads a run's detail as opened from Runs", () => {
+    const html = navFor(working, spaces, true, "/agents/@acme/reporter/runs/run_1");
+    const active = [...html.matchAll(/<a[^>]*data-active="true"[^>]*>/g)].map((m) => m[0]);
+    expect(active.some((tag) => tag.includes('href="/runs"'))).toBe(true);
   });
 });

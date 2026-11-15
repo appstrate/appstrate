@@ -13,7 +13,7 @@ import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useCanReach } from "@/hooks/use-can-reach";
+import { useShellReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
@@ -34,7 +34,8 @@ interface Product {
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const canReach = useCanReach();
+  // In « Vue d'ensemble » the chat, which belongs to one space, is not offered.
+  const canReach = useShellReach();
   const { can, ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   const chatReachable = canReach("/chat");
@@ -75,35 +76,40 @@ export function ProductTabs() {
     },
   ].filter((p) => p.enabled);
 
+  // A toggle with one choice is noise; a slot still being decided keeps the row.
+  if (products.length < 2 && !(chatPending && !chatShown)) return null;
+
   return (
-    <nav
-      aria-label={t("products.ariaLabel")}
-      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
-    >
-      {products.map((p) => (
-        <Link
-          key={p.id}
-          to={p.to}
-          aria-current={p.active ? "page" : undefined}
-          className={cn(
-            "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-            p.active
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
-          <span className="truncate">{p.label}</span>
-          {!p.active && (
-            <CountBadge
-              count={p.unread ?? 0}
-              label={t("products.unread", { count: p.unread })}
-              tone="primary"
-            />
-          )}
-        </Link>
-      ))}
-      {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
-    </nav>
+    <div className="px-2 pt-4 pb-1">
+      <nav
+        aria-label={t("products.ariaLabel")}
+        className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
+      >
+        {products.map((p) => (
+          <Link
+            key={p.id}
+            to={p.to}
+            aria-current={p.active ? "page" : undefined}
+            className={cn(
+              "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
+              p.active
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
+            <span className="truncate">{p.label}</span>
+            {!p.active && (
+              <CountBadge
+                count={p.unread ?? 0}
+                label={t("products.unread", { count: p.unread })}
+                tone="primary"
+              />
+            )}
+          </Link>
+        ))}
+        {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
+      </nav>
+    </div>
   );
 }

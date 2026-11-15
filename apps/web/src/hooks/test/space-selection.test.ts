@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The « Espace » scope of the lists spanning spaces: offered from two admitting spaces held with
- * a role; untouched it is the current space; the URL's `spaceId` wins (stale ids dropped, the
- * current space alone meaning none); without it, a remembered "all spaces" spans every one.
+ * The « Espace » scope of the lists spanning spaces. On a page: offered from two admitting
+ * spaces held with a role, untouched it is the current space, the URL's `spaceId` widens it
+ * (stale ids dropped, the current space alone meaning none). In the overview: every admitting
+ * space by default, the URL narrowing it.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -24,13 +25,9 @@ const readsSchedules = (permissions: readonly string[]) => permissions.includes(
 const HERE = "spc_a";
 const TWO = [space(HERE), space("spc_b")];
 
-describe("spaceSelection", () => {
-  it("offers nothing to a reader of one admitting space, whatever the URL or the memory says", () => {
-    expect(spaceSelection([space(HERE)], "spc_a", readsSchedules, HERE, true)).toEqual({
-      offered: [],
-      selected: [],
-    });
-    expect(spaceSelection([space(HERE)], null, readsSchedules, HERE, true)).toEqual({
+describe("spaceSelection on a page", () => {
+  it("offers nothing to a reader of one admitting space, whatever the URL says", () => {
+    expect(spaceSelection([space(HERE)], "spc_a", readsSchedules, HERE, "current")).toEqual({
       offered: [],
       selected: [],
     });
@@ -42,31 +39,23 @@ describe("spaceSelection", () => {
       space("spc_closed", { access: "none" }),
       space("spc_blind", { permissions: ["runs:read"] }),
     ];
-    expect(spaceSelection(spaces, null, readsSchedules, HERE, false).offered).toEqual([]);
+    expect(spaceSelection(spaces, null, readsSchedules, HERE, "current").offered).toEqual([]);
     const withSecond = [...spaces, space("spc_b")];
-    expect(ids(spaceSelection(withSecond, null, readsSchedules, HERE, false).offered)).toEqual([
+    expect(ids(spaceSelection(withSecond, null, readsSchedules, HERE, "current").offered)).toEqual([
       HERE,
       "spc_b",
     ]);
   });
 
   it("spans nothing untouched: the list stays on the current space's route", () => {
-    expect(spaceSelection(TWO, null, readsSchedules, HERE, false).selected).toEqual([]);
+    expect(spaceSelection(TWO, null, readsSchedules, HERE, "current").selected).toEqual([]);
   });
 
-  it("spans every offered space when the reader keeps « all spaces » and the URL says nothing", () => {
-    expect(ids(spaceSelection(TWO, null, readsSchedules, HERE, true).selected)).toEqual([
-      HERE,
+  it("spans what the URL names, the current space alone being its own route", () => {
+    expect(ids(spaceSelection(TWO, "spc_b", readsSchedules, HERE, "current").selected)).toEqual([
       "spc_b",
     ]);
-  });
-
-  it("lets an explicit param win over the memory", () => {
-    expect(ids(spaceSelection(TWO, "spc_b", readsSchedules, HERE, true).selected)).toEqual([
-      "spc_b",
-    ]);
-    // The current space alone is the space's own route, memory or not.
-    expect(spaceSelection(TWO, "spc_a", readsSchedules, HERE, true).selected).toEqual([]);
+    expect(spaceSelection(TWO, "spc_a", readsSchedules, HERE, "current").selected).toEqual([]);
   });
 
   it("drops an id the reader no longer reaches, keeping the listing's order", () => {
@@ -75,30 +64,57 @@ describe("spaceSelection", () => {
       "spc_b,spc_gone,spc_closed,spc_a",
       readsSchedules,
       HERE,
-      false,
+      "current",
     );
     expect(ids(selected)).toEqual([HERE, "spc_b"]);
+  });
+});
+
+describe("spaceSelection in the overview", () => {
+  it("spans every admitting space by default, a single one included", () => {
+    expect(ids(spaceSelection(TWO, null, readsSchedules, HERE, "all").selected)).toEqual([
+      HERE,
+      "spc_b",
+    ]);
+    expect(ids(spaceSelection([space(HERE)], null, readsSchedules, HERE, "all").selected)).toEqual([
+      HERE,
+    ]);
+  });
+
+  it("narrows to what the URL names, the current space alone included", () => {
+    expect(ids(spaceSelection(TWO, "spc_a", readsSchedules, HERE, "all").selected)).toEqual([HERE]);
+  });
+
+  it("falls back to every space when the URL names none it reaches", () => {
+    expect(ids(spaceSelection(TWO, "spc_gone", readsSchedules, HERE, "all").selected)).toEqual([
+      HERE,
+      "spc_b",
+    ]);
   });
 });
 
 describe("storedSpaceIds", () => {
   const offered = [space(HERE), space("spc_b"), space("spc_c")];
 
-  it("keeps a first tick as the current space plus the one ticked, in listing order", () => {
-    expect(storedSpaceIds(["spc_c", HERE], offered, HERE)).toEqual([HERE, "spc_c"]);
+  it("keeps a first tick on a page as the current space plus the one ticked, in listing order", () => {
+    expect(storedSpaceIds(["spc_c", HERE], offered, HERE, "current")).toEqual([HERE, "spc_c"]);
   });
 
-  it("clears the param when the selection comes down to the current space, or to nothing", () => {
-    expect(storedSpaceIds([HERE], offered, HERE)).toEqual([]);
-    expect(storedSpaceIds([], offered, HERE)).toEqual([]);
+  it("clears the param on a page when the selection comes down to the current space, or to nothing", () => {
+    expect(storedSpaceIds([HERE], offered, HERE, "current")).toEqual([]);
+    expect(storedSpaceIds([], offered, HERE, "current")).toEqual([]);
   });
 
-  it("keeps another space alone, and every space at once", () => {
-    expect(storedSpaceIds(["spc_b"], offered, HERE)).toEqual(["spc_b"]);
-    expect(storedSpaceIds(["spc_c", "spc_b", HERE], offered, HERE)).toEqual([
+  it("keeps every space on a page: widening is carried by the URL alone", () => {
+    expect(storedSpaceIds(["spc_c", "spc_b", HERE], offered, HERE, "current")).toEqual([
       HERE,
       "spc_b",
       "spc_c",
     ]);
+  });
+
+  it("clears the param in the overview when every space is chosen, keeps a narrowing", () => {
+    expect(storedSpaceIds(["spc_c", "spc_b", HERE], offered, HERE, "all")).toEqual([]);
+    expect(storedSpaceIds([HERE], offered, HERE, "all")).toEqual([HERE]);
   });
 });

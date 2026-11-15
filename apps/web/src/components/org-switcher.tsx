@@ -10,10 +10,10 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
  * keeps the coral fill and the only gear; the explored one is the highlighted row.
  */
 import { useState, type ComponentProps, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLandAfterOrgSwitch } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, ChevronsUpDown, Plus, Settings, Star } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Globe, Plus, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
@@ -24,6 +24,9 @@ import { matchesSearch } from "../lib/strings";
 import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
 import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { routeOf } from "../lib/route-match";
+import { overviewEntry } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -101,6 +104,22 @@ function PickerRow({
   );
 }
 
+/** « Vue d'ensemble »'s tile, in the slot a space's sits: it reads even when the name is truncated. */
+function OverviewTile({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      data-testid="overview-tile"
+      className={cn(
+        "bg-muted text-muted-foreground flex shrink-0 items-center justify-center",
+        className,
+      )}
+    >
+      <Globe className="size-[65%]" />
+    </span>
+  );
+}
+
 /** The trigger's box per shape, shared by the live control and its loading placeholder. */
 const TRIGGER_BOX = {
   brand: "h-9 w-full",
@@ -118,6 +137,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
   const viewer = useViewer();
+  const overview = useOverviewMode();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
@@ -154,14 +176,32 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
-  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. */
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. A real space ends « Vue d'ensemble » there. */
   const applyContext = (orgId: string, spaceId: string) =>
     requestScopeChange(() => {
+      overview.choose(false, orgId);
       if (enterSpace(orgId, spaceId)) landAfterOrgSwitch();
       closeSwitcherAndSidebar();
     });
 
-  const spaceName: ReactNode = currentSpace ? (
+  /** « Vue d'ensemble » keeps the working space; a page that does not hold the mode gives way to its first list. */
+  const chooseOverview = () =>
+    requestScopeChange(() => {
+      overview.choose(true);
+      const landing = overviewEntry(spaces, routeOf(pathname));
+      if (landing) navigate(landing);
+      closeSwitcherAndSidebar();
+    });
+  const overviewLabel = t("overview.title");
+  const offersOverview =
+    overview.offered && !isExploringElsewhere && matchesSearch(query, [overviewLabel]);
+
+  const spaceName: ReactNode = overview.on ? (
+    <span className="text-muted-foreground">
+      <OverviewTile className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom" />
+      {overviewLabel}
+    </span>
+  ) : currentSpace ? (
     <span className="text-muted-foreground">
       <IdentityTile
         {...spaceTile(currentSpace, viewer)}
@@ -318,74 +358,99 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 </div>
               ) : exploredSpaces.isError ? (
                 <p className="text-destructive px-2 py-4 text-xs">{t("error.generic")}</p>
-              ) : shownSpaces.length === 0 ? (
+              ) : shownSpaces.length === 0 && !offersOverview ? (
                 <p className="text-muted-foreground px-2 py-4 text-xs">
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
-                shownSpaces.map((space, index) => {
-                  const isCurrent = space.id === currentSpaceId && !isExploringElsewhere;
-                  const enterable = isSpaceEnterable(space);
-                  // One heading per group, printed on the first row of each: the personal space
-                  // is a different KIND of place, not a space that sorts first.
-                  const heading =
-                    index === 0 && space.personal
-                      ? t("spaces.personal.badge", { ns: "settings" })
-                      : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
-                        ? t("spaces.personal.teamGroup", { ns: "settings" })
-                        : null;
-                  return (
-                    <div key={space.id}>
-                      {heading && (
-                        <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
-                          {heading}
-                        </p>
-                      )}
-                      {/* The end of the pick: org AND workspace applied together. A closed space
-                          is listed but cannot be entered (and an orphaned personal one only
-                          managed): disabled, and says why. */}
+                <>
+                  {/* Not a space: a mode over the working space, set apart above them. */}
+                  {offersOverview && (
+                    <div className="mb-1 border-b pb-1">
                       <PickerRow
-                        data-testid={`space-item-${space.id}`}
-                        disabled={!enterable}
-                        title={
-                          enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })
-                        }
-                        onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
-                        rowClassName={isCurrent && "bg-primary/10 hover:bg-primary/10"}
-                        settings={
-                          isCurrent
-                            ? {
-                                to: "/workspace-settings",
-                                label: t("workspaceSettings.pageTitle", { ns: "settings" }),
-                              }
-                            : undefined
-                        }
+                        data-testid="space-item-overview"
+                        onClick={chooseOverview}
+                        rowClassName={overview.on && "bg-primary/10 hover:bg-primary/10"}
                         onNavigate={closeSwitcherAndSidebar}
                       >
-                        <IdentityTile {...spaceTile(space, viewer)} className="size-[30px]" />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                            {spaceLabel(space, t)}
-                            {space.isDefault && (
-                              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
-                            )}
-                          </span>
-                          {enterable && space.role && (
-                            <span className="text-muted-foreground truncate text-xs">
-                              {spaceRoleLabel(space.role, t)}
-                            </span>
-                          )}
-                        </span>
-                        {!enterable && (
-                          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-                            {t("switcher.spaceOnRequest")}
-                          </span>
+                        <OverviewTile className="size-[30px] rounded-md" />
+                        <span className="truncate text-sm font-medium">{overviewLabel}</span>
+                        {overview.on && (
+                          <Check size={15} className="text-primary ml-auto shrink-0" />
                         )}
-                        {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
                       </PickerRow>
                     </div>
-                  );
-                })
+                  )}
+                  {shownSpaces.map((space, index) => {
+                    const isCurrent =
+                      space.id === currentSpaceId && !isExploringElsewhere && !overview.on;
+                    const enterable = isSpaceEnterable(space);
+                    // One heading per group, printed on the first row of each: the personal space
+                    // is a different KIND of place, not a space that sorts first.
+                    const heading =
+                      index === 0 && space.personal
+                        ? t("spaces.personal.badge", { ns: "settings" })
+                        : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
+                          ? t("spaces.personal.teamGroup", { ns: "settings" })
+                          : null;
+                    return (
+                      <div key={space.id}>
+                        {heading && (
+                          <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                            {heading}
+                          </p>
+                        )}
+                        {/* The end of the pick: org AND workspace applied together. A closed space
+                          is listed but cannot be entered (and an orphaned personal one only
+                          managed): disabled, and says why. */}
+                        <PickerRow
+                          data-testid={`space-item-${space.id}`}
+                          disabled={!enterable}
+                          title={
+                            enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })
+                          }
+                          onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
+                          rowClassName={isCurrent && "bg-primary/10 hover:bg-primary/10"}
+                          settings={
+                            isCurrent
+                              ? {
+                                  to: "/workspace-settings",
+                                  label: t("workspaceSettings.pageTitle", { ns: "settings" }),
+                                }
+                              : undefined
+                          }
+                          onNavigate={closeSwitcherAndSidebar}
+                        >
+                          <IdentityTile {...spaceTile(space, viewer)} className="size-[30px]" />
+                          <span className="flex min-w-0 flex-col">
+                            <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                              {spaceLabel(space, t)}
+                              {space.isDefault && (
+                                <Star
+                                  size={12}
+                                  className="shrink-0 fill-amber-500 text-amber-500"
+                                />
+                              )}
+                            </span>
+                            {enterable && space.role && (
+                              <span className="text-muted-foreground truncate text-xs">
+                                {spaceRoleLabel(space.role, t)}
+                              </span>
+                            )}
+                          </span>
+                          {!enterable && (
+                            <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                              {t("switcher.spaceOnRequest")}
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <Check size={15} className="text-primary ml-auto shrink-0" />
+                          )}
+                        </PickerRow>
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </div>
           </div>

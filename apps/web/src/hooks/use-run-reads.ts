@@ -14,9 +14,9 @@ import { invalidateNotificationQueries } from "./use-notifications";
  * one, so the feed is refreshed with them.
  */
 
-/** The caller's unread runs in the space — the Runs badge. */
-export function useUnreadRunCount(): number {
-  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0 });
+/** The caller's unread runs in the space — the Runs badge; `enabled: false` where it is not shown. */
+export function useUnreadRunCount(enabled = true): number {
+  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0, enabled });
   return data?.total ?? 0;
 }
 

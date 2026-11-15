@@ -4,7 +4,7 @@
  * Lists spanning several spaces of the org (runs, schedules, files): the pieces they share.
  *
  * A row of another space than the current one links to its detail with `?enterSpace=`; the
- * resolver enters that space (`useSpaceResolver`), then the detail drops the param
+ * resolver enters that space (`useSpaceResolver`), then the route's gate drops the param
  * (`useEnterLinkedSpace`). Not `?space=`: the
  * file reader's `?org=…&space=…` names where to read WITHOUT switching.
  */

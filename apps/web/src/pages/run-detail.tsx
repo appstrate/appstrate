@@ -11,7 +11,7 @@ import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentSpaceId, useEnterLinkedSpace } from "../hooks/use-current-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
@@ -60,8 +60,6 @@ type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 /** One body per run: a re-run leaves for another run, and the form it came from must not follow it. */
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
-  // A row of a list spanning spaces links here naming the run's space.
-  if (useEnterLinkedSpace()) return <RunDetailSkeleton />;
   return <RunDetailBody key={runId} />;
 }
 

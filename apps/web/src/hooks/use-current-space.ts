@@ -134,10 +134,10 @@ export function useSpaceResolver(): void {
 }
 
 /**
- * The page side of a link's `?enterSpace=` (`lib/across-spaces.ts`): `useSpaceResolver` enters
- * the space; this waits until it has, then drops the param — at once when the space cannot be
- * entered or the listing failed. Answers whether the page must still wait: its first reads would
- * otherwise go out scoped to the previous space.
+ * The route side of a link's `?enterSpace=` (`lib/across-spaces.ts`), read by `RouteGate`:
+ * `useSpaceResolver` enters the space; this waits until it has, then drops the param — at once
+ * when the space cannot be entered or the listing failed. Answers whether the route must still
+ * wait: its gate and first reads would otherwise use the previous space.
  */
 export function useEnterLinkedSpace(): boolean {
   const [params, setParams] = useSearchParams();
