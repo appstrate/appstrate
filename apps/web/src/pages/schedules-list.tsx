@@ -31,9 +31,8 @@ export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  // The spaces the list spans ride in the URL with its state (see the search below).
-  const list = useListParams(["state", "spaceId"]);
-  const { spaceIds, filter: spaceFilter } = useSpaceFilter(list, admitsSchedules);
+  const list = useListParams(["state"]);
+  const { spaceIds, scope } = useSpaceFilter(admitsSchedules);
   const { data: schedules, isLoading, isError, error } = useAllSchedules(spaceIds);
   const agentsQuery = useAgents();
   const { data: agents } = agentsQuery;
@@ -82,7 +81,7 @@ export function SchedulesListPage() {
     });
   }, [schedules, query, states, agentName]);
 
-  const filtering = query.trim() !== "" || states.length > 0 || spaceIds.length > 0;
+  const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} />
   ) : (
@@ -107,6 +106,7 @@ export function SchedulesListPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder }}
+        scope={scope}
         filters={[
           {
             id: "state",
@@ -118,7 +118,6 @@ export function SchedulesListPage() {
               { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
             ],
           },
-          ...(spaceFilter ? [spaceFilter] : []),
         ]}
         onReset={list.reset}
         columns={menu}

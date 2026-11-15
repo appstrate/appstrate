@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The « Espace » filter of the lists spanning spaces: offered from two admitting spaces held
- * with a role; untouched it is the current space and filters nothing; a tick adds to it; a
- * selection that comes down to the current space alone is the default route again; and an id
- * the reader no longer reaches is never sent (the org route answers 400 on it).
+ * The « Espace » scope of the lists spanning spaces: offered from two admitting spaces held with
+ * a role; untouched it is the current space; the URL's `spaceId` wins (stale ids dropped, the
+ * current space alone meaning none); without it, a remembered "all spaces" spans every one.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -12,7 +11,6 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage();
 
-const { urlListParams } = await import("../../lib/list-params.ts");
 const { spaceSelection, storedSpaceIds } = await import("../use-space-filter.ts");
 
 const space = (id: string, overrides: { access?: string; permissions?: string[] } = {}) => ({
@@ -21,15 +19,21 @@ const space = (id: string, overrides: { access?: string; permissions?: string[] 
   permissions: overrides.permissions ?? ["runs:read", "schedules:read", "files:read"],
 });
 
-const urlList = (search: string) => urlListParams(new URLSearchParams(search), () => {}, []);
 const ids = (spaces: { id: string }[]) => spaces.map((s) => s.id);
 const readsSchedules = (permissions: readonly string[]) => permissions.includes("schedules:read");
 const HERE = "spc_a";
+const TWO = [space(HERE), space("spc_b")];
 
 describe("spaceSelection", () => {
-  it("offers nothing to a reader of one admitting space, whatever the URL says", () => {
-    const result = spaceSelection([space(HERE)], urlList("spaceId=spc_a"), readsSchedules, HERE);
-    expect(result).toEqual({ offered: [], selected: [] });
+  it("offers nothing to a reader of one admitting space, whatever the URL or the memory says", () => {
+    expect(spaceSelection([space(HERE)], "spc_a", readsSchedules, HERE, true)).toEqual({
+      offered: [],
+      selected: [],
+    });
+    expect(spaceSelection([space(HERE)], null, readsSchedules, HERE, true)).toEqual({
+      offered: [],
+      selected: [],
+    });
   });
 
   it("leaves out a space listed without a role, or where the list is not admitted", () => {
@@ -38,36 +42,40 @@ describe("spaceSelection", () => {
       space("spc_closed", { access: "none" }),
       space("spc_blind", { permissions: ["runs:read"] }),
     ];
-    expect(spaceSelection(spaces, urlList(""), readsSchedules, HERE).offered).toEqual([]);
+    expect(spaceSelection(spaces, null, readsSchedules, HERE, false).offered).toEqual([]);
     const withSecond = [...spaces, space("spc_b")];
-    expect(ids(spaceSelection(withSecond, urlList(""), readsSchedules, HERE).offered)).toEqual([
+    expect(ids(spaceSelection(withSecond, null, readsSchedules, HERE, false).offered)).toEqual([
       HERE,
       "spc_b",
     ]);
   });
 
-  it("selects nothing untouched: the list stays on the current space's route", () => {
-    expect(
-      spaceSelection([space(HERE), space("spc_b")], urlList(""), readsSchedules, HERE).selected,
-    ).toEqual([]);
+  it("spans nothing untouched: the list stays on the current space's route", () => {
+    expect(spaceSelection(TWO, null, readsSchedules, HERE, false).selected).toEqual([]);
   });
 
-  it("never sends the current space alone to the org route", () => {
-    const { selected } = spaceSelection(
-      [space(HERE), space("spc_b")],
-      urlList("spaceId=spc_a"),
-      readsSchedules,
+  it("spans every offered space when the reader keeps « all spaces » and the URL says nothing", () => {
+    expect(ids(spaceSelection(TWO, null, readsSchedules, HERE, true).selected)).toEqual([
       HERE,
-    );
-    expect(selected).toEqual([]);
+      "spc_b",
+    ]);
+  });
+
+  it("lets an explicit param win over the memory", () => {
+    expect(ids(spaceSelection(TWO, "spc_b", readsSchedules, HERE, true).selected)).toEqual([
+      "spc_b",
+    ]);
+    // The current space alone is the space's own route, memory or not.
+    expect(spaceSelection(TWO, "spc_a", readsSchedules, HERE, true).selected).toEqual([]);
   });
 
   it("drops an id the reader no longer reaches, keeping the listing's order", () => {
     const { selected } = spaceSelection(
       [space(HERE), space("spc_b"), space("spc_closed", { access: "none" })],
-      urlList("spaceId=spc_b,spc_gone,spc_closed,spc_a"),
+      "spc_b,spc_gone,spc_closed,spc_a",
       readsSchedules,
       HERE,
+      false,
     );
     expect(ids(selected)).toEqual([HERE, "spc_b"]);
   });

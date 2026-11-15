@@ -25,7 +25,7 @@ const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
 /** The query parameters this screen filters on, and nothing else. */
-const FILTER_PARAMS = ["user", "kind", "status", "spaceId", "q"] as const;
+const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 
 /** The org route lists a space's runs where they are read there. */
 const admitsRuns: AdmitsList = (permissions) => canReadRuns((p) => permissions.includes(p));
@@ -39,7 +39,7 @@ export function RunsPage() {
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
   // Ticked spaces list across them (org route); none is the current space, as always.
-  const { spaceIds, selected: spaces, filter: spaceFilter } = useSpaceFilter(list, admitsRuns);
+  const { spaceIds, selected: spaces, scope } = useSpaceFilter(admitsRuns);
   const acrossSpaces = spaces.length > 0;
   // Without `runs:read-all` the list is already "mine": no scope filter. Across spaces, each
   // row follows its own space: "mine" narrows as soon as one of them shows others' runs.
@@ -75,7 +75,6 @@ export function RunsPage() {
       onChange: list.setValues("kind"),
     },
     statusFilter,
-    ...(spaceFilter ? [spaceFilter] : []),
   ];
 
   // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
@@ -120,6 +119,7 @@ export function RunsPage() {
               onChange: list.setSearch,
               placeholder: searchPlaceholder,
             }}
+            scope={scope}
             filters={filters}
             onReset={list.reset}
             columns={columns}
