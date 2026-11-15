@@ -33,6 +33,7 @@ export function LocalServerFields({
   showErrors,
 }: LocalServerFieldsProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const knownType = LOCAL_SERVER_TYPES.some((candidate) => candidate === source.serverType);
   const requiredError = (value: string) =>
     showErrors && !value.trim() ? t("validation.required", { ns: "common" }) : undefined;
   // The textarea keeps what is typed (a trailing newline or a blank line is not an argument); a
@@ -51,7 +52,8 @@ export function LocalServerFields({
       <FormField
         id="int-source-server-type"
         label={t("integrationEditor.source.serverType")}
-        value={source.serverType}
+        // An unlisted stored type shows an empty select (and the warning below), never a guess.
+        value={knownType ? source.serverType : ""}
         onChange={(v) => {
           const type = LOCAL_SERVER_TYPES.find((candidate) => candidate === v);
           if (type) onChange({ serverType: type });
@@ -59,6 +61,17 @@ export function LocalServerFields({
         enumValues={[...LOCAL_SERVER_TYPES]}
         description={t("integrationEditor.source.serverTypeDesc")}
       />
+      {!knownType && (
+        <p
+          className="text-warning -mt-3 flex items-start gap-1.5 text-sm"
+          data-testid="integration-editor-server-type-unknown"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {t("integrationEditor.source.serverTypeUnknown", { type: source.serverType })}
+          </span>
+        </p>
+      )}
       <div className="flex flex-col gap-2">
         <FormField
           id="int-source-server-entry"

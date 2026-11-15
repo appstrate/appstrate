@@ -37,6 +37,7 @@ import {
   getLocalServer,
   getRemoteSource,
   isRuntimeBoundIntegration,
+  getLocalServerEnv,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
   selectedApiCallConfigs,
@@ -47,11 +48,7 @@ import type {
   ResolvedConnectionMap,
 } from "@appstrate/core/integration";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
-import {
-  effectiveMcpServerType,
-  getLocalServerEnv,
-  getMcpServerWorkspaceMount,
-} from "@appstrate/core/mcp-server";
+import { effectiveMcpServerType, getMcpServerWorkspaceMount } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
@@ -105,10 +102,11 @@ interface ResolveIntegrationsInput {
   manifestCache?: IntegrationManifestCache;
   /**
    * The run's frozen integration versions (`runs.resolved_integration_versions`). A local
-   * integration's spawn spec names the version whose archive the byte route serves; an
-   * integration frozen on its draft, on the boot registry, or absent from the map names none.
+   * integration's spawn spec names the version whose archive the byte route serves (none when
+   * frozen on its draft or the boot registry); a local integration absent from the map is
+   * dropped, since the byte route would refuse its fetch.
    */
-  integrationVersions?: ResolvedIntegrationVersionMap;
+  integrationVersions: ResolvedIntegrationVersionMap;
 }
 
 /**
@@ -249,7 +247,7 @@ export async function resolveIntegrationSpawns(
           resolvedConnections?.[entry.id],
           entry.auth_key,
           input.manifestCache,
-          input.integrationVersions?.[entry.id],
+          input.integrationVersions[entry.id],
         );
       } catch (err) {
         // Every failure (not active / not connected / unusable manifest) stays a
@@ -460,12 +458,16 @@ async function resolveOne(
       });
       return drop("local_server_not_runnable");
     }
+    if (!frozenVersion) {
+      logger.warn("local-source integration has no frozen version; skipping", { integrationId });
+      return drop("local_server_not_runnable", "no frozen version for the local integration");
+    }
     serverSpec = {
       type: effectiveType,
       entry_point: localServer.entry_point,
       // The version the byte route must serve. Absent for a system integration (boot
       // registry) and for a draft run (the draft files).
-      ...(frozenVersion?.source === "version" && frozenVersion.version
+      ...(frozenVersion.source === "version" && frozenVersion.version
         ? { version: frozenVersion.version }
         : {}),
     };
@@ -517,7 +519,7 @@ async function resolveOne(
         {
           ...specBase(serverSpec),
           ...toolSurface(undefined),
-          spawnEnv: { ...serverEnv },
+          spawnEnv: serverEnv,
         } satisfies IntegrationSpawnSpec,
       ],
       drops: [],

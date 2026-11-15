@@ -19,6 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { localIntegrationManifest, connectToolBlock } from "../../helpers/integration-manifests.ts";
+import { readIntegrationManifestForConnect } from "../../../src/services/integration-service.ts";
 import { buildConnectLoginSpec } from "../../../src/services/connect/connect-run-launcher.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ConnectToolExecution } from "../../../src/services/connect/orchestrated-strategy.ts";
@@ -58,11 +59,15 @@ async function seedIntegration(
   return manifest;
 }
 
-function execution(ctx: TestContext, manifest: IntegrationManifest): ConnectToolExecution {
+/** The execution the strategy builds: manifest and version from ONE connect read. */
+async function execution(ctx: TestContext): Promise<ConnectToolExecution> {
+  const read = await readIntegrationManifestForConnect({ orgId: ctx.orgId }, INTEGRATION_ID);
+  if (!read.ok) throw new Error(`connect read failed: ${read.reason}`);
   return {
     integrationId: INTEGRATION_ID,
     authKey: "session",
-    manifest,
+    manifest: read.manifest,
+    bundleVersion: read.version,
     scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     toolName: "login",
     inputs: {},
@@ -79,9 +84,9 @@ describe("connect login spec — Appstrate runtime override", () => {
   });
 
   it("carries the `_meta` runtime, not `source.server.type`", async () => {
-    const manifest = await seedIntegration(ctx, { appstrateRuntime: "bun" });
+    await seedIntegration(ctx, { appstrateRuntime: "bun" });
 
-    const spec = await buildConnectLoginSpec(execution(ctx, manifest));
+    const spec = await buildConnectLoginSpec(await execution(ctx));
 
     // Without the override the spec says "node" and the login spawns under the
     // wrong interpreter — silently, since node will happily start a bun-native
@@ -95,22 +100,22 @@ describe("connect login spec — Appstrate runtime override", () => {
   // that hard-coded "bun", or dropped `server.type` entirely, passes the case
   // above and fails this one.
   it("leaves `server.type` alone when no runtime override is declared", async () => {
-    const manifest = await seedIntegration(ctx);
+    await seedIntegration(ctx);
 
-    const spec = await buildConnectLoginSpec(execution(ctx, manifest));
+    const spec = await buildConnectLoginSpec(await execution(ctx));
 
     expect(spec.manifest.server?.type).toBe("node");
   });
 
   it("names the published version whose archive the byte route serves, none for a draft", async () => {
-    const manifest = await seedIntegration(ctx, { published: true });
-    const published = await buildConnectLoginSpec(execution(ctx, manifest));
+    await seedIntegration(ctx, { published: true });
+    const published = await buildConnectLoginSpec(await execution(ctx));
     expect(published.manifest.server?.version).toBe("1.0.0");
 
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "rt" });
-    const draft = await seedIntegration(ctx);
-    const unpublished = await buildConnectLoginSpec(execution(ctx, draft));
+    await seedIntegration(ctx);
+    const unpublished = await buildConnectLoginSpec(await execution(ctx));
     expect(unpublished.manifest.server?.version).toBeUndefined();
   });
 });

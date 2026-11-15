@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { VersionDetailResponse } from "@appstrate/shared-types";
 import { DraftDiffView } from "./draft-diff-view";
-import { primaryDisplayFile } from "@/lib/package-files";
+import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 
 interface DiffTabProps {
   type: PackageType;
@@ -24,7 +24,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
     latestVersion.content != null &&
     currentContent != null &&
     latestVersion.content !== currentContent;
-  const contentLabel = primaryDisplayFile(type).name;
+  const contentLabel = PACKAGE_CONTENT_FILE[type];
 
   const [subTab, setSubTab] = useState<"manifest" | "content">(
     hasManifestChanges ? "manifest" : "content",

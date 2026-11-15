@@ -444,8 +444,8 @@ function parseWithSchema(
 
 /**
  * How {@link validateManifest} treats the `dependencies` keys the spec retired —
- * `tools` and `mcp_servers` (a local MCP server is declared inline on its
- * integration) and `providers` (renamed to `integrations`). The one behaviour
+ * `tools` (a local MCP server is declared inline on its integration) and
+ * `providers` (renamed to `integrations`). The one behaviour
  * that MUST differ by direction:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,

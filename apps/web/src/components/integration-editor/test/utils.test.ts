@@ -42,7 +42,7 @@ describe("integration-editor source", () => {
     kind: "local" as const,
     remoteUrl: "",
     remoteTransport: "streamable-http" as const,
-    serverType: "node" as const,
+    serverType: "node",
     entryPoint: "server/index.ts",
     command: "bun",
     args: ["server/index.ts", "--stdio"],
@@ -117,18 +117,21 @@ describe("integration-editor source", () => {
     expect((m.source as any).server).toBeUndefined();
   });
 
-  it("falls back to node for a type the schema does not know", () => {
-    expect(
-      getSource({ source: { kind: "local", server: { type: "deno", entry_point: "x" } } })
-        .serverType,
-    ).toBe("node");
+  it("keeps a server type the form does not list, and rewrites it only when changed", () => {
+    const manifest = { source: { kind: "local", server: { type: "deno", entry_point: "x" } } };
+    const source = getSource(manifest);
+    expect(source.serverType).toBe("deno");
+    expect((setSource(manifest, source).source as any).server.type).toBe("deno");
+    expect((setSource(manifest, { ...source, serverType: "node" }).source as any).server.type).toBe(
+      "node",
+    );
   });
 
   const remote = (remoteUrl: string) => ({
     kind: "remote" as const,
     remoteUrl,
     remoteTransport: "streamable-http" as const,
-    serverType: "node" as const,
+    serverType: "node",
     entryPoint: "",
     command: "",
     args: [] as string[],

@@ -137,7 +137,7 @@ export function IntegrationsPage() {
           },
           {
             id: "source",
-            label: t("integrations.filter.source"),
+            label: t("integrations.col.source"),
             values: sources,
             onChange: list.setValues("source"),
             options: INTEGRATION_SOURCES.map((source) => ({

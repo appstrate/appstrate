@@ -48,9 +48,12 @@ import {
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
-import { getIntegrationSourceKind, getLocalServer } from "@appstrate/core/integration";
-import { effectiveMcpServerType, getLocalServerEnv } from "@appstrate/core/mcp-server";
-import { resolveConnectBundleVersion } from "../integration-service.ts";
+import {
+  getIntegrationSourceKind,
+  getLocalServer,
+  getLocalServerEnv,
+} from "@appstrate/core/integration";
+import { effectiveMcpServerType } from "@appstrate/core/mcp-server";
 import {
   getAppstrateConnectMeta,
   runnerEgressFor,
@@ -119,21 +122,7 @@ interface ConnectRunExecutorOptions {
   orchestrator?: RunOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
-  /**
-   * Injectable lookup of the published version the spawn spec names. Production defaults to the
-   * package-store lookup; unit tests supply a fixture.
-   */
-  resolveBundleVersion?: BundleVersionResolver;
 }
-
-/**
- * Resolver for the published version of the integration whose archive the sidecar fetches
- * (`GET /internal/integration-bundle/:scope/:name`). `null` when there is none to name: a
- * system integration (boot registry) or one with nothing published (its draft files). Injectable
- * so unit tests need no DB; production defaults to {@link resolveConnectBundleVersion}, the
- * rule the connect manifest read itself follows, so the bytes match the manifest.
- */
-export type BundleVersionResolver = (packageId: string, orgId: string) => Promise<string | null>;
 
 /**
  * Build the single {@link IntegrationSpawnSpec} the connect-run sidecar boots.
@@ -147,7 +136,6 @@ export type BundleVersionResolver = (packageId: string, orgId: string) => Promis
  */
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  resolveBundleVersion: BundleVersionResolver = resolveConnectBundleVersion,
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   const auth = auths[execution.authKey];
@@ -181,7 +169,7 @@ export async function buildConnectLoginSpec(
       `connect-run: integration '${execution.integrationId}' local source has no runnable source.server`,
     );
   }
-  const version = await resolveBundleVersion(execution.integrationId, execution.scope.orgId);
+  const version = execution.bundleVersion;
 
   const connectMeta = getAppstrateConnectMeta(auth.connect);
   const reauthOn = connectMeta?.reauth_on;
@@ -204,8 +192,8 @@ export async function buildConnectLoginSpec(
       server: {
         type,
         entry_point: localServer.entry_point,
-        // The published version the byte route serves as `?version=`, so the bytes match the
-        // manifest read above. Absent for a system integration and for an unpublished draft.
+        // The published version the manifest was read from, served by the byte route as
+        // `?version=`. Absent for a system integration and for an unpublished draft.
         ...(version ? { version } : {}),
       },
     },
@@ -343,12 +331,10 @@ export function parseConnectResult(
 class ConnectRunExecutor implements ConnectToolExecutor {
   private readonly orchestrator: RunOrchestrator | undefined;
   private readonly timeoutMs: number;
-  private readonly resolveBundleVersion: BundleVersionResolver;
 
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.resolveBundleVersion = opts.resolveBundleVersion ?? resolveConnectBundleVersion;
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -399,7 +385,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     // stack frame; never logged, serialized, or persisted.
     const resultKey = randomBytes(32);
 
-    const spec = await buildConnectLoginSpec(execution, this.resolveBundleVersion);
+    const spec = await buildConnectLoginSpec(execution);
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;

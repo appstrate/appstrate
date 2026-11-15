@@ -473,7 +473,7 @@ describe("POST /api/packages/import-bundle — import", () => {
 
   // ── retired AFPS 1.x dependency keys: import-bundle is the READ direction ──
   //
-  // `dependencies.tools` (retired, like `mcp_servers`) is inert — no reader has ever read
+  // `dependencies.tools` (retired) is inert — no reader has ever read
   // it — so a package published with it is not broken, just carrying dead
   // vocabulary. Aborting the whole bundle over it would be gratuitous, and the
   // source artifact is immutable so there is nothing to repair upstream. Import
@@ -1453,27 +1453,6 @@ describe("POST /api/packages/import-bundle — §3.3 gates the root, not depende
     expect(body.imported.map((i) => i.identity)).toEqual([`${LOCAL_ROOT}@1.0.0`]);
     const files = await downloadPackageFiles("integrations", ctx.orgId, LOCAL_ROOT);
     expect(new TextDecoder().decode(files?.["main.js"])).toBe("// mcp server entry stub\n");
-  });
-
-  it("warns about a bundle whose ROOT still declares dependencies.mcp_servers (read direction)", async () => {
-    const afps = buildAfps({
-      manifest: {
-        name: "@rootgate/old-agent",
-        version: "1.0.0",
-        type: "agent",
-        schema_version: "0.2",
-        display_name: "Old agent",
-        dependencies: { mcp_servers: { "@rootgate/old-server": "^1.0.0" } },
-      },
-      content: "Prompt.",
-      type: "agent",
-    });
-    const res = await importBundle(afps);
-    expect(res.status, await res.clone().text()).toBe(201);
-    const body = (await res.json()) as { warnings: string[] };
-    expect(body.warnings.find((w) => w.includes("dependencies.mcp_servers"))).toContain(
-      "source.server",
-    );
   });
 });
 

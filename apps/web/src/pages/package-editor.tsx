@@ -279,16 +279,14 @@ export function AgentDefinitionEditor({
 // ─── Package (Skill) Editor Inner Form ─────────────────────────
 
 function PackageEditorInner({
-  type,
   initialState,
   packageId,
 }: {
-  type: "skill";
   initialState: EditorState;
   packageId: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const editor = usePackageEditor({ type, initialState, packageId, tab: "general" });
+  const editor = usePackageEditor({ type: "skill", initialState, packageId, tab: "general" });
 
   return (
     <PackageEditorFrame editor={editor} tabs={[{ id: "general", label: t("editor.tabGeneral") }]}>
@@ -315,6 +313,8 @@ function IntegrationEditorInner({
   canSync: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
+  const [localServerRefused, setLocalServerRefused] = useState(false);
   const editor = usePackageEditor({
     type: "integration",
     initialState,
@@ -322,10 +322,12 @@ function IntegrationEditorInner({
     tab,
     validate: (s) => {
       const source = getSource(s.manifest);
+      setLocalServerRefused(false);
       if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
         return { error: t("integrationEditor.source.errorRemoteUrl") };
       }
       if (source.kind === "local" && (!source.entryPoint.trim() || !source.command.trim())) {
+        setLocalServerRefused(true);
         return { error: t("integrationEditor.source.errorLocalServer") };
       }
       return null;
@@ -410,7 +412,7 @@ function IntegrationEditorInner({
           onChange={onManifestChange}
           serverFiles={serverFiles}
           // A refused save names the empty required fields of the Source tab.
-          showErrors={editor.error === t("integrationEditor.source.errorLocalServer")}
+          showErrors={localServerRefused}
         />
       )}
 
@@ -471,17 +473,10 @@ export function IntegrationDefinitionEditor({
 }
 
 /** A skill's definition, edited inside its settings. Identité is the one form: SKILL.md and references are files, changed in Explorer › Fichiers. */
-export function PackageDefinitionEditor({
-  type,
-  detail,
-}: {
-  type: "skill";
-  detail: Versioned<OrgPackageItemDetail>;
-}) {
+export function PackageDefinitionEditor({ detail }: { detail: Versioned<OrgPackageItemDetail> }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <PackageEditorInner
-        type={type}
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
       />

@@ -500,27 +500,6 @@ describe("package-versions service", () => {
       expect(Object.keys(entries)).not.toContain("SKILL.md");
       expect(new TextDecoder().decode(entries["server.js"])).toBe("// real server payload");
     });
-
-    it("refuses to publish a local integration whose entry point file is not stored", async () => {
-      const id = `@${orgSlug}/local-server-missing`;
-      const pkg = await seedPackage({
-        orgId,
-        id,
-        type: "integration",
-        draftManifest: localIntegrationManifest({
-          name: id,
-          server: { entryPoint: "server.js" },
-          auths: { api: { type: "api_key" } },
-        }) as unknown as Record<string, unknown>,
-        draftContent: "",
-      });
-      await uploadPackageFiles("integrations", orgId, id, {
-        "other.js": new TextEncoder().encode("// not the entry point"),
-      });
-
-      const result = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
-      expect(result).toMatchObject({ ok: false, error: "invalid_bundle" });
-    });
   });
 
   // ── getLatestVersionCreatedAt ─────────────────────────────

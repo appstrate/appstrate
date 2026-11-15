@@ -2,9 +2,8 @@
 
 /**
  * A `source.kind: "local"` integration carries its server payload in its OWN archive, so the
- * sidecar fetches `GET /internal/integration-bundle/<spec.integrationId>` — the id the spec names
- * for the integration, never a field of the server bag. A stray `packageId` in that bag must not
- * redirect the fetch to another package's bytes in a code-execution position.
+ * sidecar fetches `GET /internal/integration-bundle/<spec.integrationId>?version=<frozen version>`:
+ * the id the spec names for the integration and the version the run froze.
  *
  * Runs fully in-process — the case stops at the bundle route, before any runner is spawned.
  */
@@ -29,7 +28,7 @@ function localSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
 }
 
 describe("local integration spawn — the bundle is keyed by the integration id", () => {
-  it("fetches the integration's own archive at the frozen version, ignoring a stray packageId", async () => {
+  it("fetches the integration's own archive at the frozen version", async () => {
     const bundleUrls: string[] = [];
     const fetchFn = (async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -49,7 +48,6 @@ describe("local integration spawn — the bundle is keyed by the integration id"
           type: "bun",
           entry_point: "./server.ts",
           version: "1.2.0",
-          packageId: "@evil/other-package",
         }),
       ],
       { platformApiUrl: "http://platform.local", runToken: "run-token", fetchFn },

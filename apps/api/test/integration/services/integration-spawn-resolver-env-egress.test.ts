@@ -16,7 +16,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";

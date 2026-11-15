@@ -4,7 +4,7 @@ Implementation in PR #1312. This replaces the original skill-only design.
 
 ## Contract
 
-Agents, skills, integrations and MCP servers have the same Files editor. Every
+Agents, skills and integrations have the same Files editor. Every
 file gesture is staged in the local package draft: creation, typing, uploads,
 replacement, rename and deletion. Save and the unsaved-navigation dialog use
 one request to the existing `PUT /api/packages/{type}/{scope}/{name}` with

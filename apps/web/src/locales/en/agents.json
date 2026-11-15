@@ -993,6 +993,7 @@
   "integrationWizard.notRemote.description": "“{{name}}” is not served by a remote MCP server: this wizard only handles remote MCP servers. Configure it from its page.",
   "integrationEditor.source.serverType": "Server type",
   "integrationEditor.source.serverTypeDesc": "The runtime that starts the MCP server shipped in the integration’s files.",
+  "integrationEditor.source.serverTypeUnknown": "Server type “{{type}}” is not one this form knows: pick one to replace it, or leave it as is.",
   "integrationEditor.source.serverEntryPoint": "Entry point",
   "integrationEditor.source.serverEntryPointDesc": "Relative path of a file in the integration (Explorer Files tab).",
   "integrationEditor.source.serverEntryPointMissing": "“{{path}}” is not in the integration’s files: runs will fail until that file exists.",

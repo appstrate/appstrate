@@ -194,8 +194,8 @@ export function OrgCatalogueModal({
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
   // The read has an address of its own: reload lands on it, Back leaves it.
   // Looked up in the whole library, not the kind shown nor the rows the filters leave: a link
-  // to a package (a share notification) opens its sheet whatever the list shows, the other
-  // integration included. An id the library does not hold drops from the address.
+  // to a package (a share notification) opens its sheet whatever the list shows, a
+  // filtered-out integration included. An id the library does not hold drops from the address.
   const preview = useUrlModalTarget(
     CATALOGUE_PACKAGE_PARAM,
     library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
@@ -285,7 +285,7 @@ export function OrgCatalogueModal({
   };
   const sourceFilter: FilterSpec = {
     id: "source",
-    label: t("integrations.filter.source"),
+    label: t("integrations.col.source"),
     values: sources,
     options: INTEGRATION_SOURCES.map((source) => ({
       value: source,

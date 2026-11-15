@@ -21,15 +21,6 @@ describe("findRetiredDependencyKeys", () => {
     ]);
   });
 
-  it("finds dependencies.mcp_servers and points at the inline source.server", () => {
-    const found = findRetiredDependencyKeys({
-      dependencies: { mcp_servers: { "@a/m": "^1.0.0" } },
-    });
-    expect(found).toHaveLength(1);
-    expect(found[0]!.key).toBe("mcp_servers");
-    expect(found[0]!.guidance).toContain("source.server");
-  });
-
   it("finds dependencies.providers", () => {
     expect(findRetiredDependencyKeys({ dependencies: { providers: {} } })).toEqual([
       { key: "providers", guidance: "renamed to `dependencies.integrations`" },
@@ -185,18 +176,6 @@ describe("extractDependencies", () => {
     expect(deps).toHaveLength(2);
     expect(deps.find((d) => d.depType === "skill")).toBeDefined();
     expect(deps.find((d) => d.depType === "integration")).toBeDefined();
-  });
-
-  it("ignores a retired mcp_servers map: it is no dependency category any more", () => {
-    const manifest = {
-      dependencies: {
-        skills: { "@acme/skill-a": "^1.0.0" },
-        mcp_servers: { "@acme/gmail-server": "^1.0.0" },
-        integrations: { "@acme/gmail-mcp": "^1.0.0" },
-      },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps.map((d) => d.depType).sort()).toEqual(["integration", "skill"]);
   });
 
   it("throws when a dependency value is not a string (§4.1)", () => {

@@ -401,7 +401,7 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
     expect((await run(true)).systemVersionsDeleted).toEqual([]);
   });
 
-  it("removes stored mcp-servers:* grants from api keys and custom space roles", async () => {
+  it("removes stored mcp-servers:* grants from every permission column, and the package_shared notifications of a server", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
@@ -416,9 +416,30 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
       orgId: ctx.orgId,
       permissions: ["skills:read", "mcp-servers:read", "mcp-servers:share"],
     });
+    await db.execute(sql`INSERT INTO oauth_clients (id, client_id, redirect_uris, scopes)
+      VALUES ('t0054-client', 't0054-client', ARRAY['http://localhost/cb'],
+        ARRAY['agents:read', 'mcp-servers:write'])`);
+    await db.execute(sql`INSERT INTO device_codes (id, device_code, user_code, expires_at, status, scope)
+      VALUES ('t0054-dc', 't0054-dc', 't0054-uc', now() + interval '1 hour', 'pending',
+        'openid  mcp-servers:read agents:read'),
+        ('t0054-dc2', 't0054-dc2', 't0054-uc2', now() + interval '1 hour', 'pending', 'openid')`);
+    const notify = (type: string, packageType: string) =>
+      db.execute(sql`INSERT INTO notifications (org_id, recipient_id, recipient_type, space_id, type, payload)
+        VALUES (${ctx.orgId}, 't0054-user', 'user', ${ctx.defaultSpaceId}, ${type},
+          ${JSON.stringify({ packageId: "@t0054/x", package_type: packageType })}::jsonb)`);
+    await notify("package_shared", "mcp-server");
+    await notify("package_shared", "skill");
+
     const fold = await run(true);
-    expect(fold.apiKeysScrubbed).toBe(1);
-    expect(fold.spaceRolesScrubbed).toBe(1);
+    expect(fold.grantsScrubbed).toMatchObject({
+      "api_keys.scopes": 1,
+      "oauth_clients.scopes": 1,
+      "space_roles.permissions": 1,
+      "device_codes.scope": 1,
+      "oauth_access_tokens.scopes": 0,
+      "cli_refresh_tokens.scope": 0,
+    });
+    expect(fold.notificationsDeleted).toBe(1);
     const scopes = async (id: string) =>
       (await one<{ scopes: string[] }>(sql`SELECT scopes FROM api_keys WHERE id = ${id}`)).scopes;
     expect(await scopes(key.id)).toEqual(["agents:read"]);
@@ -430,8 +451,21 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
         )
       ).permissions,
     ).toEqual(["skills:read"]);
+    expect(
+      (
+        await one<{ scopes: string[] }>(
+          sql`SELECT scopes FROM oauth_clients WHERE id = 't0054-client'`,
+        )
+      ).scopes,
+    ).toEqual(["agents:read"]);
+    const deviceScope = async (id: string) =>
+      (await one<{ scope: string }>(sql`SELECT scope FROM device_codes WHERE id = ${id}`)).scope;
+    expect(await deviceScope("t0054-dc")).toBe("openid agents:read");
+    expect(await deviceScope("t0054-dc2")).toBe("openid");
+    expect((await one<{ n: number }>(sql`SELECT count(*)::int AS n FROM notifications`)).n).toBe(1);
     const again = await run(true);
-    expect([again.apiKeysScrubbed, again.spaceRolesScrubbed]).toEqual([0, 0]);
+    expect(Object.values(again.grantsScrubbed).every((n) => n === 0)).toBe(true);
+    expect(again.notificationsDeleted).toBe(0);
   });
 
   it("the release migration 0106 fails while a server remains, and passes once folded", async () => {

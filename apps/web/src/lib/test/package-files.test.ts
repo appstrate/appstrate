@@ -1,28 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The per-type display file: each type's substance lives in its content file. */
+/** The draft-tree write refusals. */
 
 import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
 import { describe, it, expect } from "bun:test";
-import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors.ts";
-import { packageFilesErrorKey, primaryDisplayFile } from "../package-files.ts";
-
-const ALL_TYPES: PackageType[] = ["agent", "skill", "integration"];
-
-describe("primaryDisplayFile", () => {
-  it("names the file each type's substance actually lives in", () => {
-    expect(primaryDisplayFile("agent")).toEqual({ name: "prompt.md" });
-    expect(primaryDisplayFile("skill")).toEqual({ name: "SKILL.md" });
-    expect(primaryDisplayFile("integration")).toEqual({ name: "INTEGRATION.md" });
-  });
-
-  it("is defined for every package type", () => {
-    for (const type of ALL_TYPES) {
-      expect(primaryDisplayFile(type).name).toMatch(/\S/);
-    }
-  });
-});
+import { packageFilesErrorKey } from "../package-files.ts";
 
 describe("packageFilesErrorKey", () => {
   const refusal = (code: string, status: number) => new ApiError(code, "detail", status);

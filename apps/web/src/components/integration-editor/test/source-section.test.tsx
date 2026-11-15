@@ -56,10 +56,6 @@ describe("SourceSection, local source", () => {
     expect(renderSection(undefined, withBlank)).toContain("--name\n");
   });
 
-  it("no longer asks for a server package", () => {
-    expect(renderSection()).not.toContain("int-source-server-version");
-  });
-
   it("warns when the entry point names a file the package does not hold", () => {
     expect(renderSection(["manifest.json"])).toContain("integration-editor-entry-point-missing");
   });

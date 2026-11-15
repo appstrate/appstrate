@@ -55,7 +55,6 @@
     "./validation": "./src/validation.ts",
     "./integration": "./src/integration.ts",
     "./mcp-server": "./src/mcp-server.ts",
-    "./mcp-server-meta": "./src/mcp-server-meta.ts",
     "./zip": "./src/zip.ts",
     "./package-files": "./src/package-files.ts",
     "./package-file-operations": "./src/package-file-operations.ts",

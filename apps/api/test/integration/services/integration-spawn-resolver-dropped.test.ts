@@ -25,10 +25,8 @@ import { and, eq } from "drizzle-orm";
 import { integrationConnections, runLogs } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import {
-  resolveIntegrationSpawns,
-  type DroppedIntegration,
-} from "../../../src/services/integration-spawn-resolver.ts";
+import type { DroppedIntegration } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import {
   recordDroppedIntegrations,
   INTEGRATION_DROPPED_EVENT,

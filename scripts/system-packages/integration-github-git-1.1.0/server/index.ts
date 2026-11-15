@@ -7,8 +7,8 @@
  * (`runtime-pi/runners/bun/Dockerfile` adds git + openssh-client) and
  * hits the GitHub REST API for the operations that have no git
  * equivalent (open_pr, default-branch lookup, identity for commit
- * config). Pairs with the @appstrate/github-git integration which mints
- * `GITHUB_TOKEN` via OAuth2 with `repo` scope.
+ * config). Runs as the local server of the @appstrate/github-git integration
+ * (OAuth2, `repo` scope).
  *
  * Workspace contract:
  *
@@ -24,12 +24,11 @@
  *
  * Auth:
  *
- *   - The token never lands on disk. `.git/config` carries only the
- *     remote URL; the bearer is injected per-command via the
- *     `GIT_CONFIG_COUNT/KEY/VALUE` env vars feeding `http.extraheader`.
- *     That mechanism is what GitHub's own tooling uses on CI (gh
- *     auth, actions/checkout) so it's the SOTA pattern, not a custom
- *     workaround.
+ *   - This server never holds the token. The integration's auth delivers
+ *     it over HTTP: the sidecar's proxy adds `Authorization: Basic
+ *     x-access-token:<token>` to every request bound for GitHub, git
+ *     smart-HTTP and REST alike, so `.git/config` carries only the
+ *     remote URL and nothing here sets an Authorization header.
  *   - GitHub identity (`login`, noreply email) is fetched once on
  *     first `commit` and used to set local `user.name`/`user.email`
  *     when the cloned repo has none. Avoids the "Author identity

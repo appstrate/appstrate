@@ -442,7 +442,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         { headers: { Authorization: `Bearer ${runToken}` } },
       );
       expect(denied.status).toBe(404);
-      expect(JSON.stringify(await denied.json())).toMatch(/not a dependency of the running agent/i);
+      expect(JSON.stringify(await denied.json())).toMatch(/no resolved version/i);
     });
 
     it("CROSS: a grant cannot widen a RUN token — the run path never reads one", async () => {
@@ -469,7 +469,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         { headers: { Authorization: `Bearer ${runToken}` } },
       );
       expect(res.status).toBe(404);
-      expect(JSON.stringify(await res.json())).toMatch(/not a dependency of the running agent/i);
+      expect(JSON.stringify(await res.json())).toMatch(/no resolved version/i);
     });
 
     it("CROSS: a connect token cannot borrow the RUN branch's agent-manifest authorization", async () => {

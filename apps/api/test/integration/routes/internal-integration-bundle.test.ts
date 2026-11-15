@@ -348,6 +348,27 @@ describe("GET /internal/integration-bundle/:scope/:name", () => {
     expect((await app.request(url(INTEGRATION), bearer())).status).toBe(404);
   });
 
+  it("decides on the frozen version's source, not the current draft's", async () => {
+    // The run froze a published LOCAL version; the draft has since become REMOTE.
+    await seedLocalIntegration(INTEGRATION, { published: true });
+    await db
+      .update(packages)
+      .set({
+        draftManifest: remoteIntegrationManifest({
+          name: INTEGRATION,
+          version: "2.0.0",
+          auths: AUTH,
+          tools_policy: { search: {} },
+        }),
+      })
+      .where(eq(packages.id, INTEGRATION));
+
+    const res = await app.request(url(INTEGRATION, VERSION), bearer());
+
+    expect(res.status).toBe(200);
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(Array.from(ARCHIVE_BYTES));
+  });
+
   it("serves a SYSTEM integration from the boot registry, refusing a ?version=", async () => {
     // `getTestApp()` skips `boot()`, so the registry is empty unless a test installs one.
     await seedLocalIntegration(SYSTEM_INTEGRATION, { published: false });

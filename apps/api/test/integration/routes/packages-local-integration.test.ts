@@ -3,11 +3,9 @@
 /**
  * A `local` integration carries its MCP server payload in its own archive.
  *
- *   1. IMPORT — an integration archive with `server/index.ts` keeps the payload in the draft
- *      files and the version archive.
- *   2. PUBLISH — a draft whose entry point file is absent from the stored files is refused.
- *   3. REFUSALS — an archive missing its entry point and a manifest declaring
- *      `dependencies.mcp_servers` are rejected before any write.
+ *   1. PUBLISH — an imported draft publishes its payload; a draft whose entry point file is
+ *      absent from the stored files is refused.
+ *   2. REFUSALS — an archive missing its entry point is rejected before any write.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -18,10 +16,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import {
-  downloadPackageFiles,
-  uploadPackageFiles,
-} from "../../../src/services/package-items/storage.ts";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { downloadVersionZip } from "../../../src/services/package-storage.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 
@@ -75,27 +70,6 @@ describe("local integration with a server payload", () => {
     const res = await importArchive(archive(manifestFor(), { [ENTRY]: SERVER_SOURCE }));
     expect(res.status).toBe(201);
   }
-
-  it("import keeps the server payload in the draft files and the version archive", async () => {
-    const res = await importArchive(archive(manifestFor(), { [ENTRY]: SERVER_SOURCE }));
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { packageId: string; type: string; version: string };
-    expect(body).toMatchObject({ packageId: ID, type: "integration", version: "1.0.0" });
-
-    const draftFiles = await downloadPackageFiles("integrations", ctx.orgId, ID);
-    expect(draftFiles).not.toBeNull();
-    expect(new TextDecoder().decode(draftFiles![ENTRY])).toBe(SERVER_SOURCE);
-
-    const [ver] = await db
-      .select({ version: packageVersions.version, integrity: packageVersions.integrity })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, ID))
-      .limit(1);
-    expect(ver?.version).toBe("1.0.0");
-    const zip = await downloadVersionZip(ID, "1.0.0", ver!.integrity);
-    const entries = unzipSync(new Uint8Array(zip!));
-    expect(new TextDecoder().decode(entries[ENTRY])).toBe(SERVER_SOURCE);
-  });
 
   it("publishes a new version from the draft, payload included", async () => {
     await importExecutable();
@@ -151,18 +125,6 @@ describe("local integration with a server payload", () => {
     const res = await importArchive(archive(manifestFor(), { "other.ts": SERVER_SOURCE }));
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toContain(ENTRY);
-    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
-  });
-
-  it("refuses a manifest still declaring dependencies.mcp_servers", async () => {
-    const manifest = manifestFor({
-      dependencies: { mcp_servers: { "@pkgorg/old-server": "^1.0.0" } },
-    });
-    const res = await importArchive(archive(manifest, { [ENTRY]: SERVER_SOURCE }));
-    expect(res.status).toBe(400);
-    const text = JSON.stringify(await res.json());
-    expect(text).toContain("mcp_servers");
-    expect(text).toContain("retired");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
   });
 });

@@ -22,20 +22,19 @@ const PackageDefinitionEditor = lazy(() =>
 );
 
 export function PackageSettingsView({
-  type,
   packageId,
   detail,
   version,
   versions,
 }: {
   versions: PackageVersionsProps;
-  type: "skill";
   packageId: string;
   detail: Versioned<OrgPackageItemDetail> | undefined;
   /** A pinned version being read; the definition is only edited on the draft. */
   version?: string;
 }) {
   const { t } = useTranslation("agents");
+  const type = "skill";
   // Write authority is the package's HOME space, never the space being browsed.
   const editable = !!detail?.home_writable && version === undefined;
   // A system package has no history of its own to browse (same rule as agents).
@@ -77,7 +76,7 @@ export function PackageSettingsView({
       {({ active, file, href }) =>
         active === "general" && detail ? (
           <Suspense fallback={<EditorPanelSkeleton />}>
-            <PackageDefinitionEditor type={type} detail={detail} />
+            <PackageDefinitionEditor detail={detail} />
           </Suspense>
         ) : (
           <PackageCommonSection

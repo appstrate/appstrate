@@ -26,10 +26,10 @@ export interface Dependencies {
 // ─────────────────────────────────────────────
 
 /**
- * The `dependencies` map keys the spec retired, each mapped to the guidance an author needs:
- * what replaced it. `tools` and `mcp_servers` have no replacement key — a local MCP server is
- * declared inline on its `local` integration (`source.server`), which is what an integration
- * dependency already pulls in.
+ * The `dependencies` map keys the spec retired, each mapped to the guidance an author needs.
+ * `tools` has no replacement key — a local MCP server is declared inline on its `local`
+ * integration (`source.server`), which an integration dependency already pulls in; `providers`
+ * was renamed to `integrations`.
  *
  * A table rather than a chain of per-key `if`s so the two directions that
  * consume it — the author-input rejection ({@link findRetiredDependencyKeys},
@@ -41,15 +41,14 @@ export interface Dependencies {
  * mandates extensibility for objects it does not explicitly close (§10), so
  * `dependencies` stays a loose object and `dependencies._meta` remains legal.
  * The rejection below is a POLICY on author input, not a shape constraint —
- * which is what lets a manifest carrying a retired key keep validating when it is
- * re-imported from outside the platform. See
+ * which is what lets already-persisted manifests and published (immutable)
+ * archives carrying a retired key keep validating, and therefore keep running.
+ * See
  * {@link import("./validation.ts").RetiredDependencyKeysPolicy}.
  */
-const MCP_SERVER_GUIDANCE =
-  "a local MCP server is declared inline on its integration (`source.server`); depend on that integration instead";
 const RETIRED_DEPENDENCY_KEYS = {
-  tools: MCP_SERVER_GUIDANCE,
-  mcp_servers: MCP_SERVER_GUIDANCE,
+  tools:
+    "a local MCP server is declared inline on its integration (`source.server`); depend on that integration instead",
   providers: "renamed to `dependencies.integrations`",
 } as const satisfies Record<string, string>;
 

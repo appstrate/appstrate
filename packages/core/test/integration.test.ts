@@ -45,6 +45,7 @@ import {
   findConnectionlessVariables,
   getLocalServer,
   getLocalServerTools,
+  getLocalServerEnv,
   type LocalServer,
   PLATFORM_META_KEY,
   isRuntimeBoundIntegration,
@@ -3123,6 +3124,44 @@ describe("getLocalServer / getLocalServerTools", () => {
       source: { kind: "local", server: { ...LOCAL_SOURCE.server, tools: [] } },
     });
     expect(getLocalServerTools(m)).toEqual([]);
+  });
+});
+
+describe("getLocalServerEnv", () => {
+  const withServer = (mcp_config: Record<string, unknown>) =>
+    baseManifest({
+      source: { kind: "local", server: { ...LOCAL_SOURCE.server, mcp_config } },
+    });
+
+  it("returns the literal mcp_config.env entries", () => {
+    expect(
+      getLocalServerEnv(withServer({ command: "node", env: { MODE: "fast", REGION: "eu" } })),
+    ).toEqual({ MODE: "fast", REGION: "eu" });
+  });
+
+  it("is empty when mcp_config declares no env", () => {
+    expect(getLocalServerEnv(withServer({ command: "node" }))).toEqual({});
+  });
+
+  it("is empty for a remote manifest and for a manifest without a source", () => {
+    expect(
+      getLocalServerEnv(
+        baseManifest({
+          source: {
+            kind: "remote",
+            remote: { url: "https://x.test/mcp", transport: "streamable-http" },
+          },
+        }),
+      ),
+    ).toEqual({});
+    expect(getLocalServerEnv(baseManifest())).toEqual({});
+    expect(getLocalServerEnv(null)).toEqual({});
+  });
+
+  it("skips non-string values instead of coercing them", () => {
+    expect(getLocalServerEnv(withServer({ command: "node", env: { OK: "1", BAD: 2 } }))).toEqual({
+      OK: "1",
+    });
   });
 });
 

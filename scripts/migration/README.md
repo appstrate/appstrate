@@ -1508,7 +1508,7 @@ none of `log`, `note`, `pin` or `output`; for the same reason, do not serve it b
 ## Detail — `mcp-server` packages folded into their integrations (script `0054`)
 
 **Not a runbook.** A local MCP server is no longer a package of its own: the integration declares it
-inline (`source.server = { type, entry_point, mcp_config, tools }`), its payload (`server/**`) sits in
+inline (`source.server = { type, entry_point, mcp_config, tools }`), its payload (the server's files) sits in
 the integration's own files and archive, the credential reaches it through the auth's `delivery.env`,
 and `dependencies.mcp_servers` no longer exists (#2220). The release's drizzle migration `0106`
 rebuilds the `package_type` enum without `mcp-server` (Postgres drops no value in place) and its
@@ -1534,7 +1534,9 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    `UNFOLDED` means a draft or version would still read `source.server = { name, version }`: server
    not found, pin matching no version, server archive or draft payload missing, the integration's
    own archive missing, a `${user_config.K}` embedded in a larger value with no matching entry, or a
-   path both hold with different bytes.
+   path both hold with different bytes. The last one is cured on the integration's side: remove or
+   rename its own differing file (draft files, or publish a new version of a published one), then
+   re-run; the script never picks between the two copies.
 4. `0054 --apply`. Per ORG integration still reading `source.server = { name, version }`, the server
    is resolved as the runtime did: a system server is its highest version; an org server goes by
    the pin, exact version (yanked included), then dist-tag name, then semver range, a missing pin
@@ -1546,7 +1548,7 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    value of the auth entry whose `user_config_key ?? envKey` is `K` (`sensitive` if any is), and
    `user_config_key` is dropped everywhere. A whole-value placeholder matching no entry is dropped
    with a note (the old runtime delivered nothing); an existing `delivery.env[V]` is kept. The
-   server's files (all but `manifest.json`) join the integration's draft files and version archive
+   server's files (every file but `manifest.json`) join the integration's draft files and version archive
    (identical bytes at a shared path: a note); each rewritten version's `integrity` and
    `artifact_size` are recomputed. Every org agent, skill and integration draft or version carrying
    `dependencies.mcp_servers` loses it, with archive and integrity. Then every `mcp-server` package,
@@ -1559,9 +1561,12 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    deleted, printed `<id>@<version>`, with its dist tags, dependency rows and archive (outbox); the
    `packages` row stays. A `latest` tag that pointed at one is re-pointed to the highest remaining
    version (boot only sets `latest` when it registers a new version, not for one already stored).
-   Every `mcp-servers:*` entry of `api_keys.scopes` and of a custom role's `space_roles.permissions`
-   is removed: the permission resource is gone, and a custom role still holding one is refused on
-   its next edit. Before the commit the script verifies, in the transaction, that no org draft or
+   Every `mcp-servers:*` entry of the permission-bearing columns (`api_keys.scopes`,
+   `oauth_clients.scopes`, `oauth_consents.scopes`, `oauth_refresh_tokens.scopes`,
+   `oauth_access_tokens.scopes`, `space_roles.permissions`, and the space-delimited
+   `cli_refresh_tokens.scope` and `device_codes.scope`) is removed, counted per column: the
+   permission resource is gone, and a custom role still holding one is refused on its next edit.
+   The `package_shared` notifications of an `mcp-server` package are deleted too. Before the commit the script verifies, in the transaction, that no org draft or
    version still has `source.server.name` and no `mcp-server` row is left, and rolls back otherwise.
 5. Run the migrations (`bun run db:migrate`, or the migrate service); `0106` now passes.
 6. Run `0053` (it runs after the migrations), then start the app.
@@ -1577,7 +1582,7 @@ commit rolls the database back but may leave rewritten archives in storage under
 re-running recomputes from the unchanged rows and writes byte-identical archives, so a re-run
 repairs it. A second `--apply` on a folded database writes nothing.
 
-Rollback: restore the `pg_dump` AND the storage snapshot of step 3, together. The archives are
+Rollback: restore the `pg_dump` AND the storage snapshot of step 2, together. The archives are
 overwritten in place, so restoring the database alone leaves rewritten archives under rows whose
 `integrity` no longer matches them (an integrity mismatch at run time), and the server archives
 queued for deletion are gone once the outbox has run.

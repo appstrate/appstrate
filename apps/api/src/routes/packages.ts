@@ -50,7 +50,6 @@ import {
   assertContentConforms,
   assertArchiveContentConforms,
   assertManifestConforms,
-  assertNoManifestViolations,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type ManifestIssue, type PackageType } from "@appstrate/core/validation";
@@ -109,7 +108,6 @@ import { requireAnyPermission, requirePermission } from "../middleware/require-p
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { findUnexposedDefaultTools, type IntegrationManifest } from "@appstrate/core/integration";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
@@ -219,16 +217,10 @@ async function assertAgentIntegrationScopesValid(
   }
 }
 
-/** The `default_tools` rule on the manifest a path persists without going through `checkManifest`. */
-function assertDefaultToolsExposed(manifest: Record<string, unknown>): void {
-  assertNoManifestViolations(findUnexposedDefaultTools(manifest as unknown as IntegrationManifest));
-}
-
 /**
  * The manifest gate every package write goes through — schema validation, the
  * route/manifest `type` agreement check, then the integration-scope subset
- * check and a `local` integration's `default_tools` — returning the VALIDATED
- * (normalized) manifest callers persist.
+ * check — returning the VALIDATED (normalized) manifest callers persist.
  *
  * `direction` says where the manifest came from, and both policies key off it:
  *
@@ -287,7 +279,6 @@ async function validateManifestForRoute(
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
   }
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
-  assertDefaultToolsExposed(validated);
   return validated;
 }
 
@@ -637,103 +628,99 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const user = c.get("user");
 
-    let draft: Parameters<typeof createPackageDraft>[0];
     // Only the integration body carries `publish`; every other create snapshots its version.
     let publish = true;
+    // The two create bodies differ only in whether `content` is mandatory,
+    // which is what `requireContent` means. Selecting the schema here — as
+    // opposed to re-checking the parsed body afterwards — is what lets the
+    // spec publish the difference: `zod-schema-registry.ts` registers
+    // whichever of the two schemas this package type's route uses.
+    const body = await readJsonBody(
+      c,
+      rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
+    );
+
+    if ("publish" in body && body.publish === false) publish = false;
+    let content = body.content ?? "";
+
+    const validatedManifest = await validateManifestForRoute(
+      body.manifest,
+      rcfg.cfg.type,
+      c,
+      "author",
+    );
+
+    assertContentConforms(rcfg.cfg.type, content, "content");
+
     // Validate the complete tree before either store is written.
-    {
-      // The two create bodies differ only in whether `content` is mandatory,
-      // which is what `requireContent` means. Selecting the schema here — as
-      // opposed to re-checking the parsed body afterwards — is what lets the
-      // spec publish the difference: `zod-schema-registry.ts` registers
-      // whichever of the two schemas this package type's route uses.
-      const body = await readJsonBody(
-        c,
-        rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
-      );
-
-      if ("publish" in body && body.publish === false) publish = false;
-      const manifest = body.manifest;
-      let content = body.content ?? "";
-
-      const validatedManifest = await validateManifestForRoute(
-        manifest,
-        rcfg.cfg.type,
-        c,
-        "author",
-      );
-
-      assertContentConforms(rcfg.cfg.type, content, "content");
-
-      const manifestText = JSON.stringify(validatedManifest, null, 2);
-      let normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName]: new TextEncoder().encode(
-          rcfg.cfg.manifestIsStoredFile ? manifestText : content,
-        ),
-      };
-      const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
-      if (contentEntryPath && content)
-        normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
-      if (body.operations || rcfg.requireContent) {
-        try {
-          normalizedFiles = applyFileOperations(
-            { ...normalizedFiles, [PACKAGE_MANIFEST_FILE]: new TextEncoder().encode(manifestText) },
-            [
-              // The primary file travels as content, but has the same write limit.
-              ...(rcfg.requireContent
-                ? [
-                    {
-                      op: "write" as const,
-                      path: rcfg.storageFileName,
-                      bytes: normalizedFiles[rcfg.storageFileName]!,
-                    },
-                  ]
-                : []),
-              ...toDraftFileOperations(body.operations ?? []),
-            ],
-            { type: rcfg.cfg.type },
-          );
-          content = validateAuthoredPackageFiles(
-            normalizedFiles,
-            rcfg.cfg.type,
-            validatedManifest,
-            body.operations !== undefined,
-          );
-          if (!rcfg.cfg.manifestIsStoredFile) delete normalizedFiles[PACKAGE_MANIFEST_FILE];
-        } catch (error) {
-          if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
-          throw error;
-        }
+    const manifestText = JSON.stringify(validatedManifest, null, 2);
+    let normalizedFiles: Record<string, Uint8Array> = {
+      [rcfg.storageFileName]: new TextEncoder().encode(
+        rcfg.cfg.manifestIsStoredFile ? manifestText : content,
+      ),
+    };
+    const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
+    if (contentEntryPath && content)
+      normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
+    if (body.operations || rcfg.requireContent) {
+      try {
+        normalizedFiles = applyFileOperations(
+          { ...normalizedFiles, [PACKAGE_MANIFEST_FILE]: new TextEncoder().encode(manifestText) },
+          [
+            // The primary file travels as content, but has the same write limit.
+            ...(rcfg.requireContent
+              ? [
+                  {
+                    op: "write" as const,
+                    path: rcfg.storageFileName,
+                    bytes: normalizedFiles[rcfg.storageFileName]!,
+                  },
+                ]
+              : []),
+            ...toDraftFileOperations(body.operations ?? []),
+          ],
+          { type: rcfg.cfg.type },
+        );
+        content = validateAuthoredPackageFiles(
+          normalizedFiles,
+          rcfg.cfg.type,
+          validatedManifest,
+          body.operations !== undefined,
+        );
+        if (!rcfg.cfg.manifestIsStoredFile) delete normalizedFiles[PACKAGE_MANIFEST_FILE];
+      } catch (error) {
+        if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
+        throw error;
       }
-
-      const packageId = validatedManifest.name;
-
-      // The only scopes that gate creation are the platform's (`createOrgItem` refuses them,
-      // 400 `scope_reserved`); beyond that, a system package id must never be shadowed by an
-      // org-owned row — the boot sync upserts system rows by id and would later overwrite it
-      // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
-      if (isSystemPackage(packageId)) {
-        throw forbidden(`'${packageId}' is a system package and cannot be created`);
-      }
-
-      // Check for name collision
-      const existingIds = await getAllPackageIds(orgId);
-      if (existingIds.includes(packageId)) {
-        // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
-        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
-      }
-
-      draft = {
-        orgId,
-        id: packageId,
-        content,
-        createdBy: user.id,
-        homeSpaceId: c.get("spaceId"),
-        type: rcfg.cfg.type,
-        manifest: validatedManifest,
-        files: normalizedFiles,
-      };
     }
+
+    const newId = validatedManifest.name;
+
+    // The only scopes that gate creation are the platform's (`createOrgItem` refuses them,
+    // 400 `scope_reserved`); beyond that, a system package id must never be shadowed by an
+    // org-owned row — the boot sync upserts system rows by id and would later overwrite it
+    // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
+    if (isSystemPackage(newId)) {
+      throw forbidden(`'${newId}' is a system package and cannot be created`);
+    }
+
+    // Check for name collision
+    const existingIds = await getAllPackageIds(orgId);
+    if (existingIds.includes(newId)) {
+      // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
+      throw conflict("name_collision", `A package with identifier '${newId}' already exists`);
+    }
+
+    const draft: Parameters<typeof createPackageDraft>[0] = {
+      orgId,
+      id: newId,
+      content,
+      createdBy: user.id,
+      homeSpaceId: c.get("spaceId"),
+      type: rcfg.cfg.type,
+      manifest: validatedManifest,
+      files: normalizedFiles,
+    };
 
     const createdItem = await createPackageDraft(draft).catch((err: unknown) => {
       if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
@@ -2417,7 +2404,6 @@ export function createPackagesRouter() {
       asRecord(existing?.draftManifest),
     );
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
-    assertDefaultToolsExposed(manifest as Record<string, unknown>);
     if (existing) {
       if (existing.orgId !== orgId) {
         throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);

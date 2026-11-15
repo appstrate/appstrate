@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The index page of a package type the space runs: agents, skills, MCP
- * servers. One page for the three, so a fix to one (an error state, the
- * keywords the search reads, the actions menu) lands on all of them.
- * Integrations keep their own page: execution tabs, protocol filter, columns.
+ * The index page of a package type the space runs: agents and skills. One page
+ * for the two, so a fix to one (an error state, the keywords the search reads,
+ * the actions menu) lands on both. Integrations have their own page: a source
+ * filter and connection columns.
  */
 
 import { useState } from "react";

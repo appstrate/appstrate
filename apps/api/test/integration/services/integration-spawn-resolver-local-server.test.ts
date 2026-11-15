@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -123,13 +123,12 @@ describe("resolveIntegrationSpawns — inline local server", () => {
     });
   });
 
-  it("carries no version for a draft run, an unfrozen integration or a system one", async () => {
+  it("carries no version for a draft run or a system one", async () => {
     await seed(ctx);
 
     for (const frozen of [
       { [INTEG]: { source: "draft" as const, version: null } },
       { [INTEG]: { source: "system" as const, version: null } },
-      undefined,
     ]) {
       const specs = await resolve(ctx, frozen);
       expect(specs).toHaveLength(1);
@@ -138,6 +137,21 @@ describe("resolveIntegrationSpawns — inline local server", () => {
         entry_point: "server/index.js",
       });
     }
+  });
+
+  it("drops a local integration the run froze no version for", async () => {
+    await seed(ctx);
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
+      integrationVersions: {},
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toMatchObject([{ integrationId: INTEG, reason: "local_server_not_runnable" }]);
   });
 
   it("merges the server's literal mcp_config.env into spawnEnv, delivery.env winning", async () => {

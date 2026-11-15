@@ -16,7 +16,7 @@ import {
   useVersionInfo,
   type Versioned,
 } from "../hooks/use-packages";
-import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -116,12 +116,12 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 // ─── Main Page ──────────────────────────────────────────────────────
 
 /** One body per package and version: the modals it opens hold that package's state, and a route change must not carry them to another. */
-export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
+export function UnifiedPackageDetailPage({ type }: { type: "agent" | "skill" }) {
   const { scope, name, version } = useParams<{ scope: string; name: string; version?: string }>();
   return <PackageDetailBody key={`${scope}/${name}@${version ?? ""}`} type={type} />;
 }
 
-function PackageDetailBody({ type }: { type: PackageType }) {
+function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   // Only an agent has a narrower read: without `agents:read` a runner launches
@@ -461,9 +461,8 @@ function PackageDetailBody({ type }: { type: PackageType }) {
 
         {type !== "agent" && (
           <>
-            {/* Non-Agent tab content */}
-            {/* Both follow the version being viewed: the explorer through
-          `versionLabel`, the overview through the manifest picked above. */}
+            {/* Skill tab content. Both follow the version being viewed: the explorer
+          through `versionLabel`, the overview through the version's own `content`. */}
             <DetailTabPanel value="overview">
               {pkgDetail && (
                 <PackageOverview
@@ -476,17 +475,14 @@ function PackageDetailBody({ type }: { type: PackageType }) {
               )}
             </DetailTabPanel>
 
-            {type === "skill" && (
-              <DetailTabPanel value="settings" framed>
-                <PackageSettingsView
-                  versions={versionsProps}
-                  type={type}
-                  packageId={packageId}
-                  detail={pkgDetail}
-                  version={versionLabel}
-                />
-              </DetailTabPanel>
-            )}
+            <DetailTabPanel value="settings" framed>
+              <PackageSettingsView
+                versions={versionsProps}
+                packageId={packageId}
+                detail={pkgDetail}
+                version={versionLabel}
+              />
+            </DetailTabPanel>
 
             <DetailTabPanel value="usedBy">
               {!tabReads.usedBy ? (

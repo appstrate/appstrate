@@ -38,7 +38,6 @@ import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
   parseConnectResult,
-  type BundleVersionResolver,
 } from "../../../src/services/connect/connect-run-launcher.ts";
 import type { ConnectToolExecution } from "../../../src/services/connect/orchestrated-strategy.ts";
 import {
@@ -77,16 +76,8 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
   },
 });
 
-// The launcher names the published version whose archive the sidecar fetches. Injected here so the
-// unit test needs no DB; the real lookup is covered against the package store
-// (`connect-spec-runtime-override.test.ts`).
-const INTEGRATION_ID = "@scope/connect-it";
+// The launcher names the published version the manifest was read from, carried on the execution.
 const BUNDLE_VERSION = "1.4.2";
-const resolverCalls: { packageId: string; orgId: string }[] = [];
-const fakeVersionResolver: BundleVersionResolver = async (packageId, orgId) => {
-  resolverCalls.push({ packageId, orgId });
-  return BUNDLE_VERSION;
-};
 
 /**
  * Mirror of the sidecar's result-channel encryption
@@ -108,6 +99,7 @@ function execution(): ConnectToolExecution {
     integrationId: "@scope/connect-it",
     authKey: "session",
     manifest: MANIFEST,
+    bundleVersion: BUNDLE_VERSION,
     toolName: "login",
     produces: ["session_token"],
     inputs: { email: "a@b.c", password: "pw" },
@@ -227,7 +219,7 @@ function mockOrchestrator(opts: {
 
 describe("buildConnectLoginSpec", () => {
   it("derives the connectLogin block from the manifest auth + the integration's inline server", async () => {
-    const spec = await buildConnectLoginSpec(execution(), fakeVersionResolver);
+    const spec = await buildConnectLoginSpec(execution());
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
     // The runnable server config is the integration's own, INCLUDING the published version the
@@ -240,7 +232,6 @@ describe("buildConnectLoginSpec", () => {
     // The literal `mcp_config.env` of the server rides the spawn env, as on the agent-run path.
     expect(spec.spawnEnv).toEqual({ REGION: "ca-central" });
     // The version is looked up for the integration itself, in the run's org.
-    expect(resolverCalls.at(-1)).toEqual({ packageId: INTEGRATION_ID, orgId: "o" });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -279,7 +270,7 @@ describe("buildConnectLoginSpec", () => {
       opts: { tls: true },
       otp: null,
     };
-    const spec = await buildConnectLoginSpec(ex, fakeVersionResolver);
+    const spec = await buildConnectLoginSpec(ex);
     const expected = {
       email: "a@b.c",
       password: "pw",
@@ -301,7 +292,7 @@ describe("buildConnectLoginSpec", () => {
     delete auth.authorized_uris;
     auth.allow_all_uris = true;
     ex.manifest = allowAll;
-    const spec = await buildConnectLoginSpec(ex, fakeVersionResolver);
+    const spec = await buildConnectLoginSpec(ex);
     expect(spec.egress).toEqual({ authorizedUris: [], declaredUris: [], allowAllUris: true });
   });
 
@@ -310,9 +301,7 @@ describe("buildConnectLoginSpec", () => {
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
     delete (noHttp.auths!.session as { delivery?: unknown }).delivery;
     ex.manifest = noHttp;
-    await expect(buildConnectLoginSpec(ex, fakeVersionResolver)).rejects.toThrow(
-      /no delivery.http/,
-    );
+    await expect(buildConnectLoginSpec(ex)).rejects.toThrow(/no delivery.http/);
   });
 
   it("throws when the integration is not a local source (no spawnable server)", async () => {
@@ -323,14 +312,11 @@ describe("buildConnectLoginSpec", () => {
       remote: { url: "https://x/mcp", transport: "streamable-http" },
     };
     ex.manifest = remote as unknown as IntegrationManifest;
-    await expect(buildConnectLoginSpec(ex, fakeVersionResolver)).rejects.toThrow(
-      /no spawnable server/,
-    );
+    await expect(buildConnectLoginSpec(ex)).rejects.toThrow(/no spawnable server/);
   });
 
   it("omits server.version when there is none to name (system integration, unpublished draft)", async () => {
-    const noVersion: BundleVersionResolver = async () => null;
-    const spec = await buildConnectLoginSpec(execution(), noVersion);
+    const spec = await buildConnectLoginSpec({ ...execution(), bundleVersion: null });
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
@@ -482,7 +468,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     const result = await executor.run(execution());
@@ -522,7 +507,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     await executor.run(execution());
@@ -550,7 +534,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
@@ -567,7 +550,6 @@ describe("createConnectRunExecutor.run", () => {
     const executor = createConnectRunExecutor({
       orchestrator: orch,
       timeoutMs: 30,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow();
@@ -582,7 +564,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
@@ -602,7 +583,6 @@ describe("createConnectRunExecutor.run", () => {
     const { orch, calls } = mockOrchestrator({ stdoutLines: logs, exitCode: 137 });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -636,7 +616,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -656,7 +635,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveBundleVersion: fakeVersionResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -672,7 +650,6 @@ describe("createConnectRunExecutor.run", () => {
     const executor = createConnectRunExecutor({
       orchestrator: orch,
       timeoutMs: 30,
-      resolveBundleVersion: fakeVersionResolver,
     });
 
     // A timeout is an upstream failure, not a server bug — 504 with the budget
@@ -709,7 +686,7 @@ describe("createConnectRunExecutor.run", () => {
     );
     _resetCacheForTesting();
     try {
-      const executor = createConnectRunExecutor({ resolveBundleVersion: fakeVersionResolver });
+      const executor = createConnectRunExecutor();
       // INVERTED (failure-legibility): the throw used to carry the operator
       // remedy `RUN_ADAPTER="fake-vm" … use RUN_ADAPTER=docker` in its message,
       // which the routes turned into a flat 500 for everyone — including an end

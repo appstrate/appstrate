@@ -20,7 +20,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedPublishedVersion } from "../../helpers/seed.ts";
 import {
-  resolveConnectBundleVersion,
+  readIntegrationManifestForConnect,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "../../../src/services/integration-service.ts";
@@ -68,7 +68,7 @@ describe("resolvePublishedManifest — tenant boundary (CRIT-11)", () => {
     orgB = await createTestContext({ orgSlug: "tenantb", email: "b@tenant.test" });
   });
 
-  describe("connect bundle version (resolveConnectBundleVersion)", () => {
+  describe("connect manifest and bundle version (readIntegrationManifestForConnect)", () => {
     beforeEach(async () => {
       await seedPackage({
         id: INTEG,
@@ -81,11 +81,17 @@ describe("resolvePublishedManifest — tenant boundary (CRIT-11)", () => {
     });
 
     it("a connect in org A cannot resolve org B's published integration", async () => {
-      expect(await resolveConnectBundleVersion(INTEG, orgA.orgId)).toBeNull();
+      expect(await readIntegrationManifestForConnect({ orgId: orgA.orgId }, INTEG)).toEqual({
+        ok: false,
+        reason: "not_found",
+      });
     });
 
     it("the owning org still resolves it (control)", async () => {
-      expect(await resolveConnectBundleVersion(INTEG, orgB.orgId)).toBe("1.0.0");
+      expect(await readIntegrationManifestForConnect({ orgId: orgB.orgId }, INTEG)).toMatchObject({
+        ok: true,
+        version: "1.0.0",
+      });
     });
 
     it("a system package (orgId: null) still resolves for any org", async () => {
@@ -98,7 +104,12 @@ describe("resolvePublishedManifest — tenant boundary (CRIT-11)", () => {
       });
       await seedPublishedVersion(SYSTEM_INTEG, "1.0.0", { manifest: integManifest("1.0.0") });
 
-      expect(await resolveConnectBundleVersion(SYSTEM_INTEG, orgA.orgId)).toBe("1.0.0");
+      expect(
+        await readIntegrationManifestForConnect({ orgId: orgA.orgId }, SYSTEM_INTEG),
+      ).toMatchObject({
+        ok: true,
+        version: "1.0.0",
+      });
     });
   });
 

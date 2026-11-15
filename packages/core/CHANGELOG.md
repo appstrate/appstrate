@@ -36,11 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resource `mcp-servers` (`mcp-servers:read|write|delete|share`).
 - **`getMcpServerMcpConfigEnv`, `renderMcpConfigEnv`** — BREAKING (`@appstrate/core/mcp-server`):
   the `${user_config.*}` bridge is gone (no `user_config`, no `delivery.env.*.user_config_key`).
-  The literal `mcp_config.env` is read with `getLocalServerEnv` (see Added).
+  The literal `mcp_config.env` is read with `getLocalServerEnv` (`@appstrate/core/integration`, see Added).
 - **`dependencies.mcp_servers`** — BREAKING. It leaves `Dependencies` and `extractDependencies`
-  (`DepEntry.depType` is `"skill" | "integration"`) and is refused on every write path beside
-  `tools`: a local MCP server is declared inline on its integration (`source.server`).
-  `RetiredDependencyKeyUse` carries `guidance` (a sentence) instead of `replacement`.
+  (`DepEntry.depType` is `"skill" | "integration"`); no reader reads it any more, so a manifest
+  still carrying it validates and the key is inert. A local MCP server is declared inline on its
+  integration (`source.server`). `RetiredDependencyKeyUse` carries `guidance` (a sentence) instead
+  of `replacement`.
+- **`@appstrate/core/mcp-server-meta`** — BREAKING. The subpath is removed; every export
+  (`MCP_SERVER_APPSTRATE_META_KEY`, `MCP_SERVER_RUNTIME_CAPABILITIES`, `MCP_SERVER_RUNTIMES`,
+  `McpServerRuntime`, `isMcpServerRuntime`, `getMcpServerRuntime`, `effectiveMcpServerType`)
+  is imported from `@appstrate/core/mcp-server`.
 - **The `mcpServerTools` input** — BREAKING — of `resolveIntegrationToolCatalog`,
   `findUnexposedDefaultTools` and `validateAgentIntegrationScopes`: a local source's catalog is
   its own `source.server.tools`.
@@ -125,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local server accessors** (`@appstrate/core/integration`, `@appstrate/core/mcp-server`):
   **`LocalServer`**, **`getLocalServer(manifest)`** and **`getLocalServerTools(manifest)`** read
   `source.server` of a `local` integration (`null` unless it carries `type`, `entry_point` and an
-  `mcp_config` object with a string `command`); **`getLocalServerEnv(manifest)`** returns its literal
+  `mcp_config` object with a string `command`); **`getLocalServerEnv(manifest)`** (in
+  `@appstrate/core/integration`, `{}` for any other source) returns its literal
   `mcp_config.env`. `getMcpServerRuntime`, `effectiveMcpServerType` and
   `getMcpServerWorkspaceMount` now read the INTEGRATION manifest (`source.server` and its `_meta`),
   whose schema validates the `dev.appstrate/workspace` and `dev.appstrate/mcp-server` hints.

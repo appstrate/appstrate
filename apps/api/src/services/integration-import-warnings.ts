@@ -8,7 +8,7 @@ import { acquiresByConnectLogin } from "@appstrate/core/integration";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
- * retired (`tools` / `mcp_servers` → declared inline on a local integration, `providers` → `integrations`).
+ * retired (`tools` → declared inline on a local integration, `providers` → `integrations`).
  *
  * Author input carrying one is REJECTED upstream by `validateManifest` — this
  * channel exists for the other direction: a manifest the platform already holds

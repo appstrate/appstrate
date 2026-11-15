@@ -28,7 +28,7 @@ import { and, eq } from "drizzle-orm";
 import { integrationConnections, packageVersions } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";

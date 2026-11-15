@@ -14,18 +14,92 @@
 
 import type { IntegrationManifest } from "@afps-spec/schema";
 
-// `./mcp-server` is the complete façade for the published subpath; the facts live in
-// `./mcp-server-meta.ts` so a browser consumer can read the runtime hint without pulling the
-// `@afps-spec/schema` runtime (AJV at module scope, no `sideEffects: false`).
-export {
-  MCP_SERVER_APPSTRATE_META_KEY,
-  MCP_SERVER_RUNTIME_CAPABILITIES,
-  MCP_SERVER_RUNTIMES,
-  isMcpServerRuntime,
-  getMcpServerRuntime,
-  effectiveMcpServerType,
-} from "./mcp-server-meta.ts";
-export type { McpServerRuntime } from "./mcp-server-meta.ts";
+/** The `_meta` key (on the integration manifest) carrying Appstrate-specific local-server runtime hints. */
+export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
+
+/**
+ * Runtime identifiers accepted by both integration runtime adapters. This is
+ * the public capability registry used by package authoring/discovery; adapter
+ * implementation details (image refs and host commands) remain private.
+ */
+export const MCP_SERVER_RUNTIME_CAPABILITIES = {
+  node: {
+    manifestServerType: "node",
+    manifestCommand: "node",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript entry point present in the archive",
+  },
+  bun: {
+    manifestServerType: "node",
+    manifestCommand: "bun",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript or TypeScript entry point present in the archive",
+    runtimeOverride: "bun",
+  },
+  python: {
+    manifestServerType: "python",
+    manifestCommand: "python3",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Python entry point present in the archive",
+  },
+  uv: {
+    manifestServerType: "uv",
+    manifestCommand: "uv",
+    manifestArgsBeforeEntryPoint: ["run"],
+    entryPoint: "Python entry point present in the archive; uv resolves project dependencies",
+  },
+  binary: {
+    manifestServerType: "binary",
+    manifestCommand: null,
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Executable entry point present in the archive",
+  },
+} as const;
+
+export type McpServerRuntime = keyof typeof MCP_SERVER_RUNTIME_CAPABILITIES;
+
+export const MCP_SERVER_RUNTIMES = Object.freeze(
+  Object.keys(MCP_SERVER_RUNTIME_CAPABILITIES) as McpServerRuntime[],
+);
+
+export function isMcpServerRuntime(value: unknown): value is McpServerRuntime {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(MCP_SERVER_RUNTIME_CAPABILITIES, value)
+  );
+}
+
+/**
+ * Read the Appstrate runtime override from the integration's
+ * `_meta["dev.appstrate/mcp-server"].runtime`. `source.server.type` is
+ * `node|python|binary|uv` — it has no `bun`. A bun-native server therefore keeps
+ * `server.type: "node"` (with `mcp_config.command: "bun"`) and declares `bun`
+ * here so the platform's runner picks the bun interpreter/image. Returns
+ * `undefined` when absent, in which case callers fall back to `server.type`.
+ */
+export function getMcpServerRuntime(manifest: IntegrationManifest): McpServerRuntime | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
+  return isMcpServerRuntime(appstrate?.runtime) ? appstrate.runtime : undefined;
+}
+
+/**
+ * The runtime a local MCP server spawns under: the Appstrate
+ * `_meta["dev.appstrate/mcp-server"].runtime` override first (it may be `bun`, which
+ * `source.server.type` cannot express), else `source.server.type`.
+ *
+ * Every caller that needs a runtime decides it through this function so the fallback is
+ * derived in one place. `source.server.type` is returned verbatim (not narrowed to
+ * {@link McpServerRuntime}). `undefined` means neither source declared one: not runnable, and the
+ * caller must fail closed on it.
+ */
+export function effectiveMcpServerType(manifest: IntegrationManifest): string | undefined {
+  const type = (manifest as { source?: { server?: { type?: unknown } } }).source?.server?.type;
+  return (
+    getMcpServerRuntime(manifest) ??
+    (typeof type === "string" && type.trim() !== "" ? type : undefined)
+  );
+}
 
 /** The `_meta` key carrying the shared-workspace opt-in declaration. */
 export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
@@ -163,20 +237,4 @@ export function getMcpServerWorkspaceMount(
   }
 
   return { mount, access };
-}
-
-/**
- * The literal `source.server.mcp_config.env` entries of a `local` integration (AFPS §7.1: literal
- * values only — credentials reach the server through the auth's `delivery.env` / `delivery.files`,
- * which win over these at spawn). Empty when the source is not local or declares none.
- */
-export function getLocalServerEnv(manifest: IntegrationManifest): Record<string, string> {
-  const env = (manifest as { source?: { server?: { mcp_config?: { env?: unknown } } } }).source
-    ?.server?.mcp_config?.env;
-  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
 }

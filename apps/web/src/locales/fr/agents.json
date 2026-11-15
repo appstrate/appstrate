@@ -993,6 +993,7 @@
   "integrationWizard.notRemote.description": "« {{name}} » n’est pas servie par un serveur MCP distant : cet assistant ne prend en charge que les serveurs MCP distants. Configurez-la depuis sa page.",
   "integrationEditor.source.serverType": "Type de serveur",
   "integrationEditor.source.serverTypeDesc": "Le runtime qui démarre le serveur MCP embarqué dans les fichiers de l’intégration.",
+  "integrationEditor.source.serverTypeUnknown": "Type de serveur « {{type}} » inconnu de ce formulaire : choisissez-en un pour le remplacer, ou laissez-le tel quel.",
   "integrationEditor.source.serverEntryPoint": "Point d’entrée",
   "integrationEditor.source.serverEntryPointDesc": "Chemin relatif d’un fichier de l’intégration (onglet Fichiers de l’Explorateur).",
   "integrationEditor.source.serverEntryPointMissing": "« {{path}} » n’est pas dans les fichiers de l’intégration : le lancement échouera tant que ce fichier n’existe pas.",

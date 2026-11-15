@@ -147,9 +147,7 @@ describe("validateManifest", () => {
     expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
   });
 
-  // AFPS retires `dependencies.tools`, `dependencies.providers` and
-  // `dependencies.mcp_servers` (a local MCP server is declared inline on its
-  // integration). Every reader destructures exactly
+  // AFPS retires `dependencies.tools` and `dependencies.providers`. Every reader destructures exactly
   // `{ skills, integrations }`, so a retired spelling is inert — accepting it silently
   // ships an agent whose dependency is never resolved (#1021). Author input rejects,
   // an already-persisted manifest is tolerated.
@@ -161,25 +159,6 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toStartWith("dependencies.tools:");
     expect(result.errors[0]).toContain("source.server");
-  });
-
-  it("rejects dependencies.mcp_servers on the author path: servers are inline on the integration", () => {
-    const result = validateManifest(
-      validAgentManifest({ dependencies: { mcp_servers: { "@appstrate/ssh": "^1.0.0" } } }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStartWith("dependencies.mcp_servers:");
-    expect(result.errors[0]).toContain("declared inline on its integration");
-    expect(result.errors[0]).toContain("source.server");
-  });
-
-  it("tolerates dependencies.mcp_servers on an already-persisted manifest", () => {
-    const result = validateManifest(
-      validAgentManifest({ dependencies: { mcp_servers: { "@appstrate/ssh": "^1.0.0" } } }),
-      { retiredDependencyKeys: "tolerate" },
-    );
-    expect(result.valid).toBe(true);
   });
 
   it("rejects dependencies.providers on the author path, naming the replacement key", () => {

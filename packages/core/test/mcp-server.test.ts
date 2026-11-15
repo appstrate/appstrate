@@ -9,7 +9,6 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@afps-spec/schema";
 import {
   effectiveMcpServerType,
-  getLocalServerEnv,
   getMcpServerRuntime,
   getMcpServerWorkspaceMount,
   MCP_SERVER_WORKSPACE_META_KEY,
@@ -33,42 +32,6 @@ function manifest(
     ...(meta ? { _meta: meta } : {}),
   } as unknown as IntegrationManifest;
 }
-
-describe("getLocalServerEnv", () => {
-  it("returns the literal mcp_config.env entries", () => {
-    const m = manifest(undefined, {
-      type: "node",
-      entry_point: "server/index.ts",
-      mcp_config: { command: "node", env: { MODE: "fast", REGION: "eu" } },
-    });
-    expect(getLocalServerEnv(m)).toEqual({ MODE: "fast", REGION: "eu" });
-  });
-
-  it("is empty when mcp_config declares no env", () => {
-    expect(getLocalServerEnv(manifest())).toEqual({});
-  });
-
-  it("is empty for a non-local source", () => {
-    const remote = {
-      name: "@me/r",
-      type: "integration",
-      source: {
-        kind: "remote",
-        remote: { url: "https://x.test/mcp", transport: "streamable-http" },
-      },
-    } as unknown as IntegrationManifest;
-    expect(getLocalServerEnv(remote)).toEqual({});
-  });
-
-  it("skips non-string values instead of coercing them", () => {
-    const m = manifest(undefined, {
-      type: "node",
-      entry_point: "server/index.ts",
-      mcp_config: { command: "node", env: { OK: "1", BAD: 2 } },
-    });
-    expect(getLocalServerEnv(m)).toEqual({ OK: "1" });
-  });
-});
 
 describe("getMcpServerWorkspaceMount", () => {
   it("returns undefined when _meta.workspace is absent (default: no workspace access)", () => {

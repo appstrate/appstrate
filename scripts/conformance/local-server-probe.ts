@@ -3,7 +3,7 @@
 /**
  * Stdio handshake probe for a local integration's bundled MCP server.
  *
- * Materialises the integration archive's files in a temp directory, spawns the
+ * Writes every file of the integration archive into a temp directory, spawns the
  * entry point under Bun with a minimal non-secret environment, performs the MCP
  * `initialize` → `tools/list` handshake and reports the live tool names. Never
  * throws: the result encodes the outcome. Time-boxed (default 10s).
@@ -21,7 +21,6 @@ export interface LocalServerProbeResult {
   toolNames?: string[];
   durationMs?: number;
 }
-type BunCompatProbeResult = LocalServerProbeResult;
 
 /**
  * Environment variables forwarded to the spawned (third-party) MCP server
@@ -43,15 +42,6 @@ const PROBE_ENV_ALLOWLIST = [
   "LC_CTYPE",
   "TERM",
   "TZ",
-  // Windows essentials — bun/node resolve these to find the shell + profile.
-  "SystemRoot",
-  "SYSTEMROOT",
-  "PATHEXT",
-  "COMSPEC",
-  "WINDIR",
-  "USERPROFILE",
-  "APPDATA",
-  "LOCALAPPDATA",
 ] as const;
 
 /** Copy only the allowlisted, non-secret system vars from `process.env`. */
@@ -64,33 +54,21 @@ function buildProbeEnv(): Record<string, string> {
   return env;
 }
 
-export interface LocalServerProbeOptions {
-  /** Hard wall-clock budget. Default 10000 ms. */
-  timeoutMs?: number;
-  /** Path to a `bun` binary. Defaults to `bun` on PATH. */
-  bunPath?: string;
-  /** Override the entry point to spawn (relative to bundle root). */
-  entryPoint?: string;
-  /** Working directory root for the materialised tree. */
-  workRoot?: string;
-}
+/** Hard wall-clock budget of one probe. */
+const PROBE_TIMEOUT_MS = 10_000;
 
 /**
- * Materialise the bundle's `./server/` tree into a temp directory and
- * run the probe against it. Accepting the file map directly avoids
+ * Write every file of the integration archive into a temp directory and
+ * run the probe against its entry point. Accepting the file map directly avoids
  * round-tripping through a real ZIP just to run the probe.
  */
 export async function probeLocalServer(
   files: Record<string, Uint8Array>,
   entryPoint: string,
-  options: LocalServerProbeOptions = {},
-): Promise<BunCompatProbeResult> {
+): Promise<LocalServerProbeResult> {
   const startedAt = performance.now();
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const bunPath = options.bunPath ?? "bun";
-  const workRoot = options.workRoot ?? tmpdir();
 
-  const workDir = await mkdtemp(join(workRoot, "appstrate-conformance-probe-"));
+  const workDir = await mkdtemp(join(tmpdir(), "appstrate-conformance-probe-"));
   try {
     // Materialise the relevant subset on disk (Bun.write creates parent dirs).
     for (const [rel, bytes] of Object.entries(files)) {
@@ -99,7 +77,7 @@ export async function probeLocalServer(
     const cleanEntry = entryPoint.replace(/^\.\//, "");
     const entryAbs = join(workDir, cleanEntry);
 
-    return await runProbe(bunPath, entryAbs, timeoutMs, startedAt);
+    return await runProbe(entryAbs, startedAt);
   } catch (err) {
     return {
       ok: false,
@@ -111,20 +89,15 @@ export async function probeLocalServer(
   }
 }
 
-async function runProbe(
-  bunPath: string,
-  entryAbs: string,
-  timeoutMs: number,
-  startedAt: number,
-): Promise<BunCompatProbeResult> {
-  const withDuration = (r: BunCompatProbeResult): BunCompatProbeResult => ({
+async function runProbe(entryAbs: string, startedAt: number): Promise<LocalServerProbeResult> {
+  const withDuration = (r: LocalServerProbeResult): LocalServerProbeResult => ({
     ...r,
     durationMs: Math.round(performance.now() - startedAt),
   });
 
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
-    proc = Bun.spawn([bunPath, entryAbs], {
+    proc = Bun.spawn(["bun", entryAbs], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -169,7 +142,7 @@ async function runProbe(
   // the `tools/list` reply. Written so it never rejects: any stream error
   // (e.g. the process being killed on timeout) falls through to the
   // exit-based failure summary.
-  const scan = async (): Promise<BunCompatProbeResult> => {
+  const scan = async (): Promise<LocalServerProbeResult> => {
     const reader = proc.stdout.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: false });
     let buffer = "";
@@ -220,10 +193,10 @@ async function runProbe(
     };
   };
 
-  const timeout = new Promise<BunCompatProbeResult>((resolve) => {
+  const timeout = new Promise<LocalServerProbeResult>((resolve) => {
     const timer = setTimeout(
-      () => resolve({ ok: false, reason: `probe timed out after ${timeoutMs}ms` }),
-      timeoutMs,
+      () => resolve({ ok: false, reason: `probe timed out after ${PROBE_TIMEOUT_MS}ms` }),
+      PROBE_TIMEOUT_MS,
     );
     timer.unref?.();
   });

@@ -14,7 +14,7 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { LoginSecretStrategy } from "../../../src/services/connect/login-secret-strategy.ts";
 import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";

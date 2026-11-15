@@ -21,7 +21,7 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { buildPlatformSystemPrompt } from "../../../src/services/run-launcher/prompt-builder.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";

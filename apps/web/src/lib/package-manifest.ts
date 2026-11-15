@@ -145,13 +145,8 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
 
 // ─── Integration source ───────────────────────────────────────────────
 
-export interface LocalServerTool {
-  name: string;
-  description?: string;
-}
-
 type IntegrationSourceView =
-  | { kind: "local"; serverType: string; entryPoint: string; tools: LocalServerTool[] }
+  | { kind: "local"; serverType: string; entryPoint: string }
   | { kind: "remote"; url: string; transport: string }
   | { kind: "none" };
 
@@ -164,19 +159,7 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
     const serverType = str(server?.type);
     const entryPoint = str(server?.entry_point);
     if (!serverType || !entryPoint) return undefined;
-    // `tools` is a raw jsonb array, so `name` may repeat and the view keys rows by name: first declaration wins.
-    const seen = new Set<string>();
-    const tools = present(
-      (Array.isArray(server?.tools) ? server.tools : []).map((raw): LocalServerTool | undefined => {
-        const tool = obj(raw);
-        const name = str(tool?.name);
-        if (!name || seen.has(name)) return undefined;
-        seen.add(name);
-        const description = str(tool?.description);
-        return description ? { name, description } : { name };
-      }),
-    );
-    return { kind: "local", serverType, entryPoint, tools };
+    return { kind: "local", serverType, entryPoint };
   }
   if (kind === "remote") {
     const remote = obj(source?.remote);

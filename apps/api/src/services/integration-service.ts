@@ -249,21 +249,6 @@ async function resolvePublishedManifest(
   };
 }
 
-/**
- * The published version a connect-run's spawn spec names: the one {@link
- * readIntegrationManifestForConnect} reads its manifest from (`latest`), so manifest and archive
- * cannot skew. `null` for a system integration (boot registry) and for one with nothing
- * published (its draft files are served) — the two answers the byte route gives without a
- * `?version=`.
- */
-export async function resolveConnectBundleVersion(
-  packageId: string,
-  orgId: string,
-): Promise<string | null> {
-  const res = await resolvePublishedManifest(packageId, orgId);
-  return res.ok && res.source === "version" ? res.version : null;
-}
-
 // ---------------------------------------------------------------------------
 // Integration manifest version resolution
 // ---------------------------------------------------------------------------
@@ -594,7 +579,16 @@ async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
 }
 
 export type ConnectManifestRead =
-  | { ok: true; manifest: IntegrationManifest }
+  | {
+      ok: true;
+      manifest: IntegrationManifest;
+      /**
+       * The published version the manifest was read from, from the same read: the archive a
+       * connect-run fetches is that version's. `null` for a system integration (boot registry)
+       * and for a draft (nothing published; its files are served).
+       */
+      version: string | null;
+    }
   /** `no_usable_version`: versions exist, none of which resolves as `latest` and parses. */
   | { ok: false; reason: "not_found" | "no_usable_version" };
 
@@ -624,7 +618,13 @@ export async function readIntegrationManifestForConnect(
   const res = await resolvePublishedManifest(packageId, scope.orgId);
   if (res.ok) {
     const parsed = parseIntegrationManifest(res.rawManifest);
-    if (parsed.ok) return { ok: true, manifest: parsed.manifest };
+    if (parsed.ok) {
+      return {
+        ok: true,
+        manifest: parsed.manifest,
+        version: res.source === "version" ? res.version : null,
+      };
+    }
     logger.warn("Published integration manifest failed validation", {
       packageId,
       version: res.version,
@@ -638,7 +638,7 @@ export async function readIntegrationManifestForConnect(
   const draft = placed
     ? asIntegrationManifest(placed.draftManifest)
     : await getOrgWideIntegrationManifest(scope.orgId, packageId);
-  return draft ? { ok: true, manifest: draft } : { ok: false, reason: "not_found" };
+  return draft ? { ok: true, manifest: draft, version: null } : { ok: false, reason: "not_found" };
 }
 
 /**

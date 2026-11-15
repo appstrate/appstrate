@@ -20,10 +20,10 @@ Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format 
                 │  prompt.md + manifest.json    │  Runs autonomously in a container.
                 ├───────────────────────────────┤
   Capability    │  Skill       (declarative)    │  Reusable instructions (SKILL.md).
-                │  MCP server  (executable)     │  Packaged MCP Bundle exposing tools.
                 ├───────────────────────────────┤
   Connection    │  Integration                  │  OAuth 2.0, API key, basic, mTLS,
-                │                               │  or custom auth for external services.
+                │                               │  or custom auth for external services;
+                │                               │  may carry its own local MCP server.
                 └───────────────────────────────┘
 ```
 

@@ -23,7 +23,7 @@ import {
   localIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 
 const app = getTestApp();
 

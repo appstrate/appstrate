@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
-import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../api/errors";
-
-/** The file each package type's substance lives in, from `PACKAGE_CONTENT_FILE` (shared with the ZIP parser). */
-export function primaryDisplayFile(type: PackageType): { name: string } {
-  return { name: PACKAGE_CONTENT_FILE[type] };
-}
 
 /** The three path refusals of a draft-tree write: the one sentence of each code, here and in `errorMessage`. */
 export const PACKAGE_PATH_ERROR_KEYS = {

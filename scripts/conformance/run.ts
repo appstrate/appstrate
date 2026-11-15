@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     // Deterministic, credential-free, network-free → every tier, including
     // `gate`. Whether an oauth2 auth can keep its connection alive is decided
     // entirely by what the manifest declares.
-    if (klass !== "integration-local" && klass !== "other") {
+    if (klass !== "other") {
       findings.push(...checkRefreshStrategy(entry));
       findings.push(...checkIdentitySource(entry));
       findings.push(...checkIdentityClaimKeys(entry));
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     // Manifest-declared OAuth surface, checked for every integration class —
     // a remote MCP integration declares an `issuer` and a credential-only one
     // declares explicit endpoints, and both are transcribed by hand.
-    if (runOAuthMetadata && klass !== "integration-local" && klass !== "other") {
+    if (runOAuthMetadata && klass !== "other") {
       findings.push(...(await checkOAuthMetadata(entry)));
       // Credential-free: a bogus bearer must be rejected. Catches a
       // `userinfo_endpoint` that has been renamed or retired, which otherwise

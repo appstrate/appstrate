@@ -7,7 +7,7 @@
  * Output:   system-packages/{type}-{name}-{version}.afps
  *
  * Discovers every package source directory regardless of type (`integration-*`
- * AFPS integration manifests, plus skills/tools if any). A local integration carries
+ * AFPS integration manifests, plus skills if any). A local integration carries
  * its MCP server payload (`server/**`) next to its manifest, and every file of the
  * source directory is bundled, so the archive is self-contained. `validateManifest`
  * dispatches by root `type`, so the loop below is type-agnostic.

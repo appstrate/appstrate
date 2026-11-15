@@ -878,6 +878,22 @@ export function getLocalServer(manifest: unknown): LocalServer | null {
 }
 
 /**
+ * The literal `source.server.mcp_config.env` entries of a `local` integration (AFPS §7.1: literal
+ * values only — credentials reach the server through the auth's `delivery.env` / `delivery.files`,
+ * which win over these at spawn). Non-string values are skipped; `{}` when the source is not
+ * local, the declaration is malformed, or no env is declared.
+ */
+export function getLocalServerEnv(manifest: unknown): Record<string, string> {
+  const env: unknown = getLocalServer(manifest)?.mcp_config.env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
  * The advisory tool catalog of a `local` integration (`source.server.tools`, AFPS §7.1);
  * `undefined` when the source is not local or the declaration carries no `tools`.
  */

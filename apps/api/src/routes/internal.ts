@@ -16,7 +16,7 @@ import { parseBearer } from "@appstrate/core/bearer";
 import { zipArtifact } from "@appstrate/core/zip";
 import { getLocalServer } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
-import { readPackageSnapshot, resolvePackageFileValidator } from "../services/package-files.ts";
+import { readPackageSnapshot } from "../services/package-files.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
@@ -54,7 +54,10 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import { readIntegrationManifestForRun } from "../services/integration-service.ts";
+import {
+  readIntegrationManifestForRun,
+  type ResolvedIntegrationVersionMap,
+} from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
   isIntegrationActive,
@@ -296,7 +299,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
-      logger.warn("Integration credentials request rejected — not declared by agent", {
+      logger.warn("Integration request rejected — not declared by agent", {
         runId,
         packageId,
         agentId: effective.id,
@@ -564,7 +567,6 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       });
     }
     const { runId, run } = await verifyRunToken(c);
-    await assertAgentDeclaresLocalIntegration(integrationId, run, runId);
     // Every launch path freezes each declared integration (`freezeRunSpawnDependencies`), so a
     // missing entry is not "serve the draft" — it is a run that never resolved this integration.
     const frozen = run.resolvedIntegrationVersions?.[integrationId];
@@ -575,6 +577,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       });
       throw notFound(`Run has no resolved version for '${integrationId}'`);
     }
+    await assertAgentDeclaresLocalIntegration(integrationId, run, runId, frozen);
     assertBundleVersionPermitted(
       integrationId,
       frozen.source === "version" ? frozen.version : null,
@@ -609,6 +612,8 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         headers: { "Content-Type": "application/zip" },
       });
     }
+    // No version: the run froze the draft (or a connect run found nothing published). The draft's
+    // files are read at fetch time, so a draft edited after launch is served as edited.
     if (!version) return serveDraftIntegrationBundle(integrationId, orgId, caller);
     // Tenant scope on the VERSION lookup itself, the technique `resolvePublishedManifest` uses
     // on the same two tables: a pre-check on `packages` followed by an unfiltered version read
@@ -669,8 +674,11 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     if (!row) throw notFound(`Draft files unavailable for '${integrationId}'`);
     // The explorer's reader, so the archive carries the same DB-authoritative `manifest.json`
     // overlay every other draft reader sees — the one the spawn spec was built from.
-    const source = { ...row, type: "integration" as const };
-    const { files } = await readPackageSnapshot(source, await resolvePackageFileValidator(source));
+    const { files } = await readPackageSnapshot(row, {
+      kind: "draft",
+      snapshotId: null,
+      yanked: false,
+    });
     const bytes = zipArtifact(files, 6);
     logger.info("integration bundle delivered (draft)", {
       ...caller,
@@ -689,23 +697,12 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
    */
   async function assertAgentDeclaresLocalIntegration(
     integrationId: string,
-    run: {
-      packageId: string;
-      orgId: string;
-      spaceId: string;
-      versionRef: string | null;
-      resolvedIntegrationVersions: Record<
-        string,
-        { version: string | null; source: "version" | "draft" | "system" }
-      > | null;
-    },
+    run: { packageId: string; orgId: string; spaceId: string; versionRef: string | null },
     runId: string,
+    frozen: ResolvedIntegrationVersionMap[string],
   ): Promise<void> {
     await assertAgentDeclaresIntegration(integrationId, run, runId);
-    const res = await readIntegrationManifestForRun(
-      integrationId,
-      run.resolvedIntegrationVersions?.[integrationId],
-    );
+    const res = await readIntegrationManifestForRun(integrationId, frozen);
     if (!res.ok || !getLocalServer(res.manifest)) {
       logger.warn("integration bundle request rejected — not a local integration", {
         runId,

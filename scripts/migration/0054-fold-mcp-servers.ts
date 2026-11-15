@@ -10,7 +10,7 @@
  * A local MCP server is now declared INLINE on its integration (`source.server = { type,
  * entry_point, mcp_config, tools }`, payload in the integration's own files) and the `mcp-server`
  * package type is gone. Run BEFORE the new release boots, with the app stopped and `pg_dump` AND a
- * snapshot of object storage taken first (README, step 3): the release's migration `0106` rebuilds
+ * snapshot of object storage taken first (README, step 2): the release's migration `0106` rebuilds
  * the `package_type` enum without `mcp-server` and fails on a row still of that type, so the boot
  * fails until this script has run. Every query is raw SQL comparing `type::text`, so the script
  * reads the schema of either release. Dry run by default (rolled back, no storage
@@ -48,8 +48,12 @@
  *
  * Then every ORG agent / skill / integration draft or version carrying `dependencies.mcp_servers`
  * loses that key (it never launched anything), its archive and integrity rewritten for a version.
- * Then every `api_keys.scopes` / `space_roles.permissions` entry of the retired `mcp-servers`
- * permission resource (`mcp-servers:read|write|delete|share`) is removed.
+ * Then every entry of the retired `mcp-servers` permission resource (`mcp-servers:read|write|delete|share`)
+ * is removed from the permission-bearing columns `0046` lists: the `text[]` columns
+ * `api_keys.scopes`, `oauth_clients.scopes`, `oauth_consents.scopes`, `oauth_refresh_tokens.scopes`,
+ * `oauth_access_tokens.scopes`, `space_roles.permissions`, and the space-delimited `text` columns
+ * `cli_refresh_tokens.scope`, `device_codes.scope` (counts per column in the report). The
+ * `package_shared` notifications whose `payload.package_type` is `mcp-server` are deleted too.
  * Then every `mcp-server` package — system ones included, boot re-syncs only what
  * `system-packages/` holds — is deleted with its versions, dist tags, dependency rows,
  * `space_packages` rows and (through the deletion outbox, same transaction) its storage objects.
@@ -68,6 +72,15 @@
  * byte-identical archives (payload already present is identical bytes, zips are deterministic), so
  * re-running repairs it. The archives are overwritten in place, so only a storage snapshot undoes
  * a committed run.
+ *
+ * Collisions. The server's files, but `manifest.json`, are copied next to the integration's own. A
+ * path both hold with the SAME bytes is a note; with DIFFERENT bytes it is UNFOLDED: remove or rename
+ * the integration's own differing file (its draft files, or a new version for a published one), then
+ * re-run. The script never picks a side.
+ *
+ * Rehearsal record (README rule 4): UNMEASURED. Exercised on PGlite + filesystem storage only
+ * (`scripts/test/0054-fold-mcp-servers.test.ts`); no production dump has been replayed yet, so row
+ * counts, runtime and archive sizes on real data are unknown.
  */
 
 import { resolve } from "node:path";
@@ -80,7 +93,9 @@ import { compareVersionsDesc, matchVersion, resolveVersionString } from "@appstr
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
 import { downloadFile, uploadFile } from "@appstrate/db/storage";
 import { prefixedId } from "@appstrate/db/ids";
+import type { PackageType } from "@appstrate/core/validation";
 import {
+  CONFIG_BY_TYPE,
   PACKAGE_ITEMS_BUCKET,
   SYSTEM_STORAGE_NAMESPACE,
   packageItemKey,
@@ -99,6 +114,20 @@ import { table } from "./lib/report-table.ts";
 const serverDraftKey = (ownerNamespace: string, id: string) =>
   `${ownerNamespace}/mcp-servers/${id}.afps`;
 
+/** Permission-bearing columns (drizzle `0046`): `text[]` ones, then space-delimited `text` ones. */
+const ARRAY_GRANT_COLUMNS = [
+  ["api_keys", "scopes"],
+  ["oauth_clients", "scopes"],
+  ["oauth_consents", "scopes"],
+  ["oauth_refresh_tokens", "scopes"],
+  ["oauth_access_tokens", "scopes"],
+  ["space_roles", "permissions"],
+] as const;
+const DELIMITED_GRANT_COLUMNS = [
+  ["cli_refresh_tokens", "scope"],
+  ["device_codes", "scope"],
+] as const;
+
 class DryRunRollback extends Error {}
 
 /** Server versions exist but no server archive is readable: the storage read is the wrong one. */
@@ -115,7 +144,7 @@ const encoder = new TextEncoder();
 const isObject = (v: unknown): v is Json => !!v && typeof v === "object" && !Array.isArray(v);
 const clone = <T>(v: T): T => structuredClone(v);
 
-export interface FoldedManifest {
+interface FoldedManifest {
   manifest: Json;
   /** Informational: something dropped or skipped on purpose. */
   notes: string[];
@@ -124,7 +153,7 @@ export interface FoldedManifest {
 }
 
 /** The `source.server` reference of the retired shape: `{ name, version, vendored? }`. */
-export function oldServerRef(manifest: unknown): { name: string; version: string } | null {
+function oldServerRef(manifest: unknown): { name: string; version: string } | null {
   if (!isObject(manifest) || !isObject(manifest.source)) return null;
   const source = manifest.source;
   if (source.kind !== "local" || !isObject(source.server)) return null;
@@ -138,11 +167,6 @@ function hasMcpServersDependency(manifest: unknown): boolean {
   return (
     isObject(manifest) && isObject(manifest.dependencies) && "mcp_servers" in manifest.dependencies
   );
-}
-
-/** Drop `dependencies.mcp_servers` from a manifest copy. */
-function stripMcpServersDependency(manifest: Json): void {
-  if (isObject(manifest.dependencies)) delete manifest.dependencies.mcp_servers;
 }
 
 /** Every `delivery.env` map of an integration's auths, with the auth's key. */
@@ -162,11 +186,10 @@ function deliveryEnvs(manifest: Json): Array<[auth: string, env: Json]> {
  * one. `server` is the referenced mcp-server's manifest (old shape: `server`, `tools`, `_meta`).
  */
 export function foldLocalIntegrationManifest(integration: Json, server: Json): FoldedManifest {
-  const manifest = clone(integration);
+  const manifest = stripMcpServers(integration);
   const notes: string[] = [];
   const unfolded: string[] = [];
   const pending: Array<[Json, string, Json]> = [];
-  stripMcpServersDependency(manifest);
 
   const serverBlock = isObject(server.server) ? clone(server.server) : {};
   const tools = Array.isArray(server.tools) ? clone(server.tools) : undefined;
@@ -242,9 +265,9 @@ export function foldLocalIntegrationManifest(integration: Json, server: Json): F
 }
 
 /** A manifest copy without `dependencies.mcp_servers`. */
-export function stripMcpServers(manifest: Json): Json {
+function stripMcpServers(manifest: Json): Json {
   const copy = clone(manifest);
-  stripMcpServersDependency(copy);
+  if (isObject(copy.dependencies)) delete copy.dependencies.mcp_servers;
   return copy;
 }
 
@@ -338,9 +361,10 @@ export interface McpServersFold {
   systemServersDeleted: number;
   dependencyRowsDeleted: number;
   storageObjectsQueued: number;
-  /** API keys and custom space roles that held an `mcp-servers:*` permission, now removed. */
-  apiKeysScrubbed: number;
-  spaceRolesScrubbed: number;
+  /** Rows that held an `mcp-servers:*` permission, now removed, by `<table>.<column>`. */
+  grantsScrubbed: Record<string, number>;
+  /** `package_shared` notifications of an `mcp-server` package, deleted. */
+  notificationsDeleted: number;
   /** System integration versions still on the retired shape (`<id>@<version>`) — deleted. */
   systemVersionsDeleted: string[];
   /** System packages whose `latest` tag pointed at a deleted version and was re-pointed. */
@@ -380,8 +404,8 @@ export async function runFoldMcpServers(options: {
     systemServersDeleted: 0,
     dependencyRowsDeleted: 0,
     storageObjectsQueued: 0,
-    apiKeysScrubbed: 0,
-    spaceRolesScrubbed: 0,
+    grantsScrubbed: {},
+    notificationsDeleted: 0,
     systemVersionsDeleted: [],
     latestRepointed: [],
   };
@@ -639,8 +663,8 @@ export async function runFoldMcpServers(options: {
       folds: false,
       manifest,
     };
-    if (row.type === "integration") {
-      // An integration stores `manifest.json` in its draft files too.
+    if (CONFIG_BY_TYPE[row.type as PackageType].manifestIsStoredFile) {
+      // A type that stores `manifest.json` in its draft files too.
       const key = packageItemKey("integrations", row.org_id, row.id);
       const own = await readZip(PACKAGE_ITEMS_BUCKET, key);
       if (own) write.upload = { bucket: PACKAGE_ITEMS_BUCKET, key, bytes: archive(own, manifest) };
@@ -723,10 +747,7 @@ export async function runFoldMcpServers(options: {
           await tx.execute(sql`SELECT package_id FROM package_dist_tags
             WHERE tag = 'latest' AND version_id IN (${ids})`),
         ).map((r) => r.package_id);
-        await tx.execute(sql`DELETE FROM package_dist_tags WHERE version_id IN (${ids})`);
-        await tx.execute(
-          sql`DELETE FROM package_version_dependencies WHERE version_id IN (${ids})`,
-        );
+        // Their dist tags and dependency rows go by ON DELETE CASCADE.
         await tx.execute(sql`DELETE FROM package_versions WHERE id IN (${ids})`);
         for (const r of staleSystem) {
           await tx.execute(sql`INSERT INTO storage_deletion_jobs (id, bucket, storage_key, reason)
@@ -764,30 +785,43 @@ export async function runFoldMcpServers(options: {
         ),
       );
       result.dependencyRowsDeleted = removedDeps.length;
-      await tx.execute(sql`DELETE FROM package_dist_tags WHERE package_id IN
-        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
-      await tx.execute(sql`DELETE FROM package_versions WHERE package_id IN
-        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
-      await tx.execute(sql`DELETE FROM space_packages WHERE package_id IN
-        (SELECT id FROM packages WHERE type::text = 'mcp-server')`);
+      // Their dist tags, versions (and those versions' dependency rows) and space_packages go by
+      // ON DELETE CASCADE.
       await tx.execute(sql`DELETE FROM packages WHERE type::text = 'mcp-server'`);
       result.serversDeleted = servers.length;
       result.systemServersDeleted = servers.filter((s) => s.orgId === null).length;
 
       // The `mcp-servers` permission resource is gone: a stored grant of it names nothing, and a
-      // custom role still holding one is refused on its next edit (`normalizePermissions`).
-      result.apiKeysScrubbed = toRows<{ id: string }>(
-        await tx.execute(sql`UPDATE api_keys
-          SET scopes = ARRAY(SELECT s FROM unnest(scopes) AS s WHERE s NOT LIKE 'mcp-servers:%')
-          WHERE EXISTS (SELECT 1 FROM unnest(scopes) AS s WHERE s LIKE 'mcp-servers:%')
-          RETURNING id`),
-      ).length;
-      result.spaceRolesScrubbed = toRows<{ id: string }>(
-        await tx.execute(sql`UPDATE space_roles
-          SET permissions = ARRAY(SELECT p FROM unnest(permissions) AS p
-            WHERE p NOT LIKE 'mcp-servers:%'), updated_at = now()
-          WHERE EXISTS (SELECT 1 FROM unnest(permissions) AS p WHERE p LIKE 'mcp-servers:%')
-          RETURNING id`),
+      // custom role still holding one is refused on its next edit (`normalizePermissions`). Columns
+      // as in drizzle `0046`: `text[]` ones, then the space-delimited `text` ones.
+      for (const [table, column] of ARRAY_GRANT_COLUMNS) {
+        const t = sql.identifier(table);
+        const c = sql.identifier(column);
+        const touched = sql.raw(table === "space_roles" ? ", updated_at = now()" : "");
+        result.grantsScrubbed[`${table}.${column}`] = toRows(
+          await tx.execute(sql`UPDATE ${t}
+            SET ${c} = ARRAY(SELECT s FROM unnest(${c}) AS s WHERE s NOT LIKE 'mcp-servers:%')${touched}
+            WHERE EXISTS (SELECT 1 FROM unnest(${c}) AS s WHERE s LIKE 'mcp-servers:%')
+            RETURNING 1`),
+        ).length;
+      }
+      for (const [table, column] of DELIMITED_GRANT_COLUMNS) {
+        const t = sql.identifier(table);
+        const c = sql.identifier(column);
+        result.grantsScrubbed[`${table}.${column}`] = toRows(
+          await tx.execute(sql`UPDATE ${t}
+            SET ${c} = (SELECT string_agg(tok, ' ' ORDER BY ord)
+              FROM regexp_split_to_table(${c}, '\\s+') WITH ORDINALITY AS x(tok, ord)
+              WHERE tok <> '' AND tok NOT LIKE 'mcp-servers:%')
+            WHERE ${c} IS NOT NULL AND EXISTS (
+              SELECT 1 FROM regexp_split_to_table(${c}, '\\s+') AS tok WHERE tok LIKE 'mcp-servers:%')
+            RETURNING 1`),
+        ).length;
+      }
+      result.notificationsDeleted = toRows(
+        await tx.execute(sql`DELETE FROM notifications
+          WHERE type = 'package_shared' AND payload ->> 'package_type' = 'mcp-server'
+          RETURNING 1`),
       ).length;
 
       // Nothing may still read the reference shape, nor any server row remain: roll back otherwise.
@@ -844,8 +878,11 @@ function report(result: McpServersFold, out: (line: string) => void): void {
     ["  of which system", String(result.systemServersDeleted)],
     ["mcp-server dependency rows deleted", String(result.dependencyRowsDeleted)],
     ["storage objects queued for deletion", String(result.storageObjectsQueued)],
-    ["api keys losing mcp-servers:* scopes", String(result.apiKeysScrubbed)],
-    ["custom space roles losing mcp-servers:* permissions", String(result.spaceRolesScrubbed)],
+    ...Object.entries(result.grantsScrubbed).map(([column, count]) => [
+      `${column} rows losing mcp-servers:*`,
+      String(count),
+    ]),
+    ["package_shared notifications of mcp-server deleted", String(result.notificationsDeleted)],
   ];
   for (const line of table(["what", "count"], rows)) out(line);
   for (const label of result.integrationsFolded) out(`  folded ${label}`);

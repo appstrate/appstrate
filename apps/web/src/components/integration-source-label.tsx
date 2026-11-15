@@ -39,12 +39,22 @@ export function IntegrationSourceLabel({
 
 /**
  * « indisponible ici »: this instance cannot run local servers. A focusable trigger, its
- * explanation also screen-reader text. Nothing when it can.
+ * explanation also screen-reader text; `inline` writes both out as a sentence (the editor, where
+ * there is room). Nothing when it can.
  */
-export function LocalUnavailableHint() {
+export function LocalUnavailableHint({ inline = false }: { inline?: boolean }) {
   const { t } = useTranslation("settings");
   const { localIntegrations } = useAppConfig().features;
   if (localIntegrations) return null;
+  if (inline) {
+    return (
+      <p className="text-muted-foreground -mt-3 text-sm" data-testid="local-unavailable-notice">
+        <span className="font-medium">{t("integrations.source.localUnavailable")}</span>
+        {" · "}
+        {t("integrations.source.localUnavailableHint")}
+      </p>
+    );
+  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>

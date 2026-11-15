@@ -121,7 +121,6 @@ describe("catalogueListAddress", () => {
 describe("catalogue addresses", () => {
   it("name a kind, and a view in the query", () => {
     expect(isCatalogueKind("integration")).toBe(true);
-    expect(isCatalogueKind("mcp-server")).toBe(false);
     expect(catalogueViewOf("")).toBe("discover");
     expect(catalogueViewOf("?q=radar")).toBe("discover");
     expect(catalogueViewOf("?view=spaces&q=radar")).toBe("spaces");

@@ -1459,25 +1459,6 @@ describe("Packages API", () => {
       expect(body).toContain("dependencies.integrations");
     });
 
-    it("rejects an update whose manifest declares dependencies.mcp_servers", async () => {
-      const agent = await seedAgent({
-        id: "@pkgorg/retired-dep-mcp-servers",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const res = await putManifestDependencies(
-        "@pkgorg/retired-dep-mcp-servers",
-        agent.lockVersion,
-        { mcp_servers: { "@pkgorg/old-server": "^1.0.0" } },
-      );
-
-      expect(res.status).toBe(400);
-      const body = JSON.stringify(await res.json());
-      expect(body).toContain("dependencies.mcp_servers");
-      expect(body).toContain("source.server");
-    });
-
     it("accepts the canonical dependency maps and an unrelated extension key", async () => {
       // Control: the rejects above are caused by the retired KEYS, not by the
       // mere presence of `dependencies`. `dependencies` stays a loose object

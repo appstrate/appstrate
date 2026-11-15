@@ -8,7 +8,7 @@ import { skillBody } from "../../lib/skill-frontmatter";
 import { SkeletonLine } from "../skeleton-line";
 
 /**
- * What a skill does here: its instructions, usage, files and tools. What it IS (description,
+ * What a skill does here: its instructions, usage and files. What it IS (description,
  * version, origin, manifest metadata) is the catalogue sheet's and the header's, not repeated here.
  */
 export function PackageOverview({

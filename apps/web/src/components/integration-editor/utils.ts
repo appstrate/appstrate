@@ -33,14 +33,17 @@ type RemoteTransport = "streamable-http" | "sse";
 
 /** AFPS `source.server.type`: how the integration's own MCP server is started. */
 export const LOCAL_SERVER_TYPES = ["node", "python", "binary", "uv"] as const;
-export type LocalServerType = (typeof LOCAL_SERVER_TYPES)[number];
 
 export interface SourceState {
   kind: SourceKind;
   remoteUrl: string;
   remoteTransport: RemoteTransport;
-  /** The local run declaration (`source.server`); `mcp_config.env` and `tools` are not surfaced here, only preserved. */
-  serverType: LocalServerType;
+  /**
+   * The local run declaration (`source.server`); `mcp_config.env` and `tools` are not surfaced here,
+   * only preserved. `serverType` is the stored string as is, a value this form does not list
+   * included: it is rewritten only when the user picks another.
+   */
+  serverType: string;
   entryPoint: string;
   command: string;
   args: string[];
@@ -56,7 +59,8 @@ export function getSource(manifest: Rec): SourceState {
     kind: kind === "local" || kind === "none" ? kind : "remote",
     remoteUrl: typeof remote.url === "string" ? remote.url : "",
     remoteTransport: remote.transport === "sse" ? "sse" : "streamable-http",
-    serverType: LOCAL_SERVER_TYPES.find((type) => type === server.type) ?? "node",
+    // A server not declared yet starts as node; a declared type is never second-guessed.
+    serverType: typeof server.type === "string" ? server.type : "node",
     entryPoint: typeof server.entry_point === "string" ? server.entry_point : "",
     command: typeof config.command === "string" ? config.command : "",
     args: asStringArray(config.args),

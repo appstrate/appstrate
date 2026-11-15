@@ -299,7 +299,8 @@ export interface IntegrationSpawnSpec {
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — no manifest/bytes version skew. Omitted for
        * system integrations — the byte route serves those from the in-memory
-       * boot registry by id alone — and for remote/serverless integrations.
+       * boot registry by id alone — for a run or connect on an unpublished draft (no frozen
+       * version exists; the bytes come from the draft) — and for remote/serverless integrations.
        */
       version?: string;
       /**

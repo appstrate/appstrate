@@ -119,8 +119,9 @@ export function listRuntimeBoundSystemIntegrationIds(): readonly string[] {
 /**
  * Test-only: install a registry and return the undo. `getTestApp()` skips
  * `boot()`, so the registry is empty under test and every boot-registry branch
- * (e.g. the integration-bundle byte route's system short-circuit — the one caller
- * allowed to omit `?version=`) is otherwise unreachable. Restoring matters:
+ * (e.g. the integration-bundle byte route's system short-circuit, one of the
+ * paths that serve without `?version=` beside a draft-frozen run and an unpublished connect
+ * grant) is otherwise unreachable. Restoring matters:
  * `bun test` runs the whole suite in one process, and a registry left populated
  * would flip `isSystemPackage()` for every file that runs after.
  */

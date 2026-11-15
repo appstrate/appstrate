@@ -131,30 +131,7 @@ describe("readIntegrationSource", () => {
         kind: "local",
         server: { type: "node", entry_point: "server/index.js" },
       }),
-    ).toEqual({ kind: "local", serverType: "node", entryPoint: "server/index.js", tools: [] });
-  });
-
-  it("reads the advisory tool catalog, first declaration of a name winning", () => {
-    const source = readIntegrationSource({
-      kind: "local",
-      server: {
-        type: "python",
-        entry_point: "server.py",
-        tools: [
-          { name: "list_repos", description: "first" },
-          { name: "list_repos", description: "second" },
-          { name: "whoami" },
-          { description: "nameless" },
-          "not an object",
-        ],
-      },
-    });
-    expect(source).toEqual({
-      kind: "local",
-      serverType: "python",
-      entryPoint: "server.py",
-      tools: [{ name: "list_repos", description: "first" }, { name: "whoami" }],
-    });
+    ).toEqual({ kind: "local", serverType: "node", entryPoint: "server/index.js" });
   });
 
   it("reads the remote branch", () => {

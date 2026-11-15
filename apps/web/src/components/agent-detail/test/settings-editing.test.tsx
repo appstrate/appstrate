@@ -130,15 +130,9 @@ describe("agent definition editing", () => {
 
 describe("skill definition editing", () => {
   const renderSkill = (detail: Versioned<OrgPackageItemDetail>) =>
-    render(
-      <PackageSettingsView
-        type="skill"
-        packageId={detail.id}
-        detail={detail}
-        versions={VERSIONS}
-      />,
-      { initialEntries: ["/skills/@acme/style?packageSettings=versions#settings"] },
-    );
+    render(<PackageSettingsView packageId={detail.id} detail={detail} versions={VERSIONS} />, {
+      initialEntries: ["/skills/@acme/style?packageSettings=versions#settings"],
+    });
 
   it("offers Identité to a home writer", () => {
     expect(

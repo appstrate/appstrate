@@ -8,9 +8,6 @@
   "integration.admin.creation.title": "Users allowed to create a connection",
   "integration.admin.usage.title": "Connection usage",
   "integration.structure.access": "Access type",
-  "integration.structure.hosting": "MCP server mode",
-  "integration.structure.local": "Local, executed by the Appstrate instance",
-  "integration.structure.remote": "Remote, accessed by URL",
   "integration.structure.url": "MCP server URL",
   "integration.structure.addresses": "Allowed API addresses",
   "integration.auth.resource": "Resource (RFC 8707)",
@@ -1234,7 +1231,6 @@
   "catalogue.sourceSystem": "Appstrate (system)",
   "catalogue.moreActions": "Actions for {{name}}",
   "catalogue.viewDetail": "View details",
-  "integrations.filter.source": "Source",
   "integrations.col.source": "Source",
   "integrations.source.none": "API",
   "integrations.source.remote": "Remote MCP",
@@ -1466,9 +1462,5 @@
   "models.form.subscriptionRequired": "Choose an organization subscription or “Personal key”.",
   "creation.fromUrl.title": "From an MCP URL",
   "creation.fromUrl.description": "Paste the address of an MCP server. Appstrate guides you through adding its tools.",
-  "integration.structure.localServer": "Local server",
-  "integration.structure.localTools": "Declared tools",
-  "integration.structure.localToolsList_one": "{{count}} tool: {{names}}",
-  "integration.structure.localToolsList_other": "{{count}} tools: {{names}}",
-  "integration.structure.localToolsNone": "No catalog declared"
+  "integration.structure.localServer": "Local server"
 }
