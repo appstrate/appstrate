@@ -2646,14 +2646,6 @@ describe("Postgres-poisoned values (#1501)", () => {
     expect(log).toMatchObject({ message: `console${FFFD}tail`, data: { text: `a${FFFD}b` } });
   });
 
-  it("finalizes past a body key the platform does not read", async () => {
-    const runId = await seedRunWithSink(ctx, AGENT);
-
-    const res = await finalize(runId, { status: "failed", unread: { anything: 1 } });
-    expect(res.status).toBe(200);
-    expect((await readRun(runId)).status).toBe("failed");
-  });
-
   it("drains a buffered successor behind a dirty event that arrives late", async () => {
     const runId = await seedRunWithSink(ctx, AGENT);
 

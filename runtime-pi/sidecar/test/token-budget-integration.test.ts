@@ -353,8 +353,8 @@ describe("token-aware spill — run-budget accounting", () => {
   });
 });
 
-describe("token-aware spill — env-var configuration via createApp", () => {
-  // `createApp` reads the env vars at boot; verify the wiring runs.
+describe("token-aware spill — env-var configuration via buildSidecarRuntimeDeps", () => {
+  // `buildSidecarRuntimeDeps` reads the env vars at boot; verify the wiring runs.
   // The actual TokenBudget constructor invariants are tested in
   // token-budget.test.ts.
 
@@ -393,7 +393,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       );
       const app = createTestApp({
         ...appDeps,
-        runtimeDeps,
+        blobStore: runtimeDeps.blobStore,
         mcpToolsProvider: () => host.buildTools(),
       });
       const res = await rpc(app, {
@@ -420,11 +420,11 @@ describe("token-aware spill — env-var configuration via createApp", () => {
     }
   });
 
-  it("createApp throws at boot when env vars are malformed", () => {
+  it("throws at boot when env vars are malformed", () => {
     const original = process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
     process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = "not-a-number";
     try {
-      expect(() => createTestApp(makeDeps())).toThrow(/positive integer/);
+      expect(() => buildSidecarRuntimeDeps(makeDeps())).toThrow(/positive integer/);
     } finally {
       if (original === undefined) delete process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
       else process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = original;

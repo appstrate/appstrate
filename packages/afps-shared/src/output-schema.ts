@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from "./plain-object.ts";
+
 /**
  * The output schema an agent manifest declares: `output.schema` when it is a
  * non-empty JSON object, `undefined` otherwise.
@@ -10,11 +12,7 @@
  * run's output against it at finalize.
  */
 export function readDeclaredOutputSchema(manifest: unknown): Record<string, unknown> | undefined {
-  if (!isPlainRecord(manifest) || !isPlainRecord(manifest.output)) return undefined;
+  if (!isPlainObject(manifest) || !isPlainObject(manifest.output)) return undefined;
   const schema = manifest.output.schema;
-  return isPlainRecord(schema) && Object.keys(schema).length > 0 ? schema : undefined;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return isPlainObject(schema) && Object.keys(schema).length > 0 ? schema : undefined;
 }

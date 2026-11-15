@@ -203,7 +203,7 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 **`docs/architecture/SIDECAR.md` owns this surface** — the tool list, the argument shapes, the auth token, the SSRF tiers and the `/llm/*` behaviour all live there, next to the retry and egress detail that only makes sense alongside them. Do not re-describe them here; a second copy drifts, and the copy that used to live here had. The shape, so you can recognise it:
 
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface, alongside `/health`, `GET /integrations/boot-report` and `ALL /llm/*`
-- Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus every tool of the run's integrations under `{ns}__{tool}` — `run_history` and `recall_memory` included, served by the `@appstrate/platform` system integration through the platform's run MCP server (`POST /internal/mcp`)
+- Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus every tool of the run's integrations under `{ns}__{tool}`, those of `@appstrate/platform` forwarded to the platform's run MCP server (`POST /internal/mcp`)
 - Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
 - Zero-knowledge enforcement: `runtime-pi/launcher.ts` hands `SIDECAR_URL`, `SIDECAR_AUTH_TOKEN` and the sink credentials to the entrypoint over stdin, never in its environment, and both processes are non-dumpable — withholding the URL removes the convenience, the token removes the capability
 
@@ -218,7 +218,6 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 - Single `package_persistence` table with `(actor_type, actor_id)` scope (`member` / `end_user` / `shared`) and orthogonal `(key, pinned)` attributes
 - Three quadrants: archive (key=null, pinned=false), pinned memo (key=null, pinned=true), pinned named slot (key=string, pinned=true)
 - Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are tools of the `@appstrate/platform` system integration, served by the run MCP server (`apps/api/src/services/run-tools-mcp.ts`), which writes at call time
-- Legacy `add-memory` / `set-checkpoint` system tools are retired; `runs.state` + `package_memories` are merged into `package_persistence`
 - The finalize body (`RunResult`) carries no memories or pinned slots; `pin("checkpoint", …)` also writes `runs.checkpoint` at call time
 
 ### AFPS bundle runtime — `@appstrate/afps-runtime`

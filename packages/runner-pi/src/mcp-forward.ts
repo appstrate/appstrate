@@ -7,8 +7,10 @@
  * `{ns}__api_call` bridge and the CLI's remote MCP tools.
  */
 
-import type { CallToolResult } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient, CallToolResult, Tool } from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "./pi-tool-result.ts";
+import { unsafeSchema, type ExtensionFactory } from "./pi-sdk.ts";
+import { spillResourcesToWorkspace } from "./resource-spill.ts";
 
 /**
  * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi
@@ -66,3 +68,84 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
  * console, in-memory test recorder, …).
  */
 export type RuntimeEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
+
+/** What one call sends: its arguments and how its result is finished, or an error it ends with. */
+export type McpToolCallPlan =
+  | {
+      args: Record<string, unknown>;
+      /** Default: resources spilled to the workspace, then {@link callToolResultToPi}. */
+      finish?: (result: CallToolResult, toolCallId: string) => Promise<PiToolResult>;
+    }
+  | { error: string };
+
+export interface McpToolForwardOptions {
+  mcp: Pick<AppstrateMcpClient, "callTool" | "readResource">;
+  /** The descriptor the model sees. */
+  tool: Tool;
+  /** The name called on the server. Default: `tool.name`. */
+  upstreamName?: string;
+  runId: string;
+  /** Workspace root resources spill under. */
+  workspace: string;
+  emit: RuntimeEventEmitter;
+  /** Adapts a call's arguments and result. Default: forwarded verbatim. */
+  plan?: (args: Record<string, unknown>) => Promise<McpToolCallPlan>;
+}
+
+/**
+ * A Pi tool forwarding each call to an MCP client, between `integration_tool.called` and
+ * `integration_tool.completed` events.
+ */
+export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFactory {
+  const { mcp, tool, runId, emit } = opts;
+  return (pi) => {
+    pi.registerTool({
+      name: tool.name,
+      label: tool.name,
+      description: tool.description ?? `Integration tool: ${tool.name}`,
+      parameters: unsafeSchema<Record<string, unknown>>(
+        (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+      ),
+      async execute(toolCallId, params, signal) {
+        const startedAt = Date.now();
+        const event = { runId, tool: tool.name, toolCallId };
+        emit({ type: "integration_tool.called", ...event, timestamp: startedAt });
+        const completed = (isError: boolean) =>
+          emit({
+            type: "integration_tool.completed",
+            ...event,
+            durationMs: Date.now() - startedAt,
+            isError,
+            timestamp: Date.now(),
+          });
+        const args = (params as Record<string, unknown>) ?? {};
+        const call = opts.plan ? await opts.plan(args) : { args };
+        if ("error" in call) {
+          completed(true);
+          return callToolResultToPi({
+            content: [{ type: "text", text: call.error }],
+            isError: true,
+          });
+        }
+        // Requesting progress makes the client's per-call timeout an idle one, restarted by each
+        // notification: a long call that reports progress is kept alive within Pi's `signal`.
+        const result = await mcp.callTool(
+          { name: opts.upstreamName ?? tool.name, arguments: call.args },
+          { ...(signal ? { signal } : {}), onProgress: () => {} },
+        );
+        completed(result.isError === true);
+        if (call.finish) return call.finish(result, toolCallId);
+        // Resources become workspace files before the adapter flattens them: embedded `resource`
+        // blocks, and `resource_link` blocks read through `resources/read`.
+        const spilled = await spillResourcesToWorkspace(result, {
+          workspace: opts.workspace,
+          toolCallId,
+          emit,
+          runId,
+          readResource: (uri) => mcp.readResource({ uri }),
+        });
+        return callToolResultToPi(spilled);
+      },
+    });
+  };
+}

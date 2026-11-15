@@ -86,6 +86,7 @@ import type {
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
+export const RUN_HISTORY_LIMIT_DEFAULT = 10;
 
 /**
  * The `@scope/name` a run's agent is known by, recovered for the case where the
@@ -1153,7 +1154,7 @@ export async function getRecentRuns(
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
-  const limit = options.limit ?? 10;
+  const limit = options.limit ?? RUN_HISTORY_LIMIT_DEFAULT;
   const fields = options.fields ?? ["checkpoint"];
 
   const conditions = [

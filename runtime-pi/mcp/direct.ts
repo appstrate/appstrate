@@ -21,10 +21,11 @@ import {
   readApiUploadSiblingKey,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
-import { unsafeSchema, type ExtensionFactory } from "../pi-sdk.ts";
+import type { ExtensionFactory } from "../pi-sdk.ts";
 import {
   callToolResultToPi,
-  spillResourcesToWorkspace,
+  mcpToolForwardFactory,
+  type McpToolCallPlan,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
 import { buildApiUploadToolFactory } from "./api-upload-extension.ts";
@@ -118,129 +119,83 @@ export async function buildMcpDirectFactories(
     // `fromFile` variant is advertised by the sidecar's own schema; here we
     // only resolve it. Detected by the `dev.appstrate/api-call` `_meta`
     // marker, not the tool name.
-    const apiCall = isApiCallTool(tool);
-    factories.push((pi) => {
-      pi.registerTool({
-        name: tool.name,
-        label: tool.name,
-        description: tool.description ?? `Integration tool: ${tool.name}`,
-        parameters: unsafeSchema<Record<string, unknown>>(
-          (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
-        ),
-        async execute(toolCallId, params, signal) {
-          const startedAt = Date.now();
-          opts.emit({
-            type: `integration_tool.called`,
-            runId: opts.runId,
-            tool: tool.name,
-            toolCallId,
-            timestamp: startedAt,
-          });
-          let args = (params as Record<string, unknown>) ?? {};
-          // `responseMode` is an agent-side convenience (the sidecar has no
-          // workspace): capture `toFile` and strip the field before
-          // forwarding, so the response shaper writes the body to that path.
-          let responseToFile: string | undefined;
-          if (apiCall && args.responseMode !== undefined) {
-            const rm = args.responseMode as { toFile?: unknown };
-            if (rm && typeof rm.toFile === "string") responseToFile = rm.toFile;
-            const { responseMode: _responseMode, ...rest } = args;
-            args = rest;
-          }
-          if (apiCall && args.body !== undefined) {
-            // Resolve `{ fromFile }` references to base64 wire form. A
-            // resolution failure (missing file, symlink, oversize) is a
-            // tool-level error the LLM can act on — not a run abort.
-            try {
-              args = {
-                ...args,
-                body: await resolveApiCallBody(args.body, { workspace: opts.workspace }),
-              };
-            } catch (err) {
-              if (err instanceof ApiCallBodyResolveError) {
-                opts.emit({
-                  type: `integration_tool.completed`,
-                  runId: opts.runId,
-                  tool: tool.name,
-                  toolCallId,
-                  durationMs: Date.now() - startedAt,
-                  isError: true,
-                  timestamp: Date.now(),
-                });
-                return callToolResultToPi({
-                  content: [{ type: "text" as const, text: err.message }],
-                  isError: true,
-                });
-              }
-              throw err;
-            }
-          }
-          // A tool reporting progress (relayed by the sidecar) is kept alive within
-          // Pi's `signal`; one reporting none keeps the hard per-call timeout.
-          const result = await opts.mcp.callTool(
-            { name: tool.name, arguments: args },
-            { ...(signal ? { signal } : {}), onProgress: () => {} },
-          );
-          opts.emit({
-            type: `integration_tool.completed`,
-            runId: opts.runId,
-            tool: tool.name,
-            toolCallId,
-            durationMs: Date.now() - startedAt,
-            isError: result.isError === true,
-            timestamp: Date.now(),
-          });
-          // api_call: surface the upstream HTTP status (otherwise dropped
-          // with `_meta`) and honour `responseMode.toFile` — writing the body
-          // to the agent-chosen workspace path and returning a file
-          // descriptor. With no `toFile`, large bodies still auto-spill to
-          // `resources/<file>` and the status line is prepended.
-          if (apiCall) {
-            let shaped: Awaited<ReturnType<typeof shapeApiCallResponse>>;
-            try {
-              shaped = await shapeApiCallResponse(result, {
-                workspace: opts.workspace,
-                ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
-                toolCallId,
-                runId: opts.runId,
-                emit: opts.emit,
-                readResource: (uri) => opts.mcp.readResource({ uri }),
-              });
-            } catch (err) {
-              // A bad responseMode.toFile path (escape/symlink) or a resource
-              // read failure is a tool-level error, not a run abort.
-              return callToolResultToPi({
-                content: [
-                  {
-                    type: "text" as const,
-                    text: `api_call: could not write response to ${JSON.stringify(responseToFile)}: ${err instanceof Error ? err.message : String(err)}`,
-                  },
-                ],
-                isError: true,
-              });
-            }
-            // Outside the try: an upstream `isError` result throws here (Pi's
-            // failure signal) and must not be re-worded as a write failure.
-            return callToolResultToPi(shaped as Parameters<typeof callToolResultToPi>[0]);
-          }
-          // Materialise MCP resources to workspace files before the adapter
-          // flattens them, keeping file bytes out of the LLM context:
-          //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),
-          //  - `resource_link` blocks fetched via `readResource` so the agent
-          //    reads the file instead of an unreadable `appstrate://` URI.
-          const spilled = await spillResourcesToWorkspace(result, {
-            workspace: opts.workspace,
-            toolCallId,
-            emit: opts.emit,
-            runId: opts.runId,
-            readResource: (uri) => opts.mcp.readResource({ uri }),
-          });
-          return callToolResultToPi(spilled);
-        },
-      });
-    });
+    factories.push(
+      mcpToolForwardFactory({
+        mcp: opts.mcp,
+        tool,
+        runId: opts.runId,
+        workspace: opts.workspace,
+        emit: opts.emit,
+        ...(isApiCallTool(tool) ? { plan: (args) => planApiCall(args, opts) } : {}),
+      }),
+    );
   }
   return factories;
+}
+
+/** An api_call's body resolved from the workspace, and its response shaped. */
+async function planApiCall(
+  params: Record<string, unknown>,
+  opts: BuildMcpDirectFactoriesOptions,
+): Promise<McpToolCallPlan> {
+  let args = params;
+  // `responseMode` is an agent-side convenience (the sidecar has no
+  // workspace): capture `toFile` and strip the field before
+  // forwarding, so the response shaper writes the body to that path.
+  let responseToFile: string | undefined;
+  if (args.responseMode !== undefined) {
+    const rm = args.responseMode as { toFile?: unknown };
+    if (rm && typeof rm.toFile === "string") responseToFile = rm.toFile;
+    const { responseMode: _responseMode, ...rest } = args;
+    args = rest;
+  }
+  if (args.body !== undefined) {
+    // Resolve `{ fromFile }` references to base64 wire form. A
+    // resolution failure (missing file, symlink, oversize) is a
+    // tool-level error the LLM can act on — not a run abort.
+    try {
+      args = { ...args, body: await resolveApiCallBody(args.body, { workspace: opts.workspace }) };
+    } catch (err) {
+      if (err instanceof ApiCallBodyResolveError) return { error: err.message };
+      throw err;
+    }
+  }
+  return {
+    args,
+    // Surface the upstream HTTP status (otherwise dropped with `_meta`) and
+    // honour `responseMode.toFile` — writing the body to the agent-chosen
+    // workspace path and returning a file descriptor. With no `toFile`, large
+    // bodies still auto-spill to `resources/<file>` and the status line is
+    // prepended.
+    finish: async (result, toolCallId) => {
+      let shaped: Awaited<ReturnType<typeof shapeApiCallResponse>>;
+      try {
+        shaped = await shapeApiCallResponse(result, {
+          workspace: opts.workspace,
+          ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
+          toolCallId,
+          runId: opts.runId,
+          emit: opts.emit,
+          readResource: (uri) => opts.mcp.readResource({ uri }),
+        });
+      } catch (err) {
+        // A bad responseMode.toFile path (escape/symlink) or a resource
+        // read failure is a tool-level error, not a run abort.
+        return callToolResultToPi({
+          content: [
+            {
+              type: "text" as const,
+              text: `api_call: could not write response to ${JSON.stringify(responseToFile)}: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        });
+      }
+      // Outside the try: an upstream `isError` result throws here (Pi's
+      // failure signal) and must not be re-worded as a write failure.
+      return callToolResultToPi(shaped as Parameters<typeof callToolResultToPi>[0]);
+    },
+  };
 }
 
 /**

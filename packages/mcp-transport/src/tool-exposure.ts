@@ -7,12 +7,58 @@
  * admitted, and the descriptor the model sees under the exposed `{namespace}__{tool}` name.
  */
 
+import { allocateMcpToolName } from "@appstrate/core/naming";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_TOOL_DESCRIPTION_BYTES,
   sanitiseTextField,
+  sanitiseToolDescriptor,
 } from "./sanitize.ts";
+
+/** Why an upstream tool is not exposed by {@link exposeTool}. */
+export type ToolExposureExclusion =
+  | "allowlist"
+  | "hidden_tools"
+  | "schema_too_large_after_sanitisation"
+  | "claimed"
+  | "name_collision";
+
+export interface ToolExposureOptions {
+  namespace: string;
+  allowlist: ReadonlySet<string> | null;
+  hidden: ReadonlySet<string> | null;
+  /** Whether an exposed name is held already. */
+  isTaken: (name: string) => boolean;
+  /** A first-party descriptor: kept verbatim, exposed as `{namespace}__{name}`. */
+  trusted?: boolean;
+  /** `true` takes an admitted tool over before it is named (`claimed`). */
+  claim?: (upstreamName: string) => boolean;
+}
+
+/**
+ * The descriptor the model sees for the upstream `tool`, or why it is not exposed: excluded by
+ * the selection, too large once sanitised, claimed by the caller, or left without a free name.
+ */
+export function exposeTool(
+  tool: Tool,
+  opts: ToolExposureOptions,
+): { descriptor: Tool } | { exclusion: ToolExposureExclusion } {
+  const excluded = toolExclusion(tool.name, opts.allowlist, opts.hidden);
+  if (excluded) return { exclusion: excluded };
+  const sanitised = opts.trusted ? tool : sanitiseToolDescriptor(tool);
+  if (!sanitised) return { exclusion: "schema_too_large_after_sanitisation" };
+  if (opts.claim?.(tool.name)) return { exclusion: "claimed" };
+  let name = `${opts.namespace}__${tool.name}`;
+  if (!opts.trusted) {
+    try {
+      name = allocateMcpToolName(opts.namespace, tool.name, opts.isTaken);
+    } catch {
+      return { exclusion: "name_collision" };
+    }
+  }
+  return { descriptor: exposedToolDescriptor(sanitised, opts.namespace, name) };
+}
 
 /**
  * Why the upstream tool `name` is not exposed: absent from the agent's selection (`allowlist`,
@@ -34,7 +80,7 @@ export function toolExclusion(
  * tool exposed under anything but `{namespace}__{upstream name}` leads its description with the
  * upstream name, so the model can match the tool against the server's own documentation.
  */
-export function exposedToolDescriptor(sanitised: Tool, namespace: string, name: string): Tool {
+function exposedToolDescriptor(sanitised: Tool, namespace: string, name: string): Tool {
   if (name === `${namespace}__${sanitised.name}`) return { ...sanitised, name };
   const upstreamName = JSON.stringify(
     sanitiseTextField(sanitised.name, MAX_PARAMETER_DESCRIPTION_BYTES),

@@ -768,9 +768,6 @@ async function safeReadBody(res: Response): Promise<unknown> {
  * apart on rendering.
  *
  * Lossy cases worth knowing:
- *   - `progress/log` rows have no event counterpart: the `log` tool of
- *     `@appstrate/platform` writes them when it is called, so they map to
- *     `null`.
  *   - `appstrate.metric` events leave no row — they're synthesized
  *     separately at end-of-run from `runs.tokenUsage` + `runs.cost`.
  *   - `note` / `pin` leave no `run_logs` row: the run MCP server writes
@@ -786,11 +783,12 @@ function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
   const timestamp = Number.isFinite(ts) ? ts : Date.now();
   const envelope = { timestamp, runId: log.runId };
 
-  // `progress/progress` — runner lifecycle breadcrumb or tool call.
+  // `progress/progress` — runner lifecycle breadcrumb or tool call;
+  // `progress/log` — a message of the `log` tool of `@appstrate/platform`.
   // The console sink's `appstrate.progress` branch handles both cases:
   // when `data.tool` is present it renders the cyan tool-call line +
   // args/result; otherwise it prints the message with a `→` glyph.
-  if (log.type === "progress" && log.event === "progress") {
+  if (log.type === "progress" && (log.event === "progress" || log.event === "log")) {
     const data = isPlainObject(log.data) ? (log.data as Record<string, unknown>) : undefined;
     return {
       ...envelope,

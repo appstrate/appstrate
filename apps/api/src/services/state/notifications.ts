@@ -2,6 +2,7 @@
 
 import { eq, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
   notifications,
@@ -129,11 +130,11 @@ export async function createAgentMessageNotifications(
   message: { title: string; message: string },
 ): Promise<number> {
   if (recipients.length === 0) return 0;
-  const payload: NotificationPayloads["agent_message"] = {
+  const payload: NotificationPayloads["agent_message"] = toPgSafe({
     packageId: run.packageId,
     title: message.title,
     message: message.message,
-  };
+  });
   const inserted = await db
     .insert(notifications)
     .values(

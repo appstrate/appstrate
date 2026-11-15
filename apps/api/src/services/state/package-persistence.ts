@@ -409,7 +409,8 @@ export async function recallMemories(
  * Append one archive memory (`pinned=false`) for a scope — the `note` tool's
  * write. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per `(package, space,
  * scope)` and trimmed to {@link MAX_MEMORY_CONTENT} characters. Returns
- * `false`, writing nothing, when the scope is full.
+ * `false`, writing nothing, when the scope is full. A per-scope advisory lock
+ * serialises the count and the insert, so parallel calls cannot pass the cap.
  */
 export async function addMemory(
   packageId: string,
@@ -420,35 +421,38 @@ export async function addMemory(
   runId: string,
 ): Promise<boolean> {
   const { actorType, actorId } = storageActor(scope);
-
-  const [row] = await db
-    .select({ count: count() })
-    .from(packagePersistence)
-    .where(
-      and(
-        eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.spaceId, spaceId),
-        isNull(packagePersistence.key),
-        buildScopeFilter(scope),
-      ),
-    );
-  if ((row?.count ?? 0) >= MAX_MEMORIES_PER_SCOPE) return false;
-
   // Sanitised after the trim: the slice can split a surrogate pair.
   const trimmed = toPgSafe(content.slice(0, MAX_MEMORY_CONTENT));
   assertValidContent(trimmed, "memory");
-  await db.insert(packagePersistence).values({
-    packageId,
-    spaceId,
-    orgId,
-    key: null,
-    pinned: false,
-    actorType,
-    actorId,
-    content: trimmed,
-    runId,
+
+  return db.transaction(async (tx) => {
+    const lockKey = `package-memories:${packageId}:${spaceId}:${actorType}:${actorId ?? ""}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+    const [row] = await tx
+      .select({ count: count() })
+      .from(packagePersistence)
+      .where(
+        and(
+          eq(packagePersistence.packageId, packageId),
+          eq(packagePersistence.spaceId, spaceId),
+          isNull(packagePersistence.key),
+          buildScopeFilter(scope),
+        ),
+      );
+    if ((row?.count ?? 0) >= MAX_MEMORIES_PER_SCOPE) return false;
+    await tx.insert(packagePersistence).values({
+      packageId,
+      spaceId,
+      orgId,
+      key: null,
+      pinned: false,
+      actorType,
+      actorId,
+      content: trimmed,
+      runId,
+    });
+    return true;
   });
-  return true;
 }
 
 /** Delete a single memory by id, scoped to (package, space). */

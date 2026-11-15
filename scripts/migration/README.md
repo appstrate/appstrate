@@ -177,9 +177,7 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 ```
 
 Exceptions: `0020` is a dry run unless given `-v apply=on` (see its header);
-`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints. `0053` is
-idempotent only when re-run at once: it also adds `@appstrate/platform` to an agent that does not
-declare it, which is a legitimate state once an author removes the dependency, so run it once.
+`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints.
 
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
@@ -1480,27 +1478,22 @@ the same reason, do not serve the previous release beside this one. It also read
 **Not a runbook.** `log`, `note`, `pin`, `recall_memory`, `run_history` and `notify` are tools of
 the `@appstrate/platform` system integration, `output` is injected from `output.schema` and
 `publish_file` is a harness tool; nothing reads `runtime_tools` (#2197, #2199). `0053` rewrites
-every stored agent manifest (`package_versions.manifest`, `packages.draft_manifest`) that carries
-`runtime_tools` or does not declare `@appstrate/platform`, in one transaction: it adds the
-dependency (`^1.0.0`), selects (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪ {`recall_memory`,
-`run_history`} under `integrations_configuration."@appstrate/platform".tools`, gives an agent whose
-`runtime_tools` selected `output` without a non-empty `output.schema` the open object schema an
-inline run receives (so it keeps its `output` tool; the schema requires nothing, so a run that
-never calls it still succeeds), and removes `runtime_tools`. A manifest whose shape it cannot merge
-into is listed and left. Published archives are not rewritten: a run of a published version and
-its bundle export both take the jsonb manifest of the version row (`resolveAgentRunVersion`,
-registry resolver, `withCatalogManifest`); the archive supplies the prompt and the other files.
+the stored agent manifests (`package_versions.manifest`, `packages.draft_manifest`) that carry
+`runtime_tools`, or that predate `--before` and do not declare `@appstrate/platform`: it declares
+the integration and keeps the tools each agent had. Its header is the authority on the rewrite,
+on why `--before` bounds only the missing-dependency arm, and on which timestamp each store is
+read by; a manifest it cannot merge into is listed and left, to fix by hand.
 
-In the window of the release that ships #2199, once no run is `running` (a container started
-before the deploy posts its notes, pins and logs in a finalize body the new release does not read),
-app stopped, `pg_dump` first: the dry run prints per table what it rewrites, how many of those gain
-the open `output.schema`, and the malformed manifests it leaves; `--apply` commits. It runs on
-PostgreSQL (`DATABASE_URL`) and on the embedded database (`PGLITE_DATA_DIR`, platform stopped). The
-API refuses to boot while a manifest still carries `runtime_tools` (`assertRuntimeToolsMigrated`,
-`apps/api/src/lib/boot.ts`, which counts with the script's own predicate), but the script also
-declares the integration on agents that never carried the field, which no guard can see: run it
-even when the platform boots. An immediate second run writes nothing; a later one re-adds the
-dependency to agents whose author removed it, so it is run once.
+Rehearse it on a restored production dump before the window: its counts are unmeasured. In the
+window of the release that ships #2199, once no run is `running` (a container started before the
+deploy posts its notes, pins and logs in a finalize body the new release does not read), app
+stopped, `pg_dump` first, after the migrations:
+`set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <deploy time, ISO 8601>`
+is the dry run; `--apply` commits. It exits 2 without `--before`, with one in the future, or with
+neither `DATABASE_URL` nor `PGLITE_DATA_DIR` set (an embedded database is named, the platform
+stopped). Per store it prints what it rewrites, how many of those gain the open `output.schema`,
+the malformed manifests it leaves, and how many still carry `runtime_tools` after the rewrite.
+A second run rewrites nothing it already rewrote.
 
 Rollback: none; the removed key is read by nothing, the added dependency only grants the tools the
 agent had, and the added schema only keeps the `output` tool it had.
@@ -1558,4 +1551,4 @@ agent had, and the added schema only keeps the `output` tool it had.
 | 0050 | not yet             | READ-ONLY report (#2043): the schedules, enabled or not, whose `connection_overrides` name `[]` or a strict subset of the set an admin pin (else an enforced org default) imposes on the integration — each binds the WHOLE imposed set after the deploy — with the override, the imposed set and the imposing layer — **run before deploying the release where an override can no longer narrow an imposed set**; nothing is rewritten, the schedule owner is told                                                                                                                                                                                                                          | read-only — prints the table and the enabled / disabled totals, or `0 schedules — nothing widens.`; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 0051 | not yet             | `is_default` cleared on the auto-provisioned (DCR) OAuth clients still flagged, which no flow or picker reads and which the platform's default bookkeeping no longer skips — **run in the beta.69 window, before the release serves traffic**                                                                                                                                                                                                                                                                                                                                                                                                                                                | dry run lists the rows and the count; `--apply` clears them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 0052 | not yet             | run read state copied from the run notifications into `run_reads` (drizzle `0103`), and the notifications of runs that did not fail or time out removed — **run once after the deploy; the app may keep running**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | prints copied / removed / named / remaining-without-read-state (must be 0); a second run prints 0 0 0 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0053 | not yet             | every stored agent manifest moved from `runtime_tools` to `@appstrate/platform` in one transaction (dependency added, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, an open `output.schema` for an agent that selected `output` without one, `runtime_tools` removed), malformed manifests listed and left — **run in the window of the release that ships #2199, once no run is `running`, app stopped**; `.ts`, dry run by default, `--apply` to write, PostgreSQL or PGlite                                                                                                                                                                                | prints, per store, rewritten / of which `output.schema` added / malformed and left; refuses to commit while a well-formed manifest still carries `runtime_tools`; an immediate second run rewrites 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0053 | not yet             | every stored agent manifest that carries `runtime_tools`, or predates `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, an open `output.schema` for an agent that selected `output` without one, `runtime_tools` removed), malformed manifests listed and left — **rehearse on a production dump first; run in the window of the release that ships #2199, once no run is `running`, app stopped**; `.ts`, `--before <deploy time>` required, dry run by default, `--apply` to write, PostgreSQL or PGlite                                         | prints, per store, rewritten / of which `output.schema` added / malformed and left / still carrying `runtime_tools`; a second run rewrites 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

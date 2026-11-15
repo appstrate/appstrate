@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { HttpSink } from "../../src/sinks/http-sink.ts";
+import { HttpSink, sinkSiblingUrl } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
 import type { RunEvent } from "@afps-spec/types";
 import type { TerminalRunResult } from "../../src/types/run-result.ts";
@@ -468,4 +468,18 @@ describe("HttpSink.abort", () => {
     expect(exitCode).toBe(0);
     expect(performance.now() - started).toBeLessThan(5_000);
   }, 15_000);
+});
+
+describe("sinkSiblingUrl", () => {
+  it("swaps the /events suffix for the endpoint", () => {
+    expect(sinkSiblingUrl("https://x.test/api/runs/run_1/events", "files")).toBe(
+      "https://x.test/api/runs/run_1/files",
+    );
+  });
+
+  it("throws on a URL that is not the events endpoint", () => {
+    expect(() => sinkSiblingUrl("https://x.test/api/runs/run_1/events/", "files")).toThrow(
+      "/events",
+    );
+  });
 });

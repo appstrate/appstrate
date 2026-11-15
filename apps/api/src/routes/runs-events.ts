@@ -510,14 +510,7 @@ export function createRunsEventsRouter() {
   router.post("/runs/:runId/mcp", verifyRunCallSignature, mcpLimiter, async (c) => {
     const run = c.get("run")!;
     if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
-    return serveRunMcp(c, {
-      runId: run.id,
-      orgId: run.orgId,
-      spaceId: run.spaceId,
-      packageId: run.packageId,
-      userId: run.userId,
-      endUserId: run.endUserId,
-    });
+    return serveRunMcp(c, run);
   });
   // The stateless server has no GET stream and no session to DELETE: every
   // other verb is a 405 with `Allow: POST`, as the Streamable HTTP transport

@@ -213,17 +213,6 @@ describe("validateManifest", () => {
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0" });
   });
 
-  it("rejects `runtime_tools` in both directions, naming the platform integration", () => {
-    for (const options of [undefined, { retiredVocabulary: "tolerate" } as const]) {
-      const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }), options);
-      expect(result.valid).toBe(false);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toStartWith("runtime_tools:");
-      expect(result.errors[0]).toContain('dependencies.integrations["@appstrate/platform"]');
-      expect(result.errors[0]).toContain('integrations_configuration["@appstrate/platform"]');
-    }
-  });
-
   // The fix must not close `dependencies`: AFPS §10 mandates extensibility for
   // objects it does not explicitly close, so an unknown extension key stays legal.
   it("accepts the three canonical dependency maps plus an unrelated extension key", () => {

@@ -14,7 +14,6 @@ import {
   Plug,
   SlidersHorizontal,
   Sparkles,
-  Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -74,7 +73,6 @@ const SETTINGS_GROUPS = [
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
       { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
-      { id: "tools", icon: Wrench, labelKey: "integrationEditor.tabTools" },
     ],
   },
 ] satisfies Array<{

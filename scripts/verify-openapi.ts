@@ -1845,8 +1845,9 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "PUT /api/mcp/o/{org}/s/{space}",
   "PATCH /api/mcp/o/{org}/s/{space}",
   "DELETE /api/mcp/o/{org}/s/{space}",
-  // The run MCP server's catch-all, on its two mounts: `router.all(…)` throws
-  // 405 for every verb but the documented POST and GET.
+  // The run MCP server's catch-all, on its two mounts: the spec documents POST
+  // and GET (whose only answer is 405), and `router.all(…)` throws 405 for
+  // every verb but POST.
   "PUT /api/runs/{runId}/mcp",
   "PATCH /api/runs/{runId}/mcp",
   "DELETE /api/runs/{runId}/mcp",

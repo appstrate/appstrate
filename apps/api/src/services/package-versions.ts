@@ -296,7 +296,7 @@ export async function getExactVersionManifest(
 }
 
 /** 3-step version resolution: exact → dist-tag → semver range. */
-export async function resolveVersion(
+async function resolveVersion(
   packageId: string,
   query: string,
   executor: DbOrTx = db,

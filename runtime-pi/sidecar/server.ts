@@ -205,10 +205,10 @@ const oauthTokenCache = new OAuthTokenCache({
 // take several seconds for a fresh node_modules tree). `/mcp` serves at
 // once; `GET /integrations/boot-report` awaits this promise, and the agent
 // reads that report before listing its tools.
-// Run-scoped runtime deps built ONCE and shared between the integration
-// boot pipeline (in-process `api_call` MCP server) and the HTTP `/mcp`
-// surface (`createApp`), so both read the same blob store — resource_link
-// spillover from api_call resolves via the outer server's resources/read.
+// Run-scoped runtime deps built ONCE for the integration boot pipeline
+// (in-process `api_call` MCP server); its blob store also goes to the HTTP
+// `/mcp` surface (`createApp`), so resource_link spillover from api_call
+// resolves via the outer server's resources/read.
 const runtimeDeps = buildSidecarRuntimeDeps({
   config,
   cookieJar,
@@ -278,7 +278,7 @@ const integrationBootPromise =
 const app = createApp({
   config,
   cookieJar,
-  runtimeDeps,
+  blobStore: runtimeDeps.blobStore,
   isReady: () => proxy.readySync,
   oauthTokenCache,
   mcpToolsProvider: () => integrationTools,

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { connectPlatformIntegration, RemoteMcpError } from "../integrations-boot.ts";
+import {
+  bootIntegrations,
+  connectPlatformIntegration,
+  RemoteMcpError,
+} from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { handlerFetch, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
@@ -115,5 +120,63 @@ describe("connectPlatformIntegration", () => {
       ),
     ).rejects.toThrow(/refusing https:\/\/elsewhere\.example\.com; the run token is not sent/);
     expect(sent).toBe(0);
+  });
+
+  it("follows no redirect, even to its own origin", async () => {
+    const hits: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        const { pathname } = new URL(request.url);
+        hits.push(pathname);
+        return pathname === "/internal/mcp"
+          ? new Response(null, { status: 302, headers: { location: "/moved/mcp" } })
+          : new Response(null, { status: 404 });
+      },
+    });
+    try {
+      await expect(
+        connectPlatformIntegration(
+          spec,
+          { platformApiUrl: `http://127.0.0.1:${server.port}`, runToken: "run-token" },
+          { connectDeadlineMs: 2_000 },
+        ),
+      ).rejects.toThrow();
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits.every((path) => path === "/internal/mcp")).toBe(true);
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("bootIntegrations — an integration bound to the runtime", () => {
+  it("connects it to {platformApiUrl}/internal/mcp", async () => {
+    const serve = handlerFetch(legacyMcpHandler({ tools: [log] }));
+    const urls: string[] = [];
+    const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = new Request(String(input), init);
+      urls.push(request.url);
+      return serve(request);
+    }) as typeof fetch;
+    const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
+    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
+    let result: Awaited<ReturnType<typeof bootIntegrations>> | undefined;
+    try {
+      result = await bootIntegrations([spec], {
+        platformApiUrl: PLATFORM_API_URL,
+        runToken: "run-token",
+        fetchFn,
+      });
+      expect(result.report.ok).toBe(true);
+      expect(result.tools.map((t) => t.descriptor.name)).toEqual(["appstrate_platform__log"]);
+      expect(urls.length).toBeGreaterThan(0);
+      expect(urls.every((url) => url === `${PLATFORM_API_URL}/internal/mcp`)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+      else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
+      await result?.shutdown();
+    }
   });
 });

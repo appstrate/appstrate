@@ -406,8 +406,7 @@ export type ValidateManifestResult =
       valid: false;
       errors: string[];
       /**
-       * The same failures, structured: `path` dotted, and `code` set on a rule that carries its
-       * own. Absent on a dispatcher-level failure
+       * The same failures, structured, with `path` dotted. Absent on a dispatcher-level failure
        * (unknown type, retired keys), which only `errors` states.
        */
       issues?: ManifestIssue[];
@@ -418,7 +417,6 @@ export type ValidateManifestResult =
 export interface ManifestIssue {
   path: string;
   message: string;
-  code?: string;
 }
 
 function parseWithSchema(
@@ -437,14 +435,10 @@ function parseWithSchema(
   // reserved `_meta` key already surfaces as a `safeParse` failure below.
   const result = schema.safeParse(raw);
   if (!result.success) {
-    const issues = result.error.issues.map((issue): ManifestIssue => {
-      const code = (issue as { params?: { code?: unknown } }).params?.code;
-      return {
-        path: issue.path.join("."),
-        message: issue.message,
-        ...(typeof code === "string" ? { code } : {}),
-      };
-    });
+    const issues = result.error.issues.map((issue): ManifestIssue => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
     const errors = issues.map((issue) => `${issue.path}: ${issue.message}`);
     return { valid: false, errors, issues };
   }
@@ -467,20 +461,8 @@ function parseWithSchema(
  *     archive is immutable — its integrity hash covers its bytes — so it could
  *     never be repaired. Surfacing it belongs to the install-warning channel,
  *     not to this validator.
- *
- * The retired agent field `runtime_tools` is outside this policy: it is
- * refused in both directions, because the agent had tools under it.
  */
 export type RetiredVocabularyPolicy = "reject" | "tolerate";
-
-/**
- * The retired agent field and the message naming its replacement, returned by
- * {@link validateManifest} whatever the direction.
- */
-const RETIRED_RUNTIME_TOOLS_ERROR =
-  'runtime_tools: `runtime_tools` is retired — declare `dependencies.integrations["@appstrate/platform"]` ' +
-  'and select its tools under `integrations_configuration["@appstrate/platform"].tools`. `output` is injected when ' +
-  "`output.schema` is declared and `publish_file` is always available, so neither is selected.";
 
 /** Options for {@link validateManifest}. */
 export interface ValidateManifestOptions {
@@ -520,10 +502,9 @@ export function validateManifest(
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // Retired vocabulary: reject and name the replacement — the `dependencies`
-  // keys on the author direction only (see {@link RetiredVocabularyPolicy} for
-  // why they still parse), `runtime_tools` in both. Checked before the type
-  // dispatch because every package type may declare `dependencies`.
+  // Retired `dependencies` keys: rejected with the replacement named, on the
+  // author direction only (see {@link RetiredVocabularyPolicy}). Checked before
+  // the type dispatch because every package type may declare `dependencies`.
   const errors =
     options?.retiredVocabulary === "tolerate"
       ? []
@@ -531,9 +512,6 @@ export function validateManifest(
           ({ key, replacement }) =>
             `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
         );
-  if (type === "agent" && Object.prototype.hasOwnProperty.call(obj, "runtime_tools")) {
-    errors.push(RETIRED_RUNTIME_TOOLS_ERROR);
-  }
   if (errors.length > 0) return { valid: false, errors };
 
   // AFPS (§3.4): mcp-server identity lives at the manifest root —

@@ -148,7 +148,7 @@ export async function resolveRegistryAgent(
   // Published path. `resolveExportVersion` handles both resolution shapes:
   // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
   // nothing resolves — let it bubble.
-  const version = await resolveExportVersion(packageId, spec ?? null);
+  const { version } = await resolveExportVersion(packageId, spec ?? null);
   const detail = await getVersionDetail(packageId, version, { forExecution: true });
   if (!detail) {
     throw new ApiError({

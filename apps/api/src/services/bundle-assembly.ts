@@ -26,10 +26,7 @@ import {
   assertIntegrationVersionsResolved,
   resolveRunIntegrationVersions,
 } from "./integration-service.ts";
-import { getVersionRow, resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
-import { db } from "@appstrate/db/client";
-import { packageVersions } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { getVersionRow, versionArtifactUnavailable } from "./package-versions.ts";
 import { ApiError, notFound } from "../lib/errors.ts";
 import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
 import type { LoadedPackage } from "../types/index.ts";
@@ -99,40 +96,19 @@ export async function buildBundleFromUploadedAfps(
  * same sentence; an export that answered anything else would hand the CLI
  * different bytes from the ones a server-side run of the same agent executes.
  *
- * Returns the resolved `version` string. Throws `notFound` if no version
- * exists for the package.
+ * Returns the resolved version and its catalog manifest. Throws `notFound` if
+ * no version exists for the package.
  */
 export async function resolveExportVersion(
   packageId: string,
   versionSpec?: string | null,
-): Promise<string> {
-  if (versionSpec) {
-    const versionId = await resolveVersion(packageId, versionSpec);
-    if (!versionId) {
-      throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
-    }
-    const [row] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, versionId))
-      .limit(1);
-    if (!row) throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
-    return row.version;
-  }
-
-  // Fall back to "latest"
-  const latestId = await resolveVersion(packageId, "latest");
-  if (latestId) {
-    const [row] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, latestId))
-      .limit(1);
-    if (row) return row.version;
-  }
-
+): Promise<{ version: string; manifest: Record<string, unknown> }> {
+  const row = await getVersionRow(packageId, versionSpec || "latest");
+  if (row) return row;
   throw notFound(
-    `No exportable version found for '${packageId}' — publish a version first, then retry`,
+    versionSpec
+      ? `Version '${versionSpec}' not found for '${packageId}'`
+      : `No exportable version found for '${packageId}' — publish a version first, then retry`,
   );
 }
 
@@ -142,8 +118,8 @@ export async function resolveExportVersion(
  * The root's MANIFEST is the version's catalog row (`package_versions.manifest`),
  * the one a server-side run of that version executes (`resolveAgentRunVersion`);
  * its other files come from the version's AFPS ZIP, extracted by the same
- * primitive as ingestion (`extractRootFromAfps`). One selector cannot mean two
- * sets of bytes depending on which door asked. Members are assembled via
+ * primitive as ingestion (`extractRootFromAfps`), so the export hands the CLI the
+ * manifest a run of that version executes. Members are assembled via
  * {@link buildExportBundle}; the result serialises via
  * {@link writeBundleToBuffer}, which recomputes every RECORD and integrity.
  */
@@ -152,12 +128,10 @@ export async function buildBundleForAgentExport(
   scope: BundleAssemblyScope,
   opts: { versionSpec?: string | null; metadata?: BundleMetadata } = {},
 ): Promise<Bundle> {
-  const version = await resolveExportVersion(packageId, opts.versionSpec);
-  const row = await getVersionRow(packageId, version);
-  if (!row) throw notFound(`Version '${version}' not found for '${packageId}'`);
+  const { version, manifest } = await resolveExportVersion(packageId, opts.versionSpec);
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) throw versionArtifactUnavailable(packageId, version);
-  const root = withCatalogManifest(extractRootFromAfps(new Uint8Array(zip)), row.manifest);
+  const root = withCatalogManifest(extractRootFromAfps(new Uint8Array(zip)), manifest);
   return buildExportBundle(root, scope, opts.metadata);
 }
 

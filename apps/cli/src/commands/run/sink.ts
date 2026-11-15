@@ -266,7 +266,7 @@ function createHumanSink(
           return;
         }
         default: {
-          // Third-party event types stay quiet by default —
+          // Other event types stay quiet by default —
           // JSONL mode exposes them fully.
           return;
         }

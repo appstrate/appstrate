@@ -1112,10 +1112,7 @@ program
     "--run-id <id>",
     "Explicit run id (default: generated). In remote mode this is forwarded as the trigger's Idempotency-Key — re-running with the same value replays the original response instead of creating a duplicate run.",
   )
-  .option(
-    "--output <path>",
-    "Write the final RunResult JSON to this path. Note: in remote mode the `logs` field is emitted as an empty default — the dashboard remains the source of truth for those surfaces.",
-  )
+  .option("--output <path>", "Write the final RunResult JSON to this path.")
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",

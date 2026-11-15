@@ -174,9 +174,8 @@ import { parsePathMessages } from "../lib/field-errors.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 /**
- * The 400 items of an invalid manifest: one per structured issue, carrying the rule's own code
- * when it has one, else `invalid_manifest`. A dispatcher-level failure
- * comes as strings only.
+ * The 400 items of an invalid manifest, each coded `invalid_manifest`: one per structured
+ * issue. A dispatcher-level failure comes as strings only.
  */
 function manifestErrorsToFieldErrors(result: {
   errors: string[];
@@ -191,7 +190,7 @@ function manifestErrorsToFieldErrors(result: {
   }
   return result.issues.map((issue) => ({
     field: issue.path ? `manifest.${issue.path}` : "manifest",
-    code: issue.code ?? "invalid_manifest",
+    code: "invalid_manifest",
     title: "Invalid Manifest",
     message: issue.message,
   }));

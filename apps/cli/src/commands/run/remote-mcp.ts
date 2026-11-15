@@ -9,8 +9,8 @@
  * (`integrations_configuration.<id>.tools`, else `default_tools`) and `hidden_tools` applied to
  * the upstream names, then one Pi tool per admitted tool, named `{ns}__{tool}` exactly as the
  * platform sidecar's McpHost names it, in one allocation with the run's `api_call` tools.
- * Admission and descriptors follow the platform's rules (`toolExclusion`,
- * `sanitiseToolDescriptor`, `exposedToolDescriptor`) before they reach the model.
+ * Admission and descriptors follow the platform's rules (`exposeTool`) before they reach the
+ * model; each tool spills its resources to the run's workspace and reports its calls as events.
  *
  * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
  * takes the same path with another target: the run's MCP server on the instance the run reports
@@ -42,7 +42,6 @@ import { renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import {
-  allocateMcpToolName,
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
@@ -55,13 +54,17 @@ import {
 } from "@appstrate/core/integration";
 import {
   createMcpHttpClient,
-  exposedToolDescriptor,
-  sanitiseToolDescriptor,
-  toolExclusion,
+  exposeTool,
+  mcpFetch,
   type AppstrateMcpClient,
   type Tool,
 } from "@appstrate/mcp-transport";
-import { callToolResultToPi, unsafeSchema, type ExtensionFactory } from "@appstrate/runner-pi";
+import {
+  mcpToolForwardFactory,
+  type ExtensionFactory,
+  type RuntimeEventEmitter,
+} from "@appstrate/runner-pi";
+import { CLI_VERSION } from "../../lib/version.ts";
 
 export interface RemoteMcpExtensions {
   factories: ExtensionFactory[];
@@ -88,6 +91,11 @@ interface BuildRemoteMcpExtensionsOptions {
    * they nor their namespaces are given to a remote integration's tool.
    */
   takenToolNames?: ReadonlySet<string>;
+  runId: string;
+  /** Workspace root the tools' resources spill under. */
+  workspace: string;
+  /** Receives each tool call's `integration_tool.*` and `resource.spilled` events. */
+  emit: RuntimeEventEmitter;
   /** Aborts the connections in flight (the CLI's shutdown signal). */
   signal?: AbortSignal;
   /** DNS resolver of the egress guard. Production omits it. */
@@ -96,7 +104,7 @@ interface BuildRemoteMcpExtensionsOptions {
   startupTimeoutMs?: number;
 }
 
-const CLIENT_INFO = { name: "appstrate-cli-remote-integration", version: "0.1.0" };
+const CLIENT_INFO = { name: "appstrate-cli-remote-integration", version: CLI_VERSION };
 
 /**
  * Bound on the connection and `tools/list` of one integration: integrations connect concurrently
@@ -143,23 +151,25 @@ export async function buildRemoteMcpExtensions(
     }
     const { ref, target, client, tools } = outcome;
     const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
-    const admitted = tools.filter(
-      (tool) => toolExclusion(tool.name, target.allowlist, target.hidden) === null,
-    );
     const before = factories.length;
-    for (const tool of admitted) {
-      const sanitised = sanitiseToolDescriptor(tool);
-      if (!sanitised) continue;
-      let name: string;
-      try {
-        name = allocateMcpToolName(namespace, tool.name, (candidate) => toolNames.has(candidate));
-      } catch {
-        // An unresolvable collision costs that one tool, as on the platform.
-        continue;
-      }
-      toolNames.add(name);
+    for (const tool of tools) {
+      const exposure = exposeTool(tool, {
+        namespace,
+        allowlist: target.allowlist,
+        hidden: target.hidden,
+        isTaken: (name) => toolNames.has(name),
+      });
+      if ("exclusion" in exposure) continue;
+      toolNames.add(exposure.descriptor.name);
       factories.push(
-        remoteToolExtension(client, tool.name, exposedToolDescriptor(sanitised, namespace, name)),
+        mcpToolForwardFactory({
+          mcp: client,
+          tool: exposure.descriptor,
+          upstreamName: tool.name,
+          runId: opts.runId,
+          workspace: opts.workspace,
+          emit: opts.emit,
+        }),
       );
     }
     if (factories.length === before) {
@@ -267,27 +277,19 @@ async function connectAndList(
   opts: BuildRemoteMcpExtensionsOptions,
 ): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | { reason: string }> {
   const declaredHost = new URL(url).hostname;
-  const guardedFetch: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      // The MCP client calls `fetch(url, init)`: a `Request` would carry a method, body and
-      // headers this wrapper does not read.
-      if (input instanceof Request) {
-        throw new TypeError("remote MCP fetch takes a URL, not a Request");
-      }
-      const { response } = await guardedFetchChain(
-        input,
-        signRequest ? signed(init, signRequest) : init,
-        {
-          allowHost: (host) => host === declaredHost,
-          // A redirect to another origin is sent no signature.
-          sensitiveHeaders: SIGNATURE_HEADERS,
-          ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
-        },
-      );
-      return response;
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const guardedFetch = mcpFetch(async (input, init) => {
+    const { response } = await guardedFetchChain(
+      input,
+      signRequest ? signed(init, signRequest) : init,
+      {
+        allowHost: (host) => host === declaredHost,
+        // A redirect to another origin is sent no signature.
+        sensitiveHeaders: SIGNATURE_HEADERS,
+        ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
+      },
+    );
+    return response;
+  });
   const deadline = AbortSignal.timeout(opts.startupTimeoutMs ?? REMOTE_MCP_STARTUP_TIMEOUT_MS);
   const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
   let client: AppstrateMcpClient;
@@ -326,32 +328,4 @@ function signed(init: RequestInit | undefined, signRequest: RequestSigner): Requ
   const headers = new Headers(init?.headers);
   for (const [name, value] of Object.entries(signRequest(body))) headers.set(name, value);
   return { ...init, headers };
-}
-
-/** A Pi tool forwarding every call verbatim to `upstreamName` on the integration's server. */
-function remoteToolExtension(
-  client: AppstrateMcpClient,
-  upstreamName: string,
-  descriptor: Tool,
-): ExtensionFactory {
-  return (pi) => {
-    pi.registerTool({
-      name: descriptor.name,
-      label: descriptor.name,
-      description: descriptor.description ?? `Integration tool: ${descriptor.name}`,
-      parameters: unsafeSchema<Record<string, unknown>>(
-        (descriptor.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
-      ),
-      async execute(_toolCallId, params, signal) {
-        // Requesting progress makes the client's per-call timeout an idle one, restarted by
-        // each notification (and capped in total): a long call that reports progress is not
-        // cut. Nothing else reads the notifications.
-        const result = await client.callTool(
-          { name: upstreamName, arguments: (params as Record<string, unknown>) ?? {} },
-          { ...(signal ? { signal } : {}), onProgress: () => {} },
-        );
-        return callToolResultToPi(result);
-      },
-    });
-  };
 }

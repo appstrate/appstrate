@@ -68,7 +68,9 @@ describe("LogEntryInspector — a platform tool's result", () => {
   });
 
   it("keeps any other tool's result as JSON", () => {
-    const html = render(<LogEntryInspector entry={recall("recall_memory")} onClose={() => {}} />);
+    const html = render(
+      <LogEntryInspector entry={recall("acme_docs__search")} onClose={() => {}} />,
+    );
     expect(html).not.toContain(agentsFr["log.recalledNone"]);
   });
 });

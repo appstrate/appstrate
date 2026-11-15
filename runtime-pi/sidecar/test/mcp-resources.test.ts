@@ -61,7 +61,7 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
   );
   return createTestApp({
     ...appDeps,
-    runtimeDeps,
+    blobStore: runtimeDeps.blobStore,
     mcpToolsProvider: () => host.buildTools(),
   });
 }
@@ -492,7 +492,7 @@ describe("POST /mcp — api_call response body survives (no outputSchema / no st
 
 describe("POST /mcp — resources/list + resources/read", () => {
   it("returns an empty resources/list initially", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, { method: "resources/list" });
     const result = res.json.result as { resources: unknown[] };
     expect(result.resources).toEqual([]);
@@ -575,7 +575,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
   });
 
   it("rejects reads for unknown URIs with InvalidParams", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, {
       method: "resources/read",
       params: { uri: "appstrate://tool-output/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
@@ -586,7 +586,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
   });
 
   it("rejects reads for cross-run URIs (security invariant)", async () => {
-    const app = createTestApp(makeDeps()); // runId = run-test
+    const app = await makeResourcesApp(); // runId = run-test
     const res = await rpc(app, {
       method: "resources/read",
       params: { uri: "appstrate://tool-output/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
@@ -596,7 +596,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
   });
 
   it("rejects reads for malformed URIs", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, {
       method: "resources/read",
       params: { uri: "file:///etc/passwd" },

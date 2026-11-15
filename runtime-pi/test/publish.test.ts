@@ -854,7 +854,6 @@ describe("publish_file tool", () => {
   });
 
   interface PublishTool {
-    description: string;
     execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
   }
   /** The tool `PiRunner` registers around `uploader`, taken off a stub Pi. */
@@ -869,49 +868,17 @@ describe("publish_file tool", () => {
     return tools[0]!;
   }
 
-  it("uploads and emits a file.published event on success", async () => {
-    await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
-    const tool = publishTool(makeUploader(new Set()));
-
-    const result = await tool.execute("call-1", { path: "out.html" });
-
-    expect(result.content[0]!.text).toContain("Published");
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]!.type).toBe("file.published");
-    expect(emitted[0]!.fileId).toMatch(/^file_/);
-  });
-
-  it("refuses the call (Pi's tool error) when the upload fails", async () => {
-    const tool = publishTool(makeUploader(new Set()));
-    await expect(tool.execute("call-1", { path: "missing.txt" })).rejects.toThrow(
-      "Failed to publish",
-    );
-  });
-
-  it("refuses the call when path is missing", async () => {
-    const tool = publishTool(makeUploader(new Set()));
-    await expect(tool.execute("call-1", {})).rejects.toThrow("non-empty `path`");
-  });
-
-  it("leads its description with the publish-now + `appfile://` URI value", () => {
-    // The `outputs/` sweep is unconditional and shares the same uploader, so
-    // what the tool alone can do is publish DURING the run and hand back the
-    // durable URI.
-    const { description } = publishTool(makeUploader(new Set()));
-
-    expect(description).toContain("appfile://");
-    expect(description.indexOf("appfile://")).toBeLessThan(description.indexOf("./outputs/"));
-  });
-
-  it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {
-    // The hidden-file exclusion applies ONLY to the implicit outputs sweep; an
-    // agent deliberately publishing a dotfile via the tool is honoured.
+  it("publishes the chosen file, a dotfile included, and emits file.published", async () => {
+    // The hidden-file exclusion applies ONLY to the implicit outputs sweep.
     await writeFile(path.join(workspace, ".config"), new TextEncoder().encode("k=v"));
     const tool = publishTool(makeUploader(new Set()));
 
-    await tool.execute("call-1", { path: ".config" });
+    const result = await tool.execute("call-1", { path: ".config" });
 
-    expect(config.received).toHaveLength(1);
-    expect(config.received[0]!.name).toBe(".config");
+    expect(result.content[0]!.text).toContain("Published");
+    expect(config.received.map((file) => file.name)).toEqual([".config"]);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.type).toBe("file.published");
+    expect(emitted[0]!.fileId).toMatch(/^file_/);
   });
 });

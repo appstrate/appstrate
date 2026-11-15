@@ -229,14 +229,7 @@ export function createInternalRouter() {
   // stateless server has no GET stream and no session.
   router.post("/mcp", async (c) => {
     const { runId, run } = await verifyRunToken(c);
-    return serveRunMcp(c, {
-      runId,
-      orgId: run.orgId,
-      spaceId: run.spaceId,
-      packageId: run.packageId,
-      userId: run.userId,
-      endUserId: run.endUserId,
-    });
+    return serveRunMcp(c, { ...run, id: runId });
   });
   router.all("/mcp", () => {
     throw methodNotAllowed(["POST"]);

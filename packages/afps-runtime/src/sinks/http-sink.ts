@@ -228,7 +228,8 @@ export class HttpSink implements EventSink {
  * same run-secret signature: `…/api/runs/{id}/events` → `…/api/runs/{id}/{endpoint}`.
  */
 export function sinkSiblingUrl(sinkUrl: string, endpoint: string): string {
-  return sinkUrl.replace(/\/events$/, `/${endpoint}`);
+  if (!sinkUrl.endsWith("/events")) throw new Error(`sink URL does not end in /events: ${sinkUrl}`);
+  return `${sinkUrl.slice(0, -"events".length)}${endpoint}`;
 }
 
 class NonRetryableHttpError extends Error {

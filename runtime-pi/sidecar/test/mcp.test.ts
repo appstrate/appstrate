@@ -175,15 +175,23 @@ describe("POST /mcp — tools/list", () => {
     expect(result.tools.map((t) => t.name)).toEqual(["echo"]);
   });
 
-  it("serves no tools, rather than failing, when a descriptor is malformed", async () => {
+  // A 500 fails the agent's boot: it never runs without the tools it was given.
+  it("fails, rather than serving no tools, when a descriptor is malformed", async () => {
     const malformed: AppstrateToolDefinition = {
       ...echoTool,
       descriptor: { name: "not a valid name!", inputSchema: { type: "object" } },
     };
     const app = createTestApp(makeDeps({ mcpToolsProvider: () => [echoTool, malformed] }));
-    const res = await rpc(app, { method: "tools/list" });
-    expect(res.status).toBe(200);
-    expect((res.json.result as { tools: unknown[] }).tools).toEqual([]);
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Host: "localhost",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(res.status).toBe(500);
   });
 });
 
@@ -483,7 +491,7 @@ describe("POST /mcp — api_call", () => {
     );
     return createTestApp({
       ...appDeps,
-      runtimeDeps,
+      blobStore: runtimeDeps.blobStore,
       mcpToolsProvider: () => host.buildTools(),
     });
   }

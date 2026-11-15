@@ -218,12 +218,12 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
       ...dependencies,
       integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE },
     };
-  }
-  if (configuration && !names(integrations) && !names(configuration)) {
-    materialized.integrations_configuration = {
-      ...configuration,
-      [PLATFORM_INTEGRATION_ID]: { tools: ["log"] },
-    };
+    if (configuration && !names(configuration)) {
+      materialized.integrations_configuration = {
+        ...configuration,
+        [PLATFORM_INTEGRATION_ID]: { tools: ["log"] },
+      };
+    }
   }
 
   return { manifest: materialized };

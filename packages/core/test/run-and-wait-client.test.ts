@@ -788,21 +788,20 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  it("kind:inline leaves a non-object dependencies value for validation to refuse", async () => {
-    const { fetchImpl, captured } = captureLaunch();
+  it("kind:inline leaves a non-object dependencies value as written, for validation to refuse", async () => {
+    for (const dependencies of ["^1.0.0", { integrations: [] }]) {
+      const { fetchImpl, captured } = captureLaunch();
 
-    await launchRunAndWait(
-      {
-        kind: "inline",
-        manifest: { display_name: "Malformé", dependencies: { integrations: [] } },
-        prompt: "do it",
-      },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
+      await launchRunAndWait(
+        { kind: "inline", manifest: { display_name: "Malformé", dependencies }, prompt: "do it" },
+        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      );
 
-    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
-      ?.manifest;
-    expect(manifest?.dependencies).toEqual({ integrations: [] });
+      const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+        ?.manifest;
+      expect(manifest?.dependencies).toEqual(dependencies);
+      expect(manifest).not.toHaveProperty("integrations_configuration");
+    }
   });
 
   it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {

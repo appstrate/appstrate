@@ -136,6 +136,23 @@ describe("NotificationContent", () => {
     expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
   });
 
+  it("titles an `agent_message` row without a payload by its agent's label", () => {
+    const html = renderList([
+      {
+        id: "n8",
+        type: "agent_message",
+        runId: "run_5",
+        payload: null,
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    const label = i18n.t("runs.deletedAgent", { ns: "agents" });
+    // The title, then the sender line.
+    expect(html.split(label)).toHaveLength(3);
+  });
+
   // Notifications follow the session's ceiling: a caller can hold a share of a
   // package whose sheet would refuse them.
   it("links nowhere the caller cannot reach", () => {

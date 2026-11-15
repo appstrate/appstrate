@@ -82,7 +82,7 @@ async function makeMultipartApp(overrides?: Partial<AppDeps>) {
   );
   return createTestApp({
     ...appDeps,
-    runtimeDeps,
+    blobStore: runtimeDeps.blobStore,
     mcpToolsProvider: () => host.buildTools(),
   });
 }

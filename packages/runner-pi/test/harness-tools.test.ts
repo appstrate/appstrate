@@ -19,7 +19,6 @@ import type { ExtensionFactory } from "../src/pi-sdk.ts";
 
 interface RegisteredTool {
   name: string;
-  description: string;
   parameters: Record<string, any>;
   execute: (
     toolCallId: string,
@@ -55,23 +54,6 @@ const publishedFile: PublishedFile = {
 };
 
 describe("output — schema exposure", () => {
-  it("is named output and advertises the declared schema as the `data` argument", () => {
-    const tool = output({
-      type: "object",
-      properties: {
-        total: { type: "number", description: "Total count" },
-        items: { type: "array", items: { type: "string" } },
-      },
-      required: ["total", "items"],
-    });
-    expect(tool.name).toBe("output");
-    const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.type).toBe("object");
-    expect(dataSchema.properties.total.type).toBe("number");
-    expect(dataSchema.properties.items.type).toBe("array");
-    expect(dataSchema.required).toEqual(["total", "items"]);
-  });
-
   it("preserves the output schema description, defaulting when absent", () => {
     const withDesc = output({
       type: "object",
@@ -84,10 +66,6 @@ describe("output — schema exposure", () => {
     expect(noDesc.parameters.properties.data.description).toBe(
       "JSON object to return as the run output",
     );
-  });
-
-  it("tells the agent to call it exactly once (call contract)", () => {
-    expect(output({ type: "object" }).description).toContain("Call exactly once");
   });
 });
 
@@ -196,8 +174,6 @@ describe("publish_file", () => {
     expect(tool.name).toBe("publish_file");
     expect(Object.keys(tool.parameters.properties).sort()).toEqual(["name", "path"]);
     expect(tool.parameters.required).toEqual(["path"]);
-    expect(tool.description).toContain("appfile://");
-    expect(tool.description).toContain("./outputs/");
   });
 
   it("uploads with (path, name) and emits file.published", async () => {

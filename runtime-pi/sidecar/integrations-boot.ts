@@ -47,6 +47,7 @@ import {
   createInProcessPair,
   createMcpHttpClient,
   httpStatusOf,
+  mcpFetch,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -634,107 +635,95 @@ export async function connectRemoteHttpIntegration(
   const handshakeRejectable =
     credential !== null && spec.connectLogin?.authKey !== credential.authKey;
 
-  // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
-  // call signature. The MCP transport's `fetch?: typeof fetch` option demands
-  // the full shape, so forward the real `preconnect` rather than casting it
-  // away — the override stays a faithful drop-in for `fetch`.
-  const customFetch: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const send = async (): Promise<{
-        response: Response;
-        credentialAnswered: boolean;
-        credentialRevision: string | undefined;
-      }> => {
-        const snapshot = credential?.source.snapshot();
-        const credentialRevision = snapshot?.credentialRevision;
-        const headers = new Headers(init?.headers);
-        const injection = planInjection(snapshot, [...headers.keys()]);
-        // `guardedFetch` accepts `string | URL`; the MCP transports always
-        // call with a URL/string target (headers/body ride in `init`), so a
-        // stray `Request` is normalised to its URL for the type.
-        const target: string | URL =
-          typeof input === "string" || input instanceof URL ? input : input.url;
-        // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
-        // hop that still carries it (same origin as the first; another origin strips it).
-        let validateHop: ((url: URL) => void) | undefined;
-        if (injection.kind === "inject") {
-          const authorizedUris =
-            snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
-          const origin = new URL(String(target)).origin;
-          validateHop = (url) => {
-            if (url.origin !== origin) return;
-            if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
-              throw new RemoteCredentialRefusal(
-                // The origin only: the endpoint's path may itself be a capability.
-                `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
-              );
-            }
-          };
-          // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
-          // reads would carry the credential.
-          assertHttpFieldValue(injection.header.name, injection.header.value);
-          headers.set(injection.header.name, injection.header.value);
-        }
-        const sensitiveHeaderName =
-          injection.kind === "inject"
-            ? injection.header.name
-            : injection.kind === "caller_override"
-              ? injection.headerName
-              : null;
-        // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
-        // by the platform) skip only the host blocklist — without this, a remote
-        // MCP server the platform-side spawn validation just allowed (internal
-        // host explicitly allowlisted by the operator) would be re-blocked here
-        // and fail opaquely in-run. Redirect discipline still applies.
-        const { response, credentialsForwarded } = await guardedFetchChain(
-          target,
-          { ...init, headers },
-          {
-            allowHost: isOperatorTrustedEgressHost,
-            // The injected credential header is arbitrarily NAMED by the
-            // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
-            // builtin authorization/cookie strip set cannot know about it —
-            // declare it, or a hostile server 302ing cross-origin would carry
-            // the credential to another origin.
-            ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
-            ...(validateHop ? { validateHop } : {}),
-            ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
-          },
-        );
-        return {
-          response,
-          // A redirect hop that dropped the credential: that answer says nothing about it.
-          credentialAnswered: injection.kind === "inject" && credentialsForwarded,
-          credentialRevision,
+  const customFetch = mcpFetch(async (target, init) => {
+    const send = async (): Promise<{
+      response: Response;
+      credentialAnswered: boolean;
+      credentialRevision: string | undefined;
+    }> => {
+      const snapshot = credential?.source.snapshot();
+      const credentialRevision = snapshot?.credentialRevision;
+      const headers = new Headers(init?.headers);
+      const injection = planInjection(snapshot, [...headers.keys()]);
+      // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
+      // hop that still carries it (same origin as the first; another origin strips it).
+      let validateHop: ((url: URL) => void) | undefined;
+      if (injection.kind === "inject") {
+        const authorizedUris =
+          snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
+        const origin = new URL(String(target)).origin;
+        validateHop = (url) => {
+          if (url.origin !== origin) return;
+          if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
+            throw new RemoteCredentialRefusal(
+              // The origin only: the endpoint's path may itself be a capability.
+              `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
+            );
+          }
         };
+        // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
+        // reads would carry the credential.
+        assertHttpFieldValue(injection.header.name, injection.header.value);
+        headers.set(injection.header.name, injection.header.value);
+      }
+      const sensitiveHeaderName =
+        injection.kind === "inject"
+          ? injection.header.name
+          : injection.kind === "caller_override"
+            ? injection.headerName
+            : null;
+      // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
+      // by the platform) skip only the host blocklist — without this, a remote
+      // MCP server the platform-side spawn validation just allowed (internal
+      // host explicitly allowlisted by the operator) would be re-blocked here
+      // and fail opaquely in-run. Redirect discipline still applies.
+      const { response, credentialsForwarded } = await guardedFetchChain(
+        target,
+        { ...init, headers },
+        {
+          allowHost: isOperatorTrustedEgressHost,
+          // The injected credential header is arbitrarily NAMED by the
+          // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
+          // builtin authorization/cookie strip set cannot know about it —
+          // declare it, or a hostile server 302ing cross-origin would carry
+          // the credential to another origin.
+          ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
+          ...(validateHop ? { validateHop } : {}),
+          ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
+        },
+      );
+      return {
+        response,
+        // A redirect hop that dropped the credential: that answer says nothing about it.
+        credentialAnswered: injection.kind === "inject" && credentialsForwarded,
+        credentialRevision,
       };
-      let attempt = await send();
-      if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
-        const handshake = handshakeRejectable && !connected;
-        const refreshed = await credential.source
-          .refreshOnUnauthorized(
-            credential.authKey,
-            attempt.credentialRevision,
-            handshake ? "handshake" : undefined,
-          )
-          .catch(() => false);
-        if (refreshed) attempt = await send();
-        else if (handshake && credential.source.needsReconnection()) {
-          // The connection's name and the reconnect step, rather than the server's 401 body.
-          throw new RemoteCredentialRefusal(
-            `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
-              `during the MCP handshake (HTTP 401); the connection is flagged as needing ` +
-              `reconnection. Reconnect it and relaunch the run.`,
-          );
-        }
+    };
+    let attempt = await send();
+    if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
+      const handshake = handshakeRejectable && !connected;
+      const refreshed = await credential.source
+        .refreshOnUnauthorized(
+          credential.authKey,
+          attempt.credentialRevision,
+          handshake ? "handshake" : undefined,
+        )
+        .catch(() => false);
+      if (refreshed) attempt = await send();
+      else if (handshake && credential.source.needsReconnection()) {
+        // The connection's name and the reconnect step, rather than the server's 401 body.
+        throw new RemoteCredentialRefusal(
+          `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
+            `during the MCP handshake (HTTP 401); the connection is flagged as needing ` +
+            `reconnection. Reconnect it and relaunch the run.`,
+        );
       }
-      if (credential && attempt.response.ok && attempt.credentialAnswered) {
-        credential.source.reportUpstreamSuccess(attempt.credentialRevision);
-      }
-      return attempt.response;
-    },
-    { preconnect: fetch.preconnect },
-  );
+    }
+    if (credential && attempt.response.ok && attempt.credentialAnswered) {
+      credential.source.reportUpstreamSuccess(attempt.credentialRevision);
+    }
+    return attempt.response;
+  });
 
   const clientInfo = {
     name: "appstrate-sidecar-remote-integration",
@@ -770,25 +759,17 @@ export async function connectPlatformIntegration(
   const endpoint = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/mcp`;
   const origin = new URL(endpoint).origin;
   const baseFetch = opts.fetchFn ?? fetch;
-  const platformFetch: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      // The MCP client calls `fetch(url, init)`: a `Request` would carry a method, body and
-      // headers this wrapper does not read.
-      if (input instanceof Request) {
-        throw new TypeError("the platform MCP fetch takes a URL, not a Request");
-      }
-      const target = new URL(input);
-      if (target.origin !== origin) {
-        throw new RemoteCredentialRefusal(
-          `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,
-        );
-      }
-      const headers = new Headers(init?.headers);
-      headers.set("Authorization", `Bearer ${opts.runToken}`);
-      return baseFetch(target, { ...init, headers, redirect: "error" });
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const platformFetch = mcpFetch(async (input, init) => {
+    const target = new URL(input);
+    if (target.origin !== origin) {
+      throw new RemoteCredentialRefusal(
+        `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,
+      );
+    }
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${opts.runToken}`);
+    return baseFetch(target, { ...init, headers, redirect: "error" });
+  });
   return connectStreamableHttp(
     spec,
     endpoint,

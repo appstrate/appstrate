@@ -8,6 +8,9 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   renderPlatformPrompt,
   UNAVAILABLE_INTEGRATION_REASONS,
@@ -105,11 +108,19 @@ interface RegisteredTool {
   ) => Promise<{ content: Array<{ type: string; text?: string }> }>;
 }
 
-async function wire(
-  bundle: Bundle,
-  options: Omit<Parameters<typeof buildRemoteMcpExtensions>[0], "bundle"> = {},
-) {
-  const extensions = await buildRemoteMcpExtensions({ bundle, ...options });
+type WireOptions = Parameters<typeof buildRemoteMcpExtensions>[0];
+
+/** The options of a run, `bundle` aside, that no test here looks at. */
+const runOptions = (bundle: Bundle, options: Partial<WireOptions> = {}): WireOptions => ({
+  bundle,
+  runId: "run_test",
+  workspace: os.tmpdir(),
+  emit: () => {},
+  ...options,
+});
+
+async function wire(bundle: Bundle, options: Partial<WireOptions> = {}) {
+  const extensions = await buildRemoteMcpExtensions(runOptions(bundle, options));
   const tools: RegisteredTool[] = [];
   for (const factory of extensions.factories) {
     factory({ registerTool: (t: RegisteredTool) => tools.push(t) } as never);
@@ -261,7 +272,9 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     try {
       const bundle = makeBundle({ url: `http://127.0.0.1:${silent.port}/mcp` });
       const started = Date.now();
-      const extensions = await buildRemoteMcpExtensions({ bundle, startupTimeoutMs: 200 });
+      const extensions = await buildRemoteMcpExtensions(
+        runOptions(bundle, { startupTimeoutMs: 200 }),
+      );
       expect(Date.now() - started).toBeLessThan(5_000);
       expect(extensions.factories).toEqual([]);
       expect(extensions.unavailable).toEqual([
@@ -320,10 +333,18 @@ describe("run --local — several remote integrations", () => {
         return handler(req);
       },
     });
+    // Requests the silent server holds at once: one at a time if the integrations connected in turn.
+    let inFlight = 0;
+    let maxInFlight = 0;
     const silent = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Promise<Response>(() => {}),
+      fetch: (req) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        req.signal.addEventListener("abort", () => (inFlight -= 1));
+        return new Promise<Response>(() => {});
+      },
     });
     try {
       const bundle = makeMultiBundle([
@@ -332,11 +353,9 @@ describe("run --local — several remote integrations", () => {
         `http://127.0.0.1:${silent.port}/mcp`,
         serverUrl,
       ]);
-      const started = Date.now();
       const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 1_000 });
       try {
-        // Two silent servers one after the other would take two startup timeouts.
-        expect(Date.now() - started).toBeLessThan(1_900);
+        expect(maxInFlight).toBe(2);
         expect(tools.map((t) => t.name)).toEqual(["acme_server0__a", "acme_server3__a"]);
         expect(extensions.unavailable.map((entry) => entry.id)).toEqual([
           "@acme/server1",
@@ -481,5 +500,86 @@ describe("run --local — integration bound to the runtime", () => {
       { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound },
     ]);
     expect(seen).toEqual([]);
+  });
+
+  // Another port of the declared host: allowed by the egress guard, another origin all the same.
+  it("sends no signature past a redirect to another origin", async () => {
+    const headers: string[][] = [];
+    const elsewhere = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        headers.push([...req.headers.keys()].filter((name) => name.startsWith("webhook-")));
+        return legacyMcpHandler({ tools: [echoTool("a")] })(req);
+      },
+    });
+    const redirector = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response(null, {
+          status: 307,
+          headers: { Location: `http://127.0.0.1:${elsewhere.port}/mcp` },
+        }),
+    });
+    try {
+      const { extensions } = await wire(makeBundle({ integration: runtimeBound }), {
+        runToolsMcp: { url: `http://127.0.0.1:${redirector.port}/mcp`, runSecret: RUN_SECRET },
+      });
+      await extensions.close();
+      expect(headers.length).toBeGreaterThan(0);
+      expect(headers.flat()).toEqual([]);
+    } finally {
+      redirector.stop(true);
+      elsewhere.stop(true);
+    }
+  });
+});
+
+describe("run --local — remote MCP tool results", () => {
+  it("spills a resource its tool returns to the workspace and reports the call", async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "remote-mcp-spill-"));
+    const file: AppstrateToolDefinition = {
+      descriptor: { name: "a", inputSchema: { type: "object" } },
+      handler: async () => ({
+        content: [
+          {
+            type: "resource",
+            resource: { uri: "file:///report.txt", mimeType: "text/plain", text: "report body" },
+          },
+        ],
+      }),
+    };
+    const fileServer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: legacyMcpHandler({ tools: [file] }),
+    });
+    const events: string[] = [];
+    try {
+      const { extensions, tools } = await wire(
+        makeBundle({ url: `http://127.0.0.1:${fileServer.port}/mcp`, tools: ["a"] }),
+        { workspace, emit: (event) => events.push(event.type) },
+      );
+      try {
+        const result = await tools[0]!.execute("call_1", {});
+        expect(result.content[0]?.text).toContain(
+          "saved to workspace file resources/call_1-report.txt",
+        );
+        expect(await Bun.file(path.join(workspace, "resources/call_1-report.txt")).text()).toBe(
+          "report body",
+        );
+        expect(events).toEqual([
+          "integration_tool.called",
+          "integration_tool.completed",
+          "resource.spilled",
+        ]);
+      } finally {
+        await extensions.close();
+      }
+    } finally {
+      fileServer.stop(true);
+      await fs.rm(workspace, { recursive: true, force: true });
+    }
   });
 });

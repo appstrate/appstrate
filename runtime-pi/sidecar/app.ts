@@ -129,15 +129,10 @@ export interface AppDeps {
    */
   mcpToolsProvider?: () => AppstrateToolDefinition[];
   /**
-   * Pre-built run-scoped runtime deps (blob store, token budget,
-   * concurrency limiter, credential-proxy base deps). Production wires
-   * these in `server.ts` and shares the SAME instances with
-   * `bootIntegrations` so the in-process `api_call` MCP server and the
-   * outer `/mcp` server's resource provider read the same blob store
-   * (resource_link spillover resolves across the McpHost boundary).
-   * Omitted by tests → `createApp` builds its own.
+   * The run's blob store (`SidecarRuntimeDeps.blobStore`): `/mcp` serves its `resources/read`, so
+   * a `resource_link` the in-process `api_call` server spilled resolves. Absent: no resources.
    */
-  runtimeDeps?: SidecarRuntimeDeps;
+  blobStore?: BlobStore;
   /**
    * Promise that resolves once `bootIntegrations` has finished its
    * initial pass. Only `GET /integrations/boot-report` awaits it; `/mcp`
@@ -559,11 +554,9 @@ function platformLlmUpstream(
  *                          and every integration tool as MCP tools.
  */
 /**
- * Run-scoped runtime singletons shared between the HTTP `/mcp` surface
- * (`createApp` → `mountMcp`) and the integration boot pipeline
- * (`bootIntegrations`). Building them once and threading the SAME
- * instances is what lets the in-process `api_call` MCP server and the
- * outer server agree on one blob store / token budget / concurrency cap.
+ * Run-scoped singletons of the in-process `api_call` MCP server, built once
+ * and handed to `bootIntegrations`. Its blob store also goes to `createApp`,
+ * whose `/mcp` reads back what that server spilled.
  */
 export interface SidecarRuntimeDeps {
   blobStore: BlobStore;
@@ -572,8 +565,8 @@ export interface SidecarRuntimeDeps {
   /**
    * Run-scoped credential-proxy deps WITHOUT the credential pair — each
    * integration's `fetchCredentials` / `refreshCredentials` are layered on
-   * per tool by `mountMcp` / `createApiCallToolDefs` from the integration's
-   * live credentials source.
+   * per tool by `createApiCallToolDefs` from the integration's live
+   * credentials source.
    */
   proxyDeps: ApiCallBaseDeps;
 }
@@ -581,8 +574,7 @@ export interface SidecarRuntimeDeps {
 /**
  * Build the run-scoped runtime deps from {@link AppDeps}. Pure
  * construction (no I/O beyond reading env vars + one info log). Called
- * once in `server.ts` (shared with boot) and as a fallback inside
- * `createApp` for tests that don't pre-build them.
+ * once in `server.ts`.
  */
 /**
  * Blob-store cap for production sidecars. MUST stay well below the
@@ -988,13 +980,9 @@ export function createApp(deps: AppDeps): Hono {
 
   // MCP exposure — the agent-facing surface for every integration tool the
   // McpHost aggregates (spawned/remote MCP servers AND the in-process
-  // `api_call` server). Run-scoped deps are built once and shared with
-  // `bootIntegrations` (when `server.ts` pre-builds them) so the
-  // in-process api_call server and the outer resource provider use the
-  // same blob store.
-  const { blobStore } = deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
+  // `api_call` server).
   mountMcp(app, {
-    blobStore,
+    ...(deps.blobStore ? { blobStore: deps.blobStore } : {}),
     ...(deps.mcpToolsProvider ? { toolsProvider: deps.mcpToolsProvider } : {}),
   });
 

@@ -24,8 +24,7 @@ import {
   httpHeaderDelivery,
   mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
-import { PLATFORM_META_KEY } from "@appstrate/core/integration";
-import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 
 const INTEG = "@orga/remote-mcp";
 
@@ -330,51 +329,13 @@ describe("resolveIntegrationSpawns — unauthenticated integration (AFPS §7.2)"
 
 describe("resolveIntegrationSpawns — integration bound to the runtime", () => {
   const PLATFORM = "@appstrate/platform";
-  const platformManifest = {
-    type: "integration",
-    schema_version: "0.3",
-    name: PLATFORM,
-    version: "1.0.0",
-    display_name: "Platform",
-    source: {
-      kind: "remote",
-      remote: { url: "https://platform.appstrate.invalid/mcp", transport: "streamable-http" },
-    },
-    tools_policy: { log: {}, note: {} },
-    default_tools: ["log", "note"],
-    _meta: { [PLATFORM_META_KEY]: {} },
-  };
   let ctx: TestContext;
   let restore: () => void;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orga" });
-    await seedPackage({
-      id: PLATFORM,
-      orgId: null,
-      type: "integration",
-      source: "system",
-      draftManifest: platformManifest as never,
-    });
-    restore = _setSystemPackagesForTesting(
-      new Map([
-        [
-          PLATFORM,
-          {
-            packageId: PLATFORM,
-            scope: "@appstrate",
-            name: "platform",
-            type: "integration",
-            version: "1.0.0",
-            manifest: platformManifest,
-            zipBuffer: Buffer.alloc(0),
-            content: "",
-            files: {},
-          },
-        ],
-      ]),
-    );
+    restore = await installRuntimeBoundSystemPackages();
   });
 
   afterEach(() => restore());

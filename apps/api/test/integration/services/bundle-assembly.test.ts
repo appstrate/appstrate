@@ -489,7 +489,7 @@ describe("bundle-assembly — export takes the root manifest from the catalog ro
       schema_version: "0.2",
       display_name: "Export",
     };
-    const archiveManifest = { ...base, runtime_tools: ["log"] };
+    const archiveManifest = { ...base, description: "From the archive" };
     const catalogManifest = { ...base, description: "From the catalog row" };
     const afps = zipSync({
       "manifest.json": enc(JSON.stringify(archiveManifest, null, 2)),

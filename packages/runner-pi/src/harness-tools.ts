@@ -77,14 +77,15 @@ export function buildOutputExtension(
   //
   // A schema that cannot compile refuses every call: the server's
   // `compileCached` throws on it too, so refusing here changes the failure's
-  // timing and legibility, not the run's outcome.
-  let validator: ReturnType<typeof compileCached> | null = null;
-  let schemaCompileError: string | null = null;
-  try {
-    validator = compileCached(asJSONSchemaObject(outputSchema));
-  } catch (err) {
-    schemaCompileError = err instanceof Error ? err.message : String(err);
-  }
+  // timing and legibility, not the run's outcome. `validate` is the validator,
+  // or the compile error's message.
+  const validate = ((): ReturnType<typeof compileCached> | string => {
+    try {
+      return compileCached(asJSONSchemaObject(outputSchema));
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  })();
   const dataSchema: Record<string, unknown> = {
     ...outputSchema,
     description:
@@ -106,15 +107,15 @@ export function buildOutputExtension(
         properties: { data: dataSchema },
       },
       call: async ({ data }) => {
-        if (schemaCompileError) {
+        if (typeof validate === "string") {
           throw new Error(
-            `This agent's declared output schema cannot be compiled: ${schemaCompileError}\n\n` +
+            `This agent's declared output schema cannot be compiled: ${validate}\n\n` +
               "No output can be recorded until the manifest's `output.schema` is a valid " +
               "JSON Schema 2020-12 document. This is not something the run can work around.",
           );
         }
-        if (validator && !validator(data)) {
-          const errors = (validator.errors ?? [])
+        if (!validate(data)) {
+          const errors = (validate.errors ?? [])
             .map((e) => `  - ${e.instancePath || "/"} ${e.message}`)
             .join("\n");
           throw new Error(
@@ -123,7 +124,7 @@ export function buildOutputExtension(
           );
         }
         return {
-          event: { type: "output.emitted", data: data as Record<string, unknown> },
+          event: { type: "output.emitted", data },
           reply: "Output recorded",
         };
       },

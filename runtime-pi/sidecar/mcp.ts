@@ -91,7 +91,6 @@ import {
 import { TokenBudget } from "./token-budget.ts";
 import { spillTextIfOverBudget } from "./tool-output-spill.ts";
 import type { LimitFunction } from "p-limit";
-import { logger } from "./logger.ts";
 
 /**
  * Strict standard base64 decoder (RFC 4648 §4). Refuses URL-safe
@@ -1567,30 +1566,12 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // integrations-boot.ts), so they arrive here through `toolsProvider`
     // (= host.buildTools) exactly like any spawned/remote integration tool.
     // One pipeline.
-    const tools = options.toolsProvider?.() ?? [];
-    // `createMcpServer` validates every descriptor (tool-name pattern, schema
-    // shape). A single malformed tool would otherwise throw here — outside
-    // the try/finally below — and 500 the entire `/mcp` POST. Degrade
-    // gracefully: log the offending descriptors and serve no tools, so the
-    // agent can still connect.
-    let server: ReturnType<typeof createMcpServer>;
-    try {
-      server = createMcpServer(
-        tools,
-        { name: "appstrate-sidecar", version: "1" },
-        resources ? { resources } : {},
-      );
-    } catch (err) {
-      logger.error("MCP server build failed; serving no tools", {
-        error: err instanceof Error ? err.message : String(err),
-        toolNames: tools.map((t) => t.descriptor.name),
-      });
-      server = createMcpServer(
-        [],
-        { name: "appstrate-sidecar", version: "1" },
-        resources ? { resources } : {},
-      );
-    }
+    // A malformed descriptor throws here: the 500 fails the agent boot.
+    const server = createMcpServer(
+      options.toolsProvider?.() ?? [],
+      { name: "appstrate-sidecar", version: "1" },
+      resources ? { resources } : {},
+    );
     // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
     // disables session tracking. Combined with per-request construction,
     // there is no state to leak between agent invocations, no map to

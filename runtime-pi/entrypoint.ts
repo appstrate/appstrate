@@ -436,11 +436,9 @@ phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart
 // not the load. The honest total is emitted on `runtime ready`.
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
-const rootManifest = bundle.packages.get(bundle.root)?.manifest;
-
 // The agent's declared output schema: its presence gives the run the `output`
 // tool, built by the PiRunner (`outputSchema` option).
-const outputSchema = readDeclaredOutputSchema(rootManifest);
+const outputSchema = readDeclaredOutputSchema(bundle.packages.get(bundle.root)?.manifest);
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose

@@ -4,13 +4,7 @@
 // nothing else from the page it leaves, so a modal open there does not follow.
 export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
 
-export const AGENT_DEFINITION_SECTIONS = [
-  "general",
-  "schema",
-  "skills",
-  "integrations",
-  "tools",
-] as const;
+export const AGENT_DEFINITION_SECTIONS = ["general", "schema", "skills", "integrations"] as const;
 
 export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 

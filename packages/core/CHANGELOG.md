@@ -38,11 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
   `agentManifestSchema` does not declare it, and `dropRetiredRuntimeTools`,
   `ValidateManifestResult.droppedRuntimeTools` and `ParsedPackageZip.droppedRuntimeTools` are
-  removed. `validateManifest` refuses an agent manifest carrying `runtime_tools` whatever the
-  direction, naming `dependencies.integrations["@appstrate/platform"]` and
-  `integrations_configuration`. The option that still tells the directions apart covers the
-  retired `dependencies` keys only, and is renamed: `RetiredRuntimeToolsPolicy` →
-  **`RetiredVocabularyPolicy`**, `ValidateManifestOptions.retiredRuntimeTools` /
+  removed: `runtime_tools` is an undeclared key, which nothing reads. The option that tells the
+  author and stored directions apart covers the retired `dependencies` keys only, and is
+  renamed: `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**,
+  `ValidateManifestOptions.retiredRuntimeTools` /
   `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredVocabulary`**, with the values
   `"reject"` and **`"tolerate"`** (was `"drop"`).
 
@@ -119,8 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
   server-side — and the category vocabulary as a runtime tuple.
 - **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
-  manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
-  strings; `code` is set on a rule that carries its own. **`ValidationFieldError.line` / `.column`**
+  manifest, the failures structured as **`ManifestIssue`** `{ path, message }` beside the `errors`
+  strings. **`ValidationFieldError.line` / `.column`**
   (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to

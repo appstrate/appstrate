@@ -18,33 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   releases at once, and roll back by restoring the backup. Detail in
   `scripts/migration/README.md`.
 
-- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` between the migration and
-  the app's start** (#2197, #2199). Wait for zero `running` runs before stopping the platform: a
-  container started before the deploy posts its notes, pins and logs in a finalize body the new
-  platform does not read. Then, app stopped, `pg_dump` first, the script's dry run (it prints
-  what it rewrites), then `--apply`: `bun scripts/migration/0053-migrate-runtime-tools.ts
-[--apply]` with the platform's `DATABASE_URL`, or with `PGLITE_DATA_DIR` naming an embedded
-  database. It rewrites every stored agent manifest (`packages.draft_manifest`,
-  `package_versions.manifest`) that carries `runtime_tools` or does not declare
-  `@appstrate/platform`, in one transaction: it declares the integration, selects
-  (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪ {`recall_memory`, `run_history`} under
-  `integrations_configuration`, gives an agent whose `runtime_tools` selected `output` without
-  an `output.schema` the open object schema an inline run gets (so it keeps its `output` tool;
-  `{}` validates, so a run that never calls it still succeeds), and removes `runtime_tools`. A
-  manifest whose shape it cannot merge into is listed and left: fix it by hand. The platform
-  refuses to boot while a stored manifest carries `runtime_tools` (`assertRuntimeToolsMigrated`),
-  naming the command for its database. That guard sees the field only: the script also declares
-  the integration on agents that never carried it (they were served `recall_memory` and
-  `run_history` without declaring anything), which no guard can detect, so the script is
-  required even when the platform boots. Run it once: an immediate re-run changes nothing, a
-  later one re-adds the dependency to agents whose author removed it. Running it before the
-  deploy strips a field the previous release still reads. Two consequences for signed and
-  exported agents: the rewrite changes the jsonb manifest of every agent version, so a version
-  export (`GET /api/agents/{scope}/{name}/bundle`), which writes that manifest over the
-  archive's, drops the archive's `signature.sig`, and such a bundle no longer imports under
-  `AFPS_SIGNATURE_POLICY=required`; and `GET /api/packages/{scope}/{name}/{version}/download`
-  still serves the archive as published (its integrity hash covers those bytes), so the archive
-  of a version that carried `runtime_tools` still carries it, and an import refuses it.
+- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the window** (#2197,
+  #2199). Wait for zero `running` runs (a container started before the deploy posts its notes,
+  pins and logs in a finalize body this release does not read), stop the app, `pg_dump`, run
+  the migrations, then
+  `bun scripts/migration/0053-migrate-runtime-tools.ts --before <deploy time, ISO 8601>` (dry
+  run) and the same with `--apply`, with the platform's `DATABASE_URL` or with
+  `PGLITE_DATA_DIR` naming an embedded database, and start the app. Until it runs, every stored
+  agent runs without the `@appstrate/platform` tools it had, and nothing reports it. Detail in
+  `scripts/migration/README.md`.
 
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
@@ -591,12 +573,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/platform` integration (`integrations_configuration` restricts the
   selection); `output` and `publish_file` are harness tools. The field leaves the
   `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema, and the agent editor loses
-  its Tools tab. An author manifest carrying it (create, update, ZIP import, inline run) is
-  refused with `invalid_manifest` on `manifest.runtime_tools`, naming
-  `dependencies.integrations["@appstrate/platform"]` and `integrations_configuration`, and so is
-  a stored manifest that still carries it (a draft published or run, a bundle import), which is
-  why the platform refuses to boot until stored manifests have moved with
-  `scripts/migration/0053` (see Operators).
+  its Tools tab. Nothing reads it any more: `scripts/migration/0053` moves the stored agents
+  (see Operators). Because it rewrites the jsonb manifest of every agent version, a version
+  signed before it exports unsigned (see `SECURITY.md`, package signatures) and is refused on
+  import under `AFPS_SIGNATURE_POLICY=required`; the archive a version download serves is
+  unchanged, so an agent imported from one still carries `runtime_tools` and has none of the
+  platform tools until it declares the integration.
 
 - **BREAKING: `@appstrate/core` removes its runtime-tool exports** (#2197, #2199):
   `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
@@ -619,9 +601,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   token (a run that is not `running` answers 403). The host executing a remote run reaches
   `/api/runs/{runId}/mcp` with the Standard Webhooks signature it already puts on the run's
   events, over the exact request body, so the credential lasts as long as the run's sink, not
-  a session: a closed sink answers 410, a bad signature 401, and a platform-origin run 404 (its
-  sidecar serves these tools, restricted to the agent's selection). Each mount allows 200 MCP
-  messages a minute per run, and answers 405 (`Allow: POST`) to every other verb, GET included.
+  a session: a bad signature answers 401, a replayed `webhook-id` 409, a closed sink 410, and a
+  platform-origin run 404 (its sidecar serves these tools, restricted to the agent's selection).
+  Each mount allows 200 POSTs a minute per run (429 beyond), refuses a JSON-RPC batch with 400,
+  and answers 405 (`Allow: POST`) to every other verb, GET included.
 
 - **`notify`: an agent sends an in-app notification from inside its run** (#2200).
   A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100

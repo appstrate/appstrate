@@ -75,14 +75,12 @@ function notificationRow(
   if (notification.type === "agent_message") {
     // A message the agent sent from its run (`notify`): its own title and text, no status.
     const sent = notification.payload;
+    const agent = liveName ?? packageId ?? t("runs.deletedAgent", { ns: "agents" });
     return {
-      title: sent?.title ?? "",
+      title: sent?.title ?? agent,
       status: null,
       message: sent?.message ?? null,
-      meta: t("notifications.agentMessageFrom", {
-        agent: liveName ?? packageId ?? t("runs.deletedAgent", { ns: "agents" }),
-        date,
-      }),
+      meta: t("notifications.agentMessageFrom", { agent, date }),
       target,
     };
   }

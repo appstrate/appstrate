@@ -5,7 +5,7 @@
  * shared by its two mounts: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`.
  */
 
-import { jsonRpcTransportError, problemContent } from "../responses.ts";
+import { jsonRpcErrorContent, jsonRpcTransportError, problemContent } from "../responses.ts";
 
 export const RUN_TOOLS_MCP_DESCRIPTION =
   "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the " +
@@ -59,7 +59,7 @@ export const runToolsMcpResponses = {
       "`MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the " +
       "platform refuses before the transport.",
     content: {
-      ...jsonRpcTransportError("").content,
+      ...jsonRpcErrorContent,
       ...problemContent,
     },
   },

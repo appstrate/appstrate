@@ -9,7 +9,7 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-import { jsonRpcTransportError } from "../../../openapi/responses.ts";
+import { jsonRpcErrorContent, jsonRpcTransportError } from "../../../openapi/responses.ts";
 
 const jsonRpcRequestBody = {
   required: true,
@@ -133,7 +133,7 @@ const orgEndpoint = {
           "`invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; " +
           "pin a space with `/api/mcp/o/{org}/s/{space}` instead.",
         content: {
-          ...jsonRpcTransportError("").content,
+          ...jsonRpcErrorContent,
           "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
         },
       },

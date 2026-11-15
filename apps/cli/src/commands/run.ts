@@ -38,7 +38,7 @@ import {
   type Bundle,
   type PlatformPromptOptions,
 } from "@appstrate/afps-runtime/bundle";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
 import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
@@ -75,7 +75,7 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
-import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
+import { CompositeSink, sinkSiblingUrl, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
@@ -304,8 +304,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (skills / integrations / schemas /
   // output) from the bundle. The `output` tool is built by the PiRunner from
-  // the declared output schema (`outputSchema` option below), not from the
-  // environment.
+  // the declared output schema (`outputSchema` option below).
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
   // context so dev-loop replays
@@ -320,6 +319,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
   // The integrations the platform bound this run to none of: told to the agent, tools withheld.
   const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
+  const boundBundle = withoutIntegrations(
+    bundle,
+    unavailable.map((entry) => entry.id),
+  );
 
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
@@ -331,36 +334,26 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // to the LLM as `{ns}__api_call` — same surface as the platform sidecar's
   // `{ns}__api_call` MCP tool, so prompts are identical regardless of
   // execution mode. MCP-server integrations have no api_call surface: the
-  // unauthenticated remote ones are wired below (7a'), the others are not.
+  // unauthenticated remote ones are wired once the run is running (9a), the others are not.
   const {
     factories: apiCallFactories,
     integrationIds: wiredIntegrationIds,
     toolNames: apiCallToolNames,
   } = await buildApiCallExtensionFactory({
-    bundle: withoutIntegrations(
-      bundle,
-      unavailable.map((entry) => entry.id),
-    ),
+    bundle: boundBundle,
     integrationResolver,
     runId,
     workspace: workspaceDir,
-    emitEvent: () => {
-      // Events are swallowed in the CLI — the run-result aggregate is
-      // assembled from stdout CloudEvents, not from these telemetry hooks.
-    },
+    // The api_call bridge's events are not reported.
+    emitEvent: () => {},
   });
   if (!opts.json && apiCallFactories.length > 0) {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
 
-  // Filled in once the run is running (step 9): the run's MCP server on the instance refuses
+  // Filled in once the run is running (9a): the run's MCP server on the instance refuses
   // a connection before the runtime-ready event moves the reported run to `running`.
-  let remoteMcp: RemoteMcpExtensions = {
-    factories: [],
-    integrationIds: new Set(),
-    unavailable: [],
-    close: async () => {},
-  };
+  let remoteMcp: RemoteMcpExtensions | undefined;
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
@@ -465,7 +458,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // The run is over: no report request may outlive it, or a stalled
       // platform would keep the process from exiting.
       reportSession?.httpSink.abort(new Error("run ended"));
-      await remoteMcp.close();
+      await remoteMcp?.close();
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
     return cleanupPromise;
@@ -526,7 +519,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       });
     }
 
-    // ─── 7a'. MCP tools of unauthenticated remote integrations ────────
+    // ─── 9a. MCP tools of unauthenticated remote integrations ─────────
     // No credential to inject: the CLI connects to `source.remote.url` itself
     // (to the run's MCP server on the instance for an integration bound to the
     // runtime) and exposes each selected tool as `{ns}__{tool}`, as the sidecar
@@ -534,25 +527,37 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // run starts.
     if (mode !== "none") {
       remoteMcp = await buildRemoteMcpExtensions({
-        bundle: withoutIntegrations(
-          bundle,
-          unavailable.map((entry) => entry.id),
-        ),
-        ...(reportSession ? { runToolsMcp: reportSession.runToolsMcp } : {}),
+        bundle: boundBundle,
+        ...(reportSession
+          ? {
+              runToolsMcp: {
+                url: sinkSiblingUrl(reportSession.sinkUrl, "mcp"),
+                runSecret: reportSession.runSecret,
+              },
+            }
+          : {}),
         takenToolNames: apiCallToolNames,
+        runId: emittedRunId,
+        workspace: workspaceDir,
+        emit: (event) => {
+          sink.handle(event as RunEvent).catch(() => {});
+        },
         signal: shutdownSignal,
       });
     }
     if (!opts.json) {
-      if (remoteMcp.factories.length > 0) {
+      if (remoteMcp && remoteMcp.factories.length > 0) {
         process.stderr.write(`→ wired ${remoteMcp.factories.length} remote MCP tool(s)\n`);
       }
-      for (const entry of remoteMcp.unavailable) {
+      for (const entry of remoteMcp?.unavailable ?? []) {
         process.stderr.write(`warn: integration ${entry.id} unavailable: ${entry.reason}\n`);
       }
     }
-    const runUnavailable = [...unavailable, ...remoteMcp.unavailable];
-    const callableIntegrationIds = new Set([...wiredIntegrationIds, ...remoteMcp.integrationIds]);
+    const runUnavailable = [...unavailable, ...(remoteMcp?.unavailable ?? [])];
+    const callableIntegrationIds = new Set([
+      ...wiredIntegrationIds,
+      ...(remoteMcp?.integrationIds ?? []),
+    ]);
     // Built once the tools are wired: the catalog lists only integrations the agent can call.
     const promptInputs = cliPromptInputs(bundle, context, runUnavailable, callableIntegrationIds);
     const systemPrompt = renderPlatformPrompt(promptInputs);
@@ -572,7 +577,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...apiCallFactories, ...remoteMcp.factories],
+      extensionFactories: [...apiCallFactories, ...(remoteMcp?.factories ?? [])],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
       ...(outputSchema ? { outputSchema } : {}),
       ...piLoopOptions,

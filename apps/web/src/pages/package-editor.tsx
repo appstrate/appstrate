@@ -263,7 +263,7 @@ export function AgentDefinitionEditor({
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <AgentEditorInner
         initialState={{
-          // The retired AFPS 1.x `dependencies` keys go on load: the editor cannot display them.
+          // The editor has no field for a retired `dependencies` key.
           manifest: dropRetiredDependencyKeys(detail.manifest ?? {}),
           etag: detail.etag,
         }}
