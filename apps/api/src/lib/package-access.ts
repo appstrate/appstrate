@@ -930,9 +930,10 @@ export function holdsHomeAuthority(
  * Does READING this package let the caller COPY it out (plan decision 12)?
  *
  * By default yes, which is what a reader can approximate by hand anyway. An
- * organization that sets `org_settings.restrict_package_copy` narrows the three
+ * organization that sets `org_settings.restrict_package_copy` narrows the
  * routes that hand over a whole package — `POST …/fork`,
- * `GET …/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` — to
+ * `GET …/{version}/download`, `GET /api/agents/{scope}/{name}/bundle` and the
+ * integration's `GET …/mcpb` export — to
  * callers who hold `<type>:share` in the SOURCE's home space. Without that key,
  * personal spaces open "fork it into mine, then share it on" to every reader:
  * `share` would protect the link and not the content.

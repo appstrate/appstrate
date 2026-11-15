@@ -124,6 +124,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`findRuntimeBinding(manifest)`** is its write-path refusal for packages the platform did not
   ship.
 
+- **`@appstrate/core/mcpb`** — the MCP Bundle projection of a `local` integration (AFPS §7.1.1):
+  **`mcpbFromIntegration(manifest, files?)`** emits a strict MCPB `manifest.json` (`server` and
+  `author` are picked field by field; every `delivery.env` credential becomes a `user_config`
+  entry that is always `sensitive` and `required`), **`integrationFromMcpb(raw, scope)`** builds
+  the integration from one (sensitive `user_config` becomes one `custom` auth, `allow_all_uris`,
+  delivered in env; non-sensitive defaults are inlined in `command`, `args` and `env`, platform
+  overrides included; `compatibility` is dropped), **`isMcpbManifest(raw)`** tells the two
+  manifest kinds apart, and both refuse what they cannot carry with **`McpbProjectionError`**
+  carrying a **`McpbProjectionErrorCode`**: `mcpb_not_local`, `mcpb_unsupported_auth`,
+  `mcpb_unsupported_variables`, `mcpb_invalid_manifest`, `mcpb_unsupported_user_config` (a
+  sensitive reference outside a top-level `env` value, a `multiple` entry, a sensitive non-string,
+  a setting with no default), `mcpb_unsupported_placeholder` (a `${…}` left in an `env` value) and
+  `mcpb_unsupported_platform` (`compatibility.platforms` without `linux`). Types
+  **`McpbManifest`**, **`McpbUserConfigEntry`**, **`McpbAuthor`**, **`McpbRun`**.
 - **`resolveIntegrationToolCatalog`** takes **`listedTools`**: the tools the running server
   listed, which stand for the catalog when the caller passes them (a remote source with
   `allow_undeclared_tools`).

@@ -42,7 +42,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
 - **Package import** — Import agents, skills, and integrations from ZIP/AFPS files
-- **Skills & local MCP servers** — Extend agent capabilities with SKILL.md instructions and local integrations that carry their MCP server inline (`server.type ∈ node | python | binary | uv`)
+- **Skills & local MCP servers** — Extend agent capabilities with SKILL.md instructions and local integrations that carry their MCP server inline (`server.type ∈ node | python | binary | uv`); `.mcpb` bundles import and export
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
 - **API keys** — Programmatic access via `apst_*` prefixed API keys

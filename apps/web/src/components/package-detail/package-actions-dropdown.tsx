@@ -91,6 +91,10 @@ interface PackageActionsDropdownProps {
   isHistoricalVersion: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
+  /** Export as an MCP Bundle (`.mcpb`); passed only for a local integration. */
+  onExportMcpb?: (version: string) => void;
+  /** Why this integration has no `.mcpb` form, translated: the entry then shows disabled with it. */
+  mcpbBlockedReason?: string;
   /**
    * ACTIVE in the current space; `undefined` (unknown) offers neither switch. Bundle export runs the
    * execution gate (`isPackageActiveHere`), so a package placed but switched off answers 404.
@@ -122,6 +126,8 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   downloadVersion,
   onDownload,
+  onExportMcpb,
+  mcpbBlockedReason,
   isActiveHere,
   onCreateVersion,
   createVersionBlockedReason,
@@ -170,6 +176,8 @@ export function PackageActionsDropdown({
   const running = detail?.running_runs ?? 0;
   const hasFileInput = !!schemaHasFileFields(detail?.input?.schema);
   const published = (detail?.version_count ?? 0) > 0;
+  // A published version, else the draft for whoever may write it; anyone else has nothing to export.
+  const mcpbVersion = published ? downloadVersion : canWrite ? "draft" : undefined;
 
   const entries: PackageMenuEntry[] = [
     {
@@ -196,6 +204,15 @@ export function PackageActionsDropdown({
       label: t("btn.download", { ns: "common" }),
       hidden: !canExport,
       onSelect: () => onDownload?.(downloadVersion!),
+    },
+    {
+      id: "mcpb",
+      group: "build",
+      icon: Download,
+      label: t("integrations.exportMcpb", { ns: "settings" }),
+      reason: mcpbBlockedReason,
+      hidden: !canRead || !onExportMcpb || !mcpbVersion,
+      onSelect: () => onExportMcpb?.(mcpbVersion!),
     },
     {
       id: "create-version",

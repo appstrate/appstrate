@@ -313,6 +313,30 @@ To also hand a certificate to the server as a file, add a `client_cert` field to
 
 Import the archive as described under "Pack, import, publish" below, then activate the integration and connect an account.
 
+### From and to an MCP Bundle (`.mcpb`)
+
+A server already packaged as an [MCP Bundle](https://github.com/anthropics/mcpb) imports as it is: drop the `.mcpb` file into the import dialog (or `POST /api/packages/import`). Appstrate builds the integration from the bundle's `manifest.json`, named `@<your-org>/<bundle name>`, and keeps every payload file. The platform starts the server from `type` and `entry_point` alone: `mcp_config.command`, `args` and `platform_overrides` are carried so the bundle still exports, and are not executed.
+
+- each `user_config` entry marked `sensitive` becomes a field of one custom auth, delivered to the server in the environment variable the bundle's `mcp_config.env` named;
+- a non-sensitive entry with a `default` is written in as a literal, in `command`, `args` and `env`, platform overrides included;
+- the auth allows every host (`allow_all_uris`), because a bundle says nothing about where its server connects. Narrow it to the hosts the server needs with `authorized_uris` before you publish;
+- `compatibility` is dropped, and any `manifest_version` is accepted.
+
+The import is refused (`400`) rather than altering the bundle when:
+
+- a sensitive entry is referenced anywhere but an `env` value of the top-level `mcp_config` (a credential reaches the server through its environment only), is not a string, or has a key outside letters, digits and underscores;
+- an entry is `multiple`, or is not sensitive and has no `default`, since an integration has nowhere to store it;
+- a `${user_config.KEY}` names a key `user_config` does not declare, or an `env` value is not a string;
+- an `env` value still holds a `${…}` placeholder (`${__dirname}`, `${HOME}`, `${DESKTOP}`, `${DOCUMENTS}`, `${DOWNLOADS}`, `${pathSeparator}`, `${/}`) once the settings are inlined: environment values are literal and nothing expands them. The same placeholders stay as they are in `command` and `args`;
+- `compatibility.platforms` is present and does not include `linux`, since a local server runs in a Linux runner.
+
+The other way, a local integration's menu offers **Export as .mcpb** (`GET /api/packages/integrations/{scope}/{name}/mcpb`), which any MCPB host such as Claude Desktop can install. The export carries every credential delivered in an environment variable as a `user_config` entry, always required and sensitive. The export is refused (`422`) rather than losing a credential when the integration:
+
+- delivers its credential over HTTP or as a file;
+- declares more than one auth;
+- uses connection variables;
+- is not a local integration with a `source.server` that declares `mcp_config.command`.
+
 ## Tools and scopes in agents
 
 Agents pick tools from `tools_policy` (remote sources) or `source.server.tools` (local sources), or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/integrations/how-integrations-work#scopes).

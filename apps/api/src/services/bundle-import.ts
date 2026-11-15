@@ -65,6 +65,7 @@ import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
 import { activatePackage, type PlacementAuthority } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
+import { convertMcpbArchive } from "./mcpb.ts";
 import { logger } from "../lib/logger.ts";
 import {
   collectLoginCriteriaWarnings,
@@ -133,7 +134,8 @@ export async function readOrBuildBundle(
   scope: BundleAssemblyScope,
 ): Promise<Bundle> {
   if (looksLikeAfpsBundle(bytes)) return readBundleFromBuffer(bytes);
-  return buildBundleFromUploadedAfps(bytes, scope);
+  // A raw MCP Bundle is promoted to the integration it projects to (AFPS §7.1.1).
+  return buildBundleFromUploadedAfps(await convertMcpbArchive(bytes, { id: scope.orgId }), scope);
 }
 
 // ---------------------------------------------------------------------------
