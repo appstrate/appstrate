@@ -5,6 +5,10 @@
  * servers. One page for the three, so a fix to one (an error state, the
  * keywords the search reads, the actions menu) lands on all of them.
  * Integrations keep their own page: execution tabs, protocol filter, columns.
+ *
+ * In « Vue d'ensemble » it lists every space the reader reaches, one row per
+ * placement naming its space, read-only: creating, importing, activating and
+ * running all act in one space, which the list does not name.
  */
 
 import { useState } from "react";
@@ -33,6 +37,8 @@ import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { useOverviewList } from "../hooks/use-overview-mode";
+import { useSpaceLabelOf } from "../hooks/use-spaces";
 
 type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
 
@@ -42,6 +48,7 @@ function presentation(type: IndexType, t: TFunction) {
     return {
       title: t("common:nav.agents"),
       empty: t("list.empty", { ns: "agents" }),
+      emptyAcross: t("list.emptyAcross", { ns: "agents" }),
       create: t("list.create", { ns: "agents" }),
     };
   }
@@ -49,6 +56,7 @@ function presentation(type: IndexType, t: TFunction) {
   return {
     title: t(`packages.type.${type}s`, { ns: "settings" }),
     empty: t("packages.emptyItems", { ns: "settings", type: typeLabel }),
+    emptyAcross: t("packages.emptyItemsAcross", { ns: "settings", type: typeLabel }),
     create: t("list.createItem", { ns: "agents", type: typeLabel }),
   };
 }
@@ -57,18 +65,38 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
   return type === "agent" ? <AgentIndex /> : <PackageIndex type={type} />;
 }
 
+const LIST_OF = { agent: "agents", skill: "skills", "mcp-server": "mcp-servers" } as const;
+
 /** Agents also carry their unread runs. */
 function AgentIndex() {
-  const { data: agents, isLoading, error } = useAgents();
+  const { spanning } = useOverviewList("agents");
+  const { data: agents, isLoading, error } = useAgents(spanning);
   const items = agents?.map((agent) => agentCardItem(agent));
-  return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
+  return (
+    <PackageIndexBody
+      type="agent"
+      spanning={spanning}
+      items={items}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
 }
 
 function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
-  // What works in THIS space; the rest of the org is one action away.
-  const { data: rows, isLoading, error } = usePackageList(type);
+  const { spanning } = useOverviewList(LIST_OF[type]);
+  // What works in THIS space (or, spanning, in each); the rest of the org is one action away.
+  const { data: rows, isLoading, error } = usePackageList(type, spanning);
   const items = rows?.map((row) => packageCardItem(row, type));
-  return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
+  return (
+    <PackageIndexBody
+      type={type}
+      spanning={spanning}
+      items={items}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
 }
 
 /** Agents are the org's own work: where each came from is a detail, hidden until asked for. */
@@ -76,11 +104,13 @@ const AGENT_HIDDEN_COLUMNS = ["origin"];
 
 function PackageIndexBody({
   type,
+  spanning,
   items,
   isLoading,
   error,
 }: {
   type: IndexType;
+  spanning: boolean;
   items: CardItem[] | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -93,14 +123,19 @@ function PackageIndexBody({
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(
     `packages-${type}`,
-    usePackageColumns(type),
+    usePackageColumns(type, spanning),
     type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
   );
   // Creating — by hand, with the chat or by import — is a write on the package
   // type, as its routes are. The import names the type, so the server refuses
   // an archive of another one.
-  const canCreate = can(packagePermission(type, "write"));
-  const canActivate = can(spacePackagePermission(type, "activate"));
+  const canCreate = !spanning && can(packagePermission(type, "write"));
+  const canActivate = !spanning && can(spacePackagePermission(type, "activate"));
+  const spaceLabelOf = useSpaceLabelOf();
+  // A card names its space where the table has a column for it.
+  const shownItems = spanning
+    ? items?.map((item) => ({ ...item, meta: spaceLabelOf(item.spaceId) }))
+    : items;
   const creation = useCreationHandoff(type, canCreate);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
@@ -156,13 +191,14 @@ function PackageIndexBody({
         columns={columns}
         columnMenu={menu}
         tableId={`packages-${type}`}
-        items={items}
+        items={shownItems}
         isLoading={isLoading}
         error={error}
         holds={type}
         entity={words.title}
-        emptyMessage={words.empty}
-        emptyHint={<SpaceLibraryHint type={type} />}
+        emptyMessage={spanning ? words.emptyAcross : words.empty}
+        emptyHint={spanning ? undefined : <SpaceLibraryHint type={type} />}
+        cardRun={!spanning}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
         list={list}

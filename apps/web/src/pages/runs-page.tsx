@@ -8,13 +8,12 @@ import { NoMatchState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
-import { LIST_ADMITS } from "../lib/space-lists";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
-import { useSpaceFilter } from "../hooks/use-space-filter";
+import { useOverviewList } from "../hooks/use-overview-mode";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -30,7 +29,7 @@ const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { spaceIds, selected: spaces, spanning, scope } = useSpaceFilter(LIST_ADMITS.runs);
+  const { spanning, spaces } = useOverviewList("runs");
   // « Tout marquer comme lu » marks the CURRENT space's runs only: a list spanning spaces offers it not.
   const unreadCount = useUnreadRunCount(!spanning);
   const markAllRead = useMarkAllRunsRead();
@@ -104,7 +103,7 @@ export function RunsPage() {
         user={user}
         kind={kind}
         status={statuses}
-        spaceIds={spaceIds}
+        spanning={spanning}
         search={search}
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
@@ -114,7 +113,6 @@ export function RunsPage() {
               onChange: list.setSearch,
               placeholder: searchPlaceholder,
             }}
-            scope={scope}
             filters={filters}
             onReset={list.reset}
             columns={columns}

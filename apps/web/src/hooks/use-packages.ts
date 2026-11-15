@@ -12,6 +12,7 @@ import { client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { keepPreviousWithin, versionKeyPackage } from "../lib/query-state";
+import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -148,37 +149,68 @@ type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
   : OrgPackageItem;
 
-/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`). */
-function usePackageList<T extends PackageType>(type: T) {
+type IndexType = Exclude<PackageType, "agent">;
+type Segment = (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType];
+
+/**
+ * One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`).
+ * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), one row per placement — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
+ */
+function usePackageList<T extends IndexType>(
+  type: T,
+  spanning: boolean,
+): ReturnType<typeof usePackageIndex<T>>;
+function usePackageList<T extends PackageType>(type: T): ReturnType<typeof usePackageIndex<T>>;
+function usePackageList<T extends PackageType>(type: T, spanning = false) {
+  return usePackageIndex(type, spanning);
+}
+
+function usePackageIndex<T extends PackageType>(type: T, spanning: boolean) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const segment: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType] =
-    PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: packageKeys.list(segment, orgId, spaceId),
-    queryFn: async (): Promise<PackageIndexItem<T>[]> => {
-      const { data } = await client.GET(`/api/packages/${segment}`);
-      // Normalize the optional spec fields; `scope` is not returned by list endpoints. The spread
-      // carries an integration row's own fields; `segment` is a union, so the cast ties them to `T`.
-      return data!.data.map((item) => ({
-        ...item,
-        name: item.name,
-        description: item.description,
-        // Manifest-derived: index pages draw cards and search off this row alone.
-        icon: item.icon,
-        keywords: item.keywords,
-        scope: null,
-        version: item.version,
-        forked_from: item.forked_from,
-        created_by: item.created_by,
-        created_by_name: item.created_by_name ?? null,
-        used_by_agents: item.used_by_agents,
-        auto_installed: item.auto_installed,
-      })) as PackageIndexItem<T>[];
-    },
-    enabled: canRead && !!orgId && !!spaceId,
+    queryKey: spanning
+      ? packageKeys.acrossSpaces(segment, orgId)
+      : packageKeys.list(segment, orgId, spaceId),
+    queryFn: () => fetchPackageIndex(type, spanning ? orgId : null),
+    // Each row's space grants it server-side; the current space's gate does not apply.
+    enabled: spanning ? !!orgId : canRead && !!orgId && !!spaceId,
   });
+}
+
+/** The current space's index, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchPackageIndex<T extends PackageType>(
+  type: T,
+  acrossOrgId: string | null,
+): Promise<PackageIndexItem<T>[]> {
+  const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  const rows =
+    acrossOrgId && segment !== "agents"
+      ? (
+          await client.GET(`/api/orgs/{orgId}/packages/${segment}`, {
+            params: { path: { orgId: acrossOrgId } },
+          })
+        ).data!.data
+      : (await client.GET(`/api/packages/${segment}`)).data!.data;
+  // Normalize the optional spec fields; `scope` is not returned by list endpoints. The spread
+  // carries an integration row's own fields; `segment` is a union, so the cast ties them to `T`.
+  return rows.map((item) => ({
+    ...item,
+    name: item.name,
+    description: item.description,
+    // Manifest-derived: index pages draw cards and search off this row alone.
+    icon: item.icon,
+    keywords: item.keywords,
+    scope: null,
+    version: item.version,
+    forked_from: item.forked_from,
+    created_by: item.created_by,
+    created_by_name: item.created_by_name ?? null,
+    used_by_agents: item.used_by_agents,
+    auto_installed: item.auto_installed,
+  })) as PackageIndexItem<T>[];
 }
 
 /** {@link usePackageDetail}'s query, for an imperative `fetchQuery` that shares its cache entry. */
@@ -280,34 +312,45 @@ export {
 
 // --- Agents ---
 
-/** The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one. */
-export function useAgents() {
+/**
+ * The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one.
+ * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), one row per placement, polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
+ */
+export function useAgents(spanning = false) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canSee = useCanSeePackage("agent");
   return useQuery({
-    queryKey: agentsKeys.list(orgId, spaceId),
-    queryFn: async (): Promise<AgentListItem[]> => {
-      const { data } = await client.GET("/api/agents");
-      // The spec marks most item fields optional — normalize to the asserted
-      // list shape. `forked_from` is not returned by the list endpoint.
-      return data!.data.map((a) => ({
-        ...a,
-        // Fall back to the package id when display_name is empty.
-        display_name: a.display_name || a.id,
-        description: a.description ?? "",
-        schema_version: a.schema_version ?? "",
-        author: a.author ?? "",
-        keywords: a.keywords ?? [],
-        scope: a.scope ?? null,
-        version: a.version ?? null,
-        forked_from: null,
-        running_runs: a.running_runs ?? 0,
-        dependencies: a.dependencies,
-      }));
-    },
-    enabled: canSee && !!orgId && !!spaceId,
+    queryKey: spanning ? agentsKeys.acrossSpaces(orgId) : agentsKeys.list(orgId, spaceId),
+    queryFn: () => fetchAgents(spanning ? orgId : null),
+    // Each row's space grants it server-side; the current space's gate does not apply.
+    enabled: spanning ? !!orgId : canSee && !!orgId && !!spaceId,
+    // The running and unread counts of other spaces' agents reach no SSE stream here.
+    refetchInterval: spanning ? ACROSS_SPACES_POLL_MS : undefined,
   });
+}
+
+/** The current space's agent index, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchAgents(acrossOrgId: string | null): Promise<AgentListItem[]> {
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/agents", { params: { path: { orgId: acrossOrgId } } })
+    : await client.GET("/api/agents");
+  // The spec marks most item fields optional — normalize to the asserted
+  // list shape. `forked_from` is not returned by the list endpoint.
+  return data!.data.map((a) => ({
+    ...a,
+    // Fall back to the package id when display_name is empty.
+    display_name: a.display_name || a.id,
+    description: a.description ?? "",
+    schema_version: a.schema_version ?? "",
+    author: a.author ?? "",
+    keywords: a.keywords ?? [],
+    scope: a.scope ?? null,
+    version: a.version ?? null,
+    forked_from: null,
+    running_runs: a.running_runs ?? 0,
+    dependencies: a.dependencies,
+  }));
 }
 
 // --- Package download ---

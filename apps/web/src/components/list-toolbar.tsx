@@ -22,11 +22,11 @@
  *   describe the page rather than the list.
  */
 
-import { Fragment, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { facetTicks } from "../lib/facet-ticks";
+import { toggleValue } from "../lib/toggle-value";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -79,36 +79,13 @@ export interface FilterSpec {
   onChange: (values: string[]) => void;
 }
 
-/**
- * What the list spans rather than a filter on it: drawn in the bar's main row, its trigger always
- * naming what the list shows, never counted or reset.
- */
-export interface ScopeSpec extends FilterSpec {
-  /** What the list shows while `values` is empty; a tick starts from it. */
-  implicit: string[];
-  /** The menu's first entry, ticking every option; also the trigger's word for that selection. */
-  allLabel: string;
-}
-
 /** Beyond this many, the button counts instead of naming. */
 const NAMED_VALUES = 2;
 
-function Tick({ on }: { on: boolean }) {
-  return (
-    <div
-      className={cn(
-        "flex size-4 items-center justify-center rounded-[4px] border",
-        on ? "border-primary bg-primary text-primary-foreground" : "border-input [&_svg]:invisible",
-      )}
-    >
-      <Check className="text-primary-foreground size-3.5" />
-    </div>
-  );
-}
-
-function FacetedFilter({ filter }: { filter: FilterSpec | ScopeSpec }) {
+function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
-  const { named, all, scope, groups } = facetTicks(filter);
+  const chosen = new Set(filter.values);
+  const selected = filter.options.filter((option) => chosen.has(option.value));
 
   return (
     <Popover>
@@ -119,31 +96,27 @@ function FacetedFilter({ filter }: { filter: FilterSpec | ScopeSpec }) {
           className={cn(
             // shadcn's own `size="sm"` resolves to `px-2.5 gap-1.5` for a button carrying an
             // icon; ours is a flat `px-3 gap-2`, which would add width inside every filter.
-            "h-8 max-w-full min-w-0 gap-1.5 bg-transparent px-2.5 shadow-none",
+            "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
             // Dashed and `+` both mean "an empty slot you can fill"; a filled button is a
             // statement, so the border closes and the plus leaves with it.
-            named.length === 0 && "border-dashed",
+            selected.length === 0 && "border-dashed",
           )}
         >
-          {named.length === 0 && <PlusCircle />}
+          {selected.length === 0 && <PlusCircle />}
           {filter.label}
-          {named.length > 0 && (
+          {selected.length > 0 && (
             <>
               <Separator orientation="vertical" className="mx-1.5 h-4" />
-              {all && scope ? (
+              {selected.length > NAMED_VALUES ? (
                 <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                  {scope.allLabel}
-                </Badge>
-              ) : named.length > NAMED_VALUES ? (
-                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                  {t("toolbar.selected", { count: named.length })}
+                  {t("toolbar.selected", { count: selected.length })}
                 </Badge>
               ) : (
-                named.map((option) => (
+                selected.map((option) => (
                   <Badge
                     key={option.value}
                     variant="secondary"
-                    className="min-w-0 truncate rounded-sm px-1 font-normal"
+                    className="rounded-sm px-1 font-normal"
                   >
                     {option.label}
                   </Badge>
@@ -158,21 +131,30 @@ function FacetedFilter({ filter }: { filter: FilterSpec | ScopeSpec }) {
           <CommandInput placeholder={filter.label} />
           <CommandList>
             <CommandEmpty>{t("toolbar.noResults")}</CommandEmpty>
-            {groups.map((entries, i) => (
-              <Fragment key={entries[0]?.key ?? i}>
-                {i > 0 && <CommandSeparator />}
-                <CommandGroup>
-                  {entries.map((entry) => (
-                    <CommandItem key={entry.key} onSelect={() => filter.onChange(entry.next)}>
-                      <Tick on={entry.on} />
-                      <span>{entry.label}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </Fragment>
-            ))}
-            {/* A scope is not a filter: nothing to clear, its default is a selection too. */}
-            {!scope && named.length > 0 && (
+            <CommandGroup>
+              {filter.options.map((option) => {
+                const isSelected = chosen.has(option.value);
+                return (
+                  <CommandItem
+                    key={option.value}
+                    onSelect={() => filter.onChange(toggleValue(filter.values, option.value))}
+                  >
+                    <div
+                      className={cn(
+                        "flex size-4 items-center justify-center rounded-[4px] border",
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input [&_svg]:invisible",
+                      )}
+                    >
+                      <Check className="text-primary-foreground size-3.5" />
+                    </div>
+                    <span>{option.label}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+            {selected.length > 0 && (
               <>
                 <CommandSeparator />
                 <CommandGroup>
@@ -244,7 +226,6 @@ const NO_FILTERS: FilterSpec[] = [];
 
 export function ListToolbar({
   search,
-  scope,
   filters = NO_FILTERS,
   onReset,
   columns,
@@ -257,8 +238,6 @@ export function ListToolbar({
    * box would search the fifteen rows on screen.
    */
   search?: SearchSpec;
-  /** What the list spans, in the main row: outside `filters`, their count and their reset. */
-  scope?: ScopeSpec;
   /** Absent on a list that only searches. */
   filters?: FilterSpec[];
   /**
@@ -292,7 +271,6 @@ export function ListToolbar({
             className="[[data-slot=dialog-content]_&]:bg-background h-8 min-w-40 flex-1 sm:max-w-[280px]"
           />
         )}
-        {scope && <FacetedFilter filter={scope} />}
         {filters.length > 0 && (
           <Button
             variant="outline"

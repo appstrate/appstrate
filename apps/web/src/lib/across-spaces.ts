@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Lists spanning several spaces of the org (runs, schedules, files): the pieces they share.
+ * Lists spanning several spaces of the org (runs, schedules, files, the package indexes, and the
+ * dashboard drawn from them): the pieces they share.
  *
  * A row of another space than the current one links to its detail with `?enterSpace=`; the
  * resolver enters that space (`useSpaceResolver`), then the route's gate drops the param
@@ -39,8 +40,9 @@ export function linkedSpaceStep(
 }
 
 /**
- * The SSE stream is scoped to the current space: a run, schedule or file list spanning spaces
- * polls while mounted, or it would never see a new row of another space. React Query pauses it in a
- * hidden tab. Same period as the stream's reconnect reconciliation.
+ * The SSE stream is scoped to the current space: a run, schedule, file or agent list spanning
+ * spaces polls while mounted, or it would never see a new row (or an agent's run counts) of another
+ * space. React Query pauses it in a hidden tab. Same period as the stream's reconnect
+ * reconciliation.
  */
 export const ACROSS_SPACES_POLL_MS = 10_000;

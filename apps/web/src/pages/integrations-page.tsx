@@ -2,7 +2,9 @@
 
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
- * placed here but switched off, or never switched on, is in the space library.
+ * placed here but switched off, or never switched on, is in the space library. In « Vue
+ * d'ensemble » it lists every space the reader reaches, one row per placement naming its space,
+ * read-only: creating, importing and activating act in one space, which the list does not name.
  */
 
 import { useMemo, useState } from "react";
@@ -15,7 +17,7 @@ import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
 import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
-import { packageCardItem } from "../lib/package-card-item";
+import { cardItemKey, cardItemPath, packageCardItem } from "../lib/package-card-item";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -42,24 +44,30 @@ import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useOverviewList } from "../hooks/use-overview-mode";
+import { useSpaceLabelOf } from "../hooks/use-spaces";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
-  // The server answers the active set of this space: the index route every
-  // type page asks, not the management listing.
-  const { data: active = [], isLoading, error } = usePackageList("integration");
-  const connectionCounts = useConnectionCounts();
+  const { spanning } = useOverviewList("integrations");
+  // The server answers the active set of this space (or of each, spanning): the
+  // index route every type page asks, not the management listing.
+  const { data: active = [], isLoading, error } = usePackageList("integration", spanning);
+  const connectionCount = useConnectionCounts();
+  const spaceLabelOf = useSpaceLabelOf();
+  const currentSpaceId = useCurrentSpaceId();
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const [importing, setImporting] = useState(false);
   // The same grants as every other package index (`PackageIndexPage`): creating,
   // by import too, is a write on the type.
-  const canCreate = can(packagePermission("integration", "write"));
-  const canBrowse = can(spacePackagePermission("integration", "activate"));
+  const canCreate = !spanning && can(packagePermission("integration", "write"));
+  const canBrowse = !spanning && can(spacePackagePermission("integration", "activate"));
   const creation = useCreationHandoff("integration", canCreate);
   const [creating, setCreating] = useState(false);
   const createAction: MenuAction = {
@@ -99,12 +107,14 @@ export function IntegrationsPage() {
   const countOf = (value: IntegrationExecution) =>
     active.filter((row) => integrationExecution(row.source_kind) === value).length;
 
-  const allColumns = useIntegrationListColumns(connectionCounts).filter((column) =>
+  const allColumns = useIntegrationListColumns(connectionCount, spanning).filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} />
+  ) : spanning ? (
+    <EmptyState icon={Boxes} compact message={t("integrations.empty.across")} />
   ) : (
     <EmptyState
       icon={Boxes}
@@ -204,8 +214,10 @@ export function IntegrationsPage() {
           label={t("integrations.tableLabel")}
           columns={columns}
           rows={shown}
-          rowKey={(integration) => integration.id}
-          rowHref={(integration) => `/integrations/${integration.id}`}
+          rowKey={cardItemKey}
+          rowHref={(integration) =>
+            cardItemPath({ ...integration, type: "integration" }, currentSpaceId)
+          }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
           failure={error}
@@ -214,16 +226,20 @@ export function IntegrationsPage() {
       ) : (
         <CardGrid
           items={shown}
-          itemKey={(integration) => integration.id}
+          itemKey={cardItemKey}
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
-              meta={
-                connectionCounts &&
-                t("connections.connectionCount", {
-                  count: connectionCounts.get(integration.id) ?? 0,
-                })
-              }
+              // A card names its space where the table has a column for it.
+              meta={[
+                spanning && spaceLabelOf(integration.spaceId),
+                connectionCount &&
+                  t("connections.connectionCount", {
+                    count: connectionCount(integration.id, integration.spaceId),
+                  }),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
           )}
           isLoading={isLoading}

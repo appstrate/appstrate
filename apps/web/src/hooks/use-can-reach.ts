@@ -7,7 +7,7 @@ import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { overviewListVerdict, shownInOverview } from "../lib/space-lists";
+import { holdsOverview, overviewListVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -48,7 +48,7 @@ export function useShellReach(): (target: string) => boolean {
   return useCallback(
     (target: string) => {
       const route = routeOf(target);
-      return canReach(target) && (!on || !route || shownInOverview(route));
+      return canReach(target) && (!on || holdsOverview(route));
     },
     [canReach, on],
   );

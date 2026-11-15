@@ -184,11 +184,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       closeSwitcherAndSidebar();
     });
 
-  /** « Vue d'ensemble » keeps the working space; a page that does not hold the mode gives way to its first list. */
+  /** « Vue d'ensemble » keeps the working space; a page that does not hold the mode gives way to its home, the dashboard. */
   const chooseOverview = () =>
     requestScopeChange(() => {
       overview.choose(true);
-      const landing = overviewEntry(spaces, routeOf(pathname));
+      const landing = overviewEntry(routeOf(pathname));
       if (landing) navigate(landing);
       closeSwitcherAndSidebar();
     });

@@ -5,9 +5,13 @@
 import type { ReactNode } from "react";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AgentListItem } from "@appstrate/shared-types";
+import { linkedSpacePath } from "./across-spaces";
+import { packageDetailPath } from "./package-paths";
 
 export interface CardItem {
   id: string;
+  /** The space whose index lists the row; its link enters that space when it is not the current one. Absent off an index (the catalogue). */
+  spaceId?: string;
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -32,9 +36,24 @@ export interface CardItem {
   meta?: ReactNode;
 }
 
+/** A row's identity: a list spanning spaces holds a package once per space. */
+export function cardItemKey(item: Pick<CardItem, "id" | "spaceId">): string {
+  return item.spaceId ? `${item.spaceId}:${item.id}` : item.id;
+}
+
+/** Where the row opens: its package's page, in the row's space (`?enterSpace=` when not the current one). */
+export function cardItemPath(
+  item: Pick<CardItem, "id" | "spaceId" | "type">,
+  currentSpaceId: string | null,
+): string {
+  const path = packageDetailPath(item.type, item.id);
+  return item.spaceId ? linkedSpacePath(path, item.spaceId, currentSpaceId) : path;
+}
+
 export function agentCardItem(agent: AgentListItem): CardItem {
   return {
     id: agent.id,
+    spaceId: agent.spaceId,
     displayName: agent.display_name ?? agent.id,
     description: agent.description ?? null,
     type: "agent",
@@ -50,6 +69,7 @@ export function agentCardItem(agent: AgentListItem): CardItem {
 /** What every package index row (`usePackageList`) carries, whatever its type. */
 interface PackageIndexRow {
   id: string;
+  spaceId: string;
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -64,6 +84,7 @@ interface PackageIndexRow {
 export function packageCardItem(row: PackageIndexRow, type: PackageType): CardItem {
   return {
     id: row.id,
+    spaceId: row.spaceId,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

@@ -22,6 +22,7 @@ function integration({
 }): IntegrationIndexItem {
   return {
     id,
+    spaceId: "spc_here",
     source,
     name,
     description: null,

@@ -33,6 +33,7 @@ import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useListView } from "../stores/list-view-store";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { CardGridSkeleton } from "./card-grid";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
@@ -138,22 +139,25 @@ export function DetailPageSkeleton({
   );
 }
 
-/** The name the family's list already holds for this package, when it was read. */
+/** The name the family's list (the space's, or the one across spaces it was opened from) already holds for this package, when it was read. */
 function useCachedPackageName(type: PackageType, packageId: string | undefined) {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   if (!packageId) return undefined;
+  const cached = <Row extends { id: string }>(...keys: (readonly unknown[])[]) =>
+    keys.flatMap((key) => qc.getQueryData<Row[]>(key) ?? []).find((row) => row.id === packageId);
   if (type === "agent") {
-    return qc
-      .getQueryData<{ id: string; display_name?: string }[]>(agentsKeys.list(orgId, spaceId))
-      ?.find((row) => row.id === packageId)?.display_name;
+    return cached<{ id: string; display_name?: string }>(
+      agentsKeys.list(orgId, spaceId),
+      agentsKeys.acrossSpaces(orgId),
+    )?.display_name;
   }
-  return qc
-    .getQueryData<{ id: string; name?: string }[]>(
-      packageKeys.list(PACKAGE_TYPE_ROUTE_SEGMENT[type], orgId, spaceId),
-    )
-    ?.find((row) => row.id === packageId)?.name;
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  return cached<{ id: string; name?: string }>(
+    packageKeys.list(segment, orgId, spaceId),
+    packageKeys.acrossSpaces(segment, orgId),
+  )?.name;
 }
 
 /**
@@ -230,7 +234,9 @@ export function ListPageSkeleton({ list }: { list?: string }) {
 
 function ViewedCollectionBlocks({ list }: { list: string }) {
   const [view] = useListView(list);
-  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent"} />;
+  // « Vue d'ensemble » offers no run: a run acts in one space.
+  const { on: overview } = useOverviewMode();
+  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent" && !overview} />;
 }
 
 /** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
@@ -419,8 +425,9 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
+ * `spanning` (« Vue d'ensemble »): the agent cards carry no run button.
  */
-export function DashboardBodySkeleton() {
+export function DashboardBodySkeleton({ spanning }: { spanning: boolean }) {
   return (
     <Waiting className="flex flex-col gap-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -433,7 +440,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable />
+              <PackageCardSkeleton runnable={!spanning} />
             </div>
           ))}
         </div>

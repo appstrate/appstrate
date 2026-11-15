@@ -12,9 +12,9 @@ import { RunStatusBadge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
-import { packageDetailPath } from "../lib/package-paths";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
-import type { CardItem } from "../lib/package-card-item";
+import { cardItemPath, type CardItem } from "../lib/package-card-item";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -27,6 +27,7 @@ const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.
 
 export function PackageCard({
   id,
+  spaceId,
   displayName,
   description,
   type,
@@ -59,6 +60,7 @@ export function PackageCard({
   headingLevel?: 2 | 3;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const currentSpaceId = useCurrentSpaceId();
   // The focus ring is drawn on the stretched overlay, i.e. around the whole
   // card: on the title itself `truncate` would clip it.
   const titleClass =
@@ -88,7 +90,10 @@ export function PackageCard({
                     {displayName}
                   </button>
                 ) : (
-                  <Link to={packageDetailPath(type, id)} className={titleClass}>
+                  <Link
+                    to={cardItemPath({ id, spaceId, type }, currentSpaceId)}
+                    className={titleClass}
+                  >
                     {displayName}
                   </Link>
                 )}

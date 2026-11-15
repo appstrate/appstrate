@@ -11,8 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ListFooter, ListToolbar, type FilterSpec, type ScopeSpec } from "../list-toolbar.tsx";
-import { facetTicks } from "../../lib/facet-ticks.ts";
+import { ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -208,74 +207,5 @@ describe("the filters button", () => {
     expect(html).toContain('aria-expanded="true"');
     // The state IS the style hook: no second flag to keep in step.
     expect(html).toContain("aria-expanded:bg-accent");
-  });
-});
-
-describe("a scope", () => {
-  // The space scope: untouched, the list shows the current space, which is not a filter.
-  const spaces = (values: string[]): ScopeSpec => ({
-    id: "spaceId",
-    label: "Espace",
-    values,
-    implicit: ["spc_here"],
-    allLabel: "Tous les espaces",
-    options: [
-      { value: "spc_here", label: "Ici" },
-      { value: "spc_studio", label: "Studio" },
-      { value: "spc_ops", label: "Ops" },
-    ],
-    onChange: () => {},
-  });
-
-  it("sits in the main row, naming what the list shows, with the filter row shut", () => {
-    const html = render(<ListToolbar scope={spaces([])} filters={filters()} onReset={() => {}} />);
-    expect(html).toContain("Espace");
-    expect(html).toContain("Ici");
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain("Statut");
-  });
-
-  it("is not a filter: no count, no reset, however wide", () => {
-    const html = render(
-      <ListToolbar
-        scope={spaces(["spc_here", "spc_studio", "spc_ops"])}
-        filters={filters()}
-        onReset={() => {}}
-      />,
-    );
-    expect(html).not.toMatch(/>\d</);
-    expect(html).not.toContain("Réinitialiser");
-    expect(html).toContain("Tous les espaces");
-  });
-
-  it("names up to two spaces, then counts, and says « all » for every one", () => {
-    expect(facetTicks(spaces([])).named.map((o) => o.label)).toEqual(["Ici"]);
-    expect(facetTicks(spaces(["spc_here", "spc_studio"])).all).toBe(false);
-    expect(facetTicks(spaces(["spc_here", "spc_studio", "spc_ops"])).all).toBe(true);
-  });
-
-  it("opens its menu on « all », then the spaces, a first tick adding to what is shown", () => {
-    const [first, options] = facetTicks(spaces([])).groups;
-    expect(first).toEqual([
-      {
-        key: "*",
-        label: "Tous les espaces",
-        on: false,
-        next: ["spc_here", "spc_studio", "spc_ops"],
-      },
-    ]);
-    expect(options?.map((entry) => [entry.key, entry.on])).toEqual([
-      ["spc_here", true],
-      ["spc_studio", false],
-      ["spc_ops", false],
-    ]);
-    expect(options?.[1]?.next).toEqual(["spc_here", "spc_studio"]);
-  });
-
-  it("leaves a filter's menu as it was: its options alone, its trigger naming active values", () => {
-    const [status] = filters({ status: ["failed"] });
-    const { groups, named } = facetTicks(status!);
-    expect(groups).toHaveLength(1);
-    expect(named.map((o) => o.value)).toEqual(["failed"]);
   });
 });

@@ -3,8 +3,8 @@
 import { useTranslation } from "react-i18next";
 import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
-import { packageDetailPath } from "../lib/package-paths";
-import type { CardItem } from "../lib/package-card-item";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { cardItemKey, cardItemPath, type CardItem } from "../lib/package-card-item";
 
 export function PackagesTable({
   tableId,
@@ -31,6 +31,7 @@ export function PackagesTable({
   surface?: "framed" | "integrated";
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
+  const currentSpaceId = useCurrentSpaceId();
 
   // The same state `CardGrid` takes, forwarded whole: the two bodies answer it
   // through the same `collectionVerdict`, so a caller can hand either one the
@@ -41,8 +42,8 @@ export function PackagesTable({
       label={label ?? t("list.tableLabel")}
       columns={columns}
       rows={items}
-      rowKey={(item) => item.id}
-      rowHref={rowAction ? undefined : (item) => packageDetailPath(item.type, item.id)}
+      rowKey={cardItemKey}
+      rowHref={rowAction ? undefined : (item) => cardItemPath(item, currentSpaceId)}
       rowAction={rowAction}
       rowLabel={(item) => item.displayName}
       surface={surface}

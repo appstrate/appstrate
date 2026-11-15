@@ -25,8 +25,8 @@ interface UsePaginatedRunsOptions {
   search?: string;
   /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
   unread?: boolean;
-  /** Several spaces of the org instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
-  spaceIds?: string[];
+  /** Every space the reader reaches instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
+  spanning?: boolean;
   /** `false` keeps the query from asking (a badge the shell does not show). */
   enabled?: boolean;
   limit: number;
@@ -55,7 +55,7 @@ export function usePaginatedRuns({
   status,
   search,
   unread,
-  spaceIds,
+  spanning,
   enabled = true,
   limit,
   offset,
@@ -71,7 +71,7 @@ export function usePaginatedRuns({
   const statusQuery = status && status.length > 0 ? status : undefined;
 
   // The org route serves the global view only; inside an agent or a schedule the space is theirs.
-  const acrossSpaces = !scheduleId && !packageId && spaceIds?.length ? spaceIds : undefined;
+  const acrossSpaces = !scheduleId && !packageId && !!spanning;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -81,17 +81,7 @@ export function usePaginatedRuns({
 
   // use-global-run-sync and the run mutations invalidate by the key prefix.
   const currentKey = acrossSpaces
-    ? paginatedRunsKeys.acrossSpaces(
-        orgId,
-        acrossSpaces.join(","),
-        user,
-        kind,
-        statusKey,
-        unread,
-        search,
-        limit,
-        offset,
-      )
+    ? paginatedRunsKeys.acrossSpaces(orgId, user, kind, statusKey, unread, search, limit, offset)
     : paginatedRunsKeys.list(
         orgId,
         spaceId,
@@ -116,7 +106,7 @@ export function usePaginatedRuns({
         status: statusQuery,
         search,
         unread,
-        across: acrossSpaces && orgId ? { orgId, spaceIds: acrossSpaces } : undefined,
+        acrossOrgId: acrossSpaces && orgId ? orgId : undefined,
         limit,
         offset,
       }),
@@ -129,14 +119,14 @@ export function usePaginatedRuns({
   });
 }
 
-/** One page's question: the hook's filters, and the org's spaces when it spans several. */
-type RunPageRequest = Omit<UsePaginatedRunsOptions, "spaceIds" | "enabled"> & {
-  across?: { orgId: string; spaceIds: string[] };
+/** One page's question: the hook's filters, and the org when it spans its spaces. */
+type RunPageRequest = Omit<UsePaginatedRunsOptions, "spanning" | "enabled"> & {
+  acrossOrgId?: string;
 };
 
 /**
  * One page, from the door the request names. `user`/`kind`/`unread` exist only on the global
- * view; `across` moves it to the org route. Exported for its test.
+ * view; `acrossOrgId` moves it to the org route. Exported for its test.
  */
 export async function fetchRunPage({
   packageId,
@@ -146,7 +136,7 @@ export async function fetchRunPage({
   status,
   search,
   unread,
-  across,
+  acrossOrgId,
   limit,
   offset,
 }: RunPageRequest): Promise<ListEnvelope<EnrichedRun>> {
@@ -178,12 +168,9 @@ export async function fetchRunPage({
     q: search || undefined,
     unread: unread || undefined,
   };
-  if (across) {
+  if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: {
-        path: { orgId: across.orgId },
-        query: { ...query, spaceId: across.spaceIds.join(",") },
-      },
+      params: { path: { orgId: acrossOrgId }, query },
     });
     return data!;
   }

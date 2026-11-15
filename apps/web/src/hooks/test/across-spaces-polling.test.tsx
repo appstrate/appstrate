@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A run, schedule or file list spanning spaces polls while mounted: the SSE stream carries the current
- * space only, so a new row of another space would otherwise never appear. A list of the current
- * space alone does not poll (the stream keeps it live).
+ * A run, schedule, file or agent list spanning spaces polls while mounted: the SSE stream carries
+ * the current space only, so a new row (or an agent's running and unread counts) of another space
+ * would otherwise never appear. A list of the current space alone does not poll (the stream keeps
+ * it live), nor does a package index, which carries nothing a run moves.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -16,6 +17,7 @@ const { render } = await import("../../test/render.tsx");
 const { usePaginatedRuns } = await import("../use-paginated-runs.ts");
 const { useAllSchedules } = await import("../use-schedules.ts");
 const { useFilesPaged } = await import("../use-files.ts");
+const { useAgents, usePackageList } = await import("../use-packages.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
 
 /** The `refetchInterval` the hook's query was built with, keyed under `prefix`. */
@@ -33,26 +35,28 @@ function intervalOf(useHook: () => unknown, ...prefix: string[]): unknown {
 
 describe("polling a list spanning spaces", () => {
   it("polls the runs list across spaces, not the current space's", () => {
-    const runs = (spaceIds?: string[]) => () =>
-      usePaginatedRuns({ spaceIds, limit: 15, offset: 0 });
-    expect(intervalOf(runs(["spc_a", "spc_b"]), "paginated-runs")).toBe(ACROSS_SPACES_POLL_MS);
-    expect(intervalOf(runs(), "paginated-runs")).toBeUndefined();
+    const runs = (spanning: boolean) => () => usePaginatedRuns({ spanning, limit: 15, offset: 0 });
+    expect(intervalOf(runs(true), "paginated-runs")).toBe(ACROSS_SPACES_POLL_MS);
+    expect(intervalOf(runs(false), "paginated-runs")).toBeUndefined();
   });
 
   it("polls the schedules list across spaces, not the current space's", () => {
-    expect(intervalOf(() => useAllSchedules(["spc_a", "spc_b"]), "schedules")).toBe(
-      ACROSS_SPACES_POLL_MS,
-    );
+    expect(intervalOf(() => useAllSchedules(true), "schedules")).toBe(ACROSS_SPACES_POLL_MS);
     expect(intervalOf(() => useAllSchedules(), "schedules")).toBeUndefined();
+  });
+
+  it("polls the agent index across spaces, not the current space's", () => {
+    expect(intervalOf(() => useAgents(true), "agents")).toBe(ACROSS_SPACES_POLL_MS);
+    expect(intervalOf(() => useAgents(), "agents")).toBeUndefined();
+  });
+
+  it("does not poll a package index across spaces", () => {
+    expect(intervalOf(() => usePackageList("skill", true), "packages")).toBeUndefined();
   });
 
   it("polls the files list across spaces", () => {
     expect(
-      intervalOf(
-        () => useFilesPaged({ spaceIds: ["spc_a", "spc_b"] }),
-        "get",
-        "/api/orgs/{orgId}/files",
-      ),
+      intervalOf(() => useFilesPaged({ spanning: true }), "get", "/api/orgs/{orgId}/files"),
     ).toBe(ACROSS_SPACES_POLL_MS);
   });
 });

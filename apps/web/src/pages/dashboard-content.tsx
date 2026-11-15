@@ -22,7 +22,11 @@ import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
-import { agentCardItem } from "../lib/package-card-item";
+import { agentCardItem, cardItemKey } from "../lib/package-card-item";
+import { linkedSpacePath } from "../lib/across-spaces";
+import { grantedInSomeSpace } from "../lib/space-lists";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
@@ -38,6 +42,8 @@ const CODING_AGENT_SETUP_PROMPT = `Fetch and follow the Appstrate coding-agent s
 
 export interface DashboardData {
   firstName: string;
+  /** « Vue d'ensemble »: the rows are every space's, and the page is read-only. */
+  spanning: boolean;
   agents: AgentListItem[];
   runs: EnrichedRun[];
   runTotal: number;
@@ -65,9 +71,12 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 export function DashboardHeader({
   firstName,
   runningCount,
+  spanning,
 }: {
   firstName: string;
   runningCount?: number;
+  /** The assistant acts in one space, which « Vue d'ensemble » does not name: not offered there. */
+  spanning: boolean;
 }) {
   const { t, i18n } = useTranslation("agents");
   const canChat = useCanReach()("/chat");
@@ -100,10 +109,12 @@ export function DashboardHeader({
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
-          <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
-            <Sparkles />
-            {t("dashboard.askAi.title")}
-          </Button>
+          spanning ? undefined : (
+            <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
+              <Sparkles />
+              {t("dashboard.askAi.title")}
+            </Button>
+          )
         }
       >
         {runningCount === undefined ? (
@@ -168,19 +179,29 @@ function MetricCard({
   );
 }
 
-function RecentAgents({ agents }: { agents: AgentListItem[] }) {
+function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning: boolean }) {
   const { t } = useTranslation("common");
+  const spaceLabelOf = useSpaceLabelOf();
   return (
     <div
       className="no-scrollbar scroll-fade-x scroll-buttons-x flex gap-3 overflow-x-auto pb-1"
       data-scroll-prev={t("pagination.previous")}
       data-scroll-next={t("pagination.next")}
     >
-      {agents.map((agent) => (
-        <div key={agent.id} className="w-[19rem] shrink-0">
-          <PackageCard {...agentCardItem(agent)} headingLevel={3} />
-        </div>
-      ))}
+      {agents.map((agent) => {
+        const item = agentCardItem(agent);
+        return (
+          // Spanning, a card names its space and offers no run: a run acts in one space.
+          <div key={cardItemKey(item)} className="w-[19rem] shrink-0">
+            <PackageCard
+              {...item}
+              meta={spanning ? spaceLabelOf(agent.spaceId) : undefined}
+              showRun={!spanning}
+              headingLevel={3}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -218,10 +239,12 @@ function DashboardScheduleRow({
   agent?: AgentListItem;
 }) {
   const { t } = useTranslation("agents");
+  const currentSpaceId = useCurrentSpaceId();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
+    // A schedule of another space (« Vue d'ensemble ») names it: the detail enters it.
     <Link
-      to={scheduleDetailPath(schedule.id)}
+      to={linkedSpacePath(scheduleDetailPath(schedule.id), schedule.spaceId, currentSpaceId)}
       className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
@@ -335,9 +358,13 @@ function dashboardMetrics(
 export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
+  const { data: spaces } = useSpaces();
   // The dashboard is the fallback route and renders for ANY principal: each
-  // section answers to the guard of the query that feeds it.
-  const sections = dashboardSections(can);
+  // section answers to the guard of the query that feeds it — in « Vue
+  // d'ensemble », granted in some space (the org route lists those).
+  const sections = dashboardSections(
+    data.spanning ? (permission) => grantedInSomeSpace(spaces, permission) : can,
+  );
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
   // What is DRAWN, not merely readable: a readable section with nothing in it
@@ -351,7 +378,11 @@ export function DashboardContent(data: DashboardData) {
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
       <div>
-        <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+        <DashboardHeader
+          firstName={data.firstName}
+          runningCount={metrics.running}
+          spanning={data.spanning}
+        />
         <EmptyState
           message={t("dashboard.empty")}
           hint={t("dashboard.emptyHint")}
@@ -363,7 +394,11 @@ export function DashboardContent(data: DashboardData) {
 
   return (
     <>
-      <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+      <DashboardHeader
+        firstName={data.firstName}
+        runningCount={metrics.running}
+        spanning={data.spanning}
+      />
       <div className="flex flex-col gap-8">
         {metrics.cards.length > 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -380,7 +415,7 @@ export function DashboardContent(data: DashboardData) {
               href="/agents"
               action={t("dashboard.allAgents")}
             />
-            <RecentAgents agents={data.agents} />
+            <RecentAgents agents={data.agents} spanning={data.spanning} />
           </section>
         )}
 

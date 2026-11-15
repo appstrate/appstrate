@@ -353,7 +353,6 @@
   "toolbar.columnsLabel": "Afficher les colonnes",
   "toolbar.selected": "{{count}} sélectionnés",
   "toolbar.reset": "Réinitialiser",
-  "toolbar.allSpaces": "Tous les espaces",
   "toolbar.space": "Espace",
   "toolbar.clearFilters": "Effacer ce filtre",
   "toolbar.noResults": "Aucun résultat",

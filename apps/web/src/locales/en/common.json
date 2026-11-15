@@ -353,7 +353,6 @@
   "toolbar.columnsLabel": "Toggle columns",
   "toolbar.selected": "{{count}} selected",
   "toolbar.reset": "Reset",
-  "toolbar.allSpaces": "All spaces",
   "toolbar.space": "Space",
   "toolbar.clearFilters": "Clear this filter",
   "toolbar.noResults": "No results found.",

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which door a page of the Runs list asks: the current space's `GET /api/runs` unless spaces are
- * ticked, then `GET /api/orgs/{orgId}/runs` with them.
+ * Which door a page of the Runs list asks: the current space's `GET /api/runs` unless it spans
+ * spaces, then `GET /api/orgs/{orgId}/runs`, naming no space.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
@@ -44,11 +44,11 @@ describe("fetchRunPage", () => {
     ]);
   });
 
-  it("asks the org route with the ticked spaces, the other filters unchanged", async () => {
+  it("asks the org route naming no space, the other filters unchanged", async () => {
     await fetchRunPage({
       user: "me",
       kind: "inline",
-      across: { orgId: "org_1", spaceIds: ["spc_a", "spc_b"] },
+      acrossOrgId: "org_1",
       limit: 15,
       offset: 15,
     });
@@ -66,7 +66,6 @@ describe("fetchRunPage", () => {
               status: undefined,
               q: undefined,
               unread: undefined,
-              spaceId: "spc_a,spc_b",
             },
           },
         },

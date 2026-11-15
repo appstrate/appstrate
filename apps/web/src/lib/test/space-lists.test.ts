@@ -8,14 +8,14 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
+  grantedInSomeSpace,
   holdsOverview,
+  listAdmits,
   overviewEntry,
-  overviewLanding,
   overviewLapsed,
   overviewListVerdict,
   overviewModeOn,
   overviewOffered,
-  shownInOverview,
 } = await import("../space-lists.ts");
 
 const space = (id: string, permissions: string[], access = "member") => ({
@@ -36,7 +36,7 @@ describe("overviewOffered", () => {
       overviewOffered([
         space("spc_a", ["runs:read"]),
         space("spc_closed", ["runs:read"], "none"),
-        space("spc_blind", ["agents:read"]),
+        space("spc_blind", ["chat:read"]),
       ]),
     ).toBe(false);
     expect(overviewOffered(undefined)).toBe(false);
@@ -60,16 +60,49 @@ describe("overviewLapsed", () => {
   });
 });
 
+describe("listAdmits", () => {
+  it("admits a list where the permissions of its route hold", () => {
+    expect(listAdmits("runs")(["runs:read-all"])).toBe(true);
+    // An agent is seen by a runner too (`packageSightPermissions("agent")`).
+    expect(listAdmits("agents")(["agents:run"])).toBe(true);
+    expect(listAdmits("skills")(["skills:read"])).toBe(true);
+    expect(listAdmits("integrations")(["integrations:read"])).toBe(true);
+    expect(listAdmits("mcp-servers")(["mcp-servers:read"])).toBe(true);
+    expect(listAdmits("skills")(["agents:read", "integrations:read"])).toBe(false);
+  });
+});
+
+describe("grantedInSomeSpace", () => {
+  it("asks every space with a role, none without one", () => {
+    expect(grantedInSomeSpace(TWO, "files:read")).toBe(true);
+    expect(grantedInSomeSpace(TWO, "schedules:read")).toBe(false);
+    expect(grantedInSomeSpace([space("spc_c", ["schedules:read"], "none")], "schedules:read")).toBe(
+      false,
+    );
+  });
+});
+
 describe("holdsOverview", () => {
-  it("holds on the lists and their details, the home, the routes of no space, an undeclared address", () => {
+  it("holds on the lists and their rows, the dashboard, the routes of no space, an undeclared address", () => {
     for (const path of [
+      "/",
       "/runs",
       "/schedules",
-      "/files",
-      "/agents/:scope/:name/runs/:runId",
       "/schedules/:id",
-      "/",
+      "/files",
       "/files/:fileId",
+      "/agents",
+      "/agents/:scope/:name",
+      "/agents/:scope/:name/:version",
+      "/agents/:scope/:name/runs/:runId",
+      "/skills",
+      "/skills/:scope/:name",
+      "/skills/:scope/:name/:version",
+      "/integrations",
+      "/integrations/:scope/:name",
+      "/mcp-servers",
+      "/mcp-servers/:scope/:name",
+      "/mcp-servers/:scope/:name/:version",
       "/org-settings",
       "/org-settings/members",
       "/org-settings/billing",
@@ -80,16 +113,13 @@ describe("holdsOverview", () => {
     expect(holdsOverview(undefined)).toBe(true);
   });
 
-  it("is left by any route of one space, the catalogue included (it acts « here »)", () => {
+  it("is left by any route of one space: the catalogue (it acts « here »), the chat, a creation, the workspace settings", () => {
     for (const path of [
-      "/agents",
-      "/agents/:scope/:name",
       "/catalogue",
       "/catalogue/:type",
-      "/skills",
-      "/integrations",
-      "/mcp-servers",
+      "/integrations/new/mcp",
       "/chat",
+      "/chat/:conversationId",
       "/workspace-settings",
       "/workspace-settings/general",
       "/workspace-settings/webhooks",
@@ -99,35 +129,19 @@ describe("holdsOverview", () => {
   });
 });
 
-describe("shownInOverview", () => {
-  it("links the lists and the routes of no space, never the home", () => {
-    expect(
-      ["/runs", "/schedules", "/files", "/files/:fileId", "/org-settings"].every((p) =>
-        shownInOverview(p as "/runs"),
-      ),
-    ).toBe(true);
-    expect(shownInOverview("/")).toBe(false);
-    expect(shownInOverview("/agents")).toBe(false);
-    expect(shownInOverview("/chat")).toBe(false);
-    expect(shownInOverview("/catalogue")).toBe(false);
-  });
-});
-
-describe("overviewLanding and overviewEntry", () => {
-  it("lands on the first list a space admits", () => {
-    expect(
-      overviewLanding([space("spc_a", ["schedules:read"]), space("spc_b", ["files:read"])]),
-    ).toBe("/schedules");
-    expect(overviewLanding(TWO)).toBe("/runs");
-  });
-
-  it("stays on a page that holds the mode, and leaves the others for the first list", () => {
-    expect(overviewEntry(TWO, "/files")).toBeNull();
-    expect(overviewEntry(TWO, "/org-settings/members")).toBeNull();
+describe("overviewEntry", () => {
+  it("stays on a page that holds the mode, and leaves the others for the dashboard", () => {
+    expect(overviewEntry("/")).toBeNull();
+    expect(overviewEntry("/files")).toBeNull();
+    expect(overviewEntry("/agents")).toBeNull();
+    expect(overviewEntry("/org-settings/members")).toBeNull();
     // A row's detail opened in the mode keeps it.
-    expect(overviewEntry(TWO, "/schedules/:id")).toBeNull();
-    expect(overviewEntry(TWO, "/agents")).toBe("/runs");
-    expect(overviewEntry(TWO, "/")).toBe("/runs");
+    expect(overviewEntry("/schedules/:id")).toBeNull();
+    expect(overviewEntry("/skills/:scope/:name")).toBeNull();
+    expect(overviewEntry(undefined)).toBeNull();
+    expect(overviewEntry("/chat")).toBe("/");
+    expect(overviewEntry("/catalogue/:type")).toBe("/");
+    expect(overviewEntry("/workspace-settings/general")).toBe("/");
   });
 });
 
@@ -135,6 +149,11 @@ describe("overviewListVerdict", () => {
   it("opens a list where some space admits it, and says nothing of other routes", () => {
     expect(overviewListVerdict("/files", TWO)).toBe("granted");
     expect(overviewListVerdict("/schedules", TWO)).toBe("denied");
-    expect(overviewListVerdict("/agents", TWO)).toBeUndefined();
+    expect(overviewListVerdict("/agents", TWO)).toBe("denied");
+    expect(overviewListVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])])).toBe(
+      "granted",
+    );
+    expect(overviewListVerdict("/", TWO)).toBeUndefined();
+    expect(overviewListVerdict("/agents/:scope/:name", TWO)).toBeUndefined();
   });
 });

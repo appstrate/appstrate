@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
+import { useSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
   useCatalogueProtocolColumn,
@@ -12,13 +13,16 @@ import { useOrg } from "../hooks/use-org";
 import { integrationProtocol } from "../lib/integration-collection";
 
 /**
- * One comparable integration fact per column. `connectionCounts` is the caller's own connections
- * per integration here (`useConnectionCounts`); `undefined` while unknown, drawn as « — ».
+ * One comparable integration fact per column. `connectionCount` is the caller's own connections
+ * of an integration in a row's space (`useConnectionCounts`); `undefined` while unknown, drawn as
+ * « — ». `spanning`: an index across spaces, each row naming its space.
  */
 export function useIntegrationListColumns(
-  connectionCounts?: ReadonlyMap<string, number>,
+  connectionCount: ((sourceId: string, spaceId: string) => number) | undefined,
+  spanning: boolean,
 ): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
+  const spaceColumn = useSpaceColumn<IntegrationIndexItem>(spanning);
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
   // Remote tab only: API or MCP.
   const protocol = useCatalogueProtocolColumn<IntegrationIndexItem>((integration) =>
@@ -38,6 +42,7 @@ export function useIntegrationListColumns(
         </div>
       ),
     },
+    ...spaceColumn,
     origin,
     protocol,
     {
@@ -58,7 +63,7 @@ export function useIntegrationListColumns(
       width: 112,
       align: "end",
       cell: (integration) => {
-        const count = connectionCounts && (connectionCounts.get(integration.id) ?? 0);
+        const count = connectionCount?.(integration.id, integration.spaceId);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
             {count ?? "—"}

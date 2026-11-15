@@ -5,7 +5,7 @@ import { useSpaceLabelOf } from "../hooks/use-spaces";
 import type { DataColumn } from "./data-table";
 
 /** The « Espace » column of a list spanning spaces; none otherwise. Spread into a column set. */
-export function useSpaceColumn<T extends { spaceId: string }>(spanning: boolean): DataColumn<T>[] {
+export function useSpaceColumn<T extends { spaceId?: string }>(spanning: boolean): DataColumn<T>[] {
   const { t } = useTranslation(["common"]);
   const spaceLabelOf = useSpaceLabelOf();
   if (!spanning) return [];

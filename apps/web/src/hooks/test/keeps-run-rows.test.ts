@@ -33,11 +33,10 @@ describe("keepsRunRows", () => {
     expect(keepsRunRows(key(), key({ status: "failed" }))).toBe(false);
   });
 
-  it("treats a list across spaces like any list: paging keeps, a new selection drops", () => {
-    const across = (spaceIds: string, offset = 0) =>
+  it("treats a list across spaces like any list: paging keeps, entering or leaving it drops", () => {
+    const across = (offset = 0) =>
       paginatedRunsKeys.acrossSpaces(
         "org_1",
-        spaceIds,
         undefined,
         undefined,
         undefined,
@@ -46,8 +45,8 @@ describe("keepsRunRows", () => {
         20,
         offset,
       );
-    expect(keepsRunRows(across("spc_a,spc_b"), across("spc_a,spc_b", 20))).toBe(true);
-    expect(keepsRunRows(across("spc_a,spc_b"), across("spc_a"))).toBe(false);
-    expect(keepsRunRows(key(), across("spc_a,spc_b"))).toBe(false);
+    expect(keepsRunRows(across(), across(20))).toBe(true);
+    expect(keepsRunRows(key(), across())).toBe(false);
+    expect(keepsRunRows(across(), key())).toBe(false);
   });
 });

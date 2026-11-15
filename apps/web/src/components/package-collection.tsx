@@ -29,7 +29,7 @@ import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
 import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
-import type { CardItem } from "../lib/package-card-item";
+import { cardItemKey, type CardItem } from "../lib/package-card-item";
 
 const NO_FILTERS: FilterSpec[] = [];
 
@@ -254,7 +254,7 @@ export function PackageCollection({
                 />
                 <CardGrid
                   items={section.items}
-                  itemKey={(item) => item.id}
+                  itemKey={cardItemKey}
                   renderCard={(item) => (
                     <PackageCard
                       {...item}
@@ -272,7 +272,7 @@ export function PackageCollection({
       ) : (
         <CardGrid
           items={shown}
-          itemKey={(item) => item.id}
+          itemKey={cardItemKey}
           renderCard={(item) => (
             <PackageCard
               {...item}

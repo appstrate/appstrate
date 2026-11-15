@@ -250,7 +250,7 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, spaceId, scheduleId) });
     qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, spaceId) });
     // A list spanning spaces holds this space's schedules too.
-    qc.invalidateQueries({ queryKey: scheduleKeys.acrossSpacesAll(orgId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.acrossSpaces(orgId) });
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {

@@ -65,26 +65,20 @@ export function useFiles(filters: FileListFilters = {}) {
 
 /** The gallery's files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
 export function useFilesPaged(
-  filters: Pick<FileListFilters, "search" | "purpose"> & { spaceIds?: string[] } = {},
+  filters: Pick<FileListFilters, "search" | "purpose"> & { spanning?: boolean } = {},
 ) {
   const scope = useOrgScope();
   const orgId = useCurrentOrgId();
   const { can } = usePermissions();
   const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
-  const spaceIds = filters.spaceIds?.length ? filters.spaceIds : undefined;
+  const spanning = !!filters.spanning;
   const across = useInfiniteQuery({
-    // The org route's `[method, path]`, the listed spaces in its query.
-    queryKey: [
-      "get",
-      "/api/orgs/{orgId}/files",
-      "paged",
-      { path: { orgId }, query: { ...query, spaceId: spaceIds?.join(",") } },
-    ] as const,
+    queryKey: ["get", "/api/orgs/{orgId}/files", "paged", { path: { orgId }, query }] as const,
     queryFn: ({ pageParam, signal }) =>
-      fetchFilesAcrossSpaces(orgId!, spaceIds!, { ...query, startingAfter: pageParam }, signal),
+      fetchFilesAcrossSpaces(orgId!, { ...query, startingAfter: pageParam }, signal),
     ...keysetPaging,
     // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: !!spaceIds && !!orgId,
+    enabled: spanning && !!orgId,
     placeholderData: keepPreviousData,
     // Other spaces' new files reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
     refetchInterval: ACROSS_SPACES_POLL_MS,
@@ -100,22 +94,21 @@ export function useFilesPaged(
       return data;
     },
     ...keysetPaging,
-    enabled: !spaceIds && can("files:read") && scope.enabled,
+    enabled: !spanning && can("files:read") && scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
     placeholderData: keepPreviousData,
   });
-  return spaceIds ? across : inSpace;
+  return spanning ? across : inSpace;
 }
 
-/** One page of `GET /api/orgs/{orgId}/files`, the listed spaces in `spaceId`. Exported for its test. */
+/** One page of `GET /api/orgs/{orgId}/files`: every space the reader reaches. Exported for its test. */
 export async function fetchFilesAcrossSpaces(
   orgId: string,
-  spaceIds: string[],
   query: NonNullable<paths["/api/orgs/{orgId}/files"]["get"]["parameters"]["query"]>,
   signal?: AbortSignal,
 ) {
   const { data } = await client.GET("/api/orgs/{orgId}/files", {
-    params: { path: { orgId }, query: { ...query, spaceId: spaceIds.join(",") } },
+    params: { path: { orgId }, query },
     signal,
   });
   if (!data) throw new Error("empty response");

@@ -8,7 +8,15 @@ import { orgStore } from "../stores/org-store";
 import { overviewStore } from "../stores/overview-store";
 import { rememberedSpaceKey } from "../stores/space-store";
 import { routeOf } from "../lib/route-match";
-import { holdsOverview, overviewLapsed, overviewModeOn, overviewOffered } from "../lib/space-lists";
+import {
+  admittingSpaces,
+  holdsOverview,
+  listAdmits,
+  overviewLapsed,
+  overviewModeOn,
+  overviewOffered,
+  type SpaceList,
+} from "../lib/space-lists";
 import { useSpaces } from "./use-spaces";
 
 /** Where the reader's choice is kept in the current org: per account and org; null before both. */
@@ -38,6 +46,20 @@ export function useOverviewMode() {
   );
 
   return { on: overviewModeOn(chosen, spaces), offered: overviewOffered(spaces), choose };
+}
+
+/**
+ * Whether `list` spans spaces (the mode is on), and the spaces admitting it. Outside the mode it
+ * is the current space's own. A spanning list is read-only: a write acts in one space, which it
+ * does not name. Asked by the PAGE, never by a shared hook: a detail page runs in one space while
+ * the mode is on.
+ */
+export function useOverviewList(list: SpaceList) {
+  const { on } = useOverviewMode();
+  const { data: spaces } = useSpaces();
+  return on
+    ? { spanning: true, spaces: admittingSpaces(spaces, listAdmits(list)) }
+    : { spanning: false, spaces: [] };
 }
 
 function withdraw(key: string): void {

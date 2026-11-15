@@ -16,7 +16,8 @@ installFakeStorage();
 
 const { droppedOnSpaceSwitch, enterableSpaceId, isSpaceEnterable } =
   await import("../use-current-space.ts");
-const { paginatedRunsKeys, scheduleKeys } = await import("../../lib/query-keys.ts");
+const { agentsKeys, packageKeys, paginatedRunsKeys, scheduleKeys } =
+  await import("../../lib/query-keys.ts");
 
 const space = (id: string, access: string, isDefault = false, personal = false) => ({
   id,
@@ -91,18 +92,22 @@ describe("isSpaceEnterable", () => {
 });
 
 describe("droppedOnSpaceSwitch", () => {
-  const runs = (spaceIds?: string) =>
-    spaceIds
-      ? paginatedRunsKeys.acrossSpaces("org_1", spaceIds, null, null, null, false, "", 15, 0)
+  const runs = (spanning = false) =>
+    spanning
+      ? paginatedRunsKeys.acrossSpaces("org_1", null, null, null, false, "", 15, 0)
       : paginatedRunsKeys.list("org_1", "spc_a", "/runs", null, null, null, false, "", 15, 0);
 
-  it("drops the current space's run and schedule lists", () => {
+  it("drops the current space's run, schedule, agent and package lists", () => {
     expect(droppedOnSpaceSwitch(runs())).toBe(true);
     expect(droppedOnSpaceSwitch(scheduleKeys.list("org_1", "spc_a"))).toBe(true);
+    expect(droppedOnSpaceSwitch(agentsKeys.list("org_1", "spc_a"))).toBe(true);
+    expect(droppedOnSpaceSwitch(packageKeys.list("skills", "org_1", "spc_a"))).toBe(true);
   });
 
-  it("keeps the lists across spaces, which name their spaces", () => {
-    expect(droppedOnSpaceSwitch(runs("spc_a,spc_b"))).toBe(false);
-    expect(droppedOnSpaceSwitch(scheduleKeys.acrossSpaces("org_1", "spc_a,spc_b"))).toBe(false);
+  it("keeps the lists across spaces, which key no space", () => {
+    expect(droppedOnSpaceSwitch(runs(true))).toBe(false);
+    expect(droppedOnSpaceSwitch(scheduleKeys.acrossSpaces("org_1"))).toBe(false);
+    expect(droppedOnSpaceSwitch(agentsKeys.acrossSpaces("org_1"))).toBe(false);
+    expect(droppedOnSpaceSwitch(packageKeys.acrossSpaces("integrations", "org_1"))).toBe(false);
   });
 });

@@ -75,6 +75,7 @@
   "list.create": "New agent",
   "list.createItem": "New {{type}}",
   "list.empty": "No active agent in this space.",
+  "list.emptyAcross": "No active agent in your spaces.",
   "list.badgeBuiltIn": "System",
   "list.badgeAutoInstalled": "Auto",
   "list.filter.origin": "Origin",

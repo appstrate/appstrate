@@ -2,8 +2,8 @@
 
 /**
  * Files gallery. Paginated (keyset "load more") list of every file
- * visible to the caller in the current space, or in the spaces its « Espace »
- * scope spans, with a purpose filter. Visibility is the API's
+ * visible to the caller in the current space, or in every space it reaches
+ * in « Vue d'ensemble », with a purpose filter. Visibility is the API's
  * (container-inherited ACL): members see the space's files, end-users see only
  * their own.
  */
@@ -23,10 +23,10 @@ import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { LIST_ADMITS } from "../lib/space-lists";
+import { listAdmits } from "../lib/space-lists";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
-import { useSpaceFilter } from "../hooks/use-space-filter";
+import { useOverviewList } from "../hooks/use-overview-mode";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
@@ -41,7 +41,7 @@ function DocumentsPageContent() {
   const list = useListParams(["purpose"]);
   const purposes = list.values("purpose", PURPOSES);
   const search = list.search;
-  const { spaceIds, selected: spaces, spanning, scope } = useSpaceFilter(LIST_ADMITS.files);
+  const { spanning, spaces } = useOverviewList("files");
   const canReach = useCanReach();
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
@@ -51,7 +51,7 @@ function DocumentsPageContent() {
   const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } = useFilesPaged({
     search: query,
     purpose: purposes.length === 1 ? purposes[0] : undefined,
-    spaceIds,
+    spanning,
   });
   const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
@@ -60,7 +60,7 @@ function DocumentsPageContent() {
   const showRunLink = (doc: FileDto) => {
     if (!spanning) return readsRunsHere;
     const space = spaces.find((s) => s.id === doc.spaceId);
-    return !!space && LIST_ADMITS.runs(space.permissions);
+    return !!space && listAdmits("runs")(space.permissions);
   };
 
   const filtering = purposes.length > 0 || query.trim() !== "";
@@ -104,7 +104,6 @@ function DocumentsPageContent() {
               onChange: list.setSearch,
               placeholder: searchPlaceholder,
             }}
-            scope={scope}
             filters={[
               {
                 id: "purpose",

@@ -29,7 +29,7 @@ describe("loading skeletons", () => {
       <SettingsSkeleton />,
       <DetailPageSkeleton tabCount={3} />,
       <ListPageSkeleton />,
-      <DashboardBodySkeleton />,
+      <DashboardBodySkeleton spanning={false} />,
       <ChatPanelSkeleton />,
       <ChatConversationSkeleton />,
       <SettingsTableSkeleton />,

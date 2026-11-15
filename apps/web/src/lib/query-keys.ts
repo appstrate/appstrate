@@ -13,13 +13,12 @@ import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
 
-/** The segment that sets a list across spaces apart, where a space-scoped list keys its space. */
-const ACROSS_RUNS = "/orgs/runs";
-const ACROSS_SCHEDULES = "/orgs/schedules";
+/** What a list across spaces keys where a space-scoped list keys its space. */
+const ACROSS_SPACES = "across-spaces";
 
-/** A run or schedule list across spaces: it names its spaces, never the current one. */
+/** A list across spaces (runs, schedules, agents, a package index): it keys its org, never the current space. */
 export function spansSpaces(queryKey: readonly unknown[]): boolean {
-  return queryKey[2] === ACROSS_RUNS || queryKey[2] === ACROSS_SCHEDULES;
+  return queryKey.includes(ACROSS_SPACES);
 }
 
 /** A spec path that has a GET operation: the only paths a query key can name. */
@@ -96,10 +95,9 @@ export const paginatedRunsKeys = {
       limit,
       offset,
     ] as const,
-  /** `GET /api/orgs/{orgId}/runs`: the listed spaces (comma-joined) instead of the current one; same tail as `list`. */
+  /** `GET /api/orgs/{orgId}/runs`: every space the reader reaches instead of the current one; same tail as `list`. */
   acrossSpaces: (
     orgId: Id,
-    spaceIds: string,
     user: string | null | undefined,
     kind: string | null | undefined,
     status: string | null | undefined,
@@ -111,8 +109,7 @@ export const paginatedRunsKeys = {
     [
       "paginated-runs",
       orgId,
-      ACROSS_RUNS,
-      spaceIds,
+      ACROSS_SPACES,
       user,
       kind,
       status,
@@ -129,6 +126,8 @@ export const packageKeys = {
   family: (path: string) => ["packages", path] as const,
   familyInOrg: (path: string, orgId: Id) => ["packages", path, orgId] as const,
   list: (path: string, orgId: Id, spaceId: Id) => ["packages", path, orgId, spaceId] as const,
+  /** `GET /api/orgs/{orgId}/packages/{path}`: every space the reader reaches in place of the current one. */
+  acrossSpaces: (path: string, orgId: Id) => ["packages", path, orgId, ACROSS_SPACES] as const,
   detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string | null = null) =>
     ["packages", path, orgId, spaceId, id, version] as const,
 };
@@ -164,6 +163,8 @@ export const agentsKeys = {
   all: ["agents"] as const,
   inOrg: (orgId: Id) => ["agents", orgId] as const,
   list: (orgId: Id, spaceId: Id) => ["agents", orgId, spaceId] as const,
+  /** `GET /api/orgs/{orgId}/agents`: every space the reader reaches in place of the current one. */
+  acrossSpaces: (orgId: Id) => ["agents", orgId, ACROSS_SPACES] as const,
 };
 
 /** A package write: every package family, the agent catalog and the file explorer's caches. */
@@ -187,11 +188,8 @@ export const scheduleKeys = {
   detailAll: ["schedule"] as const,
   runsAll: ["schedule-runs"] as const,
   list: (orgId: Id, spaceId: Id) => ["schedules", orgId, spaceId] as const,
-  /** Prefix of every list across spaces (`GET /api/orgs/{orgId}/schedules`). */
-  acrossSpacesAll: (orgId: Id) => ["schedules", orgId, ACROSS_SCHEDULES] as const,
-  /** The listed spaces (comma-joined) in place of the current one. */
-  acrossSpaces: (orgId: Id, spaceIds: string) =>
-    ["schedules", orgId, ACROSS_SCHEDULES, spaceIds] as const,
+  /** `GET /api/orgs/{orgId}/schedules`: every space the reader reaches in place of the current one. */
+  acrossSpaces: (orgId: Id) => ["schedules", orgId, ACROSS_SPACES] as const,
   listForAgent: (orgId: Id, spaceId: Id, packageId: Id) =>
     ["schedules", orgId, spaceId, packageId] as const,
   detail: (orgId: Id, spaceId: Id, scheduleId: Id) =>

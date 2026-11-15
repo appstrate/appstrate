@@ -130,14 +130,13 @@ describe("the navigation in « Vue d'ensemble »", () => {
   ];
   const working = ["agents:read", "skills:read", "files:read"];
 
-  it("keeps the lists some space admits, and hides what belongs to one space", () => {
+  it("shows the dashboard and every list some space admits, whatever the working space reads", () => {
     const html = navFor(working, spaces, true);
-    for (const label of ["Fichiers", "Runs", "Planifications"]) {
+    for (const label of ["Dashboard", "Fichiers", "Runs", "Agents", "Skills", "Planifications"]) {
       expect(html).toContain(`<span>${label}</span>`);
     }
-    for (const label of ["Dashboard", "Agents", "Skills"]) {
-      expect(html).not.toContain(`<span>${label}</span>`);
-    }
+    // No space reads integrations.
+    expect(html).not.toContain("<span>Intégrations</span>");
   });
 
   it("leaves the navigation of the working space as it was out of the mode", () => {

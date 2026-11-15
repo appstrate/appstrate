@@ -56,6 +56,7 @@ function asOrgMember(
 function content(overrides: Partial<DashboardData> = {}): DashboardData {
   return {
     firstName: "Ada",
+    spanning: false,
     agents: [],
     runs: [],
     runTotal: 0,

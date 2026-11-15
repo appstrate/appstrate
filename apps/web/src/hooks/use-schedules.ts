@@ -27,33 +27,30 @@ function useCanReadSchedules(): boolean {
   return can("schedules:read");
 }
 
-/** The current space's schedules, or those of `spaceIds` (`GET /api/orgs/{orgId}/schedules`). */
-export function useAllSchedules(spaceIds?: string[]) {
+/** The current space's schedules, or, `spanning`, every space's the reader reaches (`GET /api/orgs/{orgId}/schedules`). */
+export function useAllSchedules(spanning = false) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
-  const acrossSpaces = spaceIds?.length ? spaceIds : undefined;
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
-    queryKey: acrossSpaces
-      ? scheduleKeys.acrossSpaces(orgId, acrossSpaces.join(","))
-      : scheduleKeys.list(orgId, spaceId),
-    queryFn: () => fetchSchedules(orgId, acrossSpaces),
+    queryKey: spanning ? scheduleKeys.acrossSpaces(orgId) : scheduleKeys.list(orgId, spaceId),
+    queryFn: () => fetchSchedules(orgId, spanning),
     // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: acrossSpaces ? !!orgId : canRead && !!orgId && !!spaceId,
+    enabled: spanning ? !!orgId : canRead && !!orgId && !!spaceId,
     // Other spaces' schedules reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
-    refetchInterval: acrossSpaces ? ACROSS_SPACES_POLL_MS : undefined,
+    refetchInterval: spanning ? ACROSS_SPACES_POLL_MS : undefined,
   });
 }
 
-/** The list from the door `spaceIds` names. Exported for its test. */
+/** The list from the current space's door, or the org's when `spanning`. Exported for its test. */
 export async function fetchSchedules(
   orgId: string | null,
-  spaceIds: string[] | undefined,
+  spanning: boolean,
 ): Promise<EnrichedSchedule[]> {
-  if (spaceIds?.length) {
+  if (spanning) {
     const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
-      params: { path: { orgId: orgId! }, query: { spaceId: spaceIds.join(",") } },
+      params: { path: { orgId: orgId! } },
     });
     return data?.data ?? [];
   }

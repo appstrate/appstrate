@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { useSpaceFilter } from "../hooks/use-space-filter";
+import { useOverviewList } from "../hooks/use-overview-mode";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
@@ -14,7 +14,6 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
-import { LIST_ADMITS } from "../lib/space-lists";
 import { matchesSearch } from "../lib/strings";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
@@ -27,8 +26,8 @@ export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  const { spaceIds, spanning, scope } = useSpaceFilter(LIST_ADMITS.schedules);
-  const { data: schedules, isLoading, isError, error } = useAllSchedules(spaceIds);
+  const { spanning } = useOverviewList("schedules");
+  const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
   // A schedule is created in one space, which a list spanning spaces does not name.
   const canCreate = !spanning && can("schedules:write");
@@ -90,7 +89,6 @@ export function SchedulesListPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder }}
-        scope={scope}
         filters={[
           {
             id: "state",
