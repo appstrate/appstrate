@@ -193,6 +193,6 @@
   "threads.group.older": "Older",
   "threads.results": "Results",
   "threads.noResults": "No conversation matches.",
-  "threads.search.placeholder": "Search conversations",
+  "threads.search.placeholder": "Search",
   "threads.search.clear": "Clear search"
 }

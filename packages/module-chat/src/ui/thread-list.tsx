@@ -240,7 +240,11 @@ export function ChatConversationList({
             {t(searching ? "threads.results" : "threads.title")}
           </SidebarGroupLabel>
         )}
-        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
+        {/* Grows only with rows to scroll: an empty list must not push its
+            empty state to the bottom of the sidebar. */}
+        <SidebarMenu
+          className={list.length > 0 || isLoading ? "min-h-0 flex-1 overflow-y-auto" : undefined}
+        >
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
@@ -292,11 +296,6 @@ export function ChatConversationList({
             <p className="text-sidebar-foreground/70 text-xs">
               {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
             </p>
-            {canWrite && (
-              <Button type="button" variant="outline" size="sm" onClick={() => select?.(null)}>
-                {t("threads.new")}
-              </Button>
-            )}
           </div>
         )}
       </SidebarGroup>

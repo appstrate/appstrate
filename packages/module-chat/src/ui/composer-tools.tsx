@@ -102,7 +102,7 @@ export function ComposerTools({
               checked={creationMode}
               onCheckedChange={setPackageAuthoringEnabled}
             >
-              <PackageIcon />
+              {/* The check mark takes the icon column, as Radix lays it out. */}
               {t("composer.creationMode")}
             </DropdownMenuCheckboxItem>
           )}
