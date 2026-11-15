@@ -16,6 +16,7 @@
  * | guest session                              | no row anywhere                               | empty page, 200                       |
  * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)   | the owner's own runs of Default       |
  * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un; `spaceId` = Deux → 400 |
+ * | API key without the list's read scope      | —                                             | 403 (ceiling guard), on the three lists |
  * | API key + `Appstrate-User` (end-user)      | —                                             | 403                                   |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
  * | any                                        | another organization                          | never; its path → 403                 |
@@ -264,6 +265,20 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(outside.status).toBe(400);
     const otherOrg = await app.request(path("", foreignOrgId), { headers });
     expect(otherOrg.status).toBe(403);
+  });
+
+  it("refuses an API key whose scopes hold no run-read permission, on each list", async () => {
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: un,
+      createdBy: owner.user.id,
+      scopes: ["agents:read"],
+    });
+    const headers = { Authorization: `Bearer ${key.rawKey}` };
+    for (const list of ["runs", "schedules", "files"]) {
+      const res = await app.request(`/api/orgs/${owner.orgId}/${list}`, { headers });
+      expect(res.status).toBe(403);
+    }
   });
 
   it("refuses an end-user", async () => {

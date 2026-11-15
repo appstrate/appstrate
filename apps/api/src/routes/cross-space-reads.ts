@@ -6,10 +6,11 @@
  */
 
 import { Hono } from "hono";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { canReadRuns, RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { requireOrgPathMembership } from "../middleware/org-path-context.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requireAnyCeiling, requireCeiling } from "../middleware/require-permission.ts";
 import { listGlobalRuns } from "../services/state/runs.ts";
 import { listSchedules } from "../services/scheduler.ts";
 import { fileReadGrant, listFilesForActor } from "../services/files.ts";
@@ -26,40 +27,58 @@ export function createCrossSpaceReadsRouter() {
 
   // No space is entered here, so a space-level guard could never pass: the
   // authorization IS the per-space grant list, read from the caller's role in
-  // each space they reach (a pinned credential reaches its space only).
+  // each space they reach (a pinned credential reaches its space only). The
+  // ceiling guard refuses a delegated credential whose scopes omit the list's
+  // read permission, instead of answering it an empty page.
 
-  router.get("/:orgId/runs", requireOrgPathMembership, async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const filters = parseGlobalRunListQuery(c);
-    const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
-      canReadRuns((p) => permissions.has(p)),
-    );
-    const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
-    const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
-    setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
-    return c.json(result);
-  });
+  router.get(
+    "/:orgId/runs",
+    requireOrgPathMembership,
+    requireAnyCeiling(RUNS_READ_PERMISSIONS),
+    async (c) => {
+      const orgId = c.req.param("orgId")!;
+      const filters = parseGlobalRunListQuery(c);
+      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+        canReadRuns((p) => permissions.has(p)),
+      );
+      const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
+      const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
+      setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
+      return c.json(result);
+    },
+  );
 
-  router.get("/:orgId/schedules", requireOrgPathMembership, async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
-      permissions.has("schedules:read"),
-    );
-    const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
-    return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
-  });
+  router.get(
+    "/:orgId/schedules",
+    requireOrgPathMembership,
+    requireCeiling("schedules", "read"),
+    async (c) => {
+      const orgId = c.req.param("orgId")!;
+      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+        permissions.has("schedules:read"),
+      );
+      const grants = spaces.map((space) => runReadGrant(space.id, space.permissions));
+      return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
+    },
+  );
 
-  router.get("/:orgId/files", rateLimit(120), requireOrgPathMembership, async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const filters = parseListFilesQuery(c, orgListFilesQuerySchema);
-    const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
-      permissions.has("files:read"),
-    );
-    const grants = spaces.map((space) => fileReadGrant(space.id, space.permissions));
-    return c.json(
-      await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),
-    );
-  });
+  router.get(
+    "/:orgId/files",
+    rateLimit(120),
+    requireOrgPathMembership,
+    requireCeiling("files", "read"),
+    async (c) => {
+      const orgId = c.req.param("orgId")!;
+      const filters = parseListFilesQuery(c, orgListFilesQuerySchema);
+      const spaces = await readableSpacesAcross(c, orgId, (permissions) =>
+        permissions.has("files:read"),
+      );
+      const grants = spaces.map((space) => fileReadGrant(space.id, space.permissions));
+      return c.json(
+        await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),
+      );
+    },
+  );
 
   return router;
 }
