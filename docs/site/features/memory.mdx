@@ -53,7 +53,7 @@ curl "https://your-instance/api/agents/@acme/support-triage/persistence?kind=mem
 | Method and route                                              | Purpose                                                                                                                                     | Permission           |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | `GET /api/agents/{scope}/{name}/persistence`                  | List slots and memories. Filters: `kind` (`pinned`, `memory`), `actor_type` and `actor_id` (callers holding `persistence:delete`), `runId`. | `persistence:read`   |
-| `DELETE /api/agents/{scope}/{name}/persistence`               | Delete memories, and the checkpoint when `actor_type` and `actor_id` select one scope. Returns `memory_count` and `checkpoint_count`. | `persistence:delete` |
+| `DELETE /api/agents/{scope}/{name}/persistence`               | Delete memories, and the checkpoint when `actor_type` and `actor_id` select one scope. Returns `memory_count` and `checkpoint_count`.       | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/memories/{id}` | Delete one memory.                                                                                                                          | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}`   | Delete one pinned slot.                                                                                                                     | `persistence:delete` |
 

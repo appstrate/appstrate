@@ -29,7 +29,7 @@ interface UseRunsOptions {
 }
 
 /** One page of runs everywhere (runs page, agent tab, schedule tab). */
-export const RUNS_PAGE_SIZE = 25;
+const RUNS_PAGE_SIZE = 25;
 
 /** What a runs query holds: the envelopes of the pages loaded so far, newest run first. */
 export type RunsPage = ListEnvelope<EnrichedRun> & { total: number };

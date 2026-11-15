@@ -14,7 +14,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
  * call time. Persona and space are deps so the callback's identity moves with
  * them: the module's streams read their URL once and would keep the old authority.
  */
-export function useChatGetHeaders() {
+function useChatGetHeaders() {
   const { i18n } = useTranslation("chat");
   const viewAs = useViewAsHeader();
   const spaceId = useCurrentSpaceId();
@@ -28,7 +28,7 @@ export function useChatGetHeaders() {
  * The chat's `ChatTransport` over `getHeaders`: its REST calls go through {@link fetchOrThrow}, so
  * a refusal carries the server's code and reaches the shell's global error handling.
  */
-export function chatTransport(getHeaders: () => Record<string, string>) {
+function chatTransport(getHeaders: () => Record<string, string>) {
   return {
     getHeaders,
     request: (path: string, init?: RequestInit) => {

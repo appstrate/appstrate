@@ -4,7 +4,7 @@
 
 import type { ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
 
-export class FakeProblem extends Error {
+class FakeProblem extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
