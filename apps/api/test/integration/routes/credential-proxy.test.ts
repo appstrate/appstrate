@@ -539,6 +539,37 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
+  it("logs a refused target without its userinfo or query", async () => {
+    await seedIntegrationWithConnection(ctx);
+    mockUpstream(async () => new Response("nope", { status: 599 }));
+    const logged: unknown[][] = [];
+    const spy = spyOn(logger, "warn").mockImplementation(((...args: unknown[]) => {
+      logged.push(args);
+    }) as never);
+    try {
+      const res = await app.request("/api/credential-proxy/proxy", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "X-Integration-Id": INTEGRATION_ID,
+          "X-Target": "https://user:hunter2@evil.example.com/exfil?token=s3cr3t",
+          "X-Session-Id": uuidV4(),
+        },
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      spy.mockRestore();
+    }
+    const refused = logged.find((a) => a[0] === "credential-proxy: call refused");
+    expect(refused).toBeDefined();
+    const line = JSON.stringify(refused);
+    expect(line).toContain("https://evil.example.com/exfil");
+    expect(line).not.toContain("hunter2");
+    expect(line).not.toContain("s3cr3t");
+  });
+
   it("relays an upstream 401 as the upstream's: Proxy-Status, no platform challenge", async () => {
     await seedIntegrationWithConnection(ctx);
     mockUpstream(async () => new Response('{"error":"expired"}', { status: 401 }));
