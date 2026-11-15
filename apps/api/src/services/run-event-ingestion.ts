@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Run event ingestion — the single writer behind `POST /api/runs/:runId/events`
- * and `POST /api/runs/:runId/events/finalize`.
+ * Run event ingestion — the single writer behind `POST /api/runs/:id/events`
+ * and `POST /api/runs/:id/events/finalize`.
  *
  * Platform containers and remote CLIs both post events here over HMAC-signed
  * HTTP. The route handler authenticates via `verifyRunSignature` middleware

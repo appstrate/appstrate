@@ -11,6 +11,7 @@ import {
 } from "@appstrate/ui/components/dialog";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useDialogFocus } from "../hooks/use-dialog-focus";
+import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
 
 interface ModalProps {
   onClose: () => void;
@@ -37,6 +38,7 @@ export function Modal({
     <Dialog open onOpenChange={(v) => !v && !preventClose && onClose()}>
       <DialogContent
         {...focus}
+        {...INTEGRATED_TABLE_SURFACE}
         className={className}
         onEscapeKeyDown={keepOpenWhileRenaming}
         {...(description ? {} : { "aria-describedby": undefined })}

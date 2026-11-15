@@ -26,11 +26,11 @@ import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
-import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip, SkillsPicker } from "./skills-picker.tsx";
 
 export interface ComposerToolsProps {
-  getHeaders: GetHeaders | undefined;
+  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onSelectionChange: (selection: ChatSkillSelection) => void;
   /** The skills picker is offered (`skills:read` + a readable conversation). */
@@ -42,7 +42,7 @@ export interface ComposerToolsProps {
 }
 
 export function ComposerTools({
-  getHeaders,
+  transport,
   selection,
   onSelectionChange,
   showPicker,
@@ -132,12 +132,12 @@ export function ComposerTools({
       )}
       {showPicker ? (
         <SkillsChip
-          getHeaders={getHeaders}
+          transport={transport}
           selection={selection}
           onClick={() => setSkillsOpen(true)}
         />
       ) : (
-        showEnforced && <EnforcedSkillsIndicator getHeaders={getHeaders} />
+        showEnforced && <EnforcedSkillsIndicator transport={transport} />
       )}
     </div>
   );
@@ -145,7 +145,7 @@ export function ComposerTools({
   if (!showPicker) return cluster;
   return (
     <SkillsPicker
-      getHeaders={getHeaders}
+      transport={transport}
       selection={selection}
       onChange={onSelectionChange}
       open={skillsOpen}

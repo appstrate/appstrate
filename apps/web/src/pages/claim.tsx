@@ -116,7 +116,7 @@ export function ClaimPage() {
           )}
 
           <PendingButton type="submit" pending={submitting}>
-            {submitting ? t("claim.submitting") : t("claim.submit")}
+            {t("claim.submit")}
           </PendingButton>
         </form>
 

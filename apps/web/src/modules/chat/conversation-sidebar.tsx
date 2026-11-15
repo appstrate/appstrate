@@ -28,7 +28,7 @@ import { RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
-import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
+import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { formatBytes } from "../../lib/format-bytes";
@@ -292,7 +292,7 @@ function ConversationDetails({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const scope = useOrgOnlyScope();
+  const scope = useOrgScope();
   const query = $api.useQuery(
     "get",
     "/api/chat/sessions/{id}",

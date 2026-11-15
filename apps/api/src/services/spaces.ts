@@ -263,20 +263,23 @@ export async function updateSpace(
     defaultRole?: SpaceRolePreset;
     icon?: string | null;
     color?: string | null;
+    credentialProxyOpen?: boolean;
   },
   judged: Pick<SpaceRow, "visibility" | "defaultRole" | "ownerUserId" | "isDefault">,
 ) {
   const changesAccess = params.visibility !== undefined || params.defaultRole !== undefined;
   const changesAppearance = params.icon !== undefined || params.color !== undefined;
+  const changesProxy = params.credentialProxyOpen !== undefined;
   // A personal space is `private` with one member by construction; there is no
   // visibility to choose and no implicit member to give a default role to
-  // (RBAC spec §3.6), nor an icon or colour to set. `name` stays editable, and
+  // (RBAC spec §3.6), nor an icon or colour to set, nor a credential proxy to close
+  // against its one member, who decides alone what they call. `name` stays editable, and
   // `is_default` is not a field of this route at all. The access rules are DB
   // CHECKs too, but a named 4xx beats a 23514.
-  if ((changesAccess || changesAppearance) && judged.ownerUserId !== null) {
+  if ((changesAccess || changesAppearance || changesProxy) && judged.ownerUserId !== null) {
     throw conflict(
       "personal_space_immutable",
-      "A personal space is always private, has no implicit members and no icon or colour of its own: only its name can be changed.",
+      "A personal space is always private, has no implicit members, no icon or colour of its own and keeps its credential proxy open: only its name can be changed.",
     );
   }
   if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
@@ -295,6 +298,9 @@ export async function updateSpace(
         ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
         ...(params.icon !== undefined && { icon: params.icon }),
         ...(params.color !== undefined && { color: params.color }),
+        ...(params.credentialProxyOpen !== undefined && {
+          credentialProxyOpen: params.credentialProxyOpen,
+        }),
         updatedAt: new Date(),
       })
       .where(

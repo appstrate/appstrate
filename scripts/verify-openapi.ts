@@ -458,7 +458,7 @@ function compareShapeToSchema(
  * to match the first exactly and dismiss the rest as having "no JSON schema to
  * compare a Zod object against" — true for the multipart, form-encoded and
  * octet-stream bodies, and false for exactly one endpoint:
- * `POST /api/runs/{runId}/events` declares `application/cloudevents+json` with
+ * `POST /api/runs/{id}/events` declares `application/cloudevents+json` with
  * a hand-written 8-key schema, validated by a `.strict()` Zod object with the
  * same 8 keys. It is the most skew-exposed body on the surface — the envelope
  * is strict, so a spec/Zod divergence 400s the whole event, and it is the

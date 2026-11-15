@@ -9,7 +9,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * `GET /api/library` is the organization map: every package visible to the org
  * (org-owned + system) grouped by type, each carrying one `placements` entry
  * per space it is placed in and the caller reads.
- * `GET /api/spaces/{spaceId}/library` is one space's view of the same, its
+ * `GET /api/spaces/{id}/library` is one space's view of the same, its
  * placements narrowed to that space and its rows widened to what the caller
  * could still put there in one click.
  *
@@ -154,15 +154,15 @@ const organizationLibraryPaths = {
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
         "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
         "Graded by the caller: the spaces list and the placements include only the spaces whose own library " +
-        "(`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — " +
+        "(`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — " +
         "and each package type also requires that type's read permission in the space. So the response is the union " +
         "of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package " +
         "with no placement the caller reads is listed, with empty `placements`, when its home grants the caller " +
         "`<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one " +
         "space) receive 403. Ephemeral packages are excluded. " +
-        "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +
+        "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` " +
         "activates a package in a space — placing it there when the caller holds `<type>:share` " +
-        "in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",
+        "in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.",
       parameters: [
         // `/api/library` is org-scoped, not space-scoped — no X-Space-Id.
         { $ref: "#/components/parameters/XOrgId" },
@@ -199,16 +199,16 @@ const organizationLibraryPaths = {
 
 export const libraryPaths = {
   ...organizationLibraryPaths,
-  "/api/spaces/{spaceId}/library": {
+  "/api/spaces/{id}/library": {
     get: {
       operationId: "getSpaceLibrary",
       tags: ["Library"],
       summary: "One space's placements, and what the caller could still place there",
       description:
-        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
+        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{id}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

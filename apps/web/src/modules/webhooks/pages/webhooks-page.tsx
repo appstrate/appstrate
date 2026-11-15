@@ -49,7 +49,7 @@ export function WebhooksPage() {
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
+          <EmptyState message={t("settings:webhooks.empty")} icon={Webhook} compact>
             <EmptyStateAction action={create} />
           </EmptyState>
         }

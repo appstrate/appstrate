@@ -31,7 +31,9 @@ import { and, asc, desc, eq, ilike, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
-import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
+import { invalidRequest, notFound } from "@appstrate/core/api-errors";
+import { listResponse, parseListLimit } from "@appstrate/core/list-query";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
@@ -43,14 +45,6 @@ import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 const SESSIONS_PAGE_SIZE = 100;
-
-/** Lenient `?limit=`: out-of-range or unparseable → the full page. */
-const sessionsLimit = z.coerce
-  .number()
-  .int()
-  .min(1)
-  .max(SESSIONS_PAGE_SIZE)
-  .catch(SESSIONS_PAGE_SIZE);
 
 const SESSIONS_SEARCH_MAX = 200;
 
@@ -176,7 +170,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // the bound is the cursor ROW, compared in SQL at full precision.
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
     const scope = sessionScope(c);
-    const limit = sessionsLimit.parse(c.req.query("limit") ?? SESSIONS_PAGE_SIZE);
+    const limit = parseListLimit(c, { defaultLimit: SESSIONS_PAGE_SIZE });
     const conditions: SQL[] = [
       eq(chatSessions.orgId, scope.orgId),
       eq(chatSessions.userId, scope.userId),
@@ -210,7 +204,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     setCursorLinkHeader({ c, publicOrigin: deps.publicOrigin, hasMore, lastId: page.at(-1)?.id });
-    return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
+    return c.json(listResponse(page.map(toSessionDto), { hasMore }));
   });
 
   // POST /api/chat/sessions — start a new conversation
@@ -219,7 +213,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     rateLimited(30),
     requireModulePermission("chat", "write"),
     async (c) => {
-      const data = parseBody(createSessionSchema, await c.req.json().catch(() => ({})));
+      const data = await readJsonBody(c, createSessionSchema, { allowEmpty: true });
       const scope = sessionScope(c);
       const [row] = await db
         .insert(chatSessions)
@@ -246,7 +240,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // PATCH /api/chat/sessions/:id — rename
   router.patch("/api/chat/sessions/:id", requireModulePermission("chat", "write"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
-    const { title } = parseBody(renameSessionSchema, await c.req.json().catch(() => null));
+    const { title } = await readJsonBody(c, renameSessionSchema);
     await db
       .update(chatSessions)
       .set({ title, updatedAt: new Date() })

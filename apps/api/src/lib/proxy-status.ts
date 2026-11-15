@@ -23,7 +23,10 @@ type ProxyErrorType =
   | "http_response_timeout"
   | "proxy_internal_response"
   | "proxy_internal_error"
-  | "proxy_configuration_error";
+  | "proxy_configuration_error"
+  | "http_request_error"
+  | "http_protocol_error"
+  | "http_response_body_size";
 
 export function relayedProxyStatus(receivedStatus: number): string {
   return `${PROXY_NAME}; received-status=${receivedStatus}`;
@@ -103,6 +106,28 @@ const PROXY_PROBLEMS = {
 
 export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
 
+/** A problem the proxy answers instead of the request, before or after it reached the upstream. */
+export function isProxyRefusal(code: ProxyProblemCode): boolean {
+  return PROXY_PROBLEMS[code].status < 500;
+}
+
+/**
+ * The `Proxy-Status` of a problem the platform derived from an upstream's answer: the RFC 9209
+ * §2.3 error type of what it answered, the HTTP status it answered (`receivedStatus`), or both
+ * when the proxy generated the response from an answer it did receive.
+ */
+export function upstreamProxyStatus(
+  marker:
+    | { receivedStatus: number; error?: ProxyErrorType }
+    | { receivedStatus?: number; error: ProxyErrorType },
+): Record<string, string> {
+  const params = [
+    ...(marker.error ? [`error=${marker.error}`] : []),
+    ...(marker.receivedStatus !== undefined ? [`received-status=${marker.receivedStatus}`] : []),
+  ];
+  return { "Proxy-Status": [PROXY_NAME, ...params].join("; ") };
+}
+
 /** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
 export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;
 
@@ -133,9 +158,13 @@ function ownMember(headers: Headers): string | null {
   return last && (last === PROXY_NAME || last.startsWith(`${PROXY_NAME};`)) ? last : null;
 }
 
-/** The response is an upstream's, relayed: its status and challenges are not the platform's. */
+/**
+ * The response is an upstream's, relayed: its status and challenges are not the platform's. A
+ * member with an `error` the proxy generated, even from an answer it received.
+ */
 export function isRelayedResponse(headers: Headers): boolean {
-  return /;\s*received-status=/.test(ownMember(headers) ?? "");
+  const member = ownMember(headers) ?? "";
+  return /;\s*received-status=/.test(member) && !/;\s*error=/.test(member);
 }
 
 /**

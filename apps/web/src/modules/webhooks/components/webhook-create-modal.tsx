@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
 import { FormModal } from "@/components/form-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { FormItem } from "@/components/app-ui/form-item";
+import { useAppForm } from "@/hooks/use-app-form";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
@@ -67,8 +67,9 @@ function WebhookCreateForm({
     register,
     handleSubmit,
     setError,
+    showError,
     formState: { errors },
-  } = useForm<FormData>({
+  } = useAppForm<FormData>({
     defaultValues: { url: "" },
   });
 
@@ -106,8 +107,8 @@ function WebhookCreateForm({
       <FormItem
         id="webhook-url"
         label={t("settings:webhooks.urlLabel")}
-        hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
-        error={errors.url ? t("settings:webhooks.urlHint") : undefined}
+        hint={showError("url") ? undefined : t("settings:webhooks.urlHint")}
+        error={showError("url") ? t("settings:webhooks.urlHint") : undefined}
       >
         <Input
           type="url"

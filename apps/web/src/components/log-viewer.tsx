@@ -465,7 +465,7 @@ export function LogViewer({
         <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
           <div
             className={cn(
-              "border-border bg-muted/20 text-muted-foreground grid items-center gap-4 border-y px-4 py-2 text-xs font-semibold tracking-wide uppercase",
+              "border-border bg-muted/40 text-muted-foreground grid items-center gap-4 border-y px-4 py-2 text-xs font-semibold tracking-wide uppercase",
               journalGrid,
             )}
           >
@@ -530,7 +530,7 @@ export function LogViewer({
                       <button
                         type="button"
                         className={cn(
-                          "hover:bg-muted/20 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
+                          "hover:bg-muted/50 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
                           journalGrid,
                           isSelected && "bg-muted/40",
                         )}

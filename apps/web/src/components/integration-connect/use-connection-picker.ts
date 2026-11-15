@@ -264,6 +264,12 @@ export function useConnectionPicker(
   // The modal opens on what binds, the imposed set aside; « Enregistrer » writes the ticks.
   const initialTicks = keepAvailable(shownAddedIds, addableIds);
   const busy = upsertPin.isPending || deletePin.isPending;
+  /** The refusal of the last pin write, shown by the modal under its fields. */
+  const writeError = upsertPin.error ?? deletePin.error;
+  const clearWriteError = () => {
+    upsertPin.reset();
+    deletePin.reset();
+  };
   /** What « Enregistrer » writes for `ticked`, `undefined` while it would write nothing. */
   const saveValue = (ticked: readonly string[]): ConnectionSet | undefined =>
     pickerSetToSave({
@@ -280,7 +286,7 @@ export function useConnectionPicker(
   const offersNone = !required && lockedBy === null && !pickedNone;
 
   // `null` clears the pick, `[]` stores "no connection" (under an open lock, no addition).
-  // False = refused; the mutation toasted why.
+  // False = refused; `writeError` says why.
   const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
     if (overrideMode) {
       persistence.onChange(connectionIds);
@@ -393,6 +399,8 @@ export function useConnectionPicker(
     offersDefault,
     offersNone,
     busy,
+    writeError,
+    clearWriteError,
     ownerLabel,
     manifest,
     missingScopeLabels,

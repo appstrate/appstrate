@@ -80,4 +80,4 @@ curl -X PUT https://your-instance/api/agents/@acme/support-triage/proxy \
   -d '{ "proxyId": "<id>" }'
 ```
 
-`proxyId` is a proxy id, `"none"` to opt this agent out of proxying, or `null` to clear the override and fall back to the cascade. It needs `agents:configure`. `GET /api/agents/{scope}/{name}/proxy` returns `{ proxyId, resolved }`. The same value is available as `proxyId` on `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`.
+`proxyId` is a proxy id, `"none"` to opt this agent out of proxying, or `null` to clear the override and fall back to the cascade. It needs `agents:configure`. `GET /api/agents/{scope}/{name}/proxy` returns `{ proxyId, resolved }`. The same value is available as `proxyId` on `PATCH /api/spaces/{id}/packages/{scope}/{name}`.

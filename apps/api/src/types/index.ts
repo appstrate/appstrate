@@ -138,7 +138,7 @@ export type AppEnv = {
     sessionRealm?: string;
     /**
      * Populated by `verifyRunSignature` on HMAC-authenticated event routes
-     * (POST /api/runs/:runId/events and /finalize). Routes read this
+     * (POST /api/runs/:id/events and /finalize). Routes read this
      * instead of `user`/`orgId` — the principal is the run itself.
      */
     run?: import("./run-sink.ts").RunSinkContext;

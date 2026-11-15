@@ -28,7 +28,7 @@ import {
   togglePinned,
 } from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
-import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -40,7 +40,7 @@ const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
 const MODES = Object.keys(MODE_COPY) as ChatSkillMode[];
 
 interface SkillsPickerProps {
-  getHeaders: GetHeaders | undefined;
+  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
   /** Opened from the composer's "+" menu or the chip, never by a trigger of its own. */
@@ -51,8 +51,8 @@ interface SkillsPickerProps {
 }
 
 /** Skills in use this turn (the space's imposed ones + the chosen ones), as the old trigger badge counted. */
-function useSkillsInUse(getHeaders: GetHeaders | undefined, selection: ChatSkillSelection) {
-  const enforcedQuery = useEnforcedSkills(getHeaders);
+function useSkillsInUse(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
+  const enforcedQuery = useEnforcedSkills(transport);
   const enforcedIds = new Set((enforcedQuery.data ?? []).map((skill) => skill.packageId));
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const inUse =
@@ -66,16 +66,16 @@ function useSkillsInUse(getHeaders: GetHeaders | undefined, selection: ChatSkill
  * not a chip in its default look.
  */
 export function SkillsChip({
-  getHeaders,
+  transport,
   selection,
   onClick,
 }: {
-  getHeaders: GetHeaders | undefined;
+  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onClick: () => void;
 }) {
   const { t } = useChatHost();
-  const { inUse, loading } = useSkillsInUse(getHeaders, selection);
+  const { inUse, loading } = useSkillsInUse(transport, selection);
   const isDefault =
     selection.skillMode === DEFAULT_SKILL_SELECTION.skillMode &&
     selection.pinnedSkills.length === 0;
@@ -99,7 +99,7 @@ export function SkillsChip({
 }
 
 export function SkillsPicker({
-  getHeaders,
+  transport,
   selection,
   onChange,
   open,
@@ -107,19 +107,19 @@ export function SkillsPicker({
   children,
 }: SkillsPickerProps) {
   const { t, can } = useChatHost();
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  const readable = !!spaceId && can("skills:read");
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const readable = !!spaceId && !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the space scopes it.
     queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
-    queryFn: () => fetchSkills(getHeaders),
+    queryFn: () => fetchSkills(transport!.request),
     enabled: readable,
     staleTime: 60_000,
   });
   const skills = catalogue.data ?? [];
-  const enforcedQuery = useEnforcedSkills(getHeaders);
+  const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".

@@ -604,7 +604,7 @@ function UserMessage() {
   if (resume) {
     return (
       <MessagePrimitive.Root className="flex w-full max-w-(--thread-max-width) justify-center py-1.5">
-        <span className="bg-muted/50 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+        <span className="bg-muted/40 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
           <IntegrationIcon src={resume.icon} className="size-3.5" />
           <span>
             {sentenceWithName(

@@ -320,12 +320,15 @@ export function createModelProvidersOAuthRouter() {
       },
     });
 
-    return c.json({
-      id,
-      token,
-      command,
-      expiresAt: expiresAt.toISOString(),
-    });
+    return c.json(
+      {
+        id,
+        token,
+        command,
+        expiresAt: expiresAt.toISOString(),
+      },
+      201,
+    );
   });
 
   // GET /api/model-providers-oauth/pairing/:id

@@ -12,7 +12,13 @@
 
 import { describe, it, expect } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { runKeys, invalidateRunDetails, invalidateRunLogs } from "../query-keys.ts";
+import {
+  runKeys,
+  invalidateRunDetails,
+  invalidateRunLogs,
+  invalidateVersionCaches,
+  invalidateVersionInfo,
+} from "../query-keys.ts";
 
 const ORG = "org_1";
 const SPACE = "spc_1";
@@ -66,5 +72,49 @@ describe("run detail cache invalidation", () => {
     const qc = seededClient();
     await invalidateRunDetails(qc);
     expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, RUN))).toBe(false);
+  });
+});
+
+describe("version cache invalidation", () => {
+  const header = { "X-Org-Id": ORG, "X-Space-Id": SPACE };
+  const path = { scope: "@acme", name: "mail" };
+  const list = [
+    "get",
+    "/api/packages/agents/{scope}/{name}/versions",
+    { params: { header, path } },
+  ];
+  const info = [
+    "get",
+    "/api/packages/skills/{scope}/{name}/versions/info",
+    { params: { header, path } },
+  ];
+  const detail = [
+    "get",
+    "/api/packages/integrations/{scope}/{name}/versions/{version}",
+    { params: { header, path: { ...path, version: "1.0.0" } } },
+  ];
+  const models = ["get", "/api/models", { params: { header } }];
+
+  function seeded() {
+    const qc = new QueryClient();
+    for (const key of [list, info, detail, models]) qc.setQueryData(key, {});
+    return qc;
+  }
+
+  it("marks the list, the detail and the info of every package type stale, and no other read", async () => {
+    const qc = seeded();
+    invalidateVersionCaches(qc);
+    expect(isInvalidated(qc, list)).toBe(true);
+    expect(isInvalidated(qc, info)).toBe(true);
+    expect(isInvalidated(qc, detail)).toBe(true);
+    expect(isInvalidated(qc, models)).toBe(false);
+  });
+
+  it("marks only the version summaries stale for the info invalidation", async () => {
+    const qc = seeded();
+    await invalidateVersionInfo(qc);
+    expect(isInvalidated(qc, info)).toBe(true);
+    expect(isInvalidated(qc, list)).toBe(false);
+    expect(isInvalidated(qc, detail)).toBe(false);
   });
 });

@@ -21,7 +21,7 @@ const twoPages = (): SessionsCache => ({
     { data: [row("a"), row("b")], hasMore: true },
     { data: [row("c")], hasMore: false },
   ],
-  pageParams: [null, "b"],
+  pageParams: [undefined, "b"],
 });
 
 describe("session-list cache", () => {
@@ -36,7 +36,7 @@ describe("session-list cache", () => {
       first ? rows : rows.filter((s) => s.id !== "c"),
     );
     expect(next!.pages.map((p) => p.data.map((s) => s.id))).toEqual([["a", "b"], []]);
-    expect(next!.pageParams).toEqual([null, "b"]);
+    expect(next!.pageParams).toEqual([undefined, "b"]);
   });
 
   it("leaves an absent cache absent unless seeded", () => {

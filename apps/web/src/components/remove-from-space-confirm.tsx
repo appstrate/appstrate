@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useRemovePackageFromSpace } from "../hooks/use-package-shares";
 import { ConfirmModal } from "./confirm-modal";
 
@@ -43,6 +44,8 @@ export function RemoveFromSpaceConfirm({
         removing.remove(removal, {
           leavesPage: onRemoved !== undefined,
           onSuccess: () => {
+            // The row leaving a list is the answer; only a page that is left needs saying.
+            if (onRemoved) toast.success(t("catalogue.revoked", { space: removal.targetLabel }));
             onClose();
             onRemoved?.();
           },

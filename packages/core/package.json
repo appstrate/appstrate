@@ -46,6 +46,7 @@
     "./request-body": "./src/request-body.ts",
     "./etag": "./src/etag.ts",
     "./pagination-link": "./src/pagination-link.ts",
+    "./list-query": "./src/list-query.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",

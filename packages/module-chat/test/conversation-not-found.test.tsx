@@ -14,6 +14,7 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatPage } from "../src/ui/index.tsx";
 import { sessionQueryKey } from "../src/ui/sessions.ts";
+import { transportOf } from "./fake-request.ts";
 
 // `ChatPage` reads the tab's visibility during render; SSR has no `document`.
 const realDocument: unknown = Reflect.get(globalThis, "document");
@@ -27,7 +28,7 @@ afterAll(() => {
   else Object.assign(globalThis, { document: realDocument });
 });
 
-const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 /** Seeds the history read, so the render is the answer and not a fetch. */
 function render(history: unknown, can: (permission: string) => boolean): string {
@@ -37,7 +38,7 @@ function render(history: unknown, can: (permission: string) => boolean): string 
     <QueryClientProvider client={qc}>
       <TooltipProvider>
         <ChatPage
-          getHeaders={getHeaders}
+          transport={transport}
           conversationId="chs_gone"
           onConversationChange={() => {}}
           downloadFile={() => {}}
@@ -77,7 +78,7 @@ describe("a conversation URL the caller has no conversation for", () => {
       <QueryClientProvider client={qc}>
         <TooltipProvider>
           <ChatPage
-            getHeaders={getHeaders}
+            transport={transport}
             conversationId={null}
             onConversationChange={() => {}}
             downloadFile={() => {}}

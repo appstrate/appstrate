@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
+ * Integration tests for `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`
  * — the resolver the CLI calls to reproduce a UI run.
  */
 
@@ -15,7 +15,7 @@ import { spacePackages } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
-describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
+describe("GET /api/spaces/:id/packages/:scope/:name/run-config", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {

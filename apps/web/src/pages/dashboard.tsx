@@ -3,7 +3,7 @@
 import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { ErrorState } from "../components/page-states";
 import { DashboardBodySkeleton } from "../components/loading-skeletons";
@@ -18,9 +18,8 @@ export function DashboardPage() {
     data: runsData,
     isLoading: runsLoading,
     error: runsError,
-  } = usePaginatedRuns({
+  } = useFirstRunsPage({
     limit: 15,
-    offset: 0,
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const agentName = useRunAgentName();

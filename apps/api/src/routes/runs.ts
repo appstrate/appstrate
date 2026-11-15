@@ -35,9 +35,9 @@ import {
   assertRunVisible,
   requireRunsRead,
 } from "../lib/run-visibility.ts";
-import { listResponse } from "../lib/list-response.ts";
-import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 import {
   assertConnectionOverridesAllowed,
   connectionOverridesSchema,
@@ -475,21 +475,21 @@ export function createRunsRouter() {
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const limit = parseListLimit(c, { defaultLimit: 20 });
     const { status, search } = parseRunListFilters({
       status: c.req.query("status"),
       q: c.req.query("q"),
     });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
-      offset,
+      startingAfter: c.req.query("startingAfter") || undefined,
       actor: getActor(c),
       status,
       search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
     return c.json(result);
   });
 
@@ -500,13 +500,11 @@ export function createRunsRouter() {
   //
   // `user`, `kind` and `status` are all closed sets: an unrecognised value is
   // a 400, not a dropped filter.
-  // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
-  // size returns the first page, which narrows rather than widens, and callers
-  // paging by `Link` headers never construct them by hand.
+  // Keyset-paged on `startingAfter` (a run id) + `limit` (1..100, else 400).
   router.get("/runs", requireRunsRead, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+    const limit = parseListLimit(c, { defaultLimit: 20 });
     // `user` is a closed set of one: `me`. The param means the same thing for
     // every caller, so a typo is a 400 rather than something that survives in
     // an end-user integration until it runs under an org session.
@@ -540,7 +538,7 @@ export function createRunsRouter() {
 
     const result = await listGlobalRuns(scope, {
       limit,
-      offset,
+      startingAfter: c.req.query("startingAfter") || undefined,
       kind,
       status,
       startDate,
@@ -552,7 +550,7 @@ export function createRunsRouter() {
       visibility,
       canReadAgentInput: !agentReadIsSummary(c),
     });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
     return c.json(result);
   });
 
@@ -667,11 +665,8 @@ export function createRunsRouter() {
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
 
-    // Log pages are limit-only (`since` is the cursor), so the helper's
-    // `offset` is dropped. The old inline form also carried a `.default(1000)`
-    // ahead of `.catch(1000)`: dead, because `.catch` already absorbs the
-    // `undefined` an absent `?limit=` produces.
-    const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
+    // Log pages are limit-only (`since` is the cursor), so the helper's `offset` is unused.
+    const limit = parseListLimit(c, { defaultLimit: 1000, maxLimit: 1000 });
 
     // Visibility was just verified via `assertRunVisible` above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so

@@ -14,7 +14,6 @@ export function SchedulesTable({
   isError,
   error,
   empty,
-  surface,
 }: {
   schedules: EnrichedSchedule[];
   /** From {@link useScheduleColumns}, minus whatever the reader hid. */
@@ -24,8 +23,6 @@ export function SchedulesTable({
   /** The failure, said the way the caller words it; the table has a default. */
   error?: React.ReactNode;
   empty?: React.ReactNode;
-  /** Embedded lists share their parent white surface and do not draw a second frame. */
-  surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
 
@@ -34,7 +31,6 @@ export function SchedulesTable({
       tableId="schedules"
       label={t("schedules.tableLabel")}
       columns={columns}
-      surface={surface}
       rows={schedules}
       isLoading={isLoading}
       isError={isError}

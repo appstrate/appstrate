@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { KeysetListFooter, ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -207,5 +207,44 @@ describe("the filters button", () => {
     expect(html).toContain('aria-expanded="true"');
     // The state IS the style hook: no second flag to keep in step.
     expect(html).toContain("aria-expanded:bg-accent");
+  });
+});
+
+describe("the keyset footer", () => {
+  const query = (over: Partial<Parameters<typeof KeysetListFooter>[0]["query"]> = {}) => ({
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    isFetchNextPageError: false,
+    fetchNextPage: () => {},
+    ...over,
+  });
+
+  it("counts what is loaded of the total, with the one load-more button", () => {
+    const html = render(
+      <KeysetListFooter query={query({ hasNextPage: true })} loaded={25} total={60} />,
+    );
+    expect(html).toContain("25 chargés sur 60");
+    expect(html).toContain("Charger plus");
+  });
+
+  it("counts only what is loaded when the endpoint gives no total, and drops the button at the end", () => {
+    const html = render(<KeysetListFooter query={query()} loaded={3} />);
+    expect(html).toContain("3 chargés");
+    expect(html).not.toContain("Charger plus");
+  });
+
+  it("offers a retry when the next page failed", () => {
+    const html = render(
+      <KeysetListFooter
+        query={query({ hasNextPage: true, isFetchNextPageError: true })}
+        loaded={25}
+      />,
+    );
+    expect(html).toContain("Réessayer");
+  });
+
+  it("stays silent on an empty list and before the first page answers", () => {
+    expect(render(<KeysetListFooter query={query()} loaded={0} />)).toBe("");
+    expect(render(<KeysetListFooter query={query()} loaded={5} ready={false} />)).toBe("");
   });
 });

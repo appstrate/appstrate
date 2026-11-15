@@ -13,6 +13,7 @@ import { ConfirmModal } from "../confirm-modal";
 import { FormModal } from "../form-modal";
 import { ConnectionCheckboxList } from "./connection-checkbox-list";
 import { useUpsertIntegrationPin } from "../../hooks/use-integrations";
+import { errorMessage } from "../../lib/mutation-error";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import {
   ADDITIONS_REFUSAL_KEYS,
@@ -135,6 +136,7 @@ export function PinFormModal({
         );
       }}
       isPending={upsertPin.isPending}
+      error={upsertPin.error ? errorMessage(upsertPin.error) : null}
       submitLabel={pin ? undefined : t("integration.admin.pinManagement.add")}
       submitDisabled={!canSubmit}
       submitTestId="pin-form-submit"

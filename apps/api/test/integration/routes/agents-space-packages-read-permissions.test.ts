@@ -5,7 +5,7 @@
  *
  * Five GETs shipped without the `requirePermission` guard their siblings
  * carry: the agent list, `…/proxy`, `…/model`, and the two
- * `/api/spaces/:spaceId/packages` reads. The `router.use` guards on the
+ * `/api/spaces/:id/packages` reads. The `router.use` guards on the
  * spaces router only prove the space belongs to the org — org ownership is
  * not authorization.
  *

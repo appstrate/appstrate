@@ -16,10 +16,10 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { conflict, invalidRequest } from "../lib/errors.ts";
+import { conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListPagination } from "@appstrate/core/list-query";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getSpaceScope } from "../lib/scope.ts";
@@ -104,22 +104,11 @@ export function createEndUsersRouter() {
   // GET /api/end-users — list end-users in the space (cursor-based pagination)
   router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getSpaceScope(c);
-    // Keyset-paginated on `startingAfter`/`endingBefore`, so only the helper's
-    // `limit` applies. A bare `Number("abc")` here used to hand `NaN` to the
-    // query builder, and drizzle's pg dialect emits the `limit` clause only for
-    // a `number >= 0` — `NaN` is not, so the clause vanished and the request
-    // returned the space's ENTIRE end-user table. Out-of-range or
-    // unparseable now falls back to the documented default of 20.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
-    const endingBefore = c.req.query("endingBefore");
     const externalId = c.req.query("externalId");
     const email = c.req.query("email");
-    const search = c.req.query("search");
-
-    if (startingAfter && endingBefore) {
-      throw invalidRequest("startingAfter and endingBefore are mutually exclusive");
-    }
+    const search = c.req.query("q");
 
     const result = await listEndUsers(scope, {
       externalId: externalId ?? undefined,
@@ -127,15 +116,12 @@ export function createEndUsersRouter() {
       search: search ?? undefined,
       limit,
       startingAfter: startingAfter ?? undefined,
-      endingBefore: endingBefore ?? undefined,
     });
 
     setCursorLinkHeader({
       c,
       hasMore: result.hasMore,
       lastId: result.data[result.data.length - 1]?.id,
-      firstId: result.data[0]?.id,
-      hasPrev: Boolean(endingBefore || startingAfter),
     });
 
     return c.json(result);

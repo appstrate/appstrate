@@ -36,6 +36,7 @@ import {
   filterIntegrations,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
+import { useQueryTab } from "../hooks/use-query-tab";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
@@ -73,8 +74,7 @@ export function IntegrationsPage() {
   const origins = list.values("origin", INTEGRATION_ORIGINS);
   // The execution is a tab, not a filter: it splits the collection in two
   // kinds of object, and the columns that make sense differ between them.
-  const execution: IntegrationExecution =
-    list.params.get("execution") === "local" ? "local" : "remote";
+  const [execution, setExecution] = useQueryTab("execution", INTEGRATION_EXECUTIONS);
   const protocolParam = list.params.get("protocol");
   const protocols = useMemo(
     () =>
@@ -104,7 +104,7 @@ export function IntegrationsPage() {
   );
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
-    <NoMatchState message={t("integrations.empty.filtered")} />
+    <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
   ) : (
     <EmptyState
       icon={Boxes}
@@ -124,28 +124,25 @@ export function IntegrationsPage() {
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
         actions={
-          // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate) && (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse"),
-                  icon: LibraryBig,
-                  to: catalogueHref("integration"),
-                  hidden: !canBrowse,
-                },
-                {
-                  id: "import",
-                  label: t("nav.import", { ns: "common" }),
-                  icon: Upload,
-                  onSelect: () => setImporting(true),
-                  hidden: !canCreate,
-                },
-                createAction,
-              ]}
-            />
-          )
+          <PageActionsMenu
+            actions={[
+              {
+                id: "catalogue",
+                label: t("catalogue.browse"),
+                icon: LibraryBig,
+                to: catalogueHref("integration"),
+                hidden: !canBrowse,
+              },
+              {
+                id: "import",
+                label: t("nav.import", { ns: "common" }),
+                icon: Upload,
+                onSelect: () => setImporting(true),
+                hidden: !canCreate,
+              },
+              createAction,
+            ]}
+          />
         }
       />
 
@@ -154,10 +151,8 @@ export function IntegrationsPage() {
           <CollectionTabs
             value={execution}
             label={t("integrations.execution.label")}
-            // One URL update: two in the same tick read the same location and
-            // the second would undo the first (see `useListParams`). A protocol
-            // filter left in the URL is simply not applied on the local tab.
-            onChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
+            // A protocol filter left in the URL is simply not applied on the local tab.
+            onChange={setExecution}
             countsPending={isLoading}
             options={INTEGRATION_EXECUTIONS.map((value) => ({
               value,

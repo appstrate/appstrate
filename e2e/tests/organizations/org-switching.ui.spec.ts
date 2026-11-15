@@ -67,7 +67,11 @@ test.describe("Org switching in UI", () => {
     const sidebar = new Sidebar(page);
     await sidebar.switchOrg(orgB.orgName);
 
-    await page.getByRole("link", { name: "Agents", exact: true }).click();
+    // The sidebar entry: the trail may name the same page while it lands.
+    await page
+      .getByRole("link", { name: "Agents", exact: true })
+      .and(page.locator("[data-sidebar=menu-button]"))
+      .click();
     await agents.waitForLoaded();
     await agents.expectAgentVisible(agentB);
     await agents.expectAgentNotVisible(agentA);

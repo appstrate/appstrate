@@ -110,6 +110,16 @@ describe("chat session list pagination", () => {
     expect(((await res.json()) as { param?: string }).param).toBe("startingAfter");
   });
 
+  it("refuses an invalid limit with a 400 naming it", async () => {
+    for (const limit of ["0", "101", "abc"]) {
+      const res = await app.request(`/api/chat/sessions?limit=${limit}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { param?: string }).param).toBe("limit");
+    }
+  });
+
   it("caps the session page at 100", async () => {
     await seedSessions(101);
     const body = (await (await get("/api/chat/sessions")).json()) as SessionPage;

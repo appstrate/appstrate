@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { CountBadge } from "./count-badge";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { RunStatusBadge } from "./status-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -90,6 +91,9 @@ export function NotificationContent({
   markAllRead,
   loading = false,
   failed = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: {
   unread: number;
   notifications: NotificationItem[];
@@ -102,6 +106,10 @@ export function NotificationContent({
   loading?: boolean;
   /** The list could not be read. */
   failed?: boolean;
+  /** More notifications than the pages read so far. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const { t } = useTranslation(["common", "agents"]);
 
@@ -175,6 +183,13 @@ export function NotificationContent({
               <button key={notification.id} type="button" {...row} />
             );
           })}
+          {hasMore && (
+            <div className="flex justify-center border-t px-4 py-2">
+              <PendingButton variant="ghost" size="sm" pending={loadingMore} onClick={onLoadMore}>
+                {t("notifications.loadMore")}
+              </PendingButton>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -191,6 +206,9 @@ export function NotificationBell() {
     data: notifications,
     isPending: notificationsPending,
     isError: notificationsFailed,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
   } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
@@ -231,6 +249,9 @@ export function NotificationBell() {
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,
     failed: notificationsFailed && notifications === undefined,
+    hasMore: hasNextPage,
+    loadingMore: isFetchingNextPage,
+    onLoadMore: () => void fetchNextPage(),
   };
 
   if (isMobile) {

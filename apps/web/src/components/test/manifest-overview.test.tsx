@@ -15,7 +15,6 @@ import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import agentsFr from "../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { ManifestOverview } from "../package-manifest/manifest-overview.tsx";
 
@@ -81,12 +80,14 @@ describe("ManifestOverview shared metadata", () => {
     />,
   );
 
-  it("renders the fields nothing else on the page shows", () => {
+  it("renders the fields nothing else on the catalogue sheet shows", () => {
     expect(html).toContain("Un texte plus long.");
     expect(html).toContain("git");
     expect(html).toContain("Apache-2.0");
-    expect(html).toContain("@acme/lint");
-    expect(html).toContain(agentsFr["manifest.depSkills"]);
+  });
+
+  it("leaves the dependencies to the sheet's own group", () => {
+    expect(html).not.toContain("@acme/lint");
   });
 
   it("leaves the fields the page header already carries to the header", () => {

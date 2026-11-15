@@ -600,6 +600,29 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     ]);
   });
 
+  it("a proxy call naming a tool requires that tool's scopes and serving auth", () => {
+    const manifest = {
+      ...oauth2Manifest(),
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+    const short = own({ scopesGranted: ["read"] });
+    const scoped = resolveConnections({
+      requirements: [proxyRequirement(INTEG, manifest, "t1")],
+      accessibleConnections: [short],
+      pins: [],
+    });
+    expect(scoped.errors.map((e) => [e.code, e.connectionId, e.missingScopes])).toEqual([
+      ["insufficient_scopes", short.id, ["repo"]],
+    ]);
+    // Without the tool, the same row serves the call.
+    const unscoped = resolveConnections({
+      requirements: [proxyRequirement(INTEG, manifest)],
+      accessibleConnections: [short],
+      pins: [],
+    });
+    expect(unscoped.errors).toEqual([]);
+  });
+
   it("lists the serving rows as candidates, least privilege first", () => {
     const [broad, theirs, dead, pat, short, orphaned] = [
       own({ scopesGranted: ["read", "write"] }),

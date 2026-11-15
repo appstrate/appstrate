@@ -36,7 +36,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
@@ -72,9 +72,9 @@ import {
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -971,7 +971,7 @@ export function createSchedulesRouter() {
     async (c) => {
       const scheduleId = c.req.param("id")!;
       const scope = getSpaceScope(c);
-      const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+      const limit = parseListLimit(c, { defaultLimit: 20 });
       // `schedules:read` is space-wide, so the schedule itself is readable to
       // every member — but its RUNS are runs, and follow the run predicate:
       // without `runs:read-all` a colleague's schedule lists nothing.
@@ -979,12 +979,12 @@ export function createSchedulesRouter() {
       const result = await listScheduleRuns(scope, scheduleId, {
         ...filters,
         limit,
-        offset,
+        startingAfter: c.req.query("startingAfter") || undefined,
         actor: getActor(c),
         visibility: runVisibilityFilter(c),
         canReadAgentInput: !agentReadIsSummary(c),
       });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
       return c.json(result);
     },
   );

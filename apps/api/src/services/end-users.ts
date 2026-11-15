@@ -6,13 +6,13 @@
  * End-users belong to a space and represent external users of the platform.
  */
 
-import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
+import { eq, and, or, ilike, desc, lt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, notifications, runReads, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { prefixedId } from "@appstrate/db/ids";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -109,7 +109,6 @@ export async function listEndUsers(
     search?: string;
     limit?: number;
     startingAfter?: string;
-    endingBefore?: string;
   } = {},
 ): Promise<ListEnvelope<EndUserInfo>> {
   // The route validates `limit` up front (`parseListPagination`, 1..100), so
@@ -165,19 +164,6 @@ export async function listEndUsers(
       );
     }
   }
-  if (params.endingBefore) {
-    const cursor = await getEndUserCursor(scope, params.endingBefore);
-    if (cursor) {
-      // Previous page (newer rows), DESC order: (createdAt, id) > (cursor.createdAt, cursor.id).
-      conditions.push(
-        or(
-          gt(endUsers.createdAt, cursor.createdAt),
-          and(eq(endUsers.createdAt, cursor.createdAt), gt(endUsers.id, cursor.id)),
-        )!,
-      );
-    }
-  }
-
   const rows = await db
     .select({
       id: endUsers.id,
@@ -197,7 +183,7 @@ export async function listEndUsers(
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map(toEndUserResponse);
 
-  return { ...listResponse(data, { hasMore }), limit };
+  return listResponse(data, { hasMore });
 }
 
 export async function getEndUser(scope: SpaceScope, endUserId: string): Promise<EndUserInfo> {

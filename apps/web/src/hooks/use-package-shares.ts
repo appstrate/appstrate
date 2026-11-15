@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import i18n from "../i18n";
 import { $api, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useInvalidatePaths } from "./use-invalidate-paths";
@@ -49,7 +47,7 @@ function useRevokePackageShare() {
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}");
 }
 
-/** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is a `shareTargetHandle`; `targetLabel` names it in the toast. */
+/** Removes a package from one target (the sharer withdrawing an audience, or the recipient leaving a placement): the server drops the row, its settings, and disables its schedules there. `target` is a `shareTargetHandle`. */
 export function useRemovePackageFromSpace() {
   const revoke = useRevokePackageShare();
   const invalidate = useInvalidateShares();
@@ -57,14 +55,13 @@ export function useRemovePackageFromSpace() {
   return {
     isPending: revoke.isPending,
     remove: (
-      removal: { packageId: string; target: string; targetLabel: string },
+      removal: { packageId: string; target: string },
       options?: { onSuccess?: () => void; leavesPage?: boolean },
     ) =>
       revoke.mutate(
         { params: { path: { ...splitPackageRef(removal.packageId), target: removal.target } } },
         {
           onSuccess: () => {
-            toast.success(i18n.t("settings:catalogue.revoked", { space: removal.targetLabel }));
             // A caller leaving the removed package's page only marks queries stale: refetching
             // that page now would 404, and the next page refetches what it mounts.
             if (options?.leavesPage) void qc.invalidateQueries({ refetchType: "none" });

@@ -47,7 +47,7 @@ import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
@@ -1650,15 +1650,42 @@ type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
  * `runs:read` visibility rule exists to keep out of the query.
  */
 async function listRunsWithFilter(
+  scope: SpaceScope,
   filter: SQL,
-  limit: number,
-  offset: number,
+  page: { limit: number; startingAfter?: string },
   actor: Actor | null,
   canReadAgentInput: boolean,
 ): Promise<RunListPage> {
-  // The `total` count and the page share the same filter but are independent
-  // reads — issued concurrently so the endpoint costs one round trip instead
-  // of two serialized ones. Both are tenant-indexed; neither is a seq scan.
+  const { limit, startingAfter } = page;
+  // Keyset on the sort tuple `(startedAt DESC, id DESC)`, so rows inserted while
+  // paging never shift a page. A cursor that no longer exists drops its clause:
+  // the page starts at the head instead of erroring.
+  let pageFilter = filter;
+  if (startingAfter) {
+    const [cursor] = await db
+      .select({ startedAt: runs.startedAt, id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.id, startingAfter),
+          eq(runs.orgId, scope.orgId),
+          eq(runs.spaceId, scope.spaceId),
+        ),
+      )
+      .limit(1);
+    if (cursor) {
+      pageFilter = and(
+        filter,
+        or(
+          lt(runs.startedAt, cursor.startedAt),
+          and(eq(runs.startedAt, cursor.startedAt), lt(runs.id, cursor.id)),
+        ),
+      )!;
+    }
+  }
+  // `total` counts the whole filtered list (not the part after the cursor); it
+  // and the page are independent reads, issued concurrently. Both are
+  // tenant-indexed; neither is a seq scan.
   const [countRows, rows] = await Promise.all([
     db
       .select({ count: count() })
@@ -1673,19 +1700,17 @@ async function listRunsWithFilter(
       .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
       .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
       .leftJoin(packages, eq(packages.id, runs.packageId))
-      .where(filter)
-      .orderBy(desc(runs.startedAt))
-      .limit(limit)
-      .offset(offset),
+      .where(pageFilter)
+      .orderBy(desc(runs.startedAt), desc(runs.id))
+      .limit(limit + 1),
   ]);
   const [countRow] = countRows;
 
-  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
-  const total = countRow?.count ?? 0;
-  return {
-    ...listResponse(data, { hasMore: offset + data.length < total }),
-    total,
-  };
+  const hasMore = rows.length > limit;
+  const data = (hasMore ? rows.slice(0, limit) : rows).map((row) =>
+    mapEnrichedRun(row, canReadAgentInput),
+  );
+  return { ...listResponse(data, { hasMore }), total: countRow?.count ?? 0 };
 }
 
 export async function listPackageRuns(
@@ -1693,7 +1718,7 @@ export async function listPackageRuns(
   packageId: string,
   options: {
     limit?: number;
-    offset?: number;
+    startingAfter?: string;
     actor?: Actor | null;
     status?: RunStatus[];
     search?: string;
@@ -1703,8 +1728,8 @@ export async function listPackageRuns(
   } = {},
 ) {
   const {
-    limit = 50,
-    offset = 0,
+    limit = 20,
+    startingAfter,
     actor = null,
     status,
     search,
@@ -1718,7 +1743,13 @@ export async function listPackageRuns(
   ];
   conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
+  return listRunsWithFilter(
+    scope,
+    and(...conditions)!,
+    { limit, startingAfter },
+    actor,
+    canReadAgentInput,
+  );
 }
 
 /**
@@ -1736,7 +1767,7 @@ type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 interface ListGlobalRunsOptions {
   limit?: number;
-  offset?: number;
+  startingAfter?: string;
   kind?: GlobalRunKind;
   /**
    * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
@@ -1766,8 +1797,8 @@ export async function listGlobalRuns(
   options: ListGlobalRunsOptions = {},
 ): Promise<RunListPage> {
   const {
-    limit = 50,
-    offset = 0,
+    limit = 20,
+    startingAfter,
     kind,
     status,
     startDate,
@@ -1819,7 +1850,13 @@ export async function listGlobalRuns(
     conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
   }
 
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
+  return listRunsWithFilter(
+    scope,
+    and(...conditions)!,
+    { limit, startingAfter },
+    actor,
+    canReadAgentInput,
+  );
 }
 
 export async function listScheduleRuns(
@@ -1827,7 +1864,7 @@ export async function listScheduleRuns(
   scheduleId: string,
   options: {
     limit?: number;
-    offset?: number;
+    startingAfter?: string;
     actor?: Actor | null;
     status?: RunStatus[];
     search?: string;
@@ -1837,7 +1874,7 @@ export async function listScheduleRuns(
 ) {
   const {
     limit = 20,
-    offset = 0,
+    startingAfter,
     actor = null,
     status,
     search,
@@ -1848,13 +1885,13 @@ export async function listScheduleRuns(
   conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
+    scope,
     scopedWhere(runs, {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
       extra: conditions,
     })!,
-    limit,
-    offset,
+    { limit, startingAfter },
     actor,
     canReadAgentInput,
   );
