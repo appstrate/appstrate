@@ -8,7 +8,7 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
  * opens its workspaces, it does not switch to it); one column, the organization above its
  * workspaces, on a phone or with a single organization. You are always in a workspace, never
  * in an organization alone, so org + workspace are applied together. The current context
- * keeps the coral fill and the only gear; the explored one is the highlighted row.
+ * keeps the tinted fill, the check and the only gear; the explored one is the highlighted row.
  */
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -36,36 +36,38 @@ import { cn } from "@appstrate/ui/cn";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { NEW_SPACE_PARAM } from "./space-create-modal";
 
-function ColumnHeader({
+function ColumnHeader({ label }: { label: string }) {
+  return (
+    <p className="text-muted-foreground px-2 pt-1 pb-1.5 text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
+      {label}
+    </p>
+  );
+}
+
+/** The last row of a column, under its list: where one more of what it lists is created. */
+function AddRow({
+  to,
+  state,
   label,
-  onAdd,
-  addState,
-  addLabel,
   onNavigate,
 }: {
+  to: string;
+  state?: unknown;
   label: string;
-  onAdd?: string;
-  addState?: unknown;
-  addLabel: string;
   onNavigate: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between px-2 pt-1 pb-1.5">
-      <span className="text-muted-foreground text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
-        {label}
+    <Link
+      to={to}
+      state={state}
+      onClick={onNavigate}
+      className="text-muted-foreground hover:bg-accent hover:text-foreground mt-1 flex items-center gap-2.5 rounded-md border-t p-2 text-sm"
+    >
+      <span className="flex size-6 shrink-0 items-center justify-center">
+        <Plus size={15} />
       </span>
-      {onAdd && (
-        <Link
-          to={onAdd}
-          state={addState}
-          onClick={onNavigate}
-          className="text-primary flex items-center gap-1 text-xs font-medium"
-        >
-          {addLabel}
-          <Plus size={13} />
-        </Link>
-      )}
-    </div>
+      {label}
+    </Link>
   );
 }
 
@@ -285,7 +287,8 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         side={mobilePresentation ? "bottom" : "right"}
         sideOffset={variant === "mobile" ? 47 : 6}
         className={cn(
-          "max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0",
+          // Beside the sidebar the panel takes what the viewport leaves it, never more.
+          "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
           stacked ? "w-[340px]" : "w-[660px]",
           mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
           variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
@@ -304,15 +307,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
 
           <div className={cn("grid", stacked ? "grid-cols-1" : "grid-cols-2")}>
             <div className="flex min-h-0 flex-col p-2">
-              <ColumnHeader
-                label={t("switcher.orgsColumn")}
-                addLabel={t("btn.add")}
-                // Whether this user may create one is the server's rule, not a flag.
-                onAdd={canCreateOrg ? "/onboarding/create" : undefined}
-                // Without it the create step forwards a user who already has an org.
-                addState={{ fromSwitcher: true }}
-                onNavigate={closeSwitcherAndSidebar}
-              />
+              <ColumnHeader label={t("switcher.orgsColumn")} />
               <div className={cn(!mobilePresentation && LIST_BOX)}>
                 {shownOrgs.map((org) => {
                   const isCurrent = org.id === currentOrg.id;
@@ -330,7 +325,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                       onClick={() => setExploredOrgId(org.id)}
                       rowClassName={cn(
                         isExplored && "bg-accent",
-                        isCurrent && "bg-spark/10 hover:bg-spark/10",
+                        isCurrent && "bg-primary/10 hover:bg-primary/10",
                       )}
                       settings={
                         isCurrent
@@ -347,7 +342,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         {org.name}
                       </span>
                       <RowRole>{t(`switcher.role.${org.role}`)}</RowRole>
-                      {isCurrent && <Check size={15} className="text-spark shrink-0" />}
+                      {isCurrent && <Check size={15} className="text-primary shrink-0" />}
                       {isExplored && !isCurrent && (
                         <ChevronRight className="text-muted-foreground shrink-0" size={15} />
                       )}
@@ -355,22 +350,20 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   );
                 })}
               </div>
+              {/* Whether this user may create one is the server's rule, not a flag. Without
+                  the state the create step forwards a user who already has an org. */}
+              {canCreateOrg && (
+                <AddRow
+                  to="/onboarding/create"
+                  state={{ fromSwitcher: true }}
+                  label={t("switcher.newOrg")}
+                  onNavigate={closeSwitcherAndSidebar}
+                />
+              )}
             </div>
 
             <div className={cn("flex min-h-0 flex-col p-2", stacked ? "border-t" : "border-l")}>
-              {/* Adding a workspace lands in the CURRENT org's settings, so the shortcut is
-                  offered only while you are looking at your own — elsewhere it would create it
-                  in the wrong place. Creating is `spaces:write`. */}
-              <ColumnHeader
-                label={t("switcher.workspacesColumn")}
-                addLabel={t("btn.add")}
-                onAdd={
-                  isExploringElsewhere || !can("spaces:write")
-                    ? undefined
-                    : `/org-settings/spaces?${NEW_SPACE_PARAM}=1`
-                }
-                onNavigate={closeSwitcherAndSidebar}
-              />
+              <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
                 <div className="flex flex-col gap-1 p-2">
                   <Skeleton className="h-5 w-2/3" />
@@ -434,7 +427,14 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         <span className="flex max-w-[65%] shrink-0 items-center gap-1.5 text-sm font-medium">
                           <span className="truncate">{spaceLabel(space, t)}</span>
                           {space.isDefault && (
-                            <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
+                            <Star
+                              size={12}
+                              role="img"
+                              aria-label={t("switcher.defaultSpace")}
+                              className="shrink-0 fill-amber-500 text-amber-500"
+                            >
+                              <title>{t("switcher.defaultSpace")}</title>
+                            </Star>
                           )}
                         </span>
                         <RowRole>
@@ -447,6 +447,16 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     );
                   })}
                 </div>
+              )}
+              {/* Adding a workspace lands in the CURRENT org's settings, so it is offered only
+                  while you are looking at your own — elsewhere it would create it in the wrong
+                  place. Creating is `spaces:write`. */}
+              {!isExploringElsewhere && can("spaces:write") && (
+                <AddRow
+                  to={`/org-settings/spaces?${NEW_SPACE_PARAM}=1`}
+                  label={t("spaces.create", { ns: "settings" })}
+                  onNavigate={closeSwitcherAndSidebar}
+                />
               )}
             </div>
           </div>

@@ -16,6 +16,8 @@
   "switcher.role.owner": "Propriétaire",
   "switcher.role.admin": "Administrateur",
   "switcher.role.member": "Membre",
+  "switcher.newOrg": "Nouvelle organisation",
+  "switcher.defaultSpace": "Espace par défaut",
   "switcher.role.guest": "Invité",
   "products.ariaLabel": "Changer de produit",
   "products.studio": "Studio",
