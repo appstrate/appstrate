@@ -96,7 +96,7 @@ export function skillPickerRows(
 }
 
 /** Chips drawn before the « +N » chip: a fixed count keeps the row on one line without measuring. */
-export const MAX_VISIBLE_SKILL_CHIPS = 2;
+const MAX_VISIBLE_SKILL_CHIPS = 2;
 
 export interface SkillChipModel {
   packageId: string;
