@@ -166,7 +166,7 @@ const LIST_BOX = "max-h-80 overflow-y-auto";
 
 /** The trigger's box per shape, shared by the live control and its loading placeholder. */
 const TRIGGER_BOX = {
-  brand: "h-9 w-full",
+  brand: "h-11 w-full",
   mobile: "h-11 min-w-0 flex-1",
 };
 
@@ -207,8 +207,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   if (loading) {
     return (
       <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
-        <Skeleton className="size-6 shrink-0 rounded-md" />
-        <Skeleton className="h-4 w-32" />
+        <Skeleton className="size-8 shrink-0 rounded-md" />
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3 w-20" />
+        </div>
       </div>
     );
   }
@@ -280,20 +283,17 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       ? spaceLabel(currentSpace, t)
       : undefined;
   const spaceName: ReactNode = overview.on ? (
-    <span className="text-muted-foreground">
-      <OverviewTile className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom" />
-      {overviewLabel}
-    </span>
+    <>
+      <OverviewTile className="size-3.5 rounded-sm" />
+      <span className="truncate">{overviewLabel}</span>
+    </>
   ) : currentSpace ? (
-    <span className="text-muted-foreground">
-      <IdentityTile
-        {...spaceTile(currentSpace, viewer)}
-        className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
-      />
-      {spaceLabel(currentSpace, t)}
-    </span>
+    <>
+      <IdentityTile {...spaceTile(currentSpace, viewer)} className="size-3.5 rounded-sm" />
+      <span className="truncate">{spaceLabel(currentSpace, t)}</span>
+    </>
   ) : (
-    spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
+    spacesPending && <Skeleton className="h-3 w-16" />
   );
 
   return (
@@ -326,16 +326,14 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <IdentityTile {...orgTile(currentOrg)} className="size-6 rounded-md" />
-          <span className="min-w-0 flex-1 truncate text-left">
-            <span className="font-semibold">{currentOrg.name}</span>
+          <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-md" />
+          {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
+          <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+            <span className="truncate font-semibold">{currentOrg.name}</span>
             {spaceName && (
-              <>
-                <span className="text-border mx-1.5" aria-hidden>
-                  |
-                </span>
+              <span className="text-muted-foreground flex items-center gap-1 text-xs">
                 {spaceName}
-              </>
+              </span>
             )}
           </span>
           <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
