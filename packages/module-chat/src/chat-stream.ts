@@ -277,9 +277,10 @@ export async function handleChatStream(
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
   const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
-  // The origin space and limit a conversation created by this turn takes; a space outside the
-  // acting set, or a limit without a space, is refused before anything is written.
-  const createdOrigin = conversationOrigin(reachable, body);
+  // The origin space and limit ride the turn but are read only by the turn that CREATES the
+  // conversation (`ensureSession` validates them then): an existing one keeps its own.
+  const asksOrigin = body.spaceId !== undefined || body.restricted === true;
+  const originRequest = asksOrigin ? () => conversationOrigin(reachable, body) : undefined;
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
@@ -317,6 +318,15 @@ export async function handleChatStream(
     body.skill_mode && body.pinned_skills
       ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
       : undefined;
+  // An ephemeral turn writes no row: it creates, so its origin is validated here.
+  const ephemeralConversation = (): TurnConversation => {
+    const created = originRequest?.();
+    return {
+      selection: bodySkills ?? DEFAULT_SKILL_SELECTION,
+      spaceId: created?.spaceId ?? null,
+      restricted: created?.restricted ?? false,
+    };
+  };
   const conversation: Promise<TurnConversation> =
     sessionId && lastMessage?.id
       ? ensureSession(
@@ -325,13 +335,9 @@ export async function handleChatStream(
           user.id,
           spacesHolding(reachable, "chat:read").map((space) => space.id),
           bodySkills,
-          createdOrigin,
+          originRequest,
         )
-      : Promise.resolve({
-          selection: bodySkills ?? DEFAULT_SKILL_SELECTION,
-          spaceId: createdOrigin?.spaceId ?? null,
-          restricted: createdOrigin?.restricted ?? false,
-        });
+      : Promise.resolve(ephemeralConversation());
 
   const origin = selfOrigin();
   // Single platform-call seam: re-enter the platform app in-process (or loopback

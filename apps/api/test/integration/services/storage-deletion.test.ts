@@ -25,6 +25,7 @@ import {
   runs,
   organizations,
   storageDeletionJobs,
+  chatSessions,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -412,6 +413,39 @@ describe("storage-deletion outbox", () => {
       new Set([`${runId}.afps`, `${runId}/manifest.json`]),
     );
     expect(new Set(workspaceJobs.map((job) => job.reason))).toEqual(new Set(["space_deleted"]));
+  });
+
+  it("deleteSpace also queues the files its conversations hold in OTHER spaces", async () => {
+    const origin = await createSpace(scope.orgId, { name: "Origin" }, ctx.user.id);
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: scope.orgId,
+      userId: ctx.user.id,
+      spaceId: origin.id,
+    });
+    // A file attached from the default space, contained by the conversation.
+    const runId = await seedRunRow(scope);
+    const doc = await publishDoc(scope, runId, "attached.txt", "attached bytes");
+    await db
+      .update(files)
+      .set({ runId: null, chatSessionId: sessionId })
+      .where(eq(files.id, doc.id));
+    const { inKey } = split(doc.storageKey);
+
+    await deleteSpace(scope.orgId, origin.id);
+
+    expect(await db.select().from(files).where(eq(files.id, doc.id))).toHaveLength(0);
+    const jobs = await db
+      .select({ reason: storageDeletionJobs.reason })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, inKey));
+    expect(jobs).toHaveLength(1);
+    const [after] = await db
+      .select({ used: organizations.filesBytesUsed })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId));
+    expect(after!.used).toBe(0);
   });
 
   it("deleteEndUser purges owned bytes but preserves its surviving run workspace", async () => {

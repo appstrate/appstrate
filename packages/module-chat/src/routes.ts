@@ -55,6 +55,7 @@ import { logger } from "./logger.ts";
 import { createSession, sessionVisible, touchedSpaceIds, touchedUnder } from "./persistence.ts";
 import {
   spacesHolding,
+  canActIn,
   conversationOrigin,
   actingSpaces,
   type ChatPermission,
@@ -396,10 +397,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
       const { title, restricted } = await readJsonBody(c, updateSessionSchema);
       // Limiting needs an origin space the caller can still act in; lifting is always allowed.
-      if (
-        restricted &&
-        !actingSpaces(c.get("reachable")).some((space) => space.id === session.spaceId)
-      ) {
+      if (restricted && !canActIn(c.get("reachable"), session.spaceId)) {
         throw invalidRequest(
           "restricted needs an origin space this conversation can act in",
           "restricted",
@@ -410,7 +408,8 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         .set({
           ...(title === undefined ? {} : { title }),
           ...(restricted === undefined ? {} : { restricted }),
-          updatedAt: new Date(),
+          // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
+          ...(title === undefined ? {} : { updatedAt: new Date() }),
         })
         .where(eq(chatSessions.id, session.id));
       notifySessionUpdate(session.id, session.orgId, session.userId);

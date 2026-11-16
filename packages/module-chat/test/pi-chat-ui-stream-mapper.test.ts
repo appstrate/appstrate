@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { PiChatUiStreamMapper, stripMcpToolPrefix } from "../src/pi-chat/ui-stream-mapper.ts";
+import { dispatchSpace } from "../src/pi-chat/mcp-tools.ts";
 import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
@@ -480,5 +481,41 @@ describe("PiChatUiStreamMapper — step counting and block ids", () => {
       for (const c of chunks) if (c.type === "text-start") ids.push(c.id);
     }
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("the space a tool call is stamped with", () => {
+  const callEnd = (args: Record<string, unknown>): AgentSessionEvent[] => [
+    { type: "message_start", message: {} },
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: { id: "call_1", name: "mcp__platform__run_and_wait", arguments: args },
+        partial: {},
+      },
+    } as AgentSessionEvent,
+  ];
+
+  it("rides tool-input-available as providerMetadata.appstrate.spaceId", () => {
+    const mapper = new PiChatUiStreamMapper({ callSpace: (args) => dispatchSpace("spc_o", args) });
+    const chunks = callEnd({}).flatMap((e) => mapper.map(e));
+    const available = chunks.find((c) => c.type === "tool-input-available") as
+      { providerMetadata?: unknown } | undefined;
+    expect(available?.providerMetadata).toEqual({ appstrate: { spaceId: "spc_o" } });
+  });
+
+  it("is the named space_id on the org endpoint, and nothing for a call naming none", () => {
+    expect(dispatchSpace(undefined, { space_id: "spc_b" })).toBe("spc_b");
+    expect(dispatchSpace(undefined, {})).toBeUndefined();
+    expect(dispatchSpace("spc_o", { space_id: "spc_b" })).toBe("spc_o");
+    const mapper = new PiChatUiStreamMapper({
+      callSpace: (args) => dispatchSpace(undefined, args),
+    });
+    const chunks = callEnd({}).flatMap((e) => mapper.map(e));
+    const available = chunks.find((c) => c.type === "tool-input-available") as object;
+    expect("providerMetadata" in available).toBe(false);
   });
 });

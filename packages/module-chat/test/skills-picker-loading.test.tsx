@@ -22,7 +22,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => false,
-  actingSpaceIds: [],
+  actingSpaceIds: ["spc_1"],
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,

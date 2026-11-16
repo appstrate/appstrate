@@ -38,7 +38,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
-import { callSpace, useConversationScope } from "./conversation-scope.ts";
+import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
@@ -167,10 +167,9 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
   );
 }
 
-/** The space a tool call acted in, named by the host. */
-function CallSpace({ args }: { args: unknown }) {
+/** The space a tool call acted in (the one stamped on it), named by the host. */
+function CallSpace({ spaceId }: { spaceId: string | undefined }) {
   const { renderSpaces } = useChatHost();
-  const spaceId = useCallSpaceId(args);
   if (!renderSpaces || !spaceId) return null;
   return (
     <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
@@ -195,6 +194,7 @@ export function ToolCallCard({
   isError,
   toolCallId,
   timing,
+  spaceId,
   footer,
 }: {
   phase: ToolPhase;
@@ -208,6 +208,8 @@ export function ToolCallCard({
   isError?: boolean;
   toolCallId: string;
   timing?: unknown;
+  /** Where the call acted: the space stamped on it. */
+  spaceId?: string;
   /** Under the header, e.g. the link to the package the call created. */
   footer?: React.ReactNode;
 }) {
@@ -245,7 +247,7 @@ export function ToolCallCard({
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
-        <CallSpace args={args} />
+        <CallSpace spaceId={spaceId} />
         <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
       {errorMsg ? (
@@ -350,7 +352,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   // The call names the space the run ran in: the card reads and links there.
-  const spaceId = useCallSpaceId(props.args);
+  const spaceId = callSpaceOf(props);
   return (
     <ChatRunProgressCard
       runId={runId}
@@ -390,7 +392,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       if (offer || phase !== "success") {
         return (
           <CallOAuthConnectCard
-            args={args}
+            part={props}
             authUrl={offer?.authUrl}
             state={offer?.state}
             // The session route returns no `packageId`; the call's own path
@@ -430,6 +432,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        spaceId={callSpaceOf(props)}
         footer={
           created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
         }
@@ -487,6 +490,7 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        spaceId={callSpaceOf(props)}
         footer={
           created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
         }
@@ -500,26 +504,12 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-/** The space a tool call named (`space_id`): where it acted. */
-function callSpaceId(args: unknown): string | undefined {
-  return stringArg(asRecordOrNull(args) ?? undefined, "space_id");
-}
-
-/**
- * Where a call acted: the space it named, else the origin space of a limited conversation (its
- * calls reach the pinned endpoint and name none), so the card reads and links in the right space.
- */
-function useCallSpaceId(args: unknown): string | undefined {
-  return callSpace(callSpaceId(args), useConversationScope());
-}
-
 /** The connect card of a call: it reads the integration where the call acted. */
 function CallOAuthConnectCard({
-  args,
+  part,
   ...card
-}: { args: unknown } & React.ComponentProps<typeof OAuthConnectCard>) {
-  const spaceId = useCallSpaceId(args);
-  return <OAuthConnectCard {...card} spaceId={spaceId} />;
+}: { part: { providerMetadata?: unknown } } & React.ComponentProps<typeof OAuthConnectCard>) {
+  return <OAuthConnectCard {...card} spaceId={callSpaceOf(part)} />;
 }
 
 export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
@@ -535,6 +525,7 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
+      spaceId={callSpaceOf(props)}
     />
   ),
 });
@@ -552,6 +543,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
+      spaceId={callSpaceOf(props)}
     />
   ),
 });
@@ -578,7 +570,7 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <CallOAuthConnectCard
           key={offer.authUrl}
-          args={props.args}
+          part={props}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

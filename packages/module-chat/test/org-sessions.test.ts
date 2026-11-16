@@ -230,6 +230,19 @@ describe("chat sessions", () => {
       expect(row).toMatchObject({ title: "T", restricted: true });
     });
 
+    it("reorders the sidebar for a rename only, never for the limit", async () => {
+      const created = await createSession(ctx, { spaceId: spaceB });
+      const updatedAtOf = async () =>
+        (await db.select().from(chatSessions).where(eq(chatSessions.id, created.id)))[0]!.updatedAt;
+      const before = await updatedAtOf();
+      await Bun.sleep(5);
+      expect((await patch(ctx, created.id, { restricted: true })).status).toBe(204);
+      expect((await patch(ctx, created.id, { restricted: false })).status).toBe(204);
+      expect((await updatedAtOf()).getTime()).toBe(before.getTime());
+      expect((await patch(ctx, created.id, { title: "Renamed" })).status).toBe(204);
+      expect((await updatedAtOf()).getTime()).toBeGreaterThan(before.getTime());
+    });
+
     it("refuses a limit without an origin space (400 naming the field), but lifts one always", async () => {
       const overview = await createSession(ctx);
       const refused = await patch(ctx, overview.id, { restricted: true });
@@ -564,10 +577,10 @@ describe("ensureSession", () => {
     const stranger = await memberContext(ctx, "member", "operator");
     await ensureSession("chs_owned", ctx.orgId, ctx.user.id, []);
     await expect(
-      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], undefined, {
+      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], undefined, () => ({
         spaceId: ctx.defaultSpaceId,
         restricted: true,
-      }),
+      })),
     ).rejects.toMatchObject({ status: 404 });
     const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, "chs_owned"));
     expect(row).toMatchObject({ spaceId: null, restricted: false });
@@ -580,16 +593,30 @@ describe("ensureSession", () => {
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
     const readable = [ctx.defaultSpaceId, other];
 
-    const created = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, undefined, {
-      spaceId: other,
-      restricted: true,
-    });
+    const created = await ensureSession(
+      "chs_origin",
+      ctx.orgId,
+      ctx.user.id,
+      readable,
+      undefined,
+      () => ({
+        spaceId: other,
+        restricted: true,
+      }),
+    );
     expect(created).toMatchObject({ spaceId: other, restricted: true });
     // An existing conversation keeps its own, whatever a later turn carries.
-    const again = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, undefined, {
-      spaceId: ctx.defaultSpaceId,
-      restricted: false,
-    });
+    const again = await ensureSession(
+      "chs_origin",
+      ctx.orgId,
+      ctx.user.id,
+      readable,
+      undefined,
+      () => ({
+        spaceId: ctx.defaultSpaceId,
+        restricted: false,
+      }),
+    );
     expect(again).toMatchObject({ spaceId: other, restricted: true });
     // The overview has none.
     expect(await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable)).toMatchObject({
@@ -612,10 +639,10 @@ describe("touchSessionSpace", () => {
       ctx.user.id,
       [ctx.defaultSpaceId, other],
       undefined,
-      {
+      () => ({
         spaceId: ctx.defaultSpaceId,
         restricted: false,
-      },
+      }),
     );
     const session = {
       id: "chs_touch",

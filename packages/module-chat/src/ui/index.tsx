@@ -196,6 +196,8 @@ export interface ChatPageProps {
   firstName?: ChatHost["firstName"];
   /** Names spaces (see `ChatHost`). Pass a stable function. */
   renderSpaces?: ChatHost["renderSpaces"];
+  /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
+  useSpaceLabelOf?: ChatHost["useSpaceLabelOf"];
 }
 
 export function ChatPage({
@@ -219,6 +221,7 @@ export function ChatPage({
   onPackagesChanged,
   firstName,
   renderSpaces,
+  useSpaceLabelOf,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -323,6 +326,7 @@ export function ChatPage({
       onPackagesChanged,
       firstName,
       renderSpaces,
+      useSpaceLabelOf,
     }),
     [
       onOpenFile,
@@ -339,6 +343,7 @@ export function ChatPage({
       onPackagesChanged,
       firstName,
       renderSpaces,
+      useSpaceLabelOf,
     ],
   );
 
@@ -478,7 +483,7 @@ const Conversation = memo(function Conversation({
 
   // The conversation's origin space and limit: stored once it exists, the selected space and a
   // local choice before its first message (see `conversation-limit.ts`).
-  const { scope, getCreation } = useConversationLimit({
+  const { scope, getCreation, acknowledgeCreation } = useConversationLimit({
     id,
     transport,
     persistedAtMount,
@@ -542,6 +547,7 @@ const Conversation = memo(function Conversation({
         composerSlot={composerSlot}
         getChosenSkills={getChosenSkills}
         getCreation={getCreation}
+        acknowledgeCreation={acknowledgeCreation}
         {...rest}
       />
     </ConversationScopeProvider>
@@ -596,12 +602,15 @@ function ConversationInner({
   serverUpdatedAt,
   getChosenSkills,
   getCreation,
+  acknowledgeCreation,
 }: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
   /** The origin space and limit the turn being sent creates the conversation with (none once it exists). */
   getCreation: () => ConversationCreation | undefined;
+  /** The server answered a turn: the conversation exists, so the creation fields stop. */
+  acknowledgeCreation: () => void;
 }) {
   const queryClient = useQueryClient();
   const filterSpaceId = transport?.spaceId ?? null;
@@ -641,6 +650,15 @@ function ConversationInner({
         api: turnApi,
         credentials: "include",
         headers: buildHeaders,
+        // An answered turn means the server created the row: the next ones carry no creation fields.
+        fetch: Object.assign(
+          async (input: RequestInfo | URL, init?: RequestInit) => {
+            const response = await fetch(input, init);
+            if (response.ok) acknowledgeCreation();
+            return response;
+          },
+          { preconnect: fetch.preconnect },
+        ),
         // Everything below is read at request time, like the model above, for the same reason.
         prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
           body: turnBody({
@@ -659,7 +677,7 @@ function ConversationInner({
           api: `${turnApi}/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders, getChosenSkills, getCreation, turnApi],
+    [buildHeaders, getChosenSkills, getCreation, acknowledgeCreation, turnApi],
   );
 
   const chat = useChat({

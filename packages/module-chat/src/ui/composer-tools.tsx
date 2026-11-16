@@ -28,7 +28,13 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
 import type { ChatSkillSelection } from "../skills.ts";
-import { limitAvailability, useConversationScope } from "./conversation-scope.ts";
+import {
+  limitAccessibleNames,
+  limitAvailability,
+  useAttachAvailability,
+  useConversationScope,
+  useSpaceLabel,
+} from "./conversation-scope.ts";
 import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import {
   setPackageAuthoringEnabled,
@@ -58,8 +64,14 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, canAttach = true, actingSpaceIds, renderSpaces } = useChatHost();
+  const { t, actingSpaceIds, renderSpaces } = useChatHost();
   const scope = useConversationScope();
+  const attach = useAttachAvailability();
+  // The plain name, for the accessible names: the node above carries a tile the name does not.
+  const limitNames = limitAccessibleNames(
+    t,
+    useSpaceLabel(scope.originSpaceId) ?? t("composer.limit.thisSpace"),
+  );
   const limit = limitAvailability(scope, actingSpaceIds);
   // The space as the host names it; without the host's rendering, the sentence stays generic.
   const spaceNode =
@@ -97,7 +109,7 @@ export function ComposerTools({
             setSkillsOpen(true);
           }}
         >
-          {canAttach ? (
+          {attach.available ? (
             <ComposerPrimitive.AddAttachment multiple asChild>
               <DropdownMenuItem>
                 <PaperclipIcon />
@@ -105,13 +117,19 @@ export function ComposerTools({
               </DropdownMenuItem>
             </ComposerPrimitive.AddAttachment>
           ) : (
-            // An upload lands in the working space, where the chat does not act.
-            <DropdownMenuItem disabled title={t("composer.attachUnavailable")}>
+            // An upload lands in the working space: where the chat does not act, or off the
+            // origin of a limited conversation.
+            <DropdownMenuItem disabled data-testid="composer-attach-item">
               <PaperclipIcon />
               <span className="flex flex-col">
                 {t("composer.attach")}
-                <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
-                  {t("composer.attachUnavailable")}
+                <span
+                  className="text-muted-foreground max-w-56 text-xs whitespace-normal"
+                  data-testid="composer-attach-reason"
+                >
+                  {attach.reason === "limited"
+                    ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
+                    : t("composer.attachUnavailable")}
                 </span>
               </span>
             </DropdownMenuItem>
@@ -130,6 +148,7 @@ export function ComposerTools({
             <DropdownMenuCheckboxItem
               checked={scope.restricted}
               onCheckedChange={scope.setRestricted}
+              aria-label={limitNames.item}
               data-testid="composer-limit-item"
             >
               {sentenceWithNode(t, "composer.limit", spaceNode)}
@@ -197,7 +216,7 @@ export function ComposerTools({
           </span>
           <button
             type="button"
-            aria-label={t("composer.limit.undo")}
+            aria-label={limitNames.undo}
             onClick={() => scope.setRestricted(false)}
             className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full"
           >

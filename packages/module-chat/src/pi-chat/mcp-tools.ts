@@ -386,6 +386,18 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * The space a platform tool call is dispatched in: the origin a pinned endpoint serves, else the
+ * one the call names (`space_id`); none for a call that names none.
+ */
+export function dispatchSpace(
+  pinnedSpaceId: string | undefined,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (pinnedSpaceId !== undefined) return pinnedSpaceId;
+  return typeof args.space_id === "string" ? args.space_id : undefined;
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },

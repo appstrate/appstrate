@@ -209,6 +209,11 @@ export interface ChatHost {
   firstName?: string | null;
   /** Names spaces; absent in a mount that has no space listing. */
   renderSpaces?: RenderSpaces;
+  /**
+   * A hook returning a space's plain name by id (`undefined` for one the caller does not reach),
+   * for the accessible names that carry a space's name where `renderSpaces`' node would not.
+   */
+  useSpaceLabelOf?: () => (spaceId: string | null | undefined) => string | undefined;
 }
 
 /**

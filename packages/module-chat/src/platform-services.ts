@@ -71,6 +71,14 @@ export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableS
   );
 }
 
+/** Whether `spaceId` is one of the acting set: the single test behind every "can still act there". */
+export function canActIn(
+  reachable: readonly ReachableSpaceGrant[],
+  spaceId: string | null | undefined,
+): boolean {
+  return spaceId != null && actingSpaces(reachable).some((space) => space.id === spaceId);
+}
+
 /**
  * The origin space and limit a conversation is created with (`spaceId`, `restricted` of the
  * session creation or of the turn that lazily creates it). The space must be one of the
@@ -84,7 +92,7 @@ export function conversationOrigin(
     if (input.restricted) throw invalidRequest("restricted needs a spaceId", "restricted");
     return undefined;
   }
-  if (!actingSpaces(reachable).some((space) => space.id === input.spaceId)) {
+  if (!canActIn(reachable, input.spaceId)) {
     throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
   }
   return { spaceId: input.spaceId, restricted: input.restricted === true };

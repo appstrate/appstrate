@@ -36,6 +36,30 @@ export function creationFields(created: Created): ConversationCreation {
   };
 }
 
+/**
+ * What a conversation started here sends as creation fields. The origin is frozen at the first
+ * message and kept for every attempt until the server acknowledges a turn (the row exists): a
+ * first turn that failed before the server created it must not lose it. Afterwards nothing is
+ * sent, since the server reads these fields only on the turn that creates the conversation.
+ */
+export function creationGate(freeze: () => Created) {
+  let frozen: Created | null = null;
+  let acknowledged = false;
+  return {
+    /** The fields of the turn being sent, freezing the origin on the first call. */
+    fields(): ConversationCreation | undefined {
+      if (acknowledged) return undefined;
+      frozen ??= freeze();
+      return creationFields(frozen);
+    },
+    /** The server answered a turn: the conversation exists, its origin is the server's. */
+    acknowledge(): void {
+      acknowledged = true;
+    },
+    frozen: (): Created | null => frozen,
+  };
+}
+
 /** Writes `restricted` on the session detail and on every cached list row of the conversation. */
 function writeRestricted(queryClient: QueryClient, id: string, restricted: boolean): void {
   queryClient.setQueryData<SessionHistory | null>(sessionQueryKey(id), (prev) =>
@@ -91,10 +115,12 @@ export function useConversationLimit({
   scope: ConversationScope;
   /** The creation fields of the turn being sent: none for a conversation that already exists. */
   getCreation: () => ConversationCreation | undefined;
+  /** Called when the server answered a turn: the creation fields stop riding the next ones. */
+  acknowledgeCreation: () => void;
 } {
   const queryClient = useQueryClient();
   const [created, setCreated] = useState<Created | null>(null);
-  const createdRef = useRef<Created | null>(null);
+  const gateRef = useRef<ReturnType<typeof creationGate>>(undefined);
   const [draftRestricted, setDraftRestricted] = useState(false);
   // The limit the user last set on a conversation that exists, over what was loaded or frozen.
   const [override, setOverride] = useState<boolean>();
@@ -115,18 +141,20 @@ export function useConversationLimit({
     latest.current = { selectedSpaceId, draftRestricted };
   }, [selectedSpaceId, draftRestricted]);
 
-  // A conversation started here keeps sending its frozen origin until the page is left: a first
-  // turn that failed before the server created it must not lose them; the server ignores them
-  // for a conversation that exists.
+  // A conversation started here sends its frozen origin until the server acknowledges a turn
+  // (see `creationGate`).
+  const gate = (gateRef.current ??= creationGate(() => {
+    const { selectedSpaceId: space, draftRestricted: draft } = latest.current;
+    return { spaceId: space ?? null, restricted: draft && !!space };
+  }));
   const getCreation = useCallback((): ConversationCreation | undefined => {
     if (persistedAtMount) return undefined;
-    if (!createdRef.current) {
-      const { selectedSpaceId: space, draftRestricted: draft } = latest.current;
-      createdRef.current = { spaceId: space ?? null, restricted: draft && !!space };
-      setCreated(createdRef.current);
-    }
-    return creationFields(createdRef.current);
-  }, [persistedAtMount]);
+    const fields = gate.fields();
+    const frozen = gate.frozen();
+    if (frozen) setCreated(frozen);
+    return fields;
+  }, [persistedAtMount, gate]);
+  const acknowledgeCreation = useCallback(() => gate.acknowledge(), [gate]);
 
   const { mutate } = useMutation({
     mutationFn: (next: boolean) =>
@@ -148,5 +176,5 @@ export function useConversationLimit({
     [exists, transport, mutate],
   );
 
-  return { scope: { originSpaceId, restricted, setRestricted }, getCreation };
+  return { scope: { originSpaceId, restricted, setRestricted }, getCreation, acknowledgeCreation };
 }

@@ -100,6 +100,12 @@ interface PiChatUiStreamMapperOptions {
   onFirstModelEvent?: () => void;
   /** Rate card whose tiers band each model call's usage; none → no bands. */
   cost?: ModelCost | null;
+  /**
+   * The space a tool call is dispatched in, from its arguments (`undefined`: it acts in none).
+   * Stamped on the call as `providerMetadata.appstrate.spaceId`, the one record every card
+   * reads where the call acted, long after the conversation's limit has changed.
+   */
+  callSpace?: (args: Record<string, unknown>) => string | undefined;
 }
 
 /**
@@ -109,8 +115,10 @@ interface PiChatUiStreamMapperOptions {
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
   private readonly cost: ModelCost | null;
+  private readonly callSpace: PiChatUiStreamMapperOptions["callSpace"];
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
+    this.callSpace = options.callSpace;
     this.onFirstModelEvent = options.onFirstModelEvent;
     this.cost = options.cost ?? null;
   }
@@ -270,12 +278,15 @@ export class PiChatUiStreamMapper {
         const toolCallId = block?.toolCallId ?? ev.toolCall.id;
         const toolName = stripMcpToolPrefix(block?.toolName ?? ev.toolCall.name);
         this.lastTool = toolName;
+        const input = ev.toolCall.arguments ?? {};
+        const spaceId = this.callSpace?.(input);
         return [
           {
             type: "tool-input-available",
             toolCallId,
             toolName,
-            input: ev.toolCall.arguments ?? {},
+            input,
+            ...(spaceId && { providerMetadata: { appstrate: { spaceId } } }),
           },
         ];
       }

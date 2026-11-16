@@ -157,12 +157,18 @@ export interface TurnConversation {
   restricted: boolean;
 }
 
+/** The origin space and limit a conversation is created with; throws the 400 for an invalid one. */
+export type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
+
 /**
  * Create the session row if it does not exist yet (idempotent). The client
  * mints the id; the stream route creates the row through here, writing the
- * turn's skill `selection` in the same statement when it carries one, and the
- * `origin` space and limit ONLY when it creates the row: an existing conversation keeps
- * its own. Returns what the turn takes from the row.
+ * turn's skill `selection` in the same statement when it carries one. The
+ * `origin` request (origin space and limit) is called ONLY when this call creates the row:
+ * an existing conversation keeps its own and the request is never evaluated. A turn naming an
+ * origin runs in a transaction that evaluates it once the row is known to be new (a refusal
+ * rolls the row back); a turn naming none is a single statement. Returns what the turn takes
+ * from the row.
  */
 export async function ensureSession(
   id: string,
@@ -174,7 +180,7 @@ export async function ensureSession(
    */
   readable: readonly string[],
   selection?: ChatSkillSelection,
-  origin?: { spaceId: string; restricted: boolean },
+  origin?: ConversationOriginRequest,
 ): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
@@ -195,35 +201,40 @@ export async function ensureSession(
   // below already says 404. One round trip AND no write.
   //
   // 404, not 403, so we don't reveal that the id exists for someone else.
-  const [row] = await db
-    .insert(chatSessions)
-    .values({
-      id,
-      orgId,
-      userId,
-      title: null,
-      spaceId: origin?.spaceId ?? null,
-      restricted: origin?.restricted ?? false,
-      ...selection,
-    })
-    .onConflictDoUpdate({
-      target: chatSessions.id,
-      // `updatedAt` stays either way, so a pin never reorders the sidebar.
-      set: selection ?? { id: sql`${chatSessions.id}` },
-      setWhere: and(
-        eq(chatSessions.orgId, orgId),
-        eq(chatSessions.userId, userId),
-        sessionVisible(readable),
-      ),
-    })
-    .returning({
-      orgId: chatSessions.orgId,
-      userId: chatSessions.userId,
-      skillMode: chatSessions.skillMode,
-      pinnedSkills: chatSessions.pinnedSkills,
-      spaceId: chatSessions.spaceId,
-      restricted: chatSessions.restricted,
-    });
+  const upsert = (client: ChatDbClient) =>
+    client
+      .insert(chatSessions)
+      .values({ id, orgId, userId, title: null, ...selection })
+      .onConflictDoUpdate({
+        target: chatSessions.id,
+        // `updatedAt` stays either way, so a pin never reorders the sidebar.
+        set: selection ?? { id: sql`${chatSessions.id}` },
+        setWhere: and(
+          eq(chatSessions.orgId, orgId),
+          eq(chatSessions.userId, userId),
+          sessionVisible(readable),
+        ),
+      })
+      .returning({
+        orgId: chatSessions.orgId,
+        userId: chatSessions.userId,
+        skillMode: chatSessions.skillMode,
+        pinnedSkills: chatSessions.pinnedSkills,
+        spaceId: chatSessions.spaceId,
+        restricted: chatSessions.restricted,
+        // `xmax` is 0 on a freshly inserted tuple and set on one the conflict arm rewrote.
+        created: sql<boolean>`(xmax = 0)`,
+      });
+  const row = origin
+    ? await db.transaction(async (tx) => {
+        const [inserted] = await upsert(tx);
+        if (!inserted?.created) return inserted;
+        const created = origin();
+        if (!created) return inserted;
+        await tx.update(chatSessions).set(created).where(eq(chatSessions.id, id));
+        return { ...inserted, ...created };
+      })
+    : (await upsert(db))[0];
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");
   }

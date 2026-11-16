@@ -5,6 +5,7 @@ import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
+  chatSessions,
   files,
   integrationConnections,
   integrationConnectionShares,
@@ -465,10 +466,24 @@ async function deleteSpaceInTx(
     );
   }
 
+  // A conversation's origin space owns the conversation, and `files.chat_session_id` cascades
+  // with it: a file attached from ANOTHER space still dies with the conversation. Enumerate
+  // those with the space's own files, or their objects and bytes would outlive the row.
   const docRows = await tx
     .select({ storageKey: files.storageKey, size: files.size })
     .from(files)
-    .where(eq(files.spaceId, spaceId));
+    .where(
+      or(
+        eq(files.spaceId, spaceId),
+        inArray(
+          files.chatSessionId,
+          tx
+            .select({ id: chatSessions.id })
+            .from(chatSessions)
+            .where(eq(chatSessions.spaceId, spaceId)),
+        ),
+      ),
+    );
   const uploadRows = await tx
     .select({ storageKey: uploads.storageKey })
     .from(uploads)

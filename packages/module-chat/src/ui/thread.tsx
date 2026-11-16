@@ -52,6 +52,7 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useAttachAvailability } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
@@ -82,13 +83,14 @@ export function Thread({
   useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
-  const { can, t, canAttach = true } = useChatHost();
+  const { can, t } = useChatHost();
+  const attach = useAttachAvailability();
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write") || !canAttach}
+      disabled={!can("chat:write") || !attach.available}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root

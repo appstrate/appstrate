@@ -146,7 +146,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this space but has no published version to follow.",
+      "The skill `@a/house` is required by this conversation's origin space but has no published version to follow.",
     ]);
   });
 
@@ -159,7 +159,9 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toHaveLength(1);
-    expect(result.notices[0]).toContain("is required by this space but does not fit");
+    expect(result.notices[0]).toContain(
+      "is required by this conversation's origin space but does not fit",
+    );
   });
 
   it("spends the shared budget on the space's skills first", () => {
@@ -188,7 +190,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     );
     expect(result.enforced.map((s) => s.packageId)).toEqual(["@a/a", "@a/c"]);
     expect(result.notices).toEqual([
-      `The skill \`@a/b\` is required by this space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
+      `The skill \`@a/b\` is required by this conversation's origin space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
     ]);
   });
 });
@@ -247,7 +249,7 @@ describe("injectedSkills", () => {
       [enforcedSkill("@a/house", null)],
     );
     expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this space but has no published version to follow.",
+      "The skill `@a/house` is required by this conversation's origin space but has no published version to follow.",
     ]);
   });
 

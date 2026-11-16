@@ -46,6 +46,7 @@ import {
   useChatTranslate,
 } from "./use-chat-runtime";
 import { renderSpaces } from "./render-spaces";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -198,6 +199,7 @@ export function ChatModulePage() {
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
               renderSpaces={renderSpaces}
+              useSpaceLabelOf={useSpaceLabelOf}
             />
           </div>
           <ConversationSidebar

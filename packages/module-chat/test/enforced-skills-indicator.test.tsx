@@ -75,13 +75,18 @@ describe("EnforcedSkillsIndicator", () => {
     expect(render(null, undefined, null)).toBe("");
   });
 
+  it("shows none when the author can no longer act in the origin space, as the turn injects none", () => {
+    // Seeded for the origin, which is outside the acting set (spc_a only): no skill, no placeholder.
+    expect(render([{ packageId: "@a/b", version: "1.0.0" }], undefined, "spc_gone")).toBe("");
+  });
+
   it("keys the read by the conversation's space", () => {
     // Seeded under spc_a, the render under spc_b has no answer yet: it holds its place.
     const qc = new QueryClient();
     qc.setQueryData(["chat", "enforced-skills", "spc_a"], [{ packageId: "@a/b", version: null }]);
     const html = renderToString(
       <QueryClientProvider client={qc}>
-        <ChatHostProvider value={host}>
+        <ChatHostProvider value={{ ...host, actingSpaceIds: ["spc_a", "spc_b"] }}>
           <ConversationScopeProvider
             value={{ originSpaceId: "spc_b", restricted: false, setRestricted: () => {} }}
           >

@@ -171,14 +171,14 @@ export async function loadHistory(
     messages?: StoredMessage[];
     skill_mode: ChatSkillMode;
     pinned_skills: string[];
-    spaceId?: string | null;
-    restricted?: boolean;
+    spaceId: string | null;
+    restricted: boolean;
   };
   return {
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
     skills: { skillMode: body.skill_mode, pinnedSkills: body.pinned_skills },
-    spaceId: body.spaceId ?? null,
-    restricted: body.restricted ?? false,
+    spaceId: body.spaceId,
+    restricted: body.restricted,
   };
 }

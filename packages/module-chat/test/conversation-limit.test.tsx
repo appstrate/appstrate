@@ -11,10 +11,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import { changeLimit, creationFields } from "../src/ui/conversation-limit.ts";
+import { changeLimit, creationFields, creationGate } from "../src/ui/conversation-limit.ts";
 import {
-  callSpace,
+  callSpaceOf,
+  limitAccessibleNames,
   ConversationScopeProvider,
+  attachAvailability,
   limitAvailability,
   pinnedSpaceOf,
   type ConversationScope,
@@ -42,6 +44,20 @@ describe("what the first message carries", () => {
   it("is nothing from « Vue d'ensemble », whatever was toggled", () => {
     expect(creationFields({ spaceId: null, restricted: false })).toEqual({});
     expect(creationFields({ spaceId: null, restricted: true })).toEqual({});
+  });
+});
+
+describe("the creation fields until the server answers", () => {
+  it("freeze at the first message and ride every attempt until a turn is acknowledged", () => {
+    let selected = "spc_a";
+    const gate = creationGate(() => ({ spaceId: selected, restricted: true }));
+    expect(gate.fields()).toEqual({ spaceId: "spc_a", restricted: true });
+    // A retry after a failed first turn still carries the origin chosen at the first message.
+    selected = "spc_b";
+    expect(gate.fields()).toEqual({ spaceId: "spc_a", restricted: true });
+    gate.acknowledge();
+    // The row exists: the server reads these fields no more, so they are no longer sent.
+    expect(gate.fields()).toBeUndefined();
   });
 });
 
@@ -153,16 +169,21 @@ describe("changing the limit of an existing conversation", () => {
   });
 });
 
-describe("a limited conversation's tool calls", () => {
-  it("carry no space_id: the card falls back to the origin space", () => {
-    const limited = { originSpaceId: "spc_a", restricted: true };
-    expect(callSpace(undefined, limited)).toBe("spc_a");
-    expect(pinnedSpaceOf(limited)).toBe("spc_a");
+describe("the space a tool card shows", () => {
+  it("is the one the engine stamped on the call, whatever the conversation's limit is now", () => {
+    const stamped = { providerMetadata: { appstrate: { spaceId: "spc_a" } } };
+    expect(callSpaceOf(stamped)).toBe("spc_a");
   });
 
-  it("keep the space a call named, and name none on an unlimited conversation", () => {
-    expect(callSpace("spc_b", { originSpaceId: "spc_a", restricted: true })).toBe("spc_b");
-    expect(callSpace(undefined, { originSpaceId: "spc_a", restricted: false })).toBeUndefined();
+  it("is none for a call that acted in no space", () => {
+    expect(callSpaceOf({})).toBeUndefined();
+    expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();
+    expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: 4 } } })).toBeUndefined();
+  });
+
+  it("pins the origin only while the conversation is limited", () => {
+    expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
+    expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: false })).toBeUndefined();
     expect(pinnedSpaceOf({ originSpaceId: null, restricted: true })).toBeUndefined();
   });
 });
@@ -180,16 +201,17 @@ describe("the composer's limit chip", () => {
     formatBytes: String,
     onPackagesChanged: () => {},
     renderSpaces: (ids) => <i data-spaces={ids.join(",")}>Studio</i>,
+    useSpaceLabelOf: () => (id) => (id === "spc_a" ? "Studio" : undefined),
   };
 
-  function html(scope: ConversationScope): string {
+  function html(scope: ConversationScope, workingSpaceId = "spc_a", over: Partial<ChatHost> = {}) {
     return renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <ChatHostProvider value={host}>
+        <ChatHostProvider value={{ ...host, ...over }}>
           <ConversationScopeProvider value={scope}>
             <TooltipProvider>
               <ComposerTools
-                transport={transportOf(() => ({}))}
+                transport={transportOf(() => ({ "X-Space-Id": workingSpaceId }))}
                 selection={{ skillMode: "auto", pinnedSkills: [] }}
                 onSelectionChange={() => {}}
                 showPicker={false}
@@ -207,12 +229,51 @@ describe("the composer's limit chip", () => {
     const out = html({ originSpaceId: "spc_a", restricted: true, setRestricted: () => {} });
     expect(out).toContain('data-testid="composer-limit-chip"');
     expect(out).toContain('data-spaces="spc_a"');
-    expect(out).toContain('aria-label="composer.limit.undo"');
+    expect(out).toContain('aria-label="composer.limit.undo|Studio"');
+  });
+
+  it("names the space in the accessible names of the limit item and of the chip's button", () => {
+    const t: ChatHost["t"] = (key, options) => `${key}|${String(options?.name)}`;
+    expect(limitAccessibleNames(t, "Studio")).toEqual({
+      item: "composer.limit|Studio",
+      undo: "composer.limit.undo|Studio",
+    });
   });
 
   it("is absent when the conversation is not limited", () => {
     expect(
       html({ originSpaceId: "spc_a", restricted: false, setRestricted: () => {} }),
     ).not.toContain("composer-limit-chip");
+  });
+});
+
+describe("attaching a file in a limited conversation", () => {
+  it("is allowed only from the origin space", () => {
+    const limited = { originSpaceId: "spc_a", restricted: true };
+    expect(attachAvailability(true, limited, "spc_a")).toEqual({ available: true });
+    expect(attachAvailability(true, limited, "spc_b")).toEqual({
+      available: false,
+      reason: "limited",
+    });
+    expect(attachAvailability(true, limited, null)).toEqual({
+      available: false,
+      reason: "limited",
+    });
+  });
+
+  it("follows the host elsewhere: any acting working space for an unlimited conversation", () => {
+    const open = { originSpaceId: "spc_a", restricted: false };
+    expect(attachAvailability(true, open, "spc_b")).toEqual({ available: true });
+    expect(attachAvailability(false, open, "spc_b")).toEqual({
+      available: false,
+      reason: "outside",
+    });
+    // On the origin but where the chat does not act: the host's reason.
+    expect(
+      attachAvailability(false, { originSpaceId: "spc_a", restricted: true }, "spc_a"),
+    ).toEqual({
+      available: false,
+      reason: "outside",
+    });
   });
 });

@@ -485,7 +485,7 @@ describe("formatCallerContext", () => {
         { ...BASE_OPTS, origin: ORIGIN, enforced: [{ ...HOUSE, version: null, content: null }] },
       );
       expect(out).toContain(
-        "`@acme/house` is required by this space but has no published version to follow.",
+        "`@acme/house` is required by this conversation's origin space but has no published version to follow.",
       );
       expect(out).not.toContain(ENFORCED_LEAD);
     });

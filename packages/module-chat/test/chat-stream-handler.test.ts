@@ -1580,10 +1580,10 @@ describe("handleChatStream", () => {
           ctx.user.id,
           [ctx.defaultSpaceId, spaceB],
           undefined,
-          {
+          () => ({
             spaceId: ctx.defaultSpaceId,
             restricted: false,
-          },
+          }),
         );
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
@@ -1603,6 +1603,21 @@ describe("handleChatStream", () => {
           restricted: false,
         });
         expect(await touchedBy(sessionId)).toEqual([]);
+      });
+
+      it("does not validate them on a turn of an existing conversation", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        const { engine } = scriptedEngine();
+        // Outside the acting set and a limit without a space: refused when creating, ignored here.
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach,
+          body: { spaceId: spaceC, restricted: true },
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
       });
 
       it("refuses a space outside the acting set with a 400 naming the field, before anything is written", async () => {
@@ -1730,10 +1745,10 @@ describe("handleChatStream", () => {
 
       it("is refused with a 403, before anything runs, once the author can no longer act in the origin space", async () => {
         const sessionId = mintSessionId();
-        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [spaceB], undefined, {
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [spaceB], undefined, () => ({
           spaceId: spaceB,
           restricted: true,
-        });
+        }));
         // Still read in Beta (the conversation opens), but no longer chatted in.
         const readOnlyBeta = [
           { ...reach[0]! },
@@ -2088,7 +2103,7 @@ describe("handleChatStream", () => {
             ctx.user.id,
             [ctx.defaultSpaceId, spaceB],
             undefined,
-            { spaceId: spaceB, restricted: false },
+            () => ({ spaceId: spaceB, restricted: false }),
           );
           const { res } = await orgTurn(
             sessionId,

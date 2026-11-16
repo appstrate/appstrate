@@ -44,7 +44,7 @@ import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
-import { buildPlatformMcpTools, type OrganizationSpaces } from "./mcp-tools.ts";
+import { buildPlatformMcpTools, dispatchSpace, type OrganizationSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -233,6 +233,8 @@ export function runPiChat(input: PiChatInput): Response {
     },
     // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
     cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
+    // Every call records the space it was dispatched in, for the cards that show it later.
+    callSpace: (args) => dispatchSpace(platformMcp.pinnedSpaceId, args),
   });
 
   const stream = createUIMessageStream({
