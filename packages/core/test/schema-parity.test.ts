@@ -66,7 +66,14 @@ describe("integration JSON Schema ⇄ Zod parity", () => {
       label: "a public local-source integration",
       manifest: {
         ...base,
-        source: { kind: "local", server: { name: "@acme/open-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
       },
       valid: true,
     },

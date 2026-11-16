@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The index page of a package type the space runs: agents, skills, MCP
- * servers. One page for the three, so a fix to one (an error state, the
- * keywords the search reads, the actions menu) lands on all of them.
- * Integrations keep their own page: execution tabs, protocol filter, columns.
+ * The index page of a package type the space runs: agents and skills. One page
+ * for the two, so a fix to one (an error state, the keywords the search reads,
+ * the actions menu) lands on both. Integrations have their own page: a source
+ * filter and connection columns.
  */
 
 import { useState } from "react";
@@ -34,7 +34,7 @@ import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
-type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
+type IndexType = Extract<PackageType, "agent" | "skill">;
 
 /** The page's words for its type. */
 function presentation(type: IndexType, t: TFunction) {
@@ -168,7 +168,7 @@ function PackageIndexBody({
         onViewChange={setView}
       />
       {importing && canCreate && <ImportModal type={type} onClose={() => setImporting(false)} />}
-      {creating !== null && canCreate && type !== "mcp-server" && (
+      {creating !== null && canCreate && (
         <CreatePackageModal
           type={type}
           integrationId={creating.integrationId ?? undefined}
@@ -179,14 +179,10 @@ function PackageIndexBody({
         <CreationHandoffModal
           resource={type}
           onClose={creation.close}
-          onManual={
-            type === "mcp-server"
-              ? undefined
-              : () => {
-                  creation.close();
-                  setCreating({ integrationId: creation.integrationId });
-                }
-          }
+          onManual={() => {
+            creation.close();
+            setCreating({ integrationId: creation.integrationId });
+          }}
           onImport={() => {
             creation.close();
             setImporting(true);

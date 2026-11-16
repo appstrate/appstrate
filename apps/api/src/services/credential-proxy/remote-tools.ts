@@ -189,7 +189,7 @@ export function offeredRemoteToolNames(
 ): Set<string> {
   const catalog = resolveIntegrationToolCatalog({
     integration: manifest,
-    ...(allowsUndeclaredTools(manifest) && listed ? { mcpServerTools: listed } : {}),
+    ...(allowsUndeclaredTools(manifest) && listed ? { listedTools: listed } : {}),
   });
   const synthetic = new Set(
     getApiCallConfigs(manifest).flatMap((config) =>

@@ -38,7 +38,6 @@ import { localIntegrationManifest } from "../../helpers/integration-manifests.ts
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 
 const INTEG = "@readyorg/integ";
-const SERVER = "@readyorg/server";
 const AGENT = "@readyorg/agent";
 
 /**
@@ -51,7 +50,6 @@ function integManifest(version: string, requiredScopes: string[]) {
   return localIntegrationManifest({
     name: INTEG,
     version,
-    serverName: SERVER,
     auths: {
       primary: {
         type: "oauth2",

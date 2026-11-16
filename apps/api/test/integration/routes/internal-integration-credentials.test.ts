@@ -13,7 +13,7 @@
  * run's space. A leaked run token must not be able to enumerate
  * arbitrary integration secrets across the org.
  *
- * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
+ * Mirrors the structure of `internal-integration-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
  * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
@@ -61,7 +61,6 @@ const app = getTestApp();
 const AGENT = "@credsorg/test-agent";
 const INTEGRATION = "@credsorg/svc";
 const OTHER_INTEGRATION = "@credsorg/other-svc";
-const MCP_SERVER = "@credsorg/svc-server";
 
 function buildAgentManifest(declaredIntegrations: string[]): Record<string, unknown> {
   const deps: Record<string, string> = {};
@@ -84,7 +83,6 @@ function buildAgentManifest(declaredIntegrations: string[]): Record<string, unkn
 function buildIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {
@@ -825,7 +823,6 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         source: "local",
         draftManifest: localIntegrationManifest({
           name: INTEGRATION,
-          serverName: MCP_SERVER,
           auths: {
             primary: {
               type: "oauth2",

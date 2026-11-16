@@ -56,12 +56,11 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.root).toBe("@me/root@1.0.0");
   });
 
-  it("walks skill + mcp_server + integration deps (AFPS sections)", async () => {
+  it("walks skill + integration deps (AFPS sections), a local integration carrying its server", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
         skills: { "@me/skill-a": "^1.0.0" },
-        mcp_servers: { "@me/mcp-x": "1.2.3" },
         integrations: { "@me/integ-y": "^1.0.0" },
       },
     };
@@ -73,45 +72,40 @@ describe("buildBundleFromCatalog", () => {
       { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
-    // AFPS (§3.4) lifted the mcp-server scoped identity to the manifest
-    // root, so `name`, `type`, and `schema_version` live at the top level.
-    const mcp = makePkg(
-      "@me/mcp-x@1.2.3" as PackageIdentity,
+    // A local integration member carries its own server payload.
+    const integ = makePkg(
+      "@me/integ-y@1.0.0" as PackageIdentity,
       {
-        manifest_version: "0.3",
-        name: "@me/mcp-x",
-        version: "1.2.3",
-        type: "mcp-server",
+        name: "@me/integ-y",
+        version: "1.0.0",
+        type: "integration",
         schema_version: "0.1",
-        server: {
-          type: "node",
-          entry_point: "server/index.js",
-          mcp_config: { command: "node", args: ["server/index.js"] },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+          },
         },
       },
       { "server/index.js": enc("//") },
     );
-    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
-      name: "@me/integ-y",
-      version: "1.0.0",
-      type: "integration",
-      schema_version: "0.1",
-      source: { kind: "none" },
-      auths: {
-        key: {
-          type: "api_key",
-          credentials: { schema: { type: "object", properties: {} } },
-          delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
-        },
-      },
-    });
-    const cat = new InMemoryPackageCatalog([skill, mcp, integ]);
+    const cat = new InMemoryPackageCatalog([skill, integ]);
 
     const bundle = await buildBundleFromCatalog(root, cat);
-    expect(bundle.packages.size).toBe(4);
+    expect(bundle.packages.size).toBe(3);
     expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
-    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeDefined();
-    expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
+    const member = bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity);
+    expect(member).toBeDefined();
+    expect(member!.files.has("server/index.js")).toBe(true);
   });
 
   it("depTypes: ['skills'] walks only skills", async () => {
@@ -119,7 +113,6 @@ describe("buildBundleFromCatalog", () => {
       ...ROOT,
       dependencies: {
         skills: { "@me/skill-a": "^1.0.0" },
-        mcp_servers: { "@me/mcp-x": "1.2.3" },
         integrations: { "@me/integ-y": "^1.0.0" },
       },
     };
@@ -131,23 +124,21 @@ describe("buildBundleFromCatalog", () => {
       { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
-    // Only the skill is in the catalog: an integration/mcp_server dep must not
+    // Only the skill is in the catalog: an integration dep must not
     // be resolved or fetched, so its absence here must not surface as missing.
     const cat = new InMemoryPackageCatalog([skill]);
 
     const bundle = await buildBundleFromCatalog(root, cat, { depTypes: ["skills"] });
     expect(bundle.packages.size).toBe(2); // root + skill
     expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
-    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeUndefined();
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeUndefined();
   });
 
-  it("walks AFPS §4.1 semver-string deps (skills + integrations + mcp_servers)", async () => {
+  it("walks AFPS §4.1 semver-string deps (skills + integrations)", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
         skills: { "@me/skill-a": "^1.0.0" },
-        mcp_servers: { "@me/mcp-x": "1.2.3" },
         integrations: { "@me/integ-y": "^1.0.0" },
       },
       integrations_configuration: {
@@ -162,24 +153,18 @@ describe("buildBundleFromCatalog", () => {
       { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
-    const mcp = makePkg(
-      "@me/mcp-x@1.2.3" as PackageIdentity,
-      { name: "@me/mcp-x", version: "1.2.3", type: "mcp-server", schema_version: "0.1" },
-      {},
-    );
     const integ = makePkg(
       "@me/integ-y@1.0.0" as PackageIdentity,
       { name: "@me/integ-y", version: "1.0.0", type: "integration", schema_version: "0.1" },
       {},
     );
-    const cat = new InMemoryPackageCatalog([skill, mcp, integ]);
+    const cat = new InMemoryPackageCatalog([skill, integ]);
 
     const bundle = await buildBundleFromCatalog(root, cat, {
-      depTypes: ["skills", "mcp_servers", "integrations"],
+      depTypes: ["skills", "integrations"],
     });
-    expect(bundle.packages.size).toBe(4); // root + 3 deps
+    expect(bundle.packages.size).toBe(3); // root + 2 deps
     expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
-    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeDefined();
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
   });
 
@@ -318,7 +303,6 @@ describe("buildBundleFromCatalog", () => {
         ...ROOT,
         dependencies: {
           skills: { "@me/skill-a": "^1" },
-          mcp_servers: { "@me/mcp-x": "1.2.3" },
           integrations: { "@me/integ-y": "^1" },
         },
       },
@@ -337,7 +321,6 @@ describe("buildBundleFromCatalog", () => {
     await buildBundleFromCatalog(root, recordingCatalog).catch(() => {});
     expect(calls.sort()).toEqual([
       ["@me/integ-y", "^1", "integrations"],
-      ["@me/mcp-x", "1.2.3", "mcp_servers"],
       ["@me/skill-a", "^1", "skills"],
     ]);
   });

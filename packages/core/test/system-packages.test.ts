@@ -45,7 +45,14 @@ function integrationManifest(name: string, version = "1.0.0") {
     version,
     schema_version: "0.1",
     display_name: "Test Integration",
-    source: { kind: "local", server: { name: `${name}-server`, version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       key: {
         type: "api_key",
@@ -79,7 +86,10 @@ afterEach(async () => {
 
 describe("loadSystemPackages", () => {
   it("loads integration ZIPs", async () => {
-    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
+    const zip = makeZip({
+      "manifest.json": integrationManifest("@test/gmail"),
+      "server/index.js": "export {};",
+    });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
     const result = await loadSystemPackages(testDir);
@@ -119,8 +129,14 @@ describe("loadSystemPackages", () => {
   });
 
   it("loads multiple ZIPs", async () => {
-    const zip1 = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
-    const zip2 = makeZip({ "manifest.json": integrationManifest("@test/slack") });
+    const zip1 = makeZip({
+      "manifest.json": integrationManifest("@test/gmail"),
+      "server/index.js": "export {};",
+    });
+    const zip2 = makeZip({
+      "manifest.json": integrationManifest("@test/slack"),
+      "server/index.js": "export {};",
+    });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip1);
     await writeFile(join(testDir, "slack-1.0.0.afps"), zip2);
 
@@ -130,7 +146,10 @@ describe("loadSystemPackages", () => {
   });
 
   it("skips non-zip files", async () => {
-    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
+    const zip = makeZip({
+      "manifest.json": integrationManifest("@test/gmail"),
+      "server/index.js": "export {};",
+    });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
     await writeFile(join(testDir, "readme.txt"), "not a zip");
     await writeFile(join(testDir, ".DS_Store"), "");
@@ -177,7 +196,10 @@ describe("loadSystemPackages", () => {
   });
 
   it("preserves zipBuffer for each entry", async () => {
-    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
+    const zip = makeZip({
+      "manifest.json": integrationManifest("@test/gmail"),
+      "server/index.js": "export {};",
+    });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
     const result = await loadSystemPackages(testDir);
@@ -186,7 +208,10 @@ describe("loadSystemPackages", () => {
   });
 
   it("mixes valid and invalid ZIPs", async () => {
-    const valid = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
+    const valid = makeZip({
+      "manifest.json": integrationManifest("@test/gmail"),
+      "server/index.js": "export {};",
+    });
     await writeFile(join(testDir, "gmail.afps"), valid);
     await writeFile(join(testDir, "bad.afps"), "corrupted");
 

@@ -24,7 +24,7 @@ function placement(state: LibraryPlacement["state"]): LibraryPlacement {
 }
 
 function libraryWith(agents: LibraryPackageItem[]): Pick<LibraryResponse, "packages"> {
-  return { packages: { agent: agents, skill: [], "mcp-server": [], integration: [] } };
+  return { packages: { agent: agents, skill: [], integration: [] } };
 }
 
 function agentRow(placements: LibraryPlacement[]): LibraryPackageItem {

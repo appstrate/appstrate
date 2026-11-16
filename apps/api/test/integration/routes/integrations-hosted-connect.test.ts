@@ -54,7 +54,14 @@ function apiKeyManifest(name = "@myorg/gmail"): IntegrationManifest {
     display_name: "Gmail",
     description: "Gmail integration",
     icon: "logos:google-gmail",
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       api: {
         type: "api_key",
@@ -327,7 +334,14 @@ function oauthManifest(name = "@myorg/gsuite"): IntegrationManifest {
     display_name: "Google Workspace",
     description: "Google Workspace integration",
     icon: "logos:google",
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       google: {
         type: "oauth2",
@@ -677,9 +691,8 @@ async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
   if (!dir) throw new Error("no integration-ssh-* source directory found");
   const manifest = JSON.parse(
     await readFile(join(sources, dir, "manifest.json"), "utf8"),
-  ) as IntegrationManifest & { source: { server: { name: string } } };
+  ) as IntegrationManifest;
   manifest.name = name;
-  manifest.source.server.name = `${name}-mcp`;
   return manifest;
 }
 

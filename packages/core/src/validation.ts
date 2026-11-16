@@ -13,14 +13,12 @@ import {
   metaSchema as afpsMetaSchema,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
-import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { asRecord } from "./safe-json.ts";
 import { isAppearanceColor, type AppearanceColor } from "./appearance.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
-export { mcpServerManifestSchema, type McpServerManifest };
 
 // ─────────────────────────────────────────────
 // Base manifest schema — common fields for all package types
@@ -84,7 +82,6 @@ export type PackageType = z.infer<typeof packageTypeEnum>;
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
   agent: "https://schemas.afps.dev/v0/agent.schema.json",
   skill: "https://schemas.afps.dev/v0/skill.schema.json",
-  "mcp-server": "https://schemas.afps.dev/v0/mcp-server.schema.json",
   integration: "https://schemas.afps.dev/v0/integration.schema.json",
 };
 
@@ -400,7 +397,7 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
+      manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest;
     }
   | {
       valid: false;
@@ -424,8 +421,7 @@ function parseWithSchema(
     | typeof manifestSchema
     | typeof agentManifestSchema
     | typeof skillManifestSchema
-    | typeof integrationManifestSchema
-    | typeof mcpServerManifestSchema,
+    | typeof integrationManifestSchema,
   raw: unknown,
 ): ValidateManifestResult {
   // `_meta` validation is delegated entirely to the canonical per-type schema.
@@ -447,16 +443,18 @@ function parseWithSchema(
 }
 
 /**
- * How {@link validateManifest} treats the `dependencies` keys AFPS 2.0 retired —
- * `tools` (replaced by `mcp_servers`) and `providers` (replaced by
- * `integrations`). The one behaviour that MUST differ by direction:
+ * How {@link validateManifest} treats the `dependencies` keys the spec retired —
+ * `tools` (a local MCP server is declared inline on its integration) and
+ * `providers` (renamed to `integrations`). The one behaviour
+ * that MUST differ by direction:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,
  *     import, an inline manifest from an API client, a repo-authored system
  *     package). A retired key declares something no reader will ever honour,
- *     so the author must see it, with its replacement named.
+ *     so the author must see it, with what replaced it.
  *   - `"tolerate"` — the manifest was ALREADY PERSISTED (a stored draft, a
- *     published version snapshot or archive). A retired key is TOLERATED, left
+ *     published version snapshot or archive) or comes back from outside the
+ *     platform (a bundle re-imported). A retired key is TOLERATED, left
  *     exactly where it is: it is inert (no reader reads it), and a published
  *     archive is immutable — its integrity hash covers its bytes — so it could
  *     never be repaired. Surfacing it belongs to the install-warning channel,
@@ -486,7 +484,7 @@ export function validateManifest(
   options?: ValidateManifestOptions,
 ): ValidateManifestResult {
   // AFPS: `type` is the canonical discriminator and MUST be one of
-  // `agent | skill | mcp-server | integration`. An unknown or missing `type`
+  // `agent | skill | integration`. An unknown or missing `type`
   // is a dispatcher-level error, not a partial base-schema validation
   // failure — fail fast with a single structured Zod issue keyed on
   // `["type"]` so callers/UI get a typed signal rather than a permissive
@@ -495,35 +493,32 @@ export function validateManifest(
     return {
       valid: false,
       errors: [
-        "type: Unknown package type — manifest must declare type as one of: agent, skill, mcp-server, integration",
+        "type: Unknown package type — manifest must declare type as one of: agent, skill, integration",
       ],
     };
   }
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // Retired `dependencies` keys: rejected with the replacement named, on the
+  // Retired `dependencies` keys: rejected with what replaced them, on the
   // author direction only (see {@link RetiredDependencyKeysPolicy}). Checked before
   // the type dispatch because every package type may declare `dependencies`.
   const errors =
     options?.retiredDependencyKeys === "tolerate"
       ? []
       : findRetiredDependencyKeys(obj).map(
-          ({ key, replacement }) =>
-            `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
+          ({ key, guidance }) =>
+            `dependencies.${key}: \`dependencies.${key}\` is a retired key — ${guidance}. No consumer reads it, so the dependencies declared under it are silently ignored.`,
         );
   if (errors.length > 0) return { valid: false, errors };
 
-  // AFPS (§3.4): mcp-server identity lives at the manifest root —
-  // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
-  // all root fields. Dispatch purely on the root `type` discriminator.
-  if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
+  // Dispatch purely on the root `type` discriminator.
   if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
   if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
 
   // Unknown / missing type: emit a single typed issue and stop. Any value
-  // that isn't one of the four canonical package types lands here and
+  // that isn't one of the three canonical package types lands here and
   // produces the typed error rather than a confusing list of partial
   // base-schema errors.
   const received =
@@ -531,7 +526,7 @@ export function validateManifest(
   return {
     valid: false,
     errors: [
-      `type: Unknown package type ${received} — manifest must declare type as one of: agent, skill, mcp-server, integration`,
+      `type: Unknown package type ${received} — manifest must declare type as one of: agent, skill, integration`,
     ],
   };
 }

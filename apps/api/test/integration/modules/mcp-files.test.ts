@@ -31,7 +31,7 @@ import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
@@ -553,7 +553,7 @@ describe("mcp file-backed package workflow", () => {
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
-    headers = await apiKeyHeaders(ctx, ["mcp-servers:write"]);
+    headers = await apiKeyHeaders(ctx, ["integrations:write"]);
   });
 
   it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
@@ -564,7 +564,7 @@ describe("mcp file-backed package workflow", () => {
     await seedPackage({
       id: "@mcppkgdoc/file-server",
       orgId: ctx.orgId,
-      type: "mcp-server",
+      type: "integration",
       homeSpaceId: hidden.id,
     });
     await seedSpacePackage(hidden.id, "@mcppkgdoc/file-server");
@@ -612,7 +612,7 @@ describe("mcp file-backed package workflow", () => {
     await seedPackage({
       id: packageId,
       orgId: ctx.orgId,
-      type: "mcp-server",
+      type: "integration",
       homeSpaceId: elsewhere.id,
     });
 
@@ -653,10 +653,11 @@ describe("mcp file-backed package workflow", () => {
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
     const packageId = "@mcppkgdoc/file-server";
-    const manifest = mcpServerManifest({
+    const manifest = localIntegrationManifest({
       name: packageId,
       version: "1.0.0",
-      entryPoint: "main.js",
+      server: { entryPoint: "main.js" },
+      auths: { api: { type: "api_key" } },
     });
     const entries: Record<string, Uint8Array> = {
       "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),

@@ -312,7 +312,14 @@ describe("catalogSourceKey", () => {
 describe("isRemoteSource", () => {
   it("handles only a remote MCP source", () => {
     expect(isRemoteSource({ source: proposal.source })).toBe(true);
-    expect(isRemoteSource({ source: { kind: "local", server: { name: "@org/x" } } })).toBe(false);
+    expect(
+      isRemoteSource({
+        source: {
+          kind: "local",
+          server: { type: "node", entry_point: "server/index.js", mcp_config: { command: "node" } },
+        },
+      }),
+    ).toBe(false);
     expect(isRemoteSource({ source: { kind: "none" } })).toBe(false);
   });
 });
@@ -620,7 +627,12 @@ describe("needsWizardFinish", () => {
   });
 
   it("stays quiet for a local source or a read-only caller", () => {
-    const local = { source: { kind: "local", server: { name: "x", version: "1.0.0" } } };
+    const local = {
+      source: {
+        kind: "local",
+        server: { type: "node", entry_point: "server/index.js", mcp_config: { command: "node" } },
+      },
+    };
     expect(needsWizardFinish({ ...facts, manifest: local })).toBe(false);
     expect(needsWizardFinish({ ...facts, homeWritable: false })).toBe(false);
   });

@@ -59,7 +59,14 @@ function oauth2Manifest(): IntegrationManifest {
     name: INTEG,
     version: "1.0.0",
     display_name: "Test",
-    source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       oauth: {
         type: "oauth2",
@@ -1363,7 +1370,14 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1443,7 +1457,14 @@ describe("requirementOf — the selection scopes are inferred from", () => {
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       allow_undeclared_tools: true,
       ...(defaultTools !== undefined ? { default_tools: defaultTools } : {}),
       auths: {
@@ -1677,7 +1698,14 @@ describe("resolveConnections — org default", () => {
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1929,7 +1957,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1974,7 +2009,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         pat: {
           type: "api_key",
@@ -2002,7 +2044,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {},
       tools_policy: { t1: {} },
     } as unknown as IntegrationManifest;

@@ -38,7 +38,7 @@ async function seedPublishedAgent(ctx: TestContext) {
     schema_version: "0.1",
     author: "tester",
     timeout: 300,
-    dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+    dependencies: { skills: {}, integrations: {} },
   };
   await seedPackage({
     orgId: ctx.orgId,

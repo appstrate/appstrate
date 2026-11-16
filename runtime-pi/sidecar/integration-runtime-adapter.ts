@@ -86,12 +86,12 @@ export interface SpawnIntegrationOptions {
   /**
    * Per-run shared workspace handle decoded from the sidecar's
    * `WORKSPACE_HANDLE_JSON` env var. Adapters mount/expose it under
-   * the runner's filesystem ONLY when the spec's referenced mcp-server
+   * the runner's filesystem ONLY when the spec's integration
    * opted in via `_meta["dev.appstrate/workspace"]` (carried on
    * `spec.workspaceMount`). `null` when the launching orchestrator
    * provided no workspace handle (custom
    * orchestrators) — adapters then degrade to no-mount and the
-   * opt-in mcp-server runs without workspace access (logged warning).
+   * opt-in local server runs without workspace access (logged warning).
    */
   readonly workspaceHandle: WorkspaceHandle | null;
   /** Stderr line emitter wired by the caller (typically logger.info). */
@@ -100,7 +100,7 @@ export interface SpawnIntegrationOptions {
 
 /**
  * Canonical env-var name the spawned runner reads to locate the shared
- * workspace. Exposed by both adapters so mcp-server code stays
+ * workspace. Exposed by both adapters so local server code stays
  * adapter-agnostic — the path differs between docker (the in-runner
  * mount point declared on `_meta.workspace`) and process (the host
  * tmpdir path), but the env-var contract is uniform.
@@ -460,7 +460,7 @@ export function buildProxyEnvBlock(proxyUrl: string): Record<string, string> {
  * (NODE_EXTRA_CA_CERTS), Python (requests / httpx / urllib via
  * REQUESTS_CA_BUNDLE / SSL_CERT_FILE), curl (CURL_CA_BUNDLE), and git
  * (GIT_SSL_CAINFO — git wraps libcurl but uses its OWN env var, ignoring
- * CURL_CA_BUNDLE/SSL_CERT_FILE). Without GIT_SSL_CAINFO a mcp-server that
+ * CURL_CA_BUNDLE/SSL_CERT_FILE). Without GIT_SSL_CAINFO a local server that
  * shells out to `git` (clone/fetch/push over HTTPS) sees `SSL certificate
  * problem: unable to get local issuer certificate` even with the proxy
  * reachable.

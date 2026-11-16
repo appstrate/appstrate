@@ -6,7 +6,7 @@
  * `resolveRunIntegrationVersions` resolves every declared integration's
  * manifest against PUBLISHED versions honoring its `dependencies.integrations.<id>`
  * pin (and per-run `dependency_overrides`), the integration-axis mirror of the
- * skill closure fix (#666) and `resolveMcpServerForSpawn` (#588). It:
+ * skill closure fix (#666). It:
  *   - seeds the shared manifest cache with the PINNED manifest so every kickoff
  *     reader (connection cascade, spawn resolver) honors the pin transparently,
  *   - returns the frozen `{ version, source }` map persisted on the run row,
@@ -35,7 +35,6 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@pinorg/integ";
-const SERVER = "@pinorg/server";
 
 /** A valid integration manifest stamped with `version` so a test can prove
  *  WHICH version's manifest was read (published vs the draft marker). */
@@ -43,7 +42,6 @@ function integManifest(version: string) {
   return localIntegrationManifest({
     name: INTEG,
     version,
-    serverName: SERVER,
     auths: {
       key: {
         type: "api_key",

@@ -339,13 +339,13 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/mcp-server-bundle/{scope}/{name}": {
+  "/internal/integration-bundle/{scope}/{name}": {
     get: {
-      operationId: "getMcpServerBundle",
+      operationId: "getIntegrationBundle",
       tags: ["Internal"],
-      summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
+      summary: "Fetch the archive of a local integration (manifest and server payload)",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).",
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise a local integration's MCP server before spawning a runner container. A local integration declares its server inline (`source.server`) and ships the payload in its own archive; `server.entry_point` is relative to the archive root. The route verifies that the run's agent declares this integration in `dependencies.integrations`, that it is ACTIVE in the run's space and that it is a local one with a server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single integration and concrete version its spawn spec names — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). Which bytes: the version the run froze (`runs.resolved_integration_versions`). The spawn spec names a published version in `server.version` and the sidecar forwards it as `?version=`, which must be exactly that version — never a fallback to the newest published one (that would skew the manifest from the bytes). A system integration is answered from the in-memory boot registry, and an integration the run froze on its draft (a `draft` dependency override) from the draft files, read at fetch time (a draft edited after launch is served as edited); neither spec carries a version, and `?version=` is refused for them.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -355,7 +355,7 @@ export const internalPaths = {
           in: "query",
           required: false,
           description:
-            "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone.",
+            "Concrete published version to serve — exactly the one the run froze (the spawn spec's `server.version`). Omitted for a system integration (boot registry) and for a draft run (draft files); a version sent for those, or a different one, is a 404.",
           schema: { type: "string" },
         },
       ],
@@ -368,12 +368,11 @@ export const internalPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
-            "Agent does not reference this mcp-server through an active integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
+            "The run's agent does not declare this integration, it is not active in the space or not a local one, the run froze no version for it, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

@@ -234,7 +234,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -3366,7 +3366,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills the agent is built from (`dependencies.skills`).
          */
         get: operations["getAgentPackage"];
         put?: never;
@@ -3548,7 +3548,7 @@ export interface paths {
         put?: never;
         /**
          * Create an integration package, including a remote MCP
-         * @description Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.
+         * @description Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; a local MCP server (`source.kind: "local"`) ships its server payload inside the integration archive, so it is created by importing that archive (`POST /api/packages/import`), not by this JSON form.
          */
         post: operations["createIntegrationPackage"];
         delete?: never;
@@ -3667,146 +3667,6 @@ export interface paths {
          * @description Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
          */
         post: operations["restoreIntegrationPackageVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List MCP-server packages
-         * @description List the MCP-server packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
-         */
-        get: operations["listMcpServerPackages"];
-        put?: never;
-        /**
-         * Create a local MCP-server executable package
-         * @description Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.
-         */
-        post: operations["createMcpServerPackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package detail
-         * @description Get an MCP-server package's full details including content.
-         */
-        get: operations["getMcpServerPackage"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete an MCP-server package
-         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        delete: operations["deleteMcpServerPackage"];
-        options?: never;
-        head?: never;
-        /**
-         * Update an MCP-server package
-         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        patch: operations["updateMcpServerPackage"];
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List MCP-server package versions
-         * @description List all published versions for an MCP-server package.
-         */
-        get: operations["listMcpServerPackageVersions"];
-        put?: never;
-        /**
-         * Create a version from draft
-         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        post: operations["createMcpServerPackageVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get version info for an MCP-server package (latest published + draft)
-         * @description Returns the latest published version and the current draft version from the manifest.
-         */
-        get: operations["getMcpServerPackageVersionInfo"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package version detail
-         * @description Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.
-         */
-        get: operations["getMcpServerPackageVersionDetail"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete an MCP-server package version
-         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        delete: operations["deleteMcpServerPackageVersion"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore an MCP-server package version into the draft
-         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        post: operations["restoreMcpServerPackageVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4067,7 +3927,7 @@ export interface paths {
         get: operations["getPackageHome"];
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
          */
         put: operations["movePackageHome"];
         post?: never;
@@ -4092,7 +3952,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a person or a space
-         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: an mcp-server whose `latest` archive does not parse is refused (`422 bundle_invalid`), and the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.
+         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -5397,6 +5257,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-bundle/{scope}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the archive of a local integration (manifest and server payload)
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise a local integration's MCP server before spawning a runner container. A local integration declares its server inline (`source.server`) and ships the payload in its own archive; `server.entry_point` is relative to the archive root. The route verifies that the run's agent declares this integration in `dependencies.integrations`, that it is ACTIVE in the run's space and that it is a local one with a server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single integration and concrete version its spawn spec names — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). Which bytes: the version the run froze (`runs.resolved_integration_versions`). The spawn spec names a published version in `server.version` and the sidecar forwards it as `?version=`, which must be exactly that version — never a fallback to the newest published one (that would skew the manifest from the bytes). A system integration is answered from the in-memory boot registry, and an integration the run froze on its draft (a `draft` dependency override) from the draft files, read at fetch time (a draft edited after launch is served as edited); neither spec carries a version, and `?version=` is refused for them.
+         */
+        get: operations["getIntegrationBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -5555,26 +5435,6 @@ export interface paths {
          * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run (whoever launched it, else the org's owners and admins; an ephemeral run has none and the tool refuses), once per run. Rate-limited to 200 requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) is refused with 400 (`-32600`). Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
          */
         post: operations["internalRunToolsMcpPost"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/mcp-server-bundle/{scope}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).
-         */
-        get: operations["getMcpServerBundle"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5754,11 +5614,6 @@ export interface components {
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: components["schemas"]["AgentSkillRef"][];
-                /** @description AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`). */
-                mcp_servers?: {
-                    id: string;
-                    version: string;
-                }[];
                 integrations: {
                     id: string;
                     version: string;
@@ -5832,17 +5687,13 @@ export interface components {
              * @description Package type from manifest
              * @enum {string}
              */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             running_runs: number;
             /** @description Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`. */
             unread_count: number;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
-                    [key: string]: string;
-                };
-                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
-                mcp_servers?: {
                     [key: string]: string;
                 };
                 integrations: {
@@ -5904,9 +5755,6 @@ export interface components {
             schema_version: string;
             dependencies?: {
                 skills?: {
-                    [key: string]: string;
-                };
-                mcp_servers?: {
                     [key: string]: string;
                 };
                 integrations?: {
@@ -6335,15 +6183,16 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             /**
-             * @description The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
+             * @description The manifest's `source.kind`: `local` runs the MCP server the integration archive carries, in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
              * @enum {string}
              */
             source_kind: "local" | "remote" | "none";
-            /** @description `source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source. */
+            /** @description `source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source. */
             server: {
-                name: string;
-                /** @description Semver range */
-                version: string;
+                /** @description Runtime: `node`, `python`, `binary` or `uv`. */
+                type: string;
+                /** @description Path of the server entry point inside the integration archive. */
+                entry_point: string;
             } | null;
         };
         IntegrationPin: {
@@ -6369,7 +6218,7 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             /** @description Package origin (`local` for org-owned packages, `system` for built-in system packages). */
             source: string;
             /** @description Display name from the package draft manifest (`manifest.display_name`); falls back to the package id. */
@@ -6704,7 +6553,7 @@ export interface components {
              * @enum {string}
              */
             definition: "draft" | "published";
-            /** @description The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`. */
+            /** @description The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an integration published without one. Read from the draft or from the published archive according to `definition`. */
             content: string | null;
             /** @enum {string} */
             source: "local" | "system";
@@ -6850,7 +6699,7 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
@@ -7530,7 +7379,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             /** @enum {string} */
-            package_type: "agent" | "skill" | "integration" | "mcp-server";
+            package_type: "agent" | "skill" | "integration";
             /** @enum {string} */
             package_source: "local" | "system";
             /** @description Raw draft manifest JSONB for the placed package. */
@@ -7742,25 +7591,6 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
-        /** @description The endpoint requires a different request media type */
-        UnsupportedMediaType: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "type": "https://docs.appstrate.dev/errors/archive-required",
-                 *       "title": "Archive Required",
-                 *       "status": 415,
-                 *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
-                 *       "code": "archive_required",
-                 *       "request_id": "req_abc123"
-                 *     }
-                 */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
@@ -8449,7 +8279,6 @@ export interface operations {
                      *           "unread_count": 2,
                      *           "dependencies": {
                      *             "skills": {},
-                     *             "mcp_servers": {},
                      *             "integrations": {}
                      *           }
                      *         },
@@ -8476,9 +8305,6 @@ export interface operations {
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
-                     *             },
-                     *             "mcp_servers": {
-                     *               "@appstrate/filesystem-mcp": "^1.0.0"
                      *             },
                      *             "integrations": {
                      *               "@appstrate/github": "^2.0.0"
@@ -16130,7 +15956,6 @@ export interface operations {
                      *           }
                      *         ],
                      *         "skill": [],
-                     *         "mcp-server": [],
                      *         "integration": [
                      *           {
                      *             "id": "pkg_gmail",
@@ -16190,7 +16015,6 @@ export interface operations {
                         packages: {
                             agent: components["schemas"]["LibraryPackageList"];
                             skill: components["schemas"]["LibraryPackageList"];
-                            "mcp-server": components["schemas"]["LibraryPackageList"];
                             integration: components["schemas"]["LibraryPackageList"];
                         };
                     };
@@ -19436,7 +19260,7 @@ export interface operations {
                             payload: {
                                 packageId: string;
                                 /** @enum {string} */
-                                package_type: "agent" | "skill" | "integration" | "mcp-server";
+                                package_type: "agent" | "skill" | "integration";
                                 shared_by_name: string;
                             } | null;
                             /**
@@ -21501,7 +21325,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
                 /** @description Skip draft overwrite protection. Set to true to overwrite a package with unpublished changes. */
                 force?: boolean;
             };
@@ -21544,7 +21368,7 @@ export interface operations {
                     "application/json": {
                         /** @description The imported package ID */
                         packageId: string;
-                        /** @description Package type (agent/skill/mcp-server/integration) */
+                        /** @description Package type (agent/skill/integration) */
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
@@ -21587,7 +21411,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -21629,7 +21453,7 @@ export interface operations {
                             status: "inserted" | "reused";
                             /** @description DB row id for the version; null for system packages. */
                             version_id?: number | null;
-                            /** @description Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only. */
+                            /** @description Package type (agent, skill, integration). Present on `inserted` entries only. */
                             type?: string;
                         }[];
                         /** @description Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not place it outside that home — the import still landed every package it carried. */
@@ -21640,7 +21464,7 @@ export interface operations {
                          * @description The root package's type.
                          * @enum {string}
                          */
-                        root_type: "agent" | "skill" | "mcp-server" | "integration";
+                        root_type: "agent" | "skill" | "integration";
                         /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
                         warnings: string[];
                     };
@@ -21673,7 +21497,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -21704,7 +21528,7 @@ export interface operations {
                     "application/json": {
                         /** @description The imported package ID */
                         packageId: string;
-                        /** @description Package type (agent/skill/mcp-server/integration) */
+                        /** @description Package type (agent/skill/integration) */
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
@@ -22196,483 +22020,6 @@ export interface operations {
         };
     };
     restoreIntegrationPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Version to restore (exact, dist-tag, or semver range) */
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version restored */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    listMcpServerPackages: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["OrgPackageItem"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** @description Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`. */
-        requestBody: {
-            content: {
-                "multipart/form-data": {
-                    /**
-                     * Format: binary
-                     * @description Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.
-                     */
-                    file: Blob;
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            /** @description Validation error. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description A package with this name already exists (`code: name_collision`). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            415: components["responses"]["UnsupportedMediaType"];
-        };
-    };
-    getMcpServerPackage: {
-        parameters: {
-            query?: {
-                /** @description Which definition to project into `content`, `manifest` and the fields derived from them. OMITTED reads the one that EXISTS for this caller — the author's live draft when they may WRITE the package, the `latest` published version otherwise, and the draft again when nothing is published yet, because reading a definition is not running it and a package the listing shows must have a page. The response's `definition` says which of the two answered. An EXPLICIT `draft` is an author's act and is reserved to callers who may write the package: `403 draft_not_writable` otherwise. Any other value is resolved as a version spec (exact version, dist-tag, or semver range). A system package ships its definition with the platform, so every selector but the named `draft` reads the same stored tree. */
-                version?: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package. */
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    deleteMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    updateMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
-                "If-Match": components["parameters"]["IfMatchRequired"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest?: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            428: components["responses"]["PreconditionRequired"];
-        };
-    };
-    listMcpServerPackageVersions: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["AgentVersion"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createMcpServerPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** @description Optional semver version override (e.g. from bump selector) */
-                    version?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Version created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PackageVersionDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            412: components["responses"]["PreconditionFailed"];
-        };
-    };
-    getMcpServerPackageVersionInfo: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version info */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        latest_published_version?: string | null;
-                        active_version?: string | null;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getMcpServerPackageVersionDetail: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Version query — exact version, dist-tag, or semver range */
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Versioned MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PackageVersionDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    deleteMcpServerPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    restoreMcpServerPackageVersion: {
         parameters: {
             query?: never;
             header?: {
@@ -23657,26 +23004,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "type": "about:blank",
-                     *       "title": "Invalid MCP Server Bundle",
-                     *       "status": 422,
-                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
-                     *       "code": "bundle_invalid",
-                     *       "request_id": "req_abc123"
-                     *     }
-                     */
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     listPackageShares: {
@@ -23763,16 +23090,6 @@ export interface operations {
             /** @description The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json. */
             409: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description The share would land ON and the package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -27016,7 +26333,6 @@ export interface operations {
                      *           }
                      *         ],
                      *         "skill": [],
-                     *         "mcp-server": [],
                      *         "integration": [
                      *           {
                      *             "id": "pkg_gmail",
@@ -27076,7 +26392,6 @@ export interface operations {
                         packages: {
                             agent: components["schemas"]["LibraryPackageList"];
                             skill: components["schemas"]["LibraryPackageList"];
-                            "mcp-server": components["schemas"]["LibraryPackageList"];
                             integration: components["schemas"]["LibraryPackageList"];
                         };
                     };
@@ -27279,7 +26594,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Filter by package type */
-                type?: "agent" | "skill" | "integration" | "mcp-server";
+                type?: "agent" | "skill" | "integration";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -27359,26 +26674,6 @@ export interface operations {
             /** @description The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "type": "about:blank",
-                     *       "title": "Invalid MCP Server Bundle",
-                     *       "status": 422,
-                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
-                     *       "code": "bundle_invalid",
-                     *       "request_id": "req_abc123"
-                     *     }
-                     */
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     getSpacePackage: {
@@ -28663,6 +27958,54 @@ export interface operations {
             };
         };
     };
+    getIntegrationBundle: {
+        parameters: {
+            query?: {
+                /** @description Concrete published version to serve — exactly the one the run froze (the spawn spec's `server.version`). Omitted for a system integration (boot registry) and for a draft run (draft files); a version sent for those, or a different one, is a 404. */
+                version?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AFPS bundle bytes (ZIP). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": Blob;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The run's agent does not declare this integration, it is not active in the space or not a local one, the run froze no version for it, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     getIntegrationCredentials: {
         parameters: {
             query?: {
@@ -29516,55 +28859,6 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-        };
-    };
-    getMcpServerBundle: {
-        parameters: {
-            query?: {
-                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone. */
-                version?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description AFPS bundle bytes (ZIP). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/zip": Blob;
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an active integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     getOAuthModelProviderToken: {

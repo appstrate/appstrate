@@ -42,7 +42,6 @@ const app = getTestApp();
 
 const AGENT = "@rdyorg/agent";
 const INTEGRATION = "@rdyorg/svc";
-const MCP_SERVER = "@rdyorg/svc-server";
 
 function buildAgentManifest(
   integrations: string[],
@@ -73,7 +72,6 @@ function buildAgentManifest(
 function buildIntegrationManifest(id: string, required: boolean) {
   const m = localIntegrationManifest({
     name: id,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {

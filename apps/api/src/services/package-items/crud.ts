@@ -12,8 +12,11 @@ import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { ApiError } from "@appstrate/core/api-errors";
 import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
-import { getIntegrationSourceKind, type IntegrationManifest } from "@appstrate/core/integration";
-import { getLocalServerRef } from "../integration-manifest-helpers.ts";
+import {
+  getIntegrationSourceKind,
+  getLocalServer,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,
@@ -47,10 +50,10 @@ export async function getPackageById(id: string): Promise<Package | null> {
 // ─────────────────────────────────────────────
 
 /**
- * The three AFPS §4.1 dependency maps on a manifest. Compile-time constants —
+ * The two AFPS §4.1 dependency maps on a manifest. Compile-time constants —
  * they are interpolated as SQL literals below, never user input.
  */
-const DEPENDENCY_MAPS = ["skills", "mcp_servers", "integrations"] as const;
+const DEPENDENCY_MAPS = ["skills", "integrations"] as const;
 type DependencyMap = (typeof DEPENDENCY_MAPS)[number];
 
 /**
@@ -269,15 +272,15 @@ export async function updateOrgItem(
 
 /**
  * What the integration index draws beyond the common row: how the integration
- * reaches its service (`source.kind`) and, for a local one, the server package
- * the sandbox runs. A source that is neither `local` nor `remote` has no MCP
+ * reaches its service (`source.kind`) and, for a local one, the server it
+ * carries (`source.server`: runtime type + entry point). A source that is neither `local` nor `remote` has no MCP
  * backing, which is what `none` states and what the runtime does with it.
  */
 function integrationIndexFields(manifest: IntegrationManifest) {
-  const server = getLocalServerRef(manifest);
+  const server = getLocalServer(manifest);
   return {
     source_kind: getIntegrationSourceKind(manifest) ?? "none",
-    server: server ? { name: server.name, version: server.version } : null,
+    server: server ? { type: server.type, entry_point: server.entry_point } : null,
   };
 }
 

@@ -562,7 +562,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
     // The agent's workspace is the per-run shared directory created by
-    // createIsolationBoundary so spawned mcp-server runner subprocesses
+    // createIsolationBoundary so spawned local-server runner subprocesses
     // (which receive WORKSPACE_DIR via the sidecar) read and write the
     // exact same filesystem surface as the agent.
     //

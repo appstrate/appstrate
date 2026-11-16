@@ -70,7 +70,7 @@ describe("validateManifest", () => {
     // Without a `type`, validateManifest fails fast with a single typed Zod
     // issue keyed on `type` rather than running the permissive base schema.
     // This makes the dispatcher's contract explicit: `type` is the AFPS
-    // discriminator and MUST be one of agent|skill|mcp-server|integration.
+    // discriminator and MUST be one of agent|skill|integration.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
     expect(result.valid).toBe(false);
@@ -131,12 +131,11 @@ describe("validateManifest", () => {
     expect(m.integrations_configuration).toBeUndefined();
   });
 
-  it("agent with dependencies (skills/mcp_servers/integrations)", () => {
+  it("agent with dependencies (skills/integrations)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           integrations: { "@test/gmail": "^1.0.0" },
-          mcp_servers: { "@test/fetch": "^1.0.0" },
           skills: { "@test/skill": "^1.0.0", "@test/other": "~2.3.0" },
         },
       }),
@@ -146,23 +145,20 @@ describe("validateManifest", () => {
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
     expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
-    expect(deps.mcp_servers).toEqual({ "@test/fetch": "^1.0.0" });
   });
 
-  // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
-  // renamed them to `mcp_servers` / `integrations`. Every reader destructures
-  // exactly `{ skills, mcp_servers, integrations }`, so the retired spelling is
-  // inert — accepting it silently ships an agent whose dependency is never
-  // resolved (#1021). Author input rejects, an already-persisted manifest is
-  // tolerated.
-  it("rejects dependencies.tools on the author path, naming the replacement key", () => {
+  // AFPS retires `dependencies.tools` and `dependencies.providers`. Every reader destructures exactly
+  // `{ skills, integrations }`, so a retired spelling is inert — accepting it silently
+  // ships an agent whose dependency is never resolved (#1021). Author input rejects,
+  // an already-persisted manifest is tolerated.
+  it("rejects dependencies.tools on the author path, naming the replacement", () => {
     const result = validateManifest(
       validAgentManifest({ dependencies: { tools: { "@appstrate/report": "^1.0.0" } } }),
     );
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toStartWith("dependencies.tools:");
-    expect(result.errors[0]).toContain("dependencies.mcp_servers");
+    expect(result.errors[0]).toContain("source.server");
   });
 
   it("rejects dependencies.providers on the author path, naming the replacement key", () => {
@@ -215,12 +211,11 @@ describe("validateManifest", () => {
 
   // The fix must not close `dependencies`: AFPS §10 mandates extensibility for
   // objects it does not explicitly close, so an unknown extension key stays legal.
-  it("accepts the three canonical dependency maps plus an unrelated extension key", () => {
+  it("accepts the canonical dependency maps plus an unrelated extension key", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           skills: { "@test/skill": "^1.0.0" },
-          mcp_servers: { "@test/fetch": "^1.0.0" },
           integrations: { "@test/gmail": "^1.0.0" },
           _meta: { "dev.appstrate/note": "still legal" },
         },
@@ -329,12 +324,11 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
   });
 
-  it("accepts skill + mcp_server dependency values as bare semver strings (§4.1)", () => {
+  it("accepts skill dependency values as bare semver strings (§4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          skills: { "@test/skill": "^1.0.0" },
-          mcp_servers: { "@test/mcp": "^2.0.0" },
+          skills: { "@test/skill": "^1.0.0", "@test/other": "^2.0.0" },
         },
       }),
     );
@@ -501,7 +495,6 @@ describe("validateManifest", () => {
       dependencies: {
         integrations: { "@test/google": "^1.0.0" },
         skills: {},
-        mcp_servers: {},
         customDepsField: "preserved",
       },
       integrations_configuration: {
@@ -527,7 +520,7 @@ describe("validateManifest", () => {
 });
 
 // ─────────────────────────────────────────────
-// validateManifest — all four AFPS package types
+// validateManifest — the three AFPS package types
 // ─────────────────────────────────────────────
 
 describe("validateManifest — package-type dispatch", () => {
@@ -553,50 +546,23 @@ describe("validateManifest — package-type dispatch", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("dispatches an mcp-server manifest via root identity (AFPS §3.4)", () => {
+  it("dispatches a local integration declaring its server inline", () => {
     const r = validateManifest({
-      manifest_version: "0.3",
       name: "@test/fetch-json",
       version: "1.0.0",
-      type: "mcp-server",
+      type: "integration",
       schema_version: "0.1",
       display_name: "Fetch JSON",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
     });
     expect(r.valid).toBe(true);
-  });
-
-  it("rejects an mcp-server manifest with no root identity", () => {
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "@test/fetch-json",
-      version: "1.0.0",
-      // missing type: "mcp-server"
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node" },
-      },
-    });
-    // No root `type` → dispatcher fails fast with the typed Unknown-package-type
-    // error (AFPS requires `type` as the discriminator).
-    expect(r.valid).toBe(false);
-  });
-
-  it("rejects an mcp-server with uv server type on manifest_version 0.3", () => {
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "@test/uv-srv",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
-    });
-    expect(r.valid).toBe(false);
   });
 });
 

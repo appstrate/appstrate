@@ -24,7 +24,6 @@ const VALID_MANIFEST = {
   dependencies: {
     integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    mcp_servers: { "@appstrate/web-search": "*" },
   },
   input: {
     schema: {

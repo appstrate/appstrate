@@ -1,0 +1,165 @@
+{
+  "name": "@appstrate/github-git",
+  "version": "1.1.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "GitHub Git",
+  "icon": "logos:github-icon",
+  "description": "Clone-edit-commit-push-PR loop on any GitHub repo the user has access to. Runs a local MCP server shipped in this integration: the sidecar mints an OAuth2 access token with `repo` scope, injects it as GITHUB_TOKEN, attaches the per-run workspace volume to the runner, and the server shells out to `git` for working-tree operations + the GitHub REST API for pull-request creation. Files land on disk under /workspace — the agent reads/edits them with the platform runtime tools (Bash/Read/Edit).",
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "local",
+    "server": {
+      "type": "node",
+      "entry_point": "server/index.ts",
+      "mcp_config": {
+        "command": "bun",
+        "args": ["server/index.ts"]
+      },
+      "tools": [
+        {
+          "name": "clone",
+          "description": "Clone a GitHub repository into the per-run shared workspace. Configures the remote with the OAuth token via `http.extraheader` so subsequent push/fetch calls authenticate without leaking the token into .git/config. Returns the absolute clone path."
+        },
+        {
+          "name": "checkout_branch",
+          "description": "Switch to a branch in a cloned repo, creating it (optionally off `base`) when `create=true`."
+        },
+        {
+          "name": "status",
+          "description": "Return `git status --short` for a cloned repo. Use before commit to verify what will land."
+        },
+        {
+          "name": "diff",
+          "description": "Return `git diff` (or `git diff --staged` when `staged=true`) for a cloned repo. Truncated at 200KB to avoid context bloat."
+        },
+        {
+          "name": "commit",
+          "description": "Stage paths (`paths` array, defaults to all changes) and create a commit with the given message. Configures user.name/user.email on the local repo from the GitHub identity (login + noreply email) when unset."
+        },
+        {
+          "name": "push",
+          "description": "Push the current branch to origin. Sets the upstream on first push. Returns the remote ref."
+        },
+        {
+          "name": "open_pr",
+          "description": "Open a pull request via the GitHub REST API. `head` is the branch with the changes (your fork or this repo's branch); `base` defaults to the repository's default branch. Returns the PR number + url."
+        }
+      ]
+    }
+  },
+  "setup_guide": {
+    "steps": [
+      {
+        "label": "Créer une OAuth App (Settings → Developer settings → OAuth Apps)",
+        "url": "https://github.com/settings/developers"
+      }
+    ]
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://github.com/login/oauth/authorize",
+      "token_endpoint": "https://github.com/login/oauth/access_token",
+      "callback_url_hint": "Champ « Authorization callback URL » de l'OAuth App — enregistrer exactement : {{callback_url}}",
+      "userinfo_endpoint": "https://api.github.com/user",
+      "default_scopes": ["repo", "read:user"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
+        "account_id": "$.login",
+        "sub": "$.id",
+        "login": "$.login",
+        "name": "$.name",
+        "email": "$.email",
+        "avatar_url": "$.avatar_url"
+      },
+      "scope_catalog": [
+        {
+          "value": "public_repo",
+          "label": "Public repos",
+          "description": "Read/write public repositories (clone, push branches, open PRs)."
+        },
+        {
+          "value": "repo",
+          "label": "All repos",
+          "description": "Read/write public + private repositories.",
+          "implies": ["public_repo"]
+        },
+        {
+          "value": "read:user",
+          "label": "Read profile",
+          "description": "Read the authenticated user's profile (used for the commit identity)."
+        }
+      ],
+      "authorized_uris": [
+        "https://api.github.com/**",
+        "https://github.com/**",
+        "https://codeload.github.com/**"
+      ],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic ",
+          "value": "x-access-token:{$credential.access_token}",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        }
+      }
+    }
+  },
+  "default_tools": ["clone", "checkout_branch", "status", "diff", "commit", "push", "open_pr"],
+  "tools_policy": {
+    "clone": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "checkout_branch": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "status": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "diff": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "commit": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "push": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "open_pr": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    },
+    "dev.appstrate/workspace": {
+      "mount": "/workspace",
+      "access": "rw"
+    }
+  }
+}

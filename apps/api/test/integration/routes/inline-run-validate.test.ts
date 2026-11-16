@@ -23,7 +23,7 @@ import {
   localIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 
 const app = getTestApp();
 
@@ -303,7 +303,6 @@ describe("POST /api/runs/inline/validate", () => {
     function integrationManifest() {
       return localIntegrationManifest({
         name: INTEGRATION,
-        serverName: `${INTEGRATION}-server`,
         version: "1.0.0",
         auths: {
           primary: {
@@ -514,7 +513,6 @@ describe("POST /api/runs/inline/validate", () => {
       function svcManifest(tools: string[]): Record<string, unknown> {
         return localIntegrationManifest({
           name: PINNED,
-          serverName: `${PINNED}-server`,
           version: "1.0.0",
           auths: {
             primary: {
@@ -630,7 +628,6 @@ describe("an inline run selecting no tool of @appstrate/platform", () => {
     expect(await res.json()).toEqual({ valid: true, warnings: [] });
 
     const spawns = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: manifest,

@@ -42,7 +42,7 @@ interface BaseSidecarEnvParams {
   /**
    * Handed to the sidecar as WORKSPACE_HANDLE_JSON so its integration
    * runtime adapter can mount/wire the same shared surface into runner
-   * workloads that opt in via mcp-server `_meta["dev.appstrate/workspace"]`.
+   * workloads that opt in via the integration `_meta["dev.appstrate/workspace"]`.
    */
   workspace: WorkspaceHandle;
   /**

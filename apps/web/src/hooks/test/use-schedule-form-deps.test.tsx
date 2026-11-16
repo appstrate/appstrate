@@ -41,7 +41,7 @@ const DETAIL_KEY = packageKeys.detail("agents", null, null, PACKAGE_ID);
 const AGENT_DETAIL = {
   id: PACKAGE_ID,
   version: "1.0.0",
-  dependencies: { skills: [], mcp_servers: [], integrations: [] },
+  dependencies: { skills: [], integrations: [] },
   input: {
     schema: {
       type: "object",

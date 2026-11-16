@@ -248,7 +248,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 export const SIDECAR_OPERATOR_ENV_KEYS = [
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
-  // Runner image refs per MCPB `server.type`, consumed sidecar-side. Absent keys
+  // Runner image refs per `source.server.type`, consumed sidecar-side. Absent keys
   // fall back to bare `:latest` (local dev); production sets versioned GHCR refs.
   "RUNNER_IMAGE_NODE",
   "RUNNER_IMAGE_BUN",

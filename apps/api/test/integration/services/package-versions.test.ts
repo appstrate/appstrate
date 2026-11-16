@@ -8,7 +8,7 @@ import type { DepEntry } from "@appstrate/core/dependencies";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import {
   createPackageVersion,
@@ -458,24 +458,27 @@ describe("package-versions service", () => {
     });
 
     // Regression: the non-agent branch hand-rolled its storage folder with a
-    // `type === "integration" ? "integrations" : "skills"` ternary, so an
-    // `mcp-server` package read its files from `skills/` — the folder the
+    // ternary, so a package read its files from the wrong folder — one the
     // upload path (`storageFolderForType`) never writes for that type. The
     // decoy object below is written to the WRONG folder under the same item id
     // so the assertion pins WHICH folder was read, not merely that some bytes
     // were found.
-    it("reads an mcp-server package's files from the mcp-servers folder, not skills", async () => {
-      const id = `@${orgSlug}/mcpb-pkg`;
+    it("publishes a local integration's server payload from the integrations folder, not skills", async () => {
+      const id = `@${orgSlug}/local-server-pkg`;
       const pkg = await seedPackage({
         orgId,
         id,
-        type: "mcp-server",
-        draftManifest: mcpServerManifest({ name: id, entryPoint: "server.js" }),
+        type: "integration",
+        draftManifest: localIntegrationManifest({
+          name: id,
+          server: { entryPoint: "server.js" },
+          auths: { api: { type: "api_key" } },
+        }) as unknown as Record<string, unknown>,
         draftContent: "",
       });
 
-      await uploadPackageFiles("mcp-servers", orgId, id, {
-        "server.js": new TextEncoder().encode("// real MCPB payload"),
+      await uploadPackageFiles("integrations", orgId, id, {
+        "server.js": new TextEncoder().encode("// real server payload"),
       });
       await uploadPackageFiles("skills", orgId, id, {
         "SKILL.md": new TextEncoder().encode("# decoy — must never be published"),
@@ -495,7 +498,7 @@ describe("package-versions service", () => {
       const entries = unzipPackageArchive(zip!);
       expect(Object.keys(entries)).toContain("server.js");
       expect(Object.keys(entries)).not.toContain("SKILL.md");
-      expect(new TextDecoder().decode(entries["server.js"])).toBe("// real MCPB payload");
+      expect(new TextDecoder().decode(entries["server.js"])).toBe("// real server payload");
     });
   });
 

@@ -626,16 +626,11 @@ describe("the persona of a turn that can look but not act", () => {
 });
 
 describe("the persona and package authoring", () => {
-  const CREATES = "To create a package — an agent, a skill, an integration or a local MCP server";
+  const CREATES = "To create a package — an agent, a skill or an integration";
   const FORBIDS = "Do not create, import or modify any package";
 
   it("teaches creating every package type on a write on any one of them", () => {
-    for (const write of [
-      "agents:write",
-      "skills:write",
-      "integrations:write",
-      "mcp-servers:write",
-    ]) {
+    for (const write of ["agents:write", "skills:write", "integrations:write"]) {
       const prompt = promptFor([...MCP, write]);
       expect(prompt).toContain(CREATES);
       expect(prompt).toContain("`import_package_file`");

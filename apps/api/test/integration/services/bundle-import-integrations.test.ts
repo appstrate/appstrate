@@ -63,7 +63,7 @@ function buildIntegrationAfps(opts: {
 }
 
 function validManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  // AFPS serverless `api`-source integration (no separate mcp-server to
+  // AFPS serverless `api`-source integration (no server payload to
   // bundle), so a bundle-of-one imports cleanly.
   return {
     ...(apiIntegrationManifest({

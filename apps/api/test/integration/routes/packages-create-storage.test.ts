@@ -12,7 +12,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
-import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { downloadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
 import { downloadVersionZip } from "../../../src/services/package-storage.ts";
@@ -25,7 +25,7 @@ import {
 const app = getTestApp();
 const encoder = new TextEncoder();
 const content = "---\nname: skill\ndescription: Creation storage regression\n---\n\nInstructions";
-const types = ["agent", "skill", "integration", "mcp-server"] as const;
+const types = ["agent", "skill", "integration"] as const;
 type PackageType = (typeof types)[number];
 
 describe("package creation storage consistency", () => {
@@ -98,18 +98,16 @@ describe("package creation storage consistency", () => {
 
   function manifest(type: PackageType) {
     const name = `@create-storage/${type}`;
-    return type === "mcp-server"
-      ? mcpServerManifest({ name })
-      : type === "integration"
-        ? apiIntegrationManifest({ name, auths: { primary: { type: "api_key" } } })
-        : {
-            name,
-            type,
-            schema_version: "0.2",
-            version: "1.0.0",
-            display_name: "Storage test",
-            description: "Creation storage regression",
-          };
+    return type === "integration"
+      ? apiIntegrationManifest({ name, auths: { primary: { type: "api_key" } } })
+      : {
+          name,
+          type,
+          schema_version: "0.2",
+          version: "1.0.0",
+          display_name: "Storage test",
+          description: "Creation storage regression",
+        };
   }
 
   function archive(type: PackageType, notes = "initial") {
@@ -117,7 +115,6 @@ describe("package creation storage consistency", () => {
       {
         "manifest.json": encoder.encode(JSON.stringify(manifest(type))),
         ...(type === "skill" ? { "SKILL.md": encoder.encode(content) } : {}),
-        ...(type === "mcp-server" ? { "main.js": encoder.encode("export {};") } : {}),
         "notes.txt": encoder.encode(notes),
       },
       6,
@@ -125,19 +122,14 @@ describe("package creation storage consistency", () => {
   }
 
   function create(type: PackageType) {
-    let body: string | FormData;
-    if (type === "mcp-server") {
-      body = new FormData();
-      body.set("file", new File([archive(type)], "mcp-server.afps"));
-    } else
-      body = JSON.stringify({
-        manifest: manifest(type),
-        content: type === "skill" ? content : type === "agent" ? "Instructions" : "",
-        operations: [
-          { op: "write", path: "notes.txt", text: "initial" },
-          { op: "write", path: "binary.bin", bytes_base64: "AP+A" },
-        ],
-      });
+    const body = JSON.stringify({
+      manifest: manifest(type),
+      content: type === "skill" ? content : type === "agent" ? "Instructions" : "",
+      operations: [
+        { op: "write", path: "notes.txt", text: "initial" },
+        { op: "write", path: "binary.bin", bytes_base64: "AP+A" },
+      ],
+    });
     return app.request(`/api/packages/${CONFIG_BY_TYPE[type].storageFolder}`, {
       method: "POST",
       headers: authHeaders(ctx),
@@ -181,8 +173,7 @@ describe("package creation storage consistency", () => {
       expect(retry.status, await retry.clone().text()).toBe(201);
       const draft = await files(type);
       expect(new TextDecoder().decode(draft?.["notes.txt"])).toBe("initial");
-      if (type !== "mcp-server")
-        expect(draft?.["binary.bin"]).toEqual(new Uint8Array([0, 255, 128]));
+      expect(draft?.["binary.bin"]).toEqual(new Uint8Array([0, 255, 128]));
       const published = unzipPackageArchive(
         (await downloadVersionZip(`@create-storage/${type}`, "1.0.0"))!,
       );

@@ -573,9 +573,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
     no model uses is deleted. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
-- **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
+- **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
+- **An integration's source** (API · MCP distant · MCP local) is worded in one place,
+  `IntegrationSourceLabel` (`components/integration-source-label.tsx`): the table column, the
+  card line, the catalogue sheet and the detail all draw it, and a local one says « indisponible ici »
+  (a focusable hint with its explanation) when this instance cannot run local servers.
 - **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
   the « … » menu holds EVERY action of the row, and nothing else sits at the
   row's end. No pencil, download, reconnect or gear icon beside it, in any
@@ -719,11 +723,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   only what it needs to exist, opened from every entry point
   with the context preselected, then the object's page takes the rest
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
-  (agent, skill, integration, MCP server): the creation hand-off modal
+  (agent, skill, integration): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
   url (when offered) / manual / chat / import), then, for the manual way, `components/create-package-modal.tsx`
   (name, identifier, description, plus an agent's prompt or an integration's server URL), after
-  which the new package's page takes the rest, its files included. An MCP server is imported. An integration is also added
+  which the new package's page takes the rest, its files included. A local integration (one that ships its own MCP server) is written in the editor or imported (`.afps`). An integration is also added
   from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
   `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
   in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the

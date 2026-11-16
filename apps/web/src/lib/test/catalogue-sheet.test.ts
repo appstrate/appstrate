@@ -152,7 +152,7 @@ describe("sheetChatEnforce", () => {
   });
 
   it("draws no switch for any other type", () => {
-    for (const type of ["agent", "integration", "mcp-server"] as const) {
+    for (const type of ["agent", "integration"] as const) {
       expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
     }
   });

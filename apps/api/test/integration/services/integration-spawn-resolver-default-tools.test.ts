@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -97,7 +97,6 @@ async function seedAndResolve(
   await seedConnection(ctx);
   return (
     await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(opts.integrationsConfiguration),

@@ -163,8 +163,8 @@ export interface SidecarLaunchSpec {
  * Bundle bytes are NOT inlined — they would blow past the Linux env
  * size limit (~1 MB) on real-world servers (the Gmail MCP server
  * + its npm deps is ~5 MB). For local-source integrations the sidecar
- * fetches the referenced mcp-server package's bundle at boot from
- * `GET /internal/mcp-server-bundle/:scope/:name` using the same
+ * fetches the integration's own archive (it carries the server payload) at boot from
+ * `GET /internal/integration-bundle/:scope/:name` using the same
  * Bearer run-token as the credentials surface.
  */
 /**
@@ -246,13 +246,13 @@ export interface IntegrationSpawnSpec {
    * `integrations-boot.ts`.
    *
    * Lives at the spawn-spec top level (not on `manifest.server.type`) to
-   * keep `manifest.server.type` aligned with the AFPS `mcpServerTypeEnum`
-   * (`node|python|binary|uv`) — the previous `manifest.server.type = "http"`
-   * sentinel collided with that enum and was an Appstrate-internal protocol
-   * field that never appears in a real manifest.
+   * keep `manifest.server.type` aligned with the AFPS `source.server.type`
+   * enum (`node|python|binary|uv`) — an `"http"` sentinel there would collide
+   * with that enum and be an Appstrate-internal protocol field that never
+   * appears in a real manifest.
    *
-   *   - `"local"`  → spawn a runner container/subprocess from a referenced
-   *                  mcp-server bundle.
+   *   - `"local"`  → spawn a runner container/subprocess from the
+   *                  integration's own archive (server payload).
    *   - `"remote"` → open a Streamable HTTP MCP client against
    *                  `manifest.server.url`; no bundle, no MITM.
    *   - `"none"`   → no MCP backing; the sidecar skips spawn. The only tools
@@ -274,46 +274,33 @@ export interface IntegrationSpawnSpec {
      * no `server`), which expose only their `api_call` tool(s) (if any). The
      * sidecar skips spawn entirely for such specs.
      *
-     * NOTE: `server.type` here carries the AFPS `mcpServerTypeEnum` value
+     * NOTE: `server.type` here carries the AFPS `source.server.type` value
      * (`node|python|binary|uv`) for local sources only. For remote sources
      * (`sourceKind === "remote"`) it is omitted — the spawn-mode dispatch
      * uses {@link IntegrationSpawnSpec.sourceKind}, NOT `server.type`.
      */
     server?: {
       /**
-       * Runner type, sourced from the referenced mcp-server's
-       * `server.type` (AFPS `mcpServerTypeEnum`: `node|python|binary|uv`)
-       * or the Appstrate `_meta` runtime override. Omitted for remote
+       * Runner type, sourced from the integration's `source.server.type`
+       * (`node|python|binary|uv`) or the Appstrate `_meta` runtime override. Omitted for remote
        * sources.
        */
       type?: string;
       /**
        * Path (relative to bundle root) of the spawned server's entry. AFPS
-       * §7.4 / MCPB calls this field `entry_point` — snake_case on the
-       * wire and on the spawn spec to avoid a per-type translation hop
-       * (the prior `entryPoint` camelCase was a churn-only divergence
-       * from the manifest the spawn-resolver reads).
+       * §7.1 calls this field `entry_point` — snake_case on the wire and on
+       * the spawn spec, as in the manifest the spawn-resolver reads.
        */
       entry_point?: string;
       /**
-       * AFPS — the SEPARATE `mcp-server` package id this integration's
-       * `source.kind: "local"` references (`source.server.name`). The sidecar
-       * fetches THIS package's `.afps` bundle (the runnable server code) from
-       * `GET /internal/mcp-server-bundle/:scope/:name`, NOT the integration's
-       * own bundle. Set for local sources; omitted for remote and serverless
-       * integrations.
-       */
-      packageId?: string;
-      /**
-       * AFPS — the CONCRETE published version of {@link packageId} that
-       * this run resolved at kickoff (from `source.server.version`, via
-       * exact → dist-tag → semver-range resolution). The sidecar forwards it
-       * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
+       * The CONCRETE integration version this run froze at kickoff. The
+       * sidecar forwards it to
+       * `GET /internal/integration-bundle/:scope/:name?version=…` so the
        * runnable BYTES come from the SAME version as the manifest the
-       * spawn-resolver read — eliminating the manifest/bytes version skew and
-       * the "publish ≠ deploy" footgun. Omitted for system
-       * mcp-servers — the byte route serves those from the in-memory boot
-       * registry by id alone — and for remote/serverless integrations.
+       * spawn-resolver read — no manifest/bytes version skew. Omitted for
+       * system integrations — the byte route serves those from the in-memory
+       * boot registry by id alone — for a run or connect on an unpublished draft (no frozen
+       * version exists; the bytes come from the draft) — and for remote/serverless integrations.
        */
       version?: string;
       /**
@@ -486,9 +473,9 @@ export interface IntegrationSpawnSpec {
     reauthOn?: number[];
   };
   /**
-   * Per-run shared workspace mount declared on the referenced
-   * mcp-server's `_meta["dev.appstrate/workspace"]`. Opt-in: omitted
-   * when the mcp-server didn't declare it (the runner has no access
+   * Per-run shared workspace mount declared on the local integration's
+   * `_meta["dev.appstrate/workspace"]`. Opt-in: omitted
+   * when the integration didn't declare it (the runner has no access
    * to the agent's filesystem — the historical default and current
    * behaviour for every system integration).
    *

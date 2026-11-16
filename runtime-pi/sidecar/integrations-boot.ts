@@ -117,7 +117,7 @@ import type { WorkspaceHandle } from "@appstrate/core/platform-types";
  * Decode the workspace handle from the launching orchestrator's
  * `WORKSPACE_HANDLE_JSON` env var. Returns `null` when the var is
  * absent or malformed — the sidecar then degrades to no-workspace
- * (any opt-in mcp-server runs without workspace access, logged as a
+ * (any opt-in local server runs without workspace access, logged as a
  * warning at spawn time). Strict shape validation: a foreign-shaped
  * JSON triggers a one-time warn but doesn't abort boot.
  */
@@ -169,7 +169,7 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
 
 /**
  * Where the sidecar fetches integration bundles from. The platform
- * surface is `GET /internal/mcp-server-bundle/:scope/:name` with
+ * surface is `GET /internal/integration-bundle/:scope/:name` with
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
 interface BundleFetchOptions {
@@ -247,25 +247,24 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
 }
 
 /**
- * Fetch a referenced mcp-server package's bundle from the platform's internal
- * surface. AFPS: a local-source integration references a SEPARATE
- * mcp-server package (`source.server.name`); its bundle carries the runnable
- * server code. The endpoint authorises with the same Bearer run-token as the
- * credentials surface and verifies that the run's agent declares an installed
- * integration referencing this mcp-server.
+ * Fetch a local integration's own archive from the platform's internal
+ * surface. The archive carries the runnable server payload next to the
+ * manifest; `server.entry_point` is relative to its root. The endpoint
+ * authorises with the same Bearer run-token as the credentials surface and
+ * verifies that the run's agent declares this integration.
  */
 async function fetchBundleBytes(
-  mcpServerId: string,
-  serverVersion: string | undefined,
+  integrationId: string,
+  integrationVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
   // The platform pins a concrete version at run kickoff; forward it so
   // the bytes match the manifest the spawn-resolver read. Only a system
-  // mcp-server has none (boot registry, single version, served by id alone) —
+  // integration has none (boot registry, single version, served by id alone) —
   // for anything else the route rejects an absent `?version=`.
-  const url = serverVersion
-    ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
-    : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
+  const url = integrationVersion
+    ? `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}?version=${encodeURIComponent(integrationVersion)}`
+    : `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}`;
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { Authorization: `Bearer ${opts.runToken}` } });
   if (!res.ok) {
@@ -277,7 +276,7 @@ async function fetchBundleBytes(
       // ignore
     }
     throw new Error(
-      detail || `Failed to fetch mcp-server bundle for ${mcpServerId}: HTTP ${res.status}`,
+      detail || `Failed to fetch integration bundle for ${integrationId}: HTTP ${res.status}`,
     );
   }
   const ab = await res.arrayBuffer();
@@ -299,7 +298,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-`));
   // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
-  // sidecar (decompression-bomb floor). Caps chosen for a realistic mcp-server
+  // sidecar (decompression-bomb floor). Caps chosen for a realistic local server
   // bundle (multi-MB code + deps) with generous headroom: 200 MiB total across
   // at most 10k entries. `unzipBounded` throws `DecompressionLimitError` on a
   // budget breach; it excludes directory entries but does NOT sanitize paths —
@@ -983,7 +982,7 @@ async function startLocalIntegration(params: {
    * `WORKSPACE_HANDLE_JSON` env var (set by the platform orchestrator).
    * Passed verbatim to `adapter.spawn`; the adapter wires it into the
    * runner only when the spec's `workspaceMount` is also set (opt-in
-   * by the referenced mcp-server's `_meta["dev.appstrate/workspace"]`).
+   * by the integration's `_meta["dev.appstrate/workspace"]`).
    */
   workspaceHandle: WorkspaceHandle | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
@@ -1098,21 +1097,10 @@ async function startLocalIntegration(params: {
     });
   }
 
-  // AFPS — fetch the referenced mcp-server package's bundle (the runnable
-  // server code), NOT the integration's own bundle. `server.packageId` is
-  // required for a local source (optional in TypeScript only because the
-  // `server` bag is the collapsed union of the local / remote / serverless
-  // shapes), so an absent one means the spec did not come from a conforming
-  // manifest — a hard-fail at boot, never a fetch of some other package's
-  // bytes into a code-execution position.
-  const serverPackageId = spec.manifest.server?.packageId;
-  if (!serverPackageId) {
-    throw new Error(
-      `integration ${spec.integrationId} declares sourceKind="local" but no server.packageId`,
-    );
-  }
+  // Fetch the integration's own archive (it carries the server payload), keyed by the
+  // integration id itself: never some other package's bytes in a code-execution position.
   const bytes = await fetchBundleBytes(
-    serverPackageId,
+    spec.integrationId,
     spec.manifest.server?.version,
     bundleFetchOpts,
   );
@@ -1146,7 +1134,7 @@ async function startLocalIntegration(params: {
     { name: "appstrate-sidecar-integration-host", version: "0.1.0" },
     // Advertise MCP Roots capability when the spec declares a workspace
     // mount and the launching orchestrator carried a handle. The server
-    // (mcp-server runner) can then call roots/list to discover the
+    // (local server runner) can then call roots/list to discover the
     // shared workspace root and bound its filesystem operations to it.
     // SOTA-consistent: cyanheads/git-mcp-server, modelcontextprotocol/
     // servers/filesystem all rely on the Roots protocol for boundary
@@ -1577,7 +1565,7 @@ export async function bootIntegrations(
   onAdapterPrepared?.(adapter);
   // Decode the workspace handle once for the whole run — same handle is
   // shared by every opt-in integration runner. The agent already has
-  // the underlying workspace mounted; this surfaces it to mcp-server
+  // the underlying workspace mounted; this surfaces it to the local server
   // runners that declared `_meta["dev.appstrate/workspace"]`.
   const workspaceHandle = decodeWorkspaceHandle();
   if (workspaceHandle) {
@@ -2255,7 +2243,7 @@ export async function runConnectOnce(
       // non-goal. Strip any `workspaceMount` the resolver attached so the
       // runtime adapter sees no opt-in: passing the mount + a null handle
       // would otherwise trip the adapter's "declared mount but no handle"
-      // ERROR on every connect run for a workspace-opted-in mcp-server.
+      // ERROR on every connect run for a workspace-opted-in local server.
       spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
       runId,
       adapter,

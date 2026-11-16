@@ -56,6 +56,14 @@ import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
+import {
+  getMcpServerWorkspaceMount,
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  MCP_SERVER_WORKSPACE_META_KEY,
+  isMcpServerRuntime,
+} from "./mcp-server.ts";
 
 /** RFC 3986 `scheme://` prefix of an authority-form templated authorized_uris entry. */
 const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
@@ -409,6 +417,43 @@ export function findCleartextInjectedCredentials(
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
+
+  // (0) A `local` integration's Appstrate `_meta` hints: the workspace mount and the runtime
+  // override must be well-formed and compatible with `source.server.type`.
+  const localServer = getLocalServer(manifest);
+  if (localServer !== null) {
+    try {
+      getMcpServerWorkspaceMount(manifest);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["_meta", MCP_SERVER_WORKSPACE_META_KEY],
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+    const hint = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
+    if (hint?.runtime !== undefined) {
+      if (!isMcpServerRuntime(hint.runtime)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+          message:
+            `Unsupported MCP server runtime ${JSON.stringify(hint.runtime)}. ` +
+            `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
+        });
+      } else {
+        const compatibleType = MCP_SERVER_RUNTIME_CAPABILITIES[hint.runtime].manifestServerType;
+        if (localServer.type !== compatibleType) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+            message: `Runtime '${hint.runtime}' requires source.server.type '${compatibleType}'.`,
+          });
+        }
+      }
+    }
+  }
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -808,6 +853,61 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
  */
 export type IntegrationManifest = AfpsIntegrationManifest;
 
+/** The inline run declaration of a `local` source (`source.server`, AFPS §7.1). */
+export type LocalServer = Extract<
+  NonNullable<AfpsIntegrationManifest["source"]>,
+  { kind: "local" }
+>["server"];
+
+/**
+ * The `source.server` of a `local` integration; `null` for any other source or when the
+ * declaration is missing / malformed (a draft being edited): no `type`, `entry_point`, or
+ * `mcp_config` object with a string `command`.
+ */
+export function getLocalServer(manifest: unknown): LocalServer | null {
+  const source = (manifest as { source?: { kind?: unknown; server?: unknown } } | null)?.source;
+  if (source?.kind !== "local") return null;
+  const server = source.server as
+    { type?: unknown; entry_point?: unknown; mcp_config?: unknown } | null | undefined;
+  if (!server || typeof server !== "object" || Array.isArray(server)) return null;
+  if (typeof server.type !== "string" || typeof server.entry_point !== "string") return null;
+  const config = server.mcp_config as { command?: unknown } | null | undefined;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  if (typeof config.command !== "string") return null;
+  return server as LocalServer;
+}
+
+/**
+ * The literal `source.server.mcp_config.env` entries of a `local` integration (AFPS §7.1: literal
+ * values only — credentials reach the server through the auth's `delivery.env` / `delivery.files`,
+ * which win over these at spawn). Non-string values are skipped; `{}` when the source is not
+ * local, the declaration is malformed, or no env is declared.
+ */
+export function getLocalServerEnv(manifest: unknown): Record<string, string> {
+  const env: unknown = getLocalServer(manifest)?.mcp_config.env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The advisory tool catalog of a `local` integration (`source.server.tools`, AFPS §7.1);
+ * `undefined` when the source is not local or the declaration carries no `tools`.
+ */
+export function getLocalServerTools(
+  manifest: unknown,
+): ReadonlyArray<{ name: string; description?: string }> | undefined {
+  const tools = (getLocalServer(manifest) as { tools?: unknown } | null)?.tools;
+  if (!Array.isArray(tools)) return undefined;
+  return tools.filter(
+    (t): t is { name: string; description?: string } =>
+      !!t && typeof t === "object" && typeof (t as { name?: unknown }).name === "string",
+  );
+}
+
 export function getIntegrationSourceKind(
   manifest: IntegrationManifest,
 ): "local" | "remote" | "none" | undefined {
@@ -961,7 +1061,7 @@ export function apiUploadToolNameFor(apiCallToolName: string): string {
  * Names of MCP tools the integration declares POLICY for in its top-level
  * `tools_policy` record. Empty when the integration didn't opt into per-tool
  * metadata. For a `local` source this is NOT the catalog of exposed tools —
- * that is the mcp-server's, and `tools_policy` a sparse policy table over it.
+ * that is `source.server.tools`, and `tools_policy` a sparse policy table over it.
  * For any other source these names are the base of the catalog
  * {@link resolveIntegrationToolCatalog} resolves.
  */
@@ -1091,12 +1191,12 @@ export interface IntegrationToolCatalogEntry {
 export interface ResolveIntegrationToolCatalogInput {
   integration: IntegrationManifest;
   /**
-   * Verbatim MCPB `tools[]` from the referenced mcp-server (local source
-   * only). Pass `undefined` for remote/api sources or when the mcp-server
-   * manifest is unavailable — the resolver then falls back to
-   * `integration.tools_policy` keys.
+   * The tools the running server listed (`tools/list`), when the caller holds them and the
+   * manifest lets them stand for the catalog (a remote source with `allow_undeclared_tools`).
+   * Omitted, the catalog is the manifest's: `source.server.tools` for a local source, else the
+   * `tools_policy` keys.
    */
-  mcpServerTools?: ReadonlyArray<{ name: string; description?: string }>;
+  listedTools?: ReadonlyArray<{ name: string; description?: string }>;
 }
 
 /**
@@ -1112,7 +1212,7 @@ export function allowsUndeclaredTools(manifest: object): boolean {
  * `tools/list` exposes at runtime. Resolution:
  *
  *   1. Base catalog (the integration's own surface)
- *      - local + mcpServerTools provided → MCPB-canonical entries
+ *      - local + `source.server.tools` declared → those entries
  *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
  *   1b. Append api_call tool(s) from `_meta["dev.appstrate/api"]` (additive —
  *       orthogonal to source kind; a `none` source contributes only these),
@@ -1127,12 +1227,13 @@ export function allowsUndeclaredTools(manifest: object): boolean {
 export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
 ): IntegrationToolCatalogEntry[] {
-  const { integration, mcpServerTools } = input;
+  const { integration, listedTools } = input;
 
   // Step 1 — the integration's own MCP catalog
+  const serverTools = listedTools ?? getLocalServerTools(integration);
   let base: IntegrationToolCatalogEntry[];
-  if (mcpServerTools !== undefined) {
-    base = mcpServerTools.map((t) => ({ name: t.name, description: t.description }));
+  if (serverTools !== undefined) {
+    base = serverTools.map((t) => ({ name: t.name, description: t.description }));
   } else {
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }
@@ -1312,27 +1413,24 @@ function carriesOnlyAppstrateMeta(node: unknown): boolean {
  * The `default_tools` names the manifest proves unexposed, each once: one {@link hiddenToolNames}
  * withholds, whatever the source, and one outside {@link resolveIntegrationToolCatalog} where that
  * catalog is known — a `none` source carrying no `_meta` extension but Appstrate's (another
- * vendor's may supply tools), a `local` source given its mcp-server's `tools[]`, and a `remote`
+ * vendor's may supply tools), a `local` source declaring `source.server.tools`, and a `remote`
  * source declaring a `tools_policy`, which bounds the default as it bounds an agent's selection.
  */
-function unexposedDefaultTools(
-  manifest: IntegrationManifest,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
-): { path: IssuePath; message: string }[] {
+function unexposedDefaultTools(manifest: IntegrationManifest): {
+  path: IssuePath;
+  message: string;
+}[] {
   const defaults = readDefaultTools(manifest);
   if (defaults === undefined || isToolsWildcard(defaults)) return [];
   const kind = manifest.source?.kind;
-  const serverTools = kind === "local" ? mcpServerTools : undefined;
   const catalogIsKnown =
     kind === "none"
       ? carriesOnlyAppstrateMeta(manifest)
       : kind === "remote"
         ? getDeclaredToolNames(manifest).length > 0
-        : serverTools !== undefined;
+        : getLocalServerTools(manifest) !== undefined;
   const catalog = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools: serverTools }).map(
-      (e) => e.name,
-    ),
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
   const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
   return [...new Set(defaults)]
@@ -1344,12 +1442,12 @@ function unexposedDefaultTools(
 }
 
 /** WRITE-path form of {@link unexposedDefaultTools}; none for a structurally invalid manifest. */
-export function findUnexposedDefaultTools(
-  manifest: unknown,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
-): { path: IssuePath; message: string }[] {
+export function findUnexposedDefaultTools(manifest: unknown): {
+  path: IssuePath;
+  message: string;
+}[] {
   return afpsIntegrationManifestSchema.safeParse(manifest).success
-    ? unexposedDefaultTools(manifest as IntegrationManifest, mcpServerTools)
+    ? unexposedDefaultTools(manifest as IntegrationManifest)
     : [];
 }
 
@@ -1649,11 +1747,8 @@ export interface AgentIntegrationScopeError {
  * errors — empty means install-valid.
  *
  * Tool validation uses {@link resolveIntegrationToolCatalog} so it sees the
- * MCPB-canonical mcp-server tools (when `mcpServerTools` is passed) rather
- * than the sparse `integration.tools` policy table. Pass `mcpServerTools`
- * for local-source integrations; omit it for remote/api sources or when
- * the mcp-server manifest is unavailable (the resolver falls back to
- * `integration.tools` keys).
+ * `source.server.tools` of a local integration (when declared) rather than
+ * the sparse `tools_policy` table (the resolver falls back to its keys).
  *
  * Default semantics:
  *   - Empty resolved catalog → no tool validation (caller is responsible
@@ -1664,7 +1759,6 @@ export interface AgentIntegrationScopeError {
 export function validateAgentIntegrationScopes(
   selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
@@ -1684,7 +1778,6 @@ export function validateAgentIntegrationScopes(
   } else if (selection.tools && selection.tools.length > 0) {
     const catalog = resolveIntegrationToolCatalog({
       integration: integrationManifest,
-      mcpServerTools,
     });
     if (catalog.length > 0) {
       const allowed = new Set(catalog.map((e) => e.name));

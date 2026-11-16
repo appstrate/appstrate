@@ -40,7 +40,7 @@ An agent is the core unit of work. It is defined by a **prompt** that describes 
 An agent package declares:
 
 - An **input schema** (JSON Schema) for the parameters a person or a schedule supplies at launch, and an optional **output schema** the result must satisfy. A space can store default input values and lock some of them.
-- **Dependencies**: the [skills](/features/skills), MCP servers and integrations it uses, among them `@appstrate/platform` for the [platform tools](/features/tools#platform-tools) (`log`, `note`, `pin`, …).
+- **Dependencies**: the [skills](/features/skills) and integrations it uses, among them `@appstrate/platform` for the [platform tools](/features/tools#platform-tools) (`log`, `note`, `pin`, …).
 
 An agent also gets persistence across runs:
 
@@ -90,14 +90,13 @@ Deep-dive: [Features / Runs](/features/runs) and [Features / Sandbox and Sidecar
 
 ## Packages
 
-Everything you author or install is a **package** in the open AFPS format (**A**gent **F**ormat **P**ackaging **S**tandard): a ZIP archive with a `manifest.json` at its root. There are four types:
+Everything you author or install is a **package** in the open AFPS format (**A**gent **F**ormat **P**ackaging **S**tandard): a ZIP archive with a `manifest.json` at its root. There are three types:
 
-| Type          | What it contains                                                                          |
-| ------------- | ----------------------------------------------------------------------------------------- |
-| `agent`       | A prompt, input and output schemas, and its declared skills, MCP servers and integrations |
-| `skill`       | A `SKILL.md` file (YAML frontmatter plus Markdown) and optional scripts or references     |
-| `mcp-server`  | A packaged MCP server (an MCP Bundle) that runs as a subprocess                           |
-| `integration` | An external-service definition: source, authentication methods, credential delivery       |
+| Type          | What it contains                                                                      |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `agent`       | A prompt, input and output schemas, and its declared skills and integrations          |
+| `skill`       | A `SKILL.md` file (YAML frontmatter plus Markdown) and optional scripts or references |
+| `integration` | An external-service definition: source, authentication methods, credential delivery   |
 
 Each package has an editable **draft** and immutable, **semver** versions you publish from it. Versions carry a SHA-256 integrity hash, and the `latest` tag points at the newest. The platform ships some packages itself (system packages), and you import the rest from a `.afps` or `.afps-bundle` file or from a GitHub URL. You can also edit a package in a local folder with the CLI ([`appstrate packages`](/using-appstrate/cli)).
 

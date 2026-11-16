@@ -127,7 +127,14 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
     name: INTEGRATION_ID,
     version: "1.0.0",
     display_name: "Gmail",
-    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       primary: {
         type: "oauth2",
@@ -360,7 +367,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       .set({
         draftManifest: localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
         }) as unknown as Record<string, unknown>,
       })
@@ -409,7 +415,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: (t) =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: {
             primary: {
               type: "oauth2",
@@ -427,7 +432,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: (t) =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: {
             primary: {
               type: "oauth2",
@@ -444,7 +448,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: (t) =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: {
             primary: {
               type: "oauth2",
@@ -462,7 +465,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: (t) =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: {
             primary: {
               type: "oauth2",
@@ -481,7 +483,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: () =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
         }),
       expect: "flagged",
@@ -491,7 +492,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       make: () =>
         localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: { primary: { type: "basic", credentialFields: ["username", "password"] } },
         }),
       expect: "flagged",
@@ -552,7 +552,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       .set({
         draftManifest: localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: {
             primary: {
               type: "api_key",
@@ -597,7 +596,6 @@ describe("resolveLiveIntegrationCredentials", () => {
         draftManifest: {
           ...(localIntegrationManifest({
             name: INTEGRATION_ID,
-            serverName: "@official/gmail-server",
             auths: {
               primary: {
                 type: "api_key",
@@ -652,7 +650,6 @@ describe("resolveLiveIntegrationCredentials", () => {
       .set({
         draftManifest: localIntegrationManifest({
           name: INTEGRATION_ID,
-          serverName: "@official/gmail-server",
           auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
         }) as unknown as Record<string, unknown>,
       })
@@ -693,7 +690,6 @@ describe("resolveLiveIntegrationCredentials", () => {
         .set({
           draftManifest: localIntegrationManifest({
             name: INTEGRATION_ID,
-            serverName: "@official/gmail-server",
             auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
           }) as unknown as Record<string, unknown>,
         })
@@ -930,7 +926,6 @@ describe("resolveLiveIntegrationCredentials", () => {
         .set({
           draftManifest: localIntegrationManifest({
             name: INTEGRATION_ID,
-            serverName: "@official/gmail-server",
             auths: {
               primary: {
                 type: "oauth2",
@@ -966,7 +961,6 @@ describe("resolveLiveIntegrationCredentials", () => {
         .set({
           draftManifest: localIntegrationManifest({
             name: INTEGRATION_ID,
-            serverName: "@official/gmail-server",
             auths: {
               primary: {
                 type: "oauth2",

@@ -56,6 +56,11 @@ export interface ConnectToolExecution {
   integrationId: string;
   authKey: string;
   manifest: IntegrationManifest;
+  /**
+   * The published version `manifest` was read from (the archive the sidecar fetches is that
+   * version's), `null` for a system integration or a draft.
+   */
+  bundleVersion: string | null;
   /** MCP tool name from `connect.tool`. */
   toolName: string;
   /** Declared injectable outputs (`connect.produces`) — the runner validates against this. */
@@ -88,7 +93,11 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "OrchestratedStrategy");
-    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
+    const { manifest, bundleVersion, auth } = await readIntegrationAuth(
+      ctx.scope,
+      ctx.integrationId,
+      ctx.authKey,
+    );
     // AFPS: `connect.tool` is the marker object `{}`; the orchestrated-tool
     // name + run policy (`tool`, `run_at`, `produces`, `persist_login_secret`)
     // live under `connect._meta["dev.appstrate/connect"]`.
@@ -111,6 +120,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       integrationId: ctx.integrationId,
       authKey: ctx.authKey,
       manifest,
+      bundleVersion,
       toolName: tool,
       produces: connectMeta?.produces,
       inputs: credentials,

@@ -55,7 +55,14 @@ function validIntegrationManifest() {
     version: "1.0.0",
     schema_version: "0.1",
     display_name: "My Integration",
-    source: { kind: "local", server: { name: "@test/my-integration-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       key: {
         type: "api_key",
@@ -96,7 +103,7 @@ describe("parsePackageZip", () => {
   it("valid integration ZIP (manifest-only)", () => {
     const zip = makeZip({
       "manifest.json": validIntegrationManifest(),
-      "server/index.js": "/* vendored MCP server */",
+      "server/index.js": "/* the integration's own MCP server */",
     });
     const result = parsePackageZip(zip);
     expect(result.type).toBe("integration");
@@ -105,12 +112,41 @@ describe("parsePackageZip", () => {
     expect(result.content).toContain("@test/my-integration");
   });
 
+  it("accepts arbitrary server payload files in a local integration archive", () => {
+    const zip = makeZip({
+      "manifest.json": validIntegrationManifest(),
+      "server/index.js": "export {};",
+      "server/lib/helper.js": "export const x = 1;",
+      "server/data/table.bin": "\u0000\u0001",
+      "server/package.json": "{}",
+    });
+    const result = parsePackageZip(zip);
+    expect(result.type).toBe("integration");
+    expect(Object.keys(result.files)).toContain("server/lib/helper.js");
+    expect(Object.keys(result.files)).toContain("server/data/table.bin");
+  });
+
+  it("refuses a local integration archive that lacks source.server.entry_point", () => {
+    const zip = makeZip({ "manifest.json": validIntegrationManifest() });
+    expect(() => parsePackageZip(zip)).toThrow(/entry_point/);
+  });
+
+  it("accepts a ./-prefixed entry_point against a flat archive entry", () => {
+    const manifest = JSON.parse(validIntegrationManifest());
+    manifest.source.server.entry_point = "./server/index.js";
+    const zip = makeZip({
+      "manifest.json": JSON.stringify(manifest),
+      "server/index.js": "export {};",
+    });
+    expect(parsePackageZip(zip).type).toBe("integration");
+  });
+
   it("valid integration ZIP with INTEGRATION.md companion", () => {
     const doc = "# Integration agent-facing doc\n\nWhat this MCP server does.\n";
     const zip = makeZip({
       "manifest.json": validIntegrationManifest(),
       "INTEGRATION.md": doc,
-      "server/index.js": "/* vendored */",
+      "server/index.js": "/* server payload */",
     });
     const result = parsePackageZip(zip);
     expect(result.type).toBe("integration");

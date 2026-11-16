@@ -2,159 +2,111 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS mcp-server manifest — re-exported from `@afps-spec/schema`.
+ * The local MCP server run declaration of a `local` integration.
  *
- * An `mcp-server` package's `manifest.json` is an AFPS-native manifest that
- * carries MCPB-vocabulary fields (`manifest_version`, `server`, `tools`,
- * `user_config`) verbatim, alongside the AFPS identity contract lifted to
- * the root: `type: "mcp-server"`, the scoped `name`, `schema_version`, and
- * `dependencies` (AFPS §3.4 / §11.2). The previous
- * `_meta["dev.afps/mcp-server"]` identity block was removed. The
- * Appstrate-specific runtime hints stay under `_meta["dev.appstrate/mcp-server"]`
- * (the blessed vendor extension point).
+ * A `local` integration declares its MCP server inline (`source.server`, AFPS §7.1: `type`,
+ * `entry_point`, `mcp_config`, advisory `tools`) and ships the server payload in its own archive.
+ * The Appstrate-specific runtime hints live under the integration manifest's `_meta`:
+ * `dev.appstrate/mcp-server` (runtime override) and `dev.appstrate/workspace` (workspace mount).
  *
- * Strict-MCPB host interoperability is not a goal of AFPS; the manifest
- * carries AFPS-native top-level fields (name, type, schema_version,
- * dependencies) outside the MCPB schema. A publish-time projection to a
- * strict MCPB bundle is reserved for a future minor (AFPS §10.2).
+ * Every function here reads the INTEGRATION manifest.
  */
 
-import { z } from "zod";
-import {
-  MCP_SERVER_APPSTRATE_META_KEY,
-  MCP_SERVER_RUNTIME_CAPABILITIES,
-  MCP_SERVER_RUNTIMES,
-  isMcpServerRuntime,
-} from "./mcp-server-meta.ts";
-import {
-  mcpServerManifestSchema as afpsMcpServerManifestSchema,
-  type McpServerManifest,
-} from "@afps-spec/schema";
+import type { IntegrationManifest } from "@afps-spec/schema";
 
-export type { McpServerManifest };
+/** The `_meta` key (on the integration manifest) carrying Appstrate-specific local-server runtime hints. */
+export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
 
-// Re-exported so `@appstrate/core/mcp-server` stays the one place backend code
-// imports mcp-server facts from. They LIVE in `./mcp-server-meta.ts` because
-// this module pulls `@afps-spec/schema`, which instantiates AJV at module
-// scope and declares no `sideEffects: false` — so a browser consumer that only
-// needs the runtime hint cannot tree-shake it away. Measured: +65 kB gzipped
-// on the integration detail page.
-//
-// A dead-export scan run with `includeEntryExports` on `packages/core` reports
-// THIS LINE, because at least one name below is used inside both modules and
-// imported across neither — `MCP_SERVER_APPSTRATE_META_KEY` is the standing
-// example. The list stays whole regardless: `./mcp-server` is the complete
-// façade by contract (core 6.2.0 CHANGELOG) and `./mcp-server-meta` is only
-// the bundler escape hatch behind it, so dropping a name to satisfy the scan
-// would break that published subpath for an out-of-tree manifest author — the
-// exact consumer the meta key exists for — to save a re-export line.
-//
-// Deliberately no tally of which names have in-tree façade readers: that set
-// moves whenever a call site swaps one helper for another, and a count written
-// here has already gone stale twice. Derive it instead —
-// `rg 'from "@appstrate/core/mcp-server"' --glob '!node_modules'` — and note
-// that a name reading zero is evidence about THIS repo only, never about the
-// published surface.
-export {
-  MCP_SERVER_APPSTRATE_META_KEY,
-  MCP_SERVER_RUNTIME_CAPABILITIES,
-  MCP_SERVER_RUNTIMES,
-  isMcpServerRuntime,
-  getMcpServerRuntime,
-  effectiveMcpServerType,
-} from "./mcp-server-meta.ts";
-export type { McpServerRuntime } from "./mcp-server-meta.ts";
+/**
+ * Runtime identifiers accepted by both integration runtime adapters. This is
+ * the public capability registry used by package authoring/discovery; adapter
+ * implementation details (image refs and host commands) remain private.
+ */
+export const MCP_SERVER_RUNTIME_CAPABILITIES = {
+  node: {
+    manifestServerType: "node",
+    manifestCommand: "node",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript entry point present in the archive",
+  },
+  bun: {
+    manifestServerType: "node",
+    manifestCommand: "bun",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript or TypeScript entry point present in the archive",
+    runtimeOverride: "bun",
+  },
+  python: {
+    manifestServerType: "python",
+    manifestCommand: "python3",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Python entry point present in the archive",
+  },
+  uv: {
+    manifestServerType: "uv",
+    manifestCommand: "uv",
+    manifestArgsBeforeEntryPoint: ["run"],
+    entryPoint: "Python entry point present in the archive; uv resolves project dependencies",
+  },
+  binary: {
+    manifestServerType: "binary",
+    manifestCommand: null,
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Executable entry point present in the archive",
+  },
+} as const;
+
+export type McpServerRuntime = keyof typeof MCP_SERVER_RUNTIME_CAPABILITIES;
+
+export const MCP_SERVER_RUNTIMES = Object.freeze(
+  Object.keys(MCP_SERVER_RUNTIME_CAPABILITIES) as McpServerRuntime[],
+);
+
+export function isMcpServerRuntime(value: unknown): value is McpServerRuntime {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(MCP_SERVER_RUNTIME_CAPABILITIES, value)
+  );
+}
+
+/**
+ * Read the Appstrate runtime override from the integration's
+ * `_meta["dev.appstrate/mcp-server"].runtime`. `source.server.type` is
+ * `node|python|binary|uv` — it has no `bun`. A bun-native server therefore keeps
+ * `server.type: "node"` (with `mcp_config.command: "bun"`) and declares `bun`
+ * here so the platform's runner picks the bun interpreter/image. Returns
+ * `undefined` when absent, in which case callers fall back to `server.type`.
+ */
+export function getMcpServerRuntime(manifest: IntegrationManifest): McpServerRuntime | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
+  return isMcpServerRuntime(appstrate?.runtime) ? appstrate.runtime : undefined;
+}
+
+/**
+ * The runtime a local MCP server spawns under: the Appstrate
+ * `_meta["dev.appstrate/mcp-server"].runtime` override first (it may be `bun`, which
+ * `source.server.type` cannot express), else `source.server.type`.
+ *
+ * Every caller that needs a runtime decides it through this function so the fallback is
+ * derived in one place. `source.server.type` is returned verbatim (not narrowed to
+ * {@link McpServerRuntime}). `undefined` means neither source declared one: not runnable, and the
+ * caller must fail closed on it.
+ */
+export function effectiveMcpServerType(manifest: IntegrationManifest): string | undefined {
+  const type = (manifest as { source?: { server?: { type?: unknown } } }).source?.server?.type;
+  return (
+    getMcpServerRuntime(manifest) ??
+    (typeof type === "string" && type.trim() !== "" ? type : undefined)
+  );
+}
 
 /** The `_meta` key carrying the shared-workspace opt-in declaration. */
 export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
 
 /**
- * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
- * `@afps-spec/schema` types `user_config` as
- * `z.record(z.string(), z.unknown())` — any value passes. This local refine
- * enforces the MCPB inner shape until the upstream tightening lands.
- * `.passthrough()` preserves forward-compatibility with future MCPB additions.
- */
-const userConfigEntrySchema = z
-  .object({
-    type: z.enum(["string", "number", "boolean", "directory", "file"]),
-    title: z.string().min(1),
-    description: z.string().optional(),
-    required: z.boolean().optional(),
-    default: z.unknown().optional(),
-    multiple: z.boolean().optional(),
-    sensitive: z.boolean().optional(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  })
-  .loose();
-
-/**
- * Wraps the upstream `mcpServerManifestSchema` with a `.superRefine` that
- * validates each `user_config` entry against the MCPB inner shape. Entries
- * that don't match (missing `type`, invalid `type`, missing `title`, …)
- * surface Zod issues under `["user_config", <key>, …]`.
- */
-export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((m, ctx) => {
-  const userConfig = (m as { user_config?: unknown }).user_config;
-  if (userConfig && typeof userConfig === "object" && !Array.isArray(userConfig)) {
-    for (const [key, entry] of Object.entries(userConfig as Record<string, unknown>)) {
-      const result = userConfigEntrySchema.safeParse(entry);
-      if (!result.success) {
-        for (const issue of result.error.issues) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["user_config", key, ...issue.path],
-            message: issue.message,
-          });
-        }
-      }
-    }
-  }
-
-  // Install-time check for the shared-workspace opt-in. The
-  // {@link getMcpServerWorkspaceMount} parser throws synchronously on
-  // malformed entries; surface those errors here so the platform's
-  // POST/PUT /api/packages/mcp-server validators catch them at upload
-  // time rather than at the first run that would spawn the server.
-  try {
-    getMcpServerWorkspaceMount(m as McpServerManifest);
-  } catch (err) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["_meta", MCP_SERVER_WORKSPACE_META_KEY],
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  const meta = (m as { _meta?: Record<string, unknown> })._meta;
-  const appstrateRuntime = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as
-    { runtime?: unknown } | undefined;
-  if (appstrateRuntime?.runtime !== undefined && !isMcpServerRuntime(appstrateRuntime.runtime)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
-      message:
-        `Unsupported MCP server runtime ${JSON.stringify(appstrateRuntime.runtime)}. ` +
-        `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
-    });
-  } else if (appstrateRuntime?.runtime !== undefined) {
-    const serverType = (m as { server?: { type?: unknown } }).server?.type;
-    const compatibleType =
-      MCP_SERVER_RUNTIME_CAPABILITIES[appstrateRuntime.runtime].manifestServerType;
-    if (serverType !== compatibleType) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
-        message: `Runtime '${appstrateRuntime.runtime}' requires server.type '${compatibleType}'.`,
-      });
-    }
-  }
-});
-
-/**
- * Per-run shared workspace declaration parsed from an mcp-server
- * manifest. Opt-in: an mcp-server without this `_meta` entry runs
+ * Per-run shared workspace declaration parsed from a local integration
+ * manifest. Opt-in: a local server without this `_meta` entry runs
  * with no access to the agent's filesystem (the current default).
  * When present, the platform mounts the per-run shared workspace
  * (a Docker volume in tier 3, a host directory in tier 0-2) at the
@@ -195,12 +147,12 @@ function canonicaliseMount(path: string): string {
 }
 
 /**
- * Parse the shared-workspace opt-in declared on an mcp-server manifest.
+ * Parse the shared-workspace opt-in declared on a local integration manifest.
  * Returns `undefined` when absent (default: no workspace access).
  *
  * Validation is strict — a malformed entry throws rather than being
  * silently degraded. The platform's import-time package validator
- * (`mcpServerManifestSchema` superRefine) runs this and surfaces the
+ * (the integration manifest's superRefine) runs this and surfaces the
  * throw as a schema issue, so a bad `_meta.workspace` is normally
  * rejected at upload. Spawn-time callers (`integration-spawn-resolver`)
  * run it again as defence-in-depth and may degrade safely (drop the
@@ -219,7 +171,7 @@ function canonicaliseMount(path: string): string {
  *     omitted (least-privilege)
  */
 export function getMcpServerWorkspaceMount(
-  manifest: McpServerManifest,
+  manifest: IntegrationManifest,
 ): McpServerWorkspaceMount | undefined {
   const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
   if (!meta || typeof meta !== "object") return undefined;
@@ -285,52 +237,4 @@ export function getMcpServerWorkspaceMount(
   }
 
   return { mount, access };
-}
-
-/**
- * Read the MCPB `server.mcp_config.env` map — the placeholders an mcp-server
- * declares for `${user_config.<key>}` substitution at MCPB-host launch time.
- *
- * AFPS §7.6 + §3.4: when a local-source integration's `delivery.env.<var>`
- * carries `user_config_key`, the AFPS build step injects the rendered value
- * into the referenced mcp-server's `mcp_config.env` template so the same
- * package runs in both the Appstrate runtime AND a standalone MCPB host.
- *
- * Returns the env map (typically `Record<string, string>` with literal values
- * or `"${user_config.<key>}"` placeholders) or `null` when absent / malformed.
- */
-export function getMcpServerMcpConfigEnv(
-  manifest: McpServerManifest,
-): Record<string, string> | null {
-  const server = (manifest as { server?: { mcp_config?: { env?: unknown } } }).server;
-  const env = server?.mcp_config?.env;
-  if (!env || typeof env !== "object" || Array.isArray(env)) return null;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
-}
-
-/**
- * Pre-render `${user_config.<key>}` placeholders in an MCPB `mcp_config.env`
- * template against a substitution map. Returns the rendered env block — keys
- * with no placeholder pass through unchanged; keys whose placeholder resolves
- * to a value in `substitutions` are replaced.
- *
- * Used by the integration spawn resolver (AFPS §7.6 CC-4) to bridge
- * `delivery.env.<var>.user_config_key` → mcp-server `mcp_config.env` template.
- * The substitution map's keys are the `user_config_key` names; the values are
- * the rendered credential strings.
- */
-const USER_CONFIG_REF = /\$\{user_config\.([A-Za-z0-9_]+)\}/g;
-export function renderMcpConfigEnv(
-  envTemplate: Readonly<Record<string, string>>,
-  substitutions: Readonly<Record<string, string>>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(envTemplate)) {
-    out[k] = v.replace(USER_CONFIG_REF, (_match, key: string) => substitutions[key] ?? "");
-  }
-  return out;
 }

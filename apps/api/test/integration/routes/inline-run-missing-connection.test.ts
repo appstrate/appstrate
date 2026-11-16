@@ -430,7 +430,6 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     function oauthManifest() {
       return localIntegrationManifest({
         name: OAUTH_INTEGRATION,
-        serverName: `${OAUTH_INTEGRATION}-server`,
         version: "1.0.0",
         auths: {
           primary: {

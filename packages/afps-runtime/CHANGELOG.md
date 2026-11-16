@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
   `## Output Format` for every `outputSchema` it receives.
 
+### Removed — the `mcp-server` package type (BREAKING, #2220, `@afps-spec/schema` `^0.13.0`)
+
+- A bundle has no `mcp-server` members: a `local` integration member carries its own server
+  payload (`source.server`, entry point present in its archive — `checkCompanionFiles` now judges
+  a local integration and no longer an `mcp-server`). `DependencySection` is `"skills" |
+"integrations"` (the default `depTypes` of `buildBundleFromCatalog` follows), `validateBundle`
+  dispatches `agent | skill | integration`, and `LOCAL_SERVER_MISSING_ENTRY_POINT` replaces
+  `MCP_SERVER_MISSING_ENTRY_POINT`.
+- `UNAVAILABLE_INTEGRATION_REASONS`: `local_server_ref_missing`, `mcp_server_unresolved` and
+  `mcp_server_not_runnable` are replaced by `local_server_not_runnable`.
+- The `afps bundle` command is deleted with `@appstrate/core/mcp-server-bundle` it drove.
+- The conformance cases L1.12 / L1.13 use the inline local-integration shape.
+
 ### Changed — `fetchApiCall` refuses a target carrying userinfo (#2222)
 
 - A URL whose authority carries userinfo (`https://user:pass@host/…`, even an empty

@@ -12,7 +12,6 @@ import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
-  getLocalServerRef,
   renderRemoteSource,
   hasPerConnectionAuthServer,
   getAppstrateConnectMeta,
@@ -61,25 +60,6 @@ describe("renderCredentialTemplate", () => {
       ),
     ).toBe("https://forge.example.com|t");
     expect(renderCredentialTemplate("{$variable.absent}", {}, {})).toBeNull();
-  });
-});
-
-describe("getLocalServerRef", () => {
-  it("returns the referenced mcp-server name + version", () => {
-    expect(
-      getLocalServerRef(manifest({ kind: "local", server: { name: "@x/srv", version: "^1.0.0" } })),
-    ).toEqual({ name: "@x/srv", version: "^1.0.0" });
-  });
-
-  it("returns null when source is not local", () => {
-    expect(getLocalServerRef(manifest({ kind: "remote", remote: {} }))).toBeNull();
-  });
-
-  it("returns null when server ref is malformed (non-string fields)", () => {
-    expect(
-      getLocalServerRef(manifest({ kind: "local", server: { name: 42, version: "1" } })),
-    ).toBeNull();
-    expect(getLocalServerRef(manifest({ kind: "local" }))).toBeNull();
   });
 });
 

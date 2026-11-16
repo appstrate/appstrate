@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared tool-parity set diff, used by both the local (`mcp-server`) and
- * remote (`integration` + `source.kind:remote`) handlers.
+ * Shared tool-parity set diff, used by both the local (`source.kind: local`) and
+ * remote (`source.kind: remote`) integration handlers.
  *
  * Two directions:
  *   - declared ⊄ provided → FAIL. The manifest names a tool the server does

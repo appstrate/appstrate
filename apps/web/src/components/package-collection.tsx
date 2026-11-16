@@ -3,7 +3,7 @@
 /**
  * A collection of packages: the bar, the body, the count.
  *
- * Everything the agents, skills and MCP-server pages draw below their title,
+ * Everything the agents, skills and integrations pages draw below their title,
  * and everything the organization's catalogue draws inside its panel. They are
  * the same objects with shared search, filters and empty states. Each caller
  * composes the columns and their visibility menu.
@@ -86,8 +86,6 @@ export interface PackageCollectionProps {
   actions?: ReactNode;
   /** Above the bar: what this collection is. */
   header?: ReactNode;
-  /** `CollectionTabs` for the bar's line, before the search. */
-  tabs?: ReactNode;
   /** Open a row in place rather than on its own page. */
   rowAction?: (item: CardItem) => void;
   /**
@@ -123,7 +121,6 @@ export function PackageCollection({
   cardRun = true,
   actions,
   header,
-  tabs,
   rowAction,
   cardSections,
   cardPlaceholder,
@@ -204,7 +201,6 @@ export function PackageCollection({
     <>
       {header}
       <ListToolbar
-        tabs={tabs}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}
         onReset={list.reset}

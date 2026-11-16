@@ -20,7 +20,8 @@ import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../lib/package-card-item";
-import type { IntegrationProtocol } from "../lib/integration-collection";
+import type { IntegrationSource } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 
 export function useCatalogueSelectColumn({
   selected,
@@ -138,21 +139,20 @@ export function useCatalogueActionsColumn({
   ));
 }
 
-/** API or MCP, for a remote integration — a local one is always MCP. */
-export function useCatalogueProtocolColumn<T = CardItem>(
-  protocolOf: (item: T) => IntegrationProtocol | undefined,
+/** Where an integration's tools come from (`IntegrationSourceLabel`), one column of the integration tables. */
+export function useCatalogueSourceColumn<T = CardItem>(
+  sourceOf: (item: T) => IntegrationSource | undefined,
 ): DataColumn<T> {
   const { t } = useTranslation("settings");
   return {
-    id: "protocol",
-    header: t("catalogue.column.protocol"),
-    width: 88,
+    id: "source",
+    header: t("integrations.col.source"),
+    width: 120,
     cell: (item) => {
-      const protocol = protocolOf(item);
-      return protocol ? (
-        <CellText>{t(`integrations.protocol.${protocol}`)}</CellText>
-      ) : (
-        <CellEmpty />
+      const source = sourceOf(item);
+      if (!source) return <CellEmpty />;
+      return (
+        <IntegrationSourceLabel source={source} stacked className="text-muted-foreground text-xs" />
       );
     },
   };

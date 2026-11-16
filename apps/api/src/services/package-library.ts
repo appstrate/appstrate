@@ -5,6 +5,8 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   organizationMembers,
+  packageTypeValues,
+  type PackageType,
   packageDistTags,
   packages,
   spacePackages,
@@ -17,11 +19,8 @@ import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts
 import { isActiveHere } from "./package-activation.ts";
 import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
-import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
-
-const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
 /** How a package reaches a space: its home, a row outside it (`shared`), or `system` (RBAC spec §6.9). */
 type PlacementVia = "home" | "shared" | "system";
@@ -128,7 +127,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   // alone. A personal target additionally hides every other space, since its
   // page is its owner's and nobody else's.
   const readableSpaceIds = new Map<PackageType, Set<string>>(
-    PACKAGE_TYPES.map((type) => [
+    packageTypeValues.map((type) => [
       type,
       new Set(
         accessible
@@ -211,7 +210,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const grouped: Record<string, LibraryPackage[]> = {
     agent: [],
     skill: [],
-    "mcp-server": [],
     integration: [],
   };
 

@@ -296,18 +296,24 @@ describe("checkCompanionFiles — other package types are untouched", () => {
     ).toBeNull();
   });
 
-  it("requires no companion for an integration", () => {
+  it("requires no companion for a non-local integration", () => {
     expect(checkCompanionFiles({ type: "integration" }, companionFilesFromRecord({}))).toBeNull();
+    expect(
+      checkCompanionFiles(
+        { type: "integration", source: { kind: "remote" } },
+        companionFilesFromRecord({}),
+      ),
+    ).toBeNull();
   });
 });
 
-describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
+describe("checkCompanionFiles — local integration entry_point", () => {
   const enc = new TextEncoder();
   const serverBytes = enc.encode("export {};\n");
 
   function check(entryPoint: string, files: Record<string, Uint8Array>) {
     return checkCompanionFiles(
-      { type: "mcp-server", server: { entry_point: entryPoint } },
+      { type: "integration", source: { kind: "local", server: { entry_point: entryPoint } } },
       companionFilesFromRecord(files),
     );
   }
@@ -316,9 +322,8 @@ describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
     expect(check("server.js", { "server.js": serverBytes })).toBeNull();
   });
 
-  // Regression: every mcp-server under this repo's `system-packages/` declares
-  // the MCPB-conventional `./entry` form while the archive stores the entry
-  // flat. An exact `has()` made those packages importable through the on-disk
+  // Regression: system packages declare the conventional `./entry` form while the archive
+  // stores the entry flat. An exact `has()` made those packages importable through the on-disk
   // system-package loader and REJECTED through `POST /api/packages/import`.
   it("accepts a `./`-prefixed entry_point against a flat archive entry", () => {
     expect(check("./server.js", { "server.js": serverBytes })).toBeNull();
@@ -330,15 +335,23 @@ describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
 
   it("still reports a genuinely missing payload", () => {
     const violation = check("./server.js", { "manifest.json": serverBytes });
-    expect(violation?.reason).toBe("MCP_SERVER_MISSING_ENTRY_POINT");
+    expect(violation?.reason).toBe("LOCAL_SERVER_MISSING_ENTRY_POINT");
     expect(violation?.path).toBe("./server.js");
+  });
+
+  it("refuses a local integration that declares no entry_point", () => {
+    const violation = checkCompanionFiles(
+      { type: "integration", source: { kind: "local", server: {} } },
+      companionFilesFromRecord({}),
+    );
+    expect(violation?.reason).toBe("LOCAL_SERVER_MISSING_ENTRY_POINT");
   });
 
   // Normalising `./` must not turn into path resolution: a declared parent
   // traversal stays unresolved and unmatched.
   it("does not resolve `..` segments", () => {
     expect(check("../server.js", { "server.js": serverBytes })?.reason).toBe(
-      "MCP_SERVER_MISSING_ENTRY_POINT",
+      "LOCAL_SERVER_MISSING_ENTRY_POINT",
     );
   });
 });

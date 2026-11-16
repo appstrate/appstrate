@@ -191,8 +191,8 @@ export function PackageCardSkeleton({
   keywords = true,
 }: {
   runnable?: boolean;
-  /** What the line under the description carries: a version badge, or a line of text (the catalogue's origin). */
-  meta?: "version" | "line";
+  /** What the line under the description carries: a version badge, a line of text (the catalogue's origin), or both. */
+  meta?: "version" | "line" | "both";
   /** The keyword pills under the card's body. */
   keywords?: boolean;
 }) {
@@ -207,11 +207,8 @@ export function PackageCardSkeleton({
           <SkeletonLine className="mt-0.5 w-full text-xs" />
           <SkeletonLine className="w-2/3 text-xs" />
           <div className="mt-2 flex min-w-0 items-center gap-2 text-xs">
-            {meta === "version" ? (
-              <SkeletonBadge className="w-14 font-mono text-[10px]" />
-            ) : (
-              <SkeletonLine className="w-36" />
-            )}
+            {meta !== "line" && <SkeletonBadge className="w-14 font-mono text-[10px]" />}
+            {meta !== "version" && <SkeletonLine className="w-36" />}
           </div>
         </div>
       </div>

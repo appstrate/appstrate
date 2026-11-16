@@ -83,11 +83,6 @@ export interface CoreResources {
   // reach around that.
   agents: "read" | "write" | "configure" | "delete" | "run" | "share";
   skills: "read" | "write" | "delete" | "share";
-  // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
-  // like skills; no editor surface (an mcp-server manifest is an AFPS-native
-  // manifest (MCPB vocabulary lifted to the root), authored externally and
-  // imported as a `.afps`).
-  "mcp-servers": "read" | "write" | "delete" | "share";
   // `read` = the runs the principal launched (its own manual runs, and the
   // runs of its own schedules). `read-all` = every run in the space, whoever
   // launched it: other members', end-users', and rows with no actor at all
@@ -212,7 +207,6 @@ const PACKAGE_RESOURCES = {
   agent: "agents",
   skill: "skills",
   integration: "integrations",
-  "mcp-server": "mcp-servers",
 } as const satisfies Record<PackageType, CoreResource>;
 
 /**
@@ -307,7 +301,6 @@ export const CORE_RESOURCE_ACTIONS = {
   "space-members": ["read", "invite", "remove", "change-role"],
   agents: ["read", "write", "configure", "delete", "run", "share"],
   skills: ["read", "write", "delete", "share"],
-  "mcp-servers": ["read", "write", "delete", "share"],
   runs: ["read", "read-all", "cancel", "delete"],
   files: ["read", "delete"],
   schedules: ["read", "write", "delete"],
@@ -364,7 +357,6 @@ export const CORE_RESOURCE_LEVELS = {
   "space-members": "space",
   agents: "space",
   skills: "space",
-  "mcp-servers": "space",
   runs: "space",
   files: "space",
   schedules: "space",

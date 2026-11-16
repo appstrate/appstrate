@@ -267,7 +267,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
         ) : type === "integration" ? (
           <IntegrationOverviewSkeleton />
         ) : (
-          <PackageOverviewSkeleton type={type} />
+          <PackageOverviewSkeleton />
         )
       }
     />
@@ -332,7 +332,6 @@ export function ListPageSkeleton({
   list,
   titleKey,
   actions = true,
-  tabs = false,
   views = false,
 }: {
   list?: string;
@@ -340,8 +339,6 @@ export function ListPageSkeleton({
   titleKey?: string;
   /** Whether the page has an Actions menu (`/files` has none). */
   actions?: boolean;
-  /** `CollectionTabs` lead the bar (integrations). */
-  tabs?: boolean;
   /** The bar ends with the cards-or-table switch. */
   views?: boolean;
 }) {
@@ -349,45 +346,32 @@ export function ListPageSkeleton({
   return (
     <Waiting>
       <HeaderBlocks breadcrumbs={titleKey ? [{ label: t(titleKey) }] : []} actions={actions} />
-      {list ? (
-        <ViewedCollectionBlocks list={list} tabs={tabs} views={views} />
-      ) : (
-        <CollectionBlocks columns />
-      )}
+      {list ? <ViewedCollectionBlocks list={list} views={views} /> : <CollectionBlocks columns />}
     </Waiting>
   );
 }
 
-function ViewedCollectionBlocks({
-  list,
-  tabs,
-  views,
-}: {
-  list: string;
-  tabs: boolean;
-  views: boolean;
-}) {
+function ViewedCollectionBlocks({ list, views }: { list: string; views: boolean }) {
   const [view] = useListView(list);
   return (
     <CollectionBlocks
       cards={view === "cards"}
       runnable={list === "agent"}
       files={list === "documents"}
-      tabs={tabs}
+      // An integration's card line also says its source.
+      cardMeta={list === "integrations" ? "both" : "version"}
       views={views}
     />
   );
 }
 
-/** `ListToolbar`'s bar: optional tabs, an `h-8` search, the filter and columns buttons, the view switch. */
+/** `ListToolbar`'s bar: an `h-8` search, the filter and columns buttons, the view switch. */
 function ToolbarBlocks({
-  tabs = false,
   filters = true,
   columns = false,
   views = false,
   action = false,
 }: {
-  tabs?: boolean;
   /** The filter button: absent on a list that only searches. */
   filters?: boolean;
   columns?: boolean;
@@ -397,7 +381,6 @@ function ToolbarBlocks({
 }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
-      {tabs && <Skeleton className="h-8 w-44 shrink-0" />}
       <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
       {filters && <Skeleton className="h-8 w-[5.5rem]" />}
       {columns && <Skeleton className="h-8 w-[6.5rem]" />}
@@ -444,7 +427,7 @@ function CollectionBlocks({
   cards = false,
   runnable = false,
   files = false,
-  tabs = false,
+  cardMeta = "version",
   views = false,
   columns = false,
   frameless = false,
@@ -456,19 +439,22 @@ function CollectionBlocks({
   runnable?: boolean;
   /** The cards are file tiles (the gallery). */
   files?: boolean;
-  tabs?: boolean;
+  /** What the cards' line under the description carries. */
+  cardMeta?: "version" | "both";
   views?: boolean;
   /** The table's column menu (a table view only). */
   columns?: boolean;
 }) {
   return (
     <>
-      <ToolbarBlocks tabs={tabs} views={views} columns={!cards && (columns || views)} />
+      <ToolbarBlocks views={views} columns={!cards && (columns || views)} />
       {cards ? (
         files ? (
           <CardGridSkeleton min="12rem" placeholder={<FileTileSkeleton />} />
         ) : (
-          <CardGridSkeleton placeholder={<PackageCardSkeleton runnable={runnable} />} />
+          <CardGridSkeleton
+            placeholder={<PackageCardSkeleton runnable={runnable} meta={cardMeta} />}
+          />
         )
       ) : (
         <TableBlocks framed={!frameless} />

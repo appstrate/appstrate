@@ -56,7 +56,6 @@ function renderAlert(verdict: Verdict): string {
           },
         ],
         skill: [],
-        "mcp-server": [],
         integration: [],
       },
     },

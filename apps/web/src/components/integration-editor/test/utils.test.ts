@@ -25,8 +25,10 @@ describe("integration-editor source", () => {
         kind: "remote",
         remoteUrl: "https://x.test/mcp/v1",
         remoteTransport: "streamable-http",
-        serverName: "",
-        serverVersion: "",
+        serverType: "node",
+        entryPoint: "",
+        command: "",
+        args: [],
       },
     );
     expect((m.source as any).kind).toBe("remote");
@@ -36,28 +38,103 @@ describe("integration-editor source", () => {
     expect(back.remoteUrl).toBe("https://x.test/mcp/v1");
   });
 
-  it("round-trips a local source", () => {
-    const m = setSource(
-      {},
-      {
+  const local = {
+    kind: "local" as const,
+    remoteUrl: "",
+    remoteTransport: "streamable-http" as const,
+    serverType: "node",
+    entryPoint: "server/index.ts",
+    command: "bun",
+    args: ["server/index.ts", "--stdio"],
+  };
+
+  it("emits the inline run declaration of a local source", () => {
+    expect(setSource({}, local)).toEqual({
+      source: {
         kind: "local",
-        remoteUrl: "",
-        remoteTransport: "streamable-http",
-        serverName: "@scope/srv",
-        serverVersion: "^1.0.0",
+        server: {
+          type: "node",
+          entry_point: "server/index.ts",
+          mcp_config: { command: "bun", args: ["server/index.ts", "--stdio"] },
+        },
       },
+    });
+  });
+
+  it("round-trips a local source", () => {
+    expect(getSource(setSource({}, local))).toEqual(local);
+  });
+
+  it("omits `args` when there are none", () => {
+    const m = setSource({}, { ...local, args: [] });
+    expect((m.source as any).server.mcp_config).toEqual({ command: "bun" });
+  });
+
+  it("keeps `mcp_config.env`, `tools` and unknown keys when the form edits its own fields", () => {
+    const stored = {
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "old.js",
+          mcp_config: {
+            command: "node",
+            args: ["old.js"],
+            env: { LOG_LEVEL: "debug" },
+            platform_overrides: { win32: { command: "node.exe" } },
+          },
+          tools: [{ name: "ssh_exec", description: "Run a command" }],
+          x_extra: 1,
+        },
+      },
+    };
+    const next = setSource(stored, {
+      ...getSource(stored),
+      serverType: "python",
+      entryPoint: "server.py",
+      command: "python3",
+      args: [],
+    });
+    expect((next.source as any).server).toEqual({
+      type: "python",
+      entry_point: "server.py",
+      mcp_config: {
+        command: "python3",
+        env: { LOG_LEVEL: "debug" },
+        platform_overrides: { win32: { command: "node.exe" } },
+      },
+      tools: [{ name: "ssh_exec", description: "Run a command" }],
+      x_extra: 1,
+    });
+  });
+
+  it("drops the local declaration when the kind moves to remote", () => {
+    const m = setSource(setSource({}, local), {
+      ...local,
+      kind: "remote",
+      remoteUrl: "https://x.test/mcp",
+    });
+    expect((m.source as any).server).toBeUndefined();
+  });
+
+  it("keeps a server type the form does not list, and rewrites it only when changed", () => {
+    const manifest = { source: { kind: "local", server: { type: "deno", entry_point: "x" } } };
+    const source = getSource(manifest);
+    expect(source.serverType).toBe("deno");
+    expect((setSource(manifest, source).source as any).server.type).toBe("deno");
+    expect((setSource(manifest, { ...source, serverType: "node" }).source as any).server.type).toBe(
+      "node",
     );
-    expect((m.source as any).kind).toBe("local");
-    expect((m.source as any).server.name).toBe("@scope/srv");
-    expect(getSource(m).serverVersion).toBe("^1.0.0");
   });
 
   const remote = (remoteUrl: string) => ({
     kind: "remote" as const,
     remoteUrl,
     remoteTransport: "streamable-http" as const,
-    serverName: "",
-    serverVersion: "",
+    serverType: "node",
+    entryPoint: "",
+    command: "",
+    args: [] as string[],
   });
 
   it("gives a new integration's auth the source host as its allowlist, once the URL names one", () => {

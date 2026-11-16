@@ -58,8 +58,10 @@ function entry(partial: Partial<SystemPackageEntry>): SystemPackageEntry {
 }
 
 describe("classify", () => {
-  it("maps mcp-server to local", () => {
-    expect(classify(entry({ type: "mcp-server" }))).toBe("mcp-server-local");
+  it("maps a local-source integration to integration-local", () => {
+    expect(classify(entry({ type: "integration", manifest: { source: { kind: "local" } } }))).toBe(
+      "integration-local",
+    );
   });
 
   it("maps remote integration to mcp-remote", () => {
@@ -83,26 +85,45 @@ describe("classify", () => {
 
 describe("declaredTools / serverEntryPoint", () => {
   it("extracts tool names, skipping malformed entries", () => {
-    const manifest = { tools: [{ name: "clone" }, { name: "status" }, { notName: 1 }, "bad"] };
+    const manifest = {
+      source: {
+        kind: "local",
+        server: {
+          type: "bun",
+          entry_point: "server/index.ts",
+          mcp_config: { command: "bun" },
+          tools: [{ name: "clone" }, { name: "status" }, { notName: 1 }, "bad"],
+        },
+      },
+    };
     expect(declaredTools(manifest)).toEqual(["clone", "status"]);
   });
 
   it("returns [] when tools is absent or not an array", () => {
     expect(declaredTools({})).toEqual([]);
-    expect(declaredTools({ tools: "nope" })).toEqual([]);
+    expect(declaredTools({ source: { kind: "local", server: { tools: "nope" } } })).toEqual([]);
   });
 
-  it("reads server.entry_point", () => {
-    expect(serverEntryPoint({ server: { entry_point: "server/index.ts" } })).toBe(
-      "server/index.ts",
-    );
-    expect(serverEntryPoint({ server: {} })).toBeUndefined();
+  it("reads source.server.entry_point", () => {
+    expect(
+      serverEntryPoint({
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.ts",
+            mcp_config: { command: "node" },
+          },
+        },
+      }),
+    ).toBe("server/index.ts");
+    expect(serverEntryPoint({ source: { kind: "local", server: {} } })).toBeUndefined();
     expect(serverEntryPoint({})).toBeUndefined();
   });
 });
 
 describe("diffTools", () => {
-  const id = "@appstrate/github-git-mcp";
+  const id = "@appstrate/github-git";
 
   it("returns no findings on exact parity", () => {
     expect(diffTools(id, ["clone", "status"], ["clone", "status"])).toEqual([]);

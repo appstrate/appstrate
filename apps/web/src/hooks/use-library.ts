@@ -98,7 +98,6 @@ function applyActivation(
     packages: {
       agent: mapGroup(prev.packages.agent),
       skill: mapGroup(prev.packages.skill),
-      "mcp-server": mapGroup(prev.packages["mcp-server"]),
       integration: mapGroup(prev.packages.integration),
     },
   };
@@ -191,7 +190,7 @@ export function useSetChatEnforced() {
 }
 
 /**
- * Activate / deactivate a package in one space, for all four families (`POST /api/spaces/{id}/packages`,
+ * Activate / deactivate a package in one space, for every package family (`POST /api/spaces/{id}/packages`,
  * `DELETE .../{scope}/{name}`). `active: true` upserts (places, sharing from home when allowed) and
  * switches on; `false` switches off and keeps the row and its settings.
  */

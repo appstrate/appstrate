@@ -1,18 +1,17 @@
 ---
 title: AFPS Packages
-description: The four package types, drafts and versions, importing and exporting, and system packages.
+description: The three package types, drafts and versions, importing and exporting, and system packages.
 ---
 
 Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/resources/afps-specification).
 
 ## Package types
 
-| Type          | What it is                                                                                                                           | Content file                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                                            | `prompt.md`                                |
-| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                                    | `SKILL.md`                                 |
-| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/integrations/how-integrations-work). | `manifest.json`, optional `INTEGRATION.md` |
-| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                                           | Server entry point                         |
+| Type          | What it is                                                                                                                                                                            | Content file                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                                                                                             | `prompt.md`                                                                    |
+| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                                                                                     | `SKILL.md`                                                                     |
+| `integration` | Access to a third-party API or MCP server, with its authentication methods. A local integration carries its own server code. See [Integrations](/integrations/how-integrations-work). | `manifest.json`, optional `INTEGRATION.md`, the server payload for a local one |
 
 Package ids are scoped names, `@scope/name`. The scope defaults to your organization's slug. Packages shipped with the platform use `@appstrate/`.
 
@@ -34,7 +33,7 @@ In the web app, a package's **Settings** tab has a **Files** section that browse
 Every package has a mutable **draft** and immutable **versions**.
 
 - Editing writes the draft. Saving a draft requires the `ETag` of what you last read, sent as `If-Match`. A stale tag answers `412`, a missing one `428`, so two editors cannot overwrite each other silently.
-- **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills`, `integrations` or `mcp-servers`. The version comes from the manifest or from the `version` you send in the body.
+- **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills` or `integrations`. The version comes from the manifest or from the `version` you send in the body.
 - Versions are **semver and forward-only**: a new version must be strictly higher than every existing one. A duplicate is `409 version_exists`.
 - An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing, restoring, deleting a version and deleting the agent are refused while one of its runs is in progress (`agent_in_use`).
 - Each version stores an **integrity hash** (SHA-256 SRI). Downloads return it in `X-Integrity`.
@@ -60,7 +59,7 @@ The platform maintains one dist-tag, `latest`, which points at the newest stable
 
 Two more selectors exist where a run or schedule picks a definition: `published` (the latest version) and `draft` (the working copy, for people who can write the package).
 
-Dependencies declared in an agent (`dependencies.skills`, `integrations`, `mcp_servers`) are ranges and are resolved when a run starts, so publishing a compatible dependency version changes what the next run uses.
+Dependencies declared in an agent (`dependencies.skills`, `integrations`) are ranges and are resolved when a run starts, so publishing a compatible dependency version changes what the next run uses.
 
 ## Importing
 
@@ -105,7 +104,7 @@ The [CLI](/using-appstrate/cli) edits packages as local folders: `appstrate pack
 
 A package belongs to the organization and has a **home space**. Other spaces get it through **shares** and run it once they **activate** it. Moving a home, sharing, and the library views are in [Library and sharing](/features/library).
 
-Creating a package needs the type's `write` permission (`agents:write`, `skills:write`, `integrations:write`, `mcp-servers:write`) in the space you create it from, which becomes its home. `DELETE /api/packages/{type}/{scope}/{name}` removes a package, and is refused while it is in use.
+Creating a package needs the type's `write` permission (`agents:write`, `skills:write`, `integrations:write`) in the space you create it from, which becomes its home. `DELETE /api/packages/{type}/{scope}/{name}` removes a package, and is refused while it is in use.
 
 ## Forking
 
@@ -113,4 +112,4 @@ Creating a package needs the type's `write` permission (`agents:write`, `skills:
 
 ## System packages
 
-The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more). They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).

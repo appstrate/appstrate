@@ -273,9 +273,9 @@ await orch.cleanupOrphans();
 // Stand-in for the platform API on the loopback alias — gives the guest's
 // "platform reachable" probe something to answer it. Bound AFTER
 // initialize() (which creates the alias).
-// It also serves VM4's routes (smoke-runner-egress.ts): the probe mcp-server
+// It also serves VM4's routes (smoke-runner-egress.ts): the probe integration
 // bundle the in-guest sidecar fetches exactly like the real
-// /internal/mcp-server-bundle route, the MITM integration's credential
+// /internal/integration-bundle route, the MITM integration's credential
 // exactly like /internal/integration-credentials (the run token is not
 // checked — nothing else is served), and the counter paths of the
 // direct-egress assertion.

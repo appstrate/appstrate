@@ -58,7 +58,7 @@
  *                       installs every declared peer, optional ones included,
  *                       because it imports every subpath.
  *   Ambient types       `@types/bun`. `engines.bun` already declares a Bun runtime,
- *                       core calls `Bun.*` (storage-fs, mcp-server-bundle) and
+ *                       core calls `Bun.*` (storage-fs) and
  *                       imports `node:*`. We deliberately do NOT add `@types/bun`
  *                       to `dependencies`: a hoisted global-types package silently
  *                       injects globals into the consumer's whole program. Every

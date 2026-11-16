@@ -6,12 +6,11 @@
  * Sources:  scripts/system-packages/{type}-{name}-{version}/
  * Output:   system-packages/{type}-{name}-{version}.afps
  *
- * Discovers every package source directory regardless of type — both
- * `integration-*` (AFPS integration manifests) and `mcp-server-*` (MCPB
- * manifests with the AFPS identity contract lifted to the root per AFPS
- * §3.4 — `type: "mcp-server"`, `name`, `schema_version` all at the
- * top level). `validateManifest` dispatches by root `type`, so the loop
- * below is type-agnostic.
+ * Discovers every package source directory regardless of type (`integration-*`
+ * AFPS integration manifests, plus skills if any). A local integration carries
+ * its MCP server payload (`server/**`) next to its manifest, and every file of the
+ * source directory is bundled, so the archive is self-contained. `validateManifest`
+ * dispatches by root `type`, so the loop below is type-agnostic.
  *
  * Each source directory must contain a manifest.json. All files in the
  * directory are bundled into the archive.
@@ -189,8 +188,6 @@ async function main() {
     }
 
     const manifest = result.manifest;
-    // AFPS (§3.4) lifted mcp-server identity to the manifest root, so
-    // every package type now declares its `type` at the top level.
     const type = (manifest.type as string | undefined) ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
 

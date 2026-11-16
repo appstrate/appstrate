@@ -98,7 +98,6 @@ const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReader
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
-const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -280,9 +279,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/integrations": <IntegrationsPage />,
   "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
-  "/mcp-servers": <McpServersPage />,
-  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
-  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   "/catalogue": <CatalogueIndexRedirect />,
   "/catalogue/:type": <CataloguePage />,
   "/preferences": <Outlet />,
@@ -336,7 +332,6 @@ const flatPaths = (overlay: boolean) =>
 const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
   ["/agents/", "agent"],
   ["/skills/", "skill"],
-  ["/mcp-servers/", "mcp-server"],
   ["/integrations/", "integration"],
 ];
 
@@ -345,27 +340,20 @@ const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
 const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
   "/agents": "agent",
   "/skills": "skill",
-  "/mcp-servers": "mcp-server",
   "/integrations": "integrations",
   "/files": "documents",
 };
 
 /**
- * The collection pages' titles (their crumb), whether they carry an Actions menu, and what leads
- * and ends their bar: `tabs` (`CollectionTabs`) and `views` (the cards-or-table switch).
+ * The collection pages' titles (their crumb), whether they carry an Actions menu, and what ends
+ * their bar: `views` (the cards-or-table switch).
  */
 const LIST_PAGE: Partial<
-  Record<RoutePath, { titleKey: string; actions: boolean; tabs?: boolean; views?: boolean }>
+  Record<RoutePath, { titleKey: string; actions: boolean; views?: boolean }>
 > = {
   "/agents": { titleKey: "common:nav.agents", actions: true, views: true },
   "/skills": { titleKey: "settings:packages.type.skills", actions: true, views: true },
-  "/mcp-servers": { titleKey: "settings:packages.type.mcp-servers", actions: true, views: true },
-  "/integrations": {
-    titleKey: "settings:integrations.title",
-    actions: true,
-    tabs: true,
-    views: true,
-  },
+  "/integrations": { titleKey: "settings:integrations.title", actions: true, views: true },
   "/schedules": { titleKey: "common:nav.schedules", actions: true },
   "/runs": { titleKey: "agents:runs.title", actions: true },
   "/files": { titleKey: "common:nav.files", actions: false, views: true },
@@ -405,7 +393,6 @@ function skeletonOf(path: RoutePath): ReactNode {
       list={LIST_VIEW_OF[path]}
       titleKey={page?.titleKey}
       actions={page?.actions}
-      tabs={page?.tabs}
       views={page?.views}
     />
   );

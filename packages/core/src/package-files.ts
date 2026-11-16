@@ -52,16 +52,14 @@ export const PACKAGE_MANIFEST_FILE = "manifest.json";
  * The URL segment of each type's collection — `/api/packages/<segment>/…`, the
  * per-type create, detail, update and versions routes.
  *
- * Declared, never derived: `mcp-server` → `mcp-servers` happens to add an `s`,
- * but a rule that builds a plural by appending a letter is one new type away
- * from a route that does not exist. The API mounts its routers on these
+ * Declared, never derived: a rule that builds a plural by appending a letter
+ * is one new type away from a route that does not exist. The API mounts its routers on these
  * segments, and the SPA and the CLI address them through this same map.
  */
 export const PACKAGE_TYPE_ROUTE_SEGMENT = {
   agent: "agents",
   skill: "skills",
   integration: "integrations",
-  "mcp-server": "mcp-servers",
 } as const satisfies Record<PackageType, string>;
 
 /** One package type's primary-content entry: which file, and whether it is mandatory. */
@@ -92,9 +90,6 @@ export interface PackageContentEntry {
  *   column unconditionally would invent an `INTEGRATION.md` whose body is the
  *   package's own manifest. So a reader must overlay it only on top of an
  *   entry that already exists.
- * - **`null`** — `mcp-server` has no such entry at all: its content *is*
- *   `manifest.json` (AFPS §3.4), and the value stored alongside the package is
- *   a redundant copy of the manifest text rather than a file of its own.
  *
  * `required` belongs here because it is a property of the TYPE, exactly like
  * the filename is. It was a `type === "integration"` literal inside the
@@ -122,11 +117,10 @@ export interface PackageContentEntry {
  * per-type rules, alongside checks this table has no way to express (a
  * non-empty `prompt.md`, a `name` in `SKILL.md`'s frontmatter).
  */
-export const PACKAGE_CONTENT_ENTRY: Record<PackageType, PackageContentEntry | null> = {
+export const PACKAGE_CONTENT_ENTRY: Record<PackageType, PackageContentEntry> = {
   agent: { path: "prompt.md", required: true },
   skill: { path: "SKILL.md", required: true },
   integration: { path: "INTEGRATION.md", required: false },
-  "mcp-server": null,
 };
 
 /**
@@ -134,12 +128,12 @@ export const PACKAGE_CONTENT_ENTRY: Record<PackageType, PackageContentEntry | nu
  * the filename and nothing else (the package UI's tab labels, the ZIP
  * extractor). DERIVED, never declared a second time — the two cannot drift.
  */
-export const PACKAGE_CONTENT_FILE: Record<PackageType, string | null> = Object.fromEntries(
-  Object.entries(PACKAGE_CONTENT_ENTRY).map(([type, entry]): [string, string | null] => [
+export const PACKAGE_CONTENT_FILE: Record<PackageType, string> = Object.fromEntries(
+  Object.entries(PACKAGE_CONTENT_ENTRY).map(([type, entry]): [string, string] => [
     type,
-    entry?.path ?? null,
+    entry.path,
   ]),
   // `Object.entries` / `Object.fromEntries` widen the key back to `string`; the
   // input is already keyed by `PackageType`, so the assertion below only
   // restores what the round-trip erased — it does not claim anything new.
-) as Record<PackageType, string | null>;
+) as Record<PackageType, string>;

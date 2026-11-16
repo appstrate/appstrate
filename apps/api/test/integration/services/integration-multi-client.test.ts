@@ -57,7 +57,14 @@ const PUBLIC_AUTH: AfpsManifestAuth = {
 } as AfpsManifestAuth;
 
 const LOCAL_MANIFEST = {
-  source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
+  source: {
+    kind: "local",
+    server: {
+      type: "node",
+      entry_point: "server/index.js",
+      mcp_config: { command: "node", args: ["server/index.js"] },
+    },
+  },
 } as unknown as IntegrationManifest;
 
 describe("integration multi-client", () => {
