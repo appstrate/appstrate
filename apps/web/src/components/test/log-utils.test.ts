@@ -709,6 +709,7 @@ describe("toolLabel and journalSearchText — the names a tool call goes by", ()
   it("names the runner's own tools by their label", () => {
     expect(toolLabel(call("output"), t)).toBe("t(log.harness.output)");
     expect(toolLabel(call("publish_file"), t)).toBe("t(log.harness.publish_file)");
+    expect(toolLabel(call("bash"), t)).toBe("t(log.harness.bash)");
   });
 
   it("keeps the name the model called for a call without identity", () => {

@@ -564,10 +564,20 @@ export function journalGroupElapsedMs(group: JournalGroup): number {
   return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
 }
 
-/** The tools the runner itself offers the model (`@appstrate/runner-pi` harness tools). */
+/**
+ * The tools the runner itself offers the model: its harness tools and the coding agent's
+ * built-ins (`@appstrate/runner-pi`), each with the key of its label.
+ */
 const HARNESS_TOOL_LABELS = new Map([
   ["output", "log.harness.output"],
   ["publish_file", "log.harness.publish_file"],
+  ["read", "log.harness.read"],
+  ["bash", "log.harness.bash"],
+  ["edit", "log.harness.edit"],
+  ["write", "log.harness.write"],
+  ["grep", "log.harness.grep"],
+  ["find", "log.harness.find"],
+  ["ls", "log.harness.ls"],
 ]);
 
 /** What a tool row is called: its server's title or name, a harness tool's label, else the name the model called. */
