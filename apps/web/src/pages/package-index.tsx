@@ -7,8 +7,8 @@
  * Integrations keep their own page: execution tabs, protocol filter, columns.
  *
  * In « Vue d'ensemble » it lists every space the reader reaches, one row per
- * placement naming its space, read-only: creating, importing, activating and
- * running all act in one space, which the list does not name.
+ * placement naming its space. A row runs in its own space; creating, importing
+ * and browsing the catalogue ask which space (`useSpaceAction`).
  */
 
 import { useState } from "react";
@@ -38,6 +38,7 @@ import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceAction } from "../hooks/use-space-action";
 
 type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
 
@@ -125,9 +126,12 @@ function PackageIndexBody({
   );
   // Creating — by hand, with the chat or by import — is a write on the package
   // type, as its routes are. The import names the type, so the server refuses
-  // an archive of another one.
-  const canCreate = !spanning && can(packagePermission(type, "write"));
-  const canActivate = !spanning && can(spacePackagePermission(type, "activate"));
+  // an archive of another one. Offered where a space grants it; the dialogs open
+  // in the working space, which the action entered when it asked for one.
+  const write = packagePermission(type, "write");
+  const create = useSpaceAction({ permission: write });
+  const browse = useSpaceAction({ permission: spacePackagePermission(type, "activate") });
+  const canCreate = can(write);
   const creation = useCreationHandoff(type, canCreate);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
@@ -145,8 +149,8 @@ function PackageIndexBody({
     id: "create",
     label: words.create,
     icon: Plus,
-    onSelect: creation.open,
-    hidden: !canCreate,
+    onSelect: () => create.run(creation.open),
+    hidden: !create.offered,
   };
 
   return (
@@ -156,22 +160,22 @@ function PackageIndexBody({
         variant="collection"
         breadcrumbs={[{ label: words.title }]}
         actions={
-          canCreate || canActivate ? (
+          create.offered || browse.offered ? (
             <PageActionsMenu
               actions={[
                 {
                   id: "catalogue",
                   label: t("catalogue.browse", { ns: "settings" }),
                   icon: LibraryBig,
-                  to: catalogueHref(type),
-                  hidden: !canActivate,
+                  ...browse.link(catalogueHref(type)),
+                  hidden: !browse.offered,
                 },
                 {
                   id: "import",
                   label: t("nav.import", { ns: "common" }),
                   icon: Upload,
-                  onSelect: () => setImporting(true),
-                  hidden: !canCreate,
+                  onSelect: () => create.run(() => setImporting(true)),
+                  hidden: !create.offered,
                 },
                 createAction,
               ]}
@@ -190,7 +194,6 @@ function PackageIndexBody({
         entity={words.title}
         emptyMessage={spanning ? words.emptyAcross : words.empty}
         emptyHint={spanning ? undefined : <SpaceLibraryHint type={type} />}
-        cardRun={!spanning}
         spanning={spanning}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
@@ -226,6 +229,8 @@ function PackageIndexBody({
           integration={integration}
         />
       )}
+      {create.picker}
+      {browse.picker}
     </>
   );
 }

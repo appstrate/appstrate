@@ -27,7 +27,7 @@ import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { routeOf } from "../lib/route-match";
-import { holdsOverview } from "../lib/space-lists";
+import { holdsOverview, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -147,7 +147,7 @@ const TRIGGER_BOX = {
 export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
-  const { currentOrg, orgs, loading } = useOrg();
+  const { currentOrg, orgs, loading, switchOrg } = useOrg();
   const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const enterSpace = useEnterSpace();
@@ -204,16 +204,25 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       closeSwitcherAndSidebar();
     });
 
-  /** « Vue d'ensemble » keeps the working space; a page that does not hold the mode gives way to its home, the dashboard. */
+  /**
+   * « Vue d'ensemble » of the explored organization, in one pick. In the current one it keeps
+   * the working space, and a page that does not hold the mode gives way to its home, the
+   * dashboard. In another it switches there (the space resolver enters the space remembered
+   * there, else the default) and lands on that home.
+   */
   const chooseOverview = () =>
     requestScopeChange(() => {
-      overview.choose(true);
-      if (!holdsOverview(routeOf(pathname))) navigate("/");
+      overview.choose(true, exploredId ?? undefined);
+      if (isExploringElsewhere && exploredId) {
+        switchOrg(exploredId);
+        navigate("/");
+      } else if (!holdsOverview(routeOf(pathname))) navigate("/");
       closeSwitcherAndSidebar();
     });
   const overviewLabel = t("overview.title");
+  const overviewCurrent = overview.on && !isExploringElsewhere;
   const offersOverview =
-    overview.offered && !isExploringElsewhere && matchesSearch(query, [overviewLabel]);
+    overviewOffered(exploredSpaces.data) && matchesSearch(query, [overviewLabel]);
 
   const currentContextLabel = overview.on
     ? overviewLabel
@@ -382,16 +391,16 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     <div className="mb-1 border-b pb-1">
                       <PickerRow
                         data-testid="space-item-overview"
-                        aria-current={overview.on || undefined}
+                        aria-current={overviewCurrent || undefined}
                         onClick={chooseOverview}
-                        rowClassName={overview.on && "bg-primary/10 hover:bg-primary/10"}
+                        rowClassName={overviewCurrent && "bg-primary/10 hover:bg-primary/10"}
                         onNavigate={closeSwitcherAndSidebar}
                       >
                         <OverviewTile className="size-6 rounded-md" />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">
                           {overviewLabel}
                         </span>
-                        {overview.on && <Check size={15} className="text-primary shrink-0" />}
+                        {overviewCurrent && <Check size={15} className="text-primary shrink-0" />}
                       </PickerRow>
                     </div>
                   )}

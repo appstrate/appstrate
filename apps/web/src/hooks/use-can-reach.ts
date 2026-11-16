@@ -7,7 +7,7 @@ import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { holdsOverview, overviewListVerdict } from "../lib/space-lists";
+import { overviewListVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -38,19 +38,6 @@ export function useCanReach(): (target: string) => boolean {
       return !route || verdict(route) === "granted";
     },
     [verdict],
-  );
-}
-
-/** Whether the shell links to `target`: reachable, and in « Vue d'ensemble » a route that holds it. */
-export function useShellReach(): (target: string) => boolean {
-  const canReach = useCanReach();
-  const { on } = useOverviewMode();
-  return useCallback(
-    (target: string) => {
-      const route = routeOf(target);
-      return canReach(target) && (!on || holdsOverview(route));
-    },
-    [canReach, on],
   );
 }
 

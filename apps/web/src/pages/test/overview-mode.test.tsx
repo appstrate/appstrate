@@ -3,8 +3,10 @@
 /**
  * « Vue d'ensemble » over the working space: the switcher names it, the list pages and the
  * dashboard ask the org routes (which list every space the reader reaches) and nothing of the
- * working space's lists, one row per placement naming its space and linking into it, they create
- * nothing, and the gate opens a list another space admits. Out of the mode, nothing changes.
+ * working space's lists, one row per placement naming its space and linking into it, and the gate
+ * opens a list another space admits. Nothing is hidden by the mode: a row acts in its own space,
+ * by that space's grants, and an action naming no space is offered where some space grants it.
+ * Out of the mode, nothing changes.
  */
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
@@ -212,26 +214,34 @@ describe("the switcher", () => {
 });
 
 describe("a list page in the mode", () => {
-  it("asks the org route, and no list of the working space", () => {
+  it("asks the org route, its unread count included, and no list of the working space", () => {
     const { asked } = renderIn(true, <RunsPage />, "/runs");
-    expect(asked("paginated-runs").map((key) => key.slice(1, 3))).toEqual([
-      ["org_1", "across-spaces"],
-    ]);
+    const scopes = asked("paginated-runs").map((key) => key.slice(1, 3));
+    expect(scopes.length).toBeGreaterThan(0);
+    expect(scopes.every(([org, scope]) => org === "org_1" && scope === "across-spaces")).toBe(true);
   });
 
-  it("offers no « Tout marquer comme lu », which marks the working space's runs only", () => {
-    expect(renderIn(true, <RunsPage />, "/runs").html).not.toContain("data-page-actions-trigger");
-    // Out of the mode the runs page carries that menu.
+  it("offers « Tout marquer comme lu », as out of the mode", () => {
+    expect(renderIn(true, <RunsPage />, "/runs").html).toContain("data-page-actions-trigger");
     expect(renderIn(false, <RunsPage />, "/runs").html).toContain("data-page-actions-trigger");
   });
 
-  it("offers no creation, though the working space may create schedules", () => {
+  it("offers the creation a space grants, the list asking every space", () => {
     const { html, asked } = renderIn(true, <SchedulesListPage />, "/schedules");
-    expect(html).not.toContain("Nouvelle planification");
+    expect(html).toContain("data-page-actions-trigger");
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
   });
 
-  it("says the schedules are empty across the spaces, offering no creation", () => {
+  it("offers no creation where no space grants it", () => {
+    const readers = SPACES.map((s) => ({
+      ...s,
+      permissions: s.permissions.filter((p) => p !== "schedules:write"),
+    }));
+    const { html } = renderIn(true, <SchedulesListPage />, "/schedules", () => {}, readers);
+    expect(html).not.toContain("data-page-actions-trigger");
+  });
+
+  it("says the schedules are empty across the spaces, offering the creation", () => {
     const empty = (overview: boolean) =>
       renderIn(overview, <SchedulesListPage />, "/schedules", (qc) =>
         qc.setQueryData(
@@ -240,8 +250,7 @@ describe("a list page in the mode", () => {
         ),
       ).html;
     expect(empty(true)).toContain("Aucune planification dans vos espaces.");
-    expect(empty(true)).not.toContain("Nouvelle planification");
-    // Out of the mode the empty list offers the creation the working space may make.
+    expect(empty(true)).toContain("Nouvelle planification");
     expect(empty(false)).toContain("Nouvelle planification");
   });
 
@@ -265,16 +274,49 @@ describe("the agent index in the mode", () => {
     expect(html).toContain("Studio");
   });
 
-  it("offers no creation, import, catalogue nor run, though the working space may do all four", () => {
+  /** The table's body rows, by the space each one links into. */
+  const rowsOf = (html: string) => html.split("<tr").slice(2);
+  const runIn = (html: string, row: (tr: string) => boolean) =>
+    rowsOf(html)
+      .filter(row)
+      .every((tr) => tr.includes('aria-label="Lancer"'));
+
+  it("offers a row's run where the row's space grants it, whatever the working space grants", () => {
     const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed);
+    const there = (tr: string) => tr.includes("enterSpace=spc_b");
+    // spc_a grants `agents:run`, spc_b does not.
+    expect(runIn(html, (tr) => !there(tr))).toBe(true);
+    expect(
+      rowsOf(html)
+        .filter(there)
+        .some((tr) => tr.includes('aria-label="Lancer"')),
+    ).toBe(false);
+    // The same placements with the grants swapped: the run follows the row, not the working space.
+    const swapped = [
+      { ...SPACES[0]!, permissions: SPACES[0]!.permissions.filter((p) => p !== "agents:run") },
+      { ...SPACES[1]!, permissions: [...SPACES[1]!.permissions, "agents:run"] },
+    ];
+    const other = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, swapped).html;
+    expect(runIn(other, there)).toBe(true);
+    expect(
+      rowsOf(other)
+        .filter((tr) => !there(tr))
+        .some((tr) => tr.includes('aria-label="Lancer"')),
+    ).toBe(false);
+  });
+
+  it("offers no write while the space listing has not answered: it appears once, never flips", () => {
+    const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", (qc) => {
+      qc.removeQueries({ queryKey: ["get", "/api/spaces"] });
+      qc.setQueryData(["agents", "org_1", "spc_a"], [agent("spc_a")]);
+    });
     expect(html).not.toContain("data-page-actions-trigger");
-    expect(html).not.toContain("Nouvel agent");
     expect(html).not.toContain('aria-label="Lancer"');
-    // Out of the mode the same agent, in the working space, offers its run.
-    const here = renderIn(false, <PackageIndexPage type="agent" />, "/agents", (qc) =>
-      qc.setQueryData(["agents", "org_1", "spc_a"], [agent("spc_a")]),
-    ).html;
-    expect(here).toContain('aria-label="Lancer"');
+  });
+
+  it("offers the creation, import and catalogue a space grants", () => {
+    const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed);
+    expect(html).toContain("data-page-actions-trigger");
   });
 
   it("is the working space's page out of the mode", () => {
@@ -284,12 +326,12 @@ describe("the agent index in the mode", () => {
     expect(html).not.toContain(">Espace<");
   });
 
-  it("says the list is empty across the spaces, offering no creation", () => {
+  it("says the list is empty across the spaces, offering the creation", () => {
     const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", (qc) =>
       qc.setQueryData(["agents", "org_1", "across-spaces"], []),
     );
     expect(html).toContain("Aucun agent actif dans vos espaces.");
-    expect(html).not.toContain("Nouvel agent");
+    expect(html).toContain("Nouvel agent");
   });
 });
 
@@ -304,7 +346,7 @@ describe("the skill index in the mode", () => {
     expect(asked("packages")).toEqual([["packages", "skills", "org_1", "across-spaces"]]);
     expect(html).toContain('href="/skills/@acme/crm"');
     expect(html).toContain('href="/skills/@acme/crm?enterSpace=spc_b"');
-    expect(html).not.toContain("data-page-actions-trigger");
+    expect(html).toContain("data-page-actions-trigger");
   });
 });
 
@@ -343,7 +385,7 @@ describe("the integration index in the mode", () => {
     expect(html).toMatch(
       /title="spc_b">spc_b<\/span><span aria-hidden="true">·<\/span>2 connexions/,
     );
-    expect(html).not.toContain("data-page-actions-trigger");
+    expect(html).toContain("data-page-actions-trigger");
   });
 
   it("counts integrations, not their placements", () => {
@@ -352,7 +394,7 @@ describe("the integration index in the mode", () => {
     expect(html).not.toContain("2 intégrations");
   });
 
-  it("says the list is empty across the spaces, offering no creation", () => {
+  it("says the list is empty across the spaces, offering the creation", () => {
     const empty = (overview: boolean) =>
       renderIn(overview, <IntegrationsPage />, "/integrations", (qc) =>
         qc.setQueryData(
@@ -363,8 +405,7 @@ describe("the integration index in the mode", () => {
         ),
       ).html;
     expect(empty(true)).toContain("Aucune intégration active dans vos espaces.");
-    expect(empty(true)).not.toContain("Nouvelle intégration");
-    // Out of the mode the empty list offers the creation the working space may make.
+    expect(empty(true)).toContain("Nouvelle intégration");
     expect(empty(false)).toContain("Aucune intégration active dans cet espace.");
     expect(empty(false)).toContain("Nouvelle intégration");
   });
@@ -401,6 +442,46 @@ describe("the files gallery in the mode", () => {
         pageParams: [undefined],
       },
     );
+
+  it("offers each row the keep and delete its own space grants", () => {
+    const writable = (name: string, spaceId: string, granted: boolean) =>
+      fileFixture({
+        name,
+        spaceId,
+        expiresAt: "2026-12-01T00:00:00.000Z",
+        capabilities: {
+          visible: true,
+          metadata: true,
+          download: false,
+          preview: false,
+          keep: granted,
+          delete: granted,
+        },
+      });
+    const { html } = renderIn(true, <FilesPage />, "/files", (queryClient) =>
+      queryClient.setQueryData(
+        [
+          "get",
+          "/api/orgs/{orgId}/files",
+          "paged",
+          { path: { orgId: "org_1" }, query: { purpose: undefined, q: undefined, limit: 25 } },
+        ],
+        {
+          pages: [
+            {
+              object: "list",
+              hasMore: false,
+              data: [writable("here", "spc_a", false), writable("there", "spc_b", true)],
+            },
+          ],
+          pageParams: [undefined],
+        },
+      ),
+    );
+    // Keep and delete are the rows' only deeds: a row has a menu exactly when its space grants them.
+    expect(html).toContain("Plus d'actions pour there");
+    expect(html).not.toContain("Plus d'actions pour here");
+  });
 
   it("links a file to its run where the file's space reads runs, not the working space", () => {
     const { html } = renderIn(true, <FilesPage />, "/files", seed);
@@ -454,10 +535,11 @@ describe("the dashboard in the mode", () => {
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_a"');
   });
 
-  it("offers neither the assistant nor a run", () => {
+  it("offers the assistant, and an agent's run on the card of the space that grants it", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
-    expect(html).not.toContain("Demander à l’IA");
-    expect(html).not.toContain('aria-label="Lancer"');
+    expect(html).toContain("Demander à l’IA");
+    // Two cards of the same agent; only spc_a grants `agents:run`.
+    expect(html.match(/aria-label="Lancer"/g)).toHaveLength(1);
     // Out of the mode, a working space that reads runs offers the assistant and the agent's run.
     const here = renderIn(
       false,
@@ -494,9 +576,9 @@ describe("the dashboard in the mode", () => {
     expect(html).toMatch(/Agents disponibles<\/span><div><p[^>]*>1<\/p>/);
   });
 
-  it("offers no assistant while the space listing has not answered", () => {
-    // No org, so no listing: whether the mode is on is not known yet.
-    expect(render(<DashboardPage />)).not.toContain("Demander à l’IA");
+  it("offers the assistant while the space listing has not answered, as once it has", () => {
+    // No org, so no listing: whether the mode is on is not known yet, and nothing waits on it.
+    expect(render(<DashboardPage />)).toContain("Demander à l’IA");
   });
 });
 

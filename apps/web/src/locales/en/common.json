@@ -23,6 +23,8 @@
   "products.studio": "Studio",
   "products.chat": "Chat",
   "overview.title": "Overview",
+  "spacePicker.title": "In which space?",
+  "spacePicker.description": "Choose the space to continue in.",
   "nav.section.activity": "Activity",
   "nav.dashboard": "Dashboard",
   "nav.breadcrumb": "Breadcrumb",

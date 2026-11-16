@@ -30,7 +30,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
-import { fileReaderPath, otherSpaceFileContext } from "../lib/file-link";
+import { fileContextHeader, fileReaderPath, otherSpaceFileContext } from "../lib/file-link";
 
 export function DocumentListPanel({
   documents,
@@ -60,7 +60,7 @@ export function DocumentListPanel({
   tableLabel?: string;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
-  /** The list spans several spaces: each row names its own, and none offers a write. */
+  /** The list spans several spaces: each row names its own. */
   spanning?: boolean;
 }) {
   const { t } = useTranslation("files");
@@ -73,16 +73,10 @@ export function DocumentListPanel({
   const currentSpaceId = useCurrentSpaceId();
   const spaceLabelOf = useSpaceLabelOf();
 
-  // A file of another space is read in its own, through the reader's `?org=…&space=…`, without
-  // switching. A list spanning spaces offers no write (keep, delete), the working space's rows
-  // included: the reader's « Ouvrir dans l'espace » leads to them.
+  // A file of another space is read, kept and deleted in its own, named on the request
+  // (`?org=…&space=…` for the reader), without switching. Its `capabilities` are already its
+  // space's: the server judges each row by the grant of the row's space.
   const contextOf = (doc: FileDto) => otherSpaceFileContext(doc.spaceId, orgId, currentSpaceId);
-  const rows = spanning
-    ? documents.map((doc) => ({
-        ...doc,
-        capabilities: { ...doc.capabilities, keep: false, delete: false },
-      }))
-    : documents;
   const readerHref = (doc: FileDto) => {
     const context = contextOf(doc);
     return context && doc.capabilities.preview ? fileReaderPath(doc.id, context) : undefined;
@@ -108,7 +102,7 @@ export function DocumentListPanel({
   // Keep ("pin") — clears the document's expiry.
   const onKeep = (doc: FileDto) =>
     keepDoc.mutate(
-      { params: { path: { id: doc.id } } },
+      { params: { path: { id: doc.id }, header: fileContextHeader(contextOf(doc)) } },
       {
         onSuccess: () => {
           toast.success(t("keep.success"));
@@ -120,7 +114,7 @@ export function DocumentListPanel({
     if (!pendingDelete) return;
     const id = pendingDelete.id;
     deleteDoc.mutate(
-      { params: { path: { id } } },
+      { params: { path: { id }, header: fileContextHeader(contextOf(pendingDelete)) } },
       {
         onSuccess: () => {
           toast.success(t("delete.success"));
@@ -152,7 +146,7 @@ export function DocumentListPanel({
       <div className="flex flex-col gap-3">
         {display === "cards" ? (
           <CardGrid
-            items={rows}
+            items={documents}
             itemKey={(doc) => doc.id}
             min="12rem"
             placeholder={<FileTileSkeleton />}
@@ -174,7 +168,7 @@ export function DocumentListPanel({
           />
         ) : display === "compact" ? (
           <ItemList
-            items={rows}
+            items={documents}
             itemKey={(doc) => doc.id}
             isLoading={isLoading && documents.length === 0}
             failure={error}
@@ -202,7 +196,7 @@ export function DocumentListPanel({
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
             surface={tableSurface}
-            rows={rows}
+            rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={readerHref}
             rowAction={(doc) => preview.open(doc.id)}

@@ -88,8 +88,8 @@ export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> 
 }
 
 /**
- * Only agents have a run state and a run action. `spanning`: an index across spaces, each row
- * naming its space and offering no run (a run acts in one space, which the list does not name).
+ * Only agents have a run state and a run action, which runs in the row's space. `spanning`: an
+ * index across spaces, each row naming its space.
  */
 export function usePackageColumns(holds: PackageType, spanning = false): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
@@ -135,6 +135,7 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
         <span className="relative z-10">
           <RunAgentButton
             packageId={item.id}
+            spaceId={item.spaceId}
             variant="ghost"
             size="icon"
             className="text-muted-foreground hover:text-primary size-7"
@@ -144,9 +145,5 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
     ),
   ];
 
-  const showsState = runnable;
-  const offersRun = runnable && !spanning;
-  return columns.filter(
-    (c) => (showsState || c.id !== "state") && (offersRun || c.id !== "actions"),
-  );
+  return columns.filter((c) => runnable || (c.id !== "state" && c.id !== "actions"));
 }

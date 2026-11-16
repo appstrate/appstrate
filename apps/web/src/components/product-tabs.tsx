@@ -13,7 +13,7 @@ import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useShellReach } from "@/hooks/use-can-reach";
+import { useSpaceAction, useSpacesFor } from "@/hooks/use-space-action";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
@@ -29,29 +29,35 @@ interface Product {
   enabled: boolean;
   /** Unread conversations, on the tab that leads to them. */
   unread?: number;
+  /** Replaces the plain navigation (« Vue d'ensemble » asks which space first). */
+  onSelect?: () => void;
 }
 
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  // In « Vue d'ensemble » the chat, which belongs to one space, is not offered.
-  const canReach = useShellReach();
-  const { can, ready } = usePermissions();
+  // The chat belongs to one space: in « Vue d'ensemble » it is offered where some space opens
+  // it, and opened in the space the reader picks.
+  const chat = useSpaceAction({ route: "/chat" });
+  const { on: overview, offered: canWrite } = useSpacesFor({ permission: "chat:write" });
+  const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
-  const chatReachable = canReach("/chat");
-  // The chat has no entry in the Studio's navigation: its unread count rides on this tab.
+  const chatReachable = chat.offered;
+  const chatLink = chat.link("/chat");
+  // The chat has no entry in the Studio's navigation: its unread count rides on this tab. It is
+  // the working space's, so « Vue d'ensemble » does not show it.
   const chatUnread = useChatUnreadCount(buildScopingHeaders, chatReachable);
   const hasChatSessions = useHasChatSessions(buildScopingHeaders, chatReachable);
   const chatShown = isChatTabShown({
     reachable: chatReachable,
-    canWrite: can("chat:write"),
+    canWrite,
     previewing,
     hasOwnSessions: hasChatSessions,
   });
 
   // The Chat tab is still undecided: its slot is reserved so Studio does not fill the row then split.
   const chatPending =
-    !ready || (chatReachable && !can("chat:write") && !previewing && hasChatSessions === undefined);
+    !ready || (chatReachable && !canWrite && !previewing && hasChatSessions === undefined);
 
   // Studio owns every route the chat does not, so it is active whenever the chat is not.
   const inChat = pathname.startsWith("/chat");
@@ -72,7 +78,8 @@ export function ProductTabs() {
       to: "/chat",
       active: inChat,
       enabled: chatShown,
-      unread: chatUnread,
+      unread: overview ? undefined : chatUnread,
+      onSelect: "onSelect" in chatLink ? chatLink.onSelect : undefined,
     },
   ].filter((p) => p.enabled);
 
@@ -90,6 +97,13 @@ export function ProductTabs() {
             key={p.id}
             to={p.to}
             aria-current={p.active ? "page" : undefined}
+            onClick={
+              p.onSelect &&
+              ((event) => {
+                event.preventDefault();
+                p.onSelect?.();
+              })
+            }
             className={cn(
               "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
               p.active
@@ -110,6 +124,7 @@ export function ProductTabs() {
         ))}
         {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
       </nav>
+      {chat.picker}
     </div>
   );
 }

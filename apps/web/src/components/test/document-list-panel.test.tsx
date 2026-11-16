@@ -167,7 +167,7 @@ describe("a list spanning spaces", () => {
     expect(panel(false)).not.toContain('data-column="space"');
   });
 
-  it("offers no write on any row while spanning, the working space's included", () => {
+  it("offers each row the writes its own space grants, spanning or not", () => {
     // Keep and delete are its only deeds: its « … » menu shows exactly when one is offered.
     const writable = fileFixture({
       ...file,
@@ -183,7 +183,17 @@ describe("a list spanning spaces", () => {
     const rows = (spanning: boolean) =>
       inSpace1(
         <DocumentListPanel
-          documents={[writable, { ...writable, id: "file_ailleurs", spaceId: "spc_2" }]}
+          documents={[
+            writable,
+            { ...writable, id: "file_ailleurs", name: "ailleurs.txt", spaceId: "spc_2" },
+            {
+              ...writable,
+              id: "file_lu",
+              name: "lu.txt",
+              spaceId: "spc_3",
+              capabilities: { ...writable.capabilities, keep: false, delete: false },
+            },
+          ]}
           display="compact"
           isLoading={false}
           error={null}
@@ -191,8 +201,12 @@ describe("a list spanning spaces", () => {
           spanning={spanning}
         />,
       );
-    const actions = (html: string) => html.match(/aria-label="Plus d'actions pour/g)?.length ?? 0;
-    expect(actions(rows(false))).toBe(2);
-    expect(actions(rows(true))).toBe(0);
+    for (const spanning of [false, true]) {
+      const html = rows(spanning);
+      expect(html).toContain(`Plus d'actions pour ${writable.name}`);
+      expect(html).toContain("Plus d'actions pour ailleurs.txt");
+      // Its space grants it neither.
+      expect(html).not.toContain("Plus d'actions pour lu.txt");
+    }
   });
 });

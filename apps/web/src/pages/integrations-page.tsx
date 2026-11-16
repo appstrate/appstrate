@@ -3,8 +3,8 @@
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
  * placed here but switched off, or never switched on, is in the space library. In « Vue
- * d'ensemble » it lists every space the reader reaches, one row per placement naming its space,
- * read-only: creating, importing and activating act in one space, which the list does not name.
+ * d'ensemble » it lists every space the reader reaches, one row per placement naming its space;
+ * creating, importing and browsing the catalogue ask which space (`useSpaceAction`).
  */
 
 import { useMemo, useState } from "react";
@@ -46,6 +46,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceAction } from "../hooks/use-space-action";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useIntegrationListColumns } from "./integration-list-columns";
@@ -66,17 +67,20 @@ export function IntegrationsPage() {
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const [importing, setImporting] = useState(false);
   // The same grants as every other package index (`PackageIndexPage`): creating,
-  // by import too, is a write on the type.
-  const canCreate = !spanning && can(packagePermission("integration", "write"));
-  const canBrowse = !spanning && can(spacePackagePermission("integration", "activate"));
+  // by import too, is a write on the type. Offered where a space grants it; the
+  // dialogs open in the working space, which the action entered when it asked for one.
+  const write = packagePermission("integration", "write");
+  const create = useSpaceAction({ permission: write });
+  const browse = useSpaceAction({ permission: spacePackagePermission("integration", "activate") });
+  const canCreate = can(write);
   const creation = useCreationHandoff("integration", canCreate);
   const [creating, setCreating] = useState(false);
   const createAction: MenuAction = {
     id: "create",
     label: t("integrations.create"),
     icon: Plus,
-    onSelect: creation.open,
-    hidden: !canCreate,
+    onSelect: () => create.run(creation.open),
+    hidden: !create.offered,
   };
 
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -138,22 +142,22 @@ export function IntegrationsPage() {
         wrapActions
         actions={
           // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate) && (
+          (browse.offered || create.offered) && (
             <PageActionsMenu
               actions={[
                 {
                   id: "catalogue",
                   label: t("catalogue.browse"),
                   icon: LibraryBig,
-                  to: catalogueHref("integration"),
-                  hidden: !canBrowse,
+                  ...browse.link(catalogueHref("integration")),
+                  hidden: !browse.offered,
                 },
                 {
                   id: "import",
                   label: t("nav.import", { ns: "common" }),
                   icon: Upload,
-                  onSelect: () => setImporting(true),
-                  hidden: !canCreate,
+                  onSelect: () => create.run(() => setImporting(true)),
+                  hidden: !create.offered,
                 },
                 createAction,
               ]}
@@ -278,6 +282,8 @@ export function IntegrationsPage() {
       {creating && canCreate && (
         <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
+      {create.picker}
+      {browse.picker}
     </div>
   );
 }

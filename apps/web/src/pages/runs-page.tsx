@@ -31,8 +31,9 @@ export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { on: spanning } = useOverviewMode();
   const runSpaces = useAdmittingSpaces("runs");
-  // « Tout marquer comme lu » marks the CURRENT space's runs only: a list spanning spaces offers it not.
-  const unreadCount = useUnreadRunCount(!spanning);
+  // « Tout marquer comme lu » marks what the list spans: the working space, or each space
+  // admitting the list.
+  const unreadCount = useUnreadRunCount(true, spanning);
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -91,9 +92,9 @@ export function RunsPage() {
                 id: "mark-all-read",
                 label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
-                onSelect: () => markAllRead.mutate({}),
+                onSelect: () =>
+                  markAllRead.mutate(spanning ? runSpaces.map((space) => space.id) : null),
                 disabled: markAllRead.isPending || !unreadCount,
-                hidden: spanning,
               },
             ]}
           />

@@ -234,15 +234,9 @@ export function ListPageSkeleton({ list }: { list?: string }) {
 
 function ViewedCollectionBlocks({ list }: { list: string }) {
   const [view] = useListView(list);
-  // « Vue d'ensemble » offers no run (a run acts in one space) and names each card's space.
-  const { on, readOnly } = useOverviewMode();
-  return (
-    <CollectionBlocks
-      cards={view === "cards"}
-      runnable={list === "agent" && !readOnly}
-      spaceName={on}
-    />
-  );
+  // « Vue d'ensemble » names each card's space.
+  const { on } = useOverviewMode();
+  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent"} spaceName={on} />;
 }
 
 /** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
@@ -436,11 +430,10 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
- * In « Vue d'ensemble », or while it is not known, the agent cards carry no run button; in it,
- * they name their space.
+ * In « Vue d'ensemble » the agent cards name their space.
  */
 export function DashboardBodySkeleton() {
-  const { on, readOnly } = useOverviewMode();
+  const { on } = useOverviewMode();
   return (
     <Waiting className="flex flex-col gap-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -453,7 +446,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable={!readOnly} spaceName={on} />
+              <PackageCardSkeleton runnable spaceName={on} />
             </div>
           ))}
         </div>

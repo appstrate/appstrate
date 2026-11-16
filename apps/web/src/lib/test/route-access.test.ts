@@ -50,7 +50,9 @@ describe("route declarations", () => {
   /** Routes outside `MainLayout`, which no declaration covers. */
   const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
   const links = (text: string) => [...text.matchAll(/\bto(?:=|: )"([^"]+)"/g)].map((m) => m[1]!);
-  const reached = (text: string) => [...text.matchAll(/canReach\("([^"]+)"\)/g)].map((m) => m[1]!);
+  /** A route gated by its declaration: `canReach`, or `useSpaceAction`, which reads it per space in « Vue d'ensemble ». */
+  const reached = (text: string) =>
+    [...text.matchAll(/(?:canReach\(|useSpaceAction\(\{ route: )"([^"]+)"/g)].map((m) => m[1]!);
 
   it("points every shell link at a declared route", () => {
     const targets = SHELL.flatMap(({ text }) => [

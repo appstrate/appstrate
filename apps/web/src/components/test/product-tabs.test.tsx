@@ -2,7 +2,7 @@
 
 /**
  * The products toggle draws nothing when only one product remains: one choice is no choice. In
- * « Vue d'ensemble » the chat, which belongs to one space, is not offered, so nothing is drawn.
+ * « Vue d'ensemble » the Chat tab is offered where some space opens the chat, as out of it.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -53,8 +53,8 @@ describe("the products toggle", () => {
     }
   });
 
-  it("is not drawn in « Vue d'ensemble », though the working space writes in the chat", () => {
-    const tabs = (overview: boolean) => {
+  it("draws the Chat tab in « Vue d'ensemble » where a space opens the chat", () => {
+    const tabs = (overview: boolean, workingPermissions: string[]) => {
       const stubs = [
         spyOn(orgStore, "getInitialState").mockReturnValue({
           ...orgStore.getInitialState(),
@@ -77,12 +77,12 @@ describe("the products toggle", () => {
       window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
       const queryClient = new QueryClient();
       queryClient.setQueryData(["orgs"], [ORG]);
-      // Two spaces reading runs offer the mode; both write in the chat.
-      const space = (id: string) => ({
+      // Two spaces reading runs offer the mode; the other one writes in the chat.
+      const space = (id: string, permissions: string[]) => ({
         id,
         object: "space",
         access: "member",
-        permissions: ["runs:read", "chat:read", "chat:write"],
+        permissions,
         personal: false,
         isDefault: id === "spc_a",
         name: id,
@@ -90,7 +90,14 @@ describe("the products toggle", () => {
       });
       queryClient.setQueryData(
         ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
-        { object: "list", hasMore: false, data: [space("spc_a"), space("spc_b")] },
+        {
+          object: "list",
+          hasMore: false,
+          data: [
+            space("spc_a", workingPermissions),
+            space("spc_b", ["runs:read", "chat:read", "chat:write"]),
+          ],
+        },
       );
       try {
         return render(<ProductTabs />, { queryClient });
@@ -99,7 +106,11 @@ describe("the products toggle", () => {
         for (const stub of stubs) stub.mockRestore();
       }
     };
-    expect(tabs(false)).toContain('href="/chat"');
-    expect(tabs(true)).toBe("");
+    const chatter = ["runs:read", "chat:read", "chat:write"];
+    expect(tabs(false, chatter)).toContain('href="/chat"');
+    expect(tabs(true, chatter)).toContain('href="/chat"');
+    // The working space opens no chat: offered in the mode (another space does), not out of it.
+    expect(tabs(true, ["runs:read"])).toContain('href="/chat"');
+    expect(tabs(false, ["runs:read"])).toBe("");
   });
 });

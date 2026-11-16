@@ -57,6 +57,61 @@ export function admittingSpaces<S extends ListedSpace>(
   return (spaces ?? []).filter(admittedIn(admits));
 }
 
+/** What the caller may do in one space: its effective set there, the org-level grants included. */
+export type SpaceGate = (permission: string) => boolean;
+
+function gateIn(
+  space: { permissions: readonly string[] },
+  orgPermissions: readonly string[] = [],
+): SpaceGate {
+  return (permission) =>
+    orgPermissions.includes(permission) || space.permissions.includes(permission);
+}
+
+/**
+ * The spaces an action naming no space may act in: held with a role, and admitted by `admits`
+ * judging the caller's gate there, as `usePermissions().can` judges the working space.
+ */
+export function spacesWhere<S extends ListedSpace>(
+  spaces: readonly S[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  admits: (can: SpaceGate, space: S) => boolean,
+): S[] {
+  return (spaces ?? []).filter(
+    (space) => isSpaceEnterable(space) && admits(gateIn(space, orgPermissions), space),
+  );
+}
+
+/**
+ * How an action naming no space finds one in « Vue d'ensemble »: not offered without an eligible
+ * space, the only one taken without asking, the reader asked between several.
+ */
+type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
+
+export function spaceChoice(eligible: readonly { id: string }[]): SpaceChoice {
+  if (eligible.length === 0) return { kind: "none" };
+  if (eligible.length === 1) return { kind: "one", spaceId: eligible[0]!.id };
+  return { kind: "ask" };
+}
+
+/**
+ * Whether `permission` holds in a row's space, where an action on that row acts: the working
+ * space's gate when the row has no space or is the working space's, else the listed space's
+ * (held with a role). A space the listing does not hold grants nothing.
+ */
+export function grantsInRowSpace(
+  rowSpaceId: string | undefined,
+  workingSpaceId: string | null,
+  can: SpaceGate,
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  permission: string,
+): boolean {
+  if (!rowSpaceId || rowSpaceId === workingSpaceId) return can(permission);
+  const space = spaces?.find((s) => s.id === rowSpaceId);
+  return !!space && isSpaceEnterable(space) && gateIn(space, orgPermissions)(permission);
+}
+
 /** Whether some space grants `permission`: in the mode, what opens a section drawn across spaces. */
 export function grantedInSomeSpace(
   spaces: readonly ListedSpace[] | undefined,
@@ -109,9 +164,9 @@ function belongsToSpace(path: RoutePath): boolean {
 }
 
 /**
- * Whether rendering `path` keeps the mode, and so whether the shell links to it there: the lists
- * and their rows, any route of no space (the dashboard, `/`, is one), and an address no route
- * declares. Any other route leaves it, into the working space.
+ * Whether rendering `path` keeps the mode: the lists and their rows, any route of no space (the
+ * dashboard, `/`, is one), and an address no route declares. Any other route leaves it, into the
+ * working space (the one an action asking « Dans quel espace ? » entered).
  */
 export function holdsOverview(path: RoutePath | undefined): boolean {
   return path === undefined || ofList(path) || !belongsToSpace(path);

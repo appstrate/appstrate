@@ -10,14 +10,17 @@ import { useUrlModal } from "./use-url-modal";
 
 const COMPANIONS = [CREATE_INTEGRATION_PARAM];
 
+/**
+ * The creation chooser of a package type, at `?create=<type>`. `canCreate` is the WORKING space's
+ * grant: the chooser and its chat door open only there. `open` asks nothing itself: its callers
+ * offer it where creating is allowed, after entering the space it acts in (`useSpaceAction`).
+ */
 export function useCreationHandoff(resource: CreationResource, canCreate: boolean) {
   const param = useUrlModal("create", COMPANIONS);
   const [search] = useSearchParams();
   const navigate = useNavigate();
 
-  const open = () => {
-    if (canCreate) param.open(resource);
-  };
+  const open = () => param.open(resource);
 
   const openChat = (prompt: string) => {
     if (!canCreate) return;

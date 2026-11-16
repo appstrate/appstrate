@@ -14,7 +14,8 @@ import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { SidebarCredits } from "@/components/sidebar-credits";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
-import { useShellReach, useReachReady } from "@/hooks/use-can-reach";
+import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
+import { useSpaceAction } from "@/hooks/use-space-action";
 import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
@@ -83,11 +84,14 @@ function OverlayEntry({
   active,
   icon: Icon,
   label,
+  onSelect,
 }: {
   to: string;
   active: boolean;
   icon: LucideIcon;
   label: string;
+  /** Replaces the plain navigation (an entry that first asks which space, `useSpaceAction`). */
+  onSelect?: () => void;
 }) {
   const content = (
     <>
@@ -101,7 +105,17 @@ function OverlayEntry({
         {active ? (
           <span aria-current="page">{content}</span>
         ) : (
-          <Link to={to} {...overlayIntent(to)}>
+          <Link
+            to={to}
+            {...overlayIntent(to)}
+            onClick={
+              onSelect &&
+              ((event) => {
+                event.preventDefault();
+                onSelect();
+              })
+            }
+          >
             {content}
           </Link>
         )}
@@ -121,13 +135,16 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { setOpenMobile } = useSidebar();
   const { pathname, search } = useLocation();
   useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
-  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
-  const canReach = useShellReach();
+  // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`); in « Vue
+  // d'ensemble », where some space admits it, opened in the space the reader picks.
+  const canReach = useCanReach();
+  const catalogue = useSpaceAction({ route: "/catalogue" });
+  const catalogueLink = catalogue.link(catalogueHref("agent"));
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
   const catalogueActive = isUnder(overlayPath, "/catalogue");
-  const catalogueReachable = canReach("/catalogue");
+  const catalogueReachable = catalogue.offered;
   // Always on screen, so their overlays' code is fetched ahead of any click (`lib/overlay-chunks.ts`).
   useEffect(
     () =>
@@ -176,8 +193,10 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
             active={catalogueActive}
             icon={LibraryBig}
             label={t("nav.catalogue")}
+            onSelect={"onSelect" in catalogueLink ? catalogueLink.onSelect : undefined}
           />
         </SidebarMenu>
+        {catalogue.picker}
         <SidebarMenu className="px-2 pb-2">
           <OverlayEntry
             to={SETTINGS_ENTRY}

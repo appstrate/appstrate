@@ -24,9 +24,8 @@ import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem, cardItemKey } from "../lib/package-card-item";
 import { grantedInSomeSpace } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceAction } from "../hooks/use-space-action";
 import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
-import { useCanReach } from "../hooks/use-can-reach";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
@@ -41,7 +40,7 @@ const CODING_AGENT_SETUP_PROMPT = `Fetch and follow the Appstrate coding-agent s
 
 export interface DashboardData {
   firstName: string;
-  /** « Vue d'ensemble »: the rows are every space's, and the page is read-only. */
+  /** « Vue d'ensemble »: the rows are every space's, each naming its space. */
   spanning: boolean;
   agents: AgentListItem[];
   runs: EnrichedRun[];
@@ -68,8 +67,7 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant acts in one space, which « Vue d'ensemble » does not name: not offered there, nor
- * while the mode is not known yet.
+ * assistant names no space; its chat door opens in one, which « Vue d'ensemble » asks for.
  */
 export function DashboardHeader({
   firstName,
@@ -79,8 +77,7 @@ export function DashboardHeader({
   runningCount?: number;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const { readOnly } = useOverviewMode();
-  const canChat = useCanReach()("/chat");
+  const chat = useSpaceAction({ route: "/chat" });
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [assistOpen, setAssistOpen] = useState(false);
@@ -91,7 +88,10 @@ export function DashboardHeader({
   }).format(new Date());
 
   const openChat = () => {
-    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
+    setAssistOpen(false);
+    chat.run(() =>
+      navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) }),
+    );
   };
 
   const copyCodingAgentSetup = async () => {
@@ -110,12 +110,10 @@ export function DashboardHeader({
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
-          readOnly ? undefined : (
-            <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
-              <Sparkles />
-              {t("dashboard.askAi.title")}
-            </Button>
-          )
+          <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
+            <Sparkles />
+            {t("dashboard.askAi.title")}
+          </Button>
         }
       >
         {runningCount === undefined ? (
@@ -136,7 +134,7 @@ export function DashboardHeader({
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
-            {canChat && (
+            {chat.offered && (
               <ChoiceCard
                 icon={MessageSquareText}
                 title={t("dashboard.askAi.chat")}
@@ -154,6 +152,7 @@ export function DashboardHeader({
           </div>
         </Modal>
       )}
+      {chat.picker}
     </>
   );
 }
@@ -192,12 +191,11 @@ function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning:
       {agents.map((agent) => {
         const item = agentCardItem(agent);
         return (
-          // Spanning, a card names its space and offers no run: a run acts in one space.
+          // Spanning, a card names its space; its run acts there.
           <div key={cardItemKey(item)} className="w-[19rem] shrink-0">
             <PackageCard
               {...item}
               spaceName={spanning ? spaceLabelOf(agent.spaceId) : undefined}
-              showRun={!spanning}
               headingLevel={3}
             />
           </div>

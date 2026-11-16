@@ -129,6 +129,7 @@ export function PackageCard({
               {type === "agent" && showRun && (
                 <RunAgentButton
                   packageId={id}
+                  spaceId={spaceId}
                   variant="ghost"
                   size="icon"
                   className="text-muted-foreground hover:text-primary size-7"

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { $api } from "../api/client";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { $api, client } from "../api/client";
+import { markAllRunsReadRequests } from "../lib/mark-all-runs-read";
 import { usePaginatedRuns } from "./use-paginated-runs";
 import { agentsKeys, paginatedRunsKeys, runKeys, scheduleKeys } from "../lib/query-keys";
 import { invalidateNotificationQueries } from "./use-notifications";
@@ -14,9 +15,12 @@ import { invalidateNotificationQueries } from "./use-notifications";
  * one, so the feed is refreshed with them.
  */
 
-/** The caller's unread runs in the space — the Runs badge; `enabled: false` where it is not shown. */
-export function useUnreadRunCount(enabled = true): number {
-  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0, enabled });
+/**
+ * The caller's unread runs in the space — the Runs badge; `enabled: false` where it is not shown.
+ * `spanning`: in every space the reader reaches instead.
+ */
+export function useUnreadRunCount(enabled = true, spanning = false): number {
+  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0, enabled, spanning });
   return data?.total ?? 0;
 }
 
@@ -45,9 +49,19 @@ export function useMarkRunRead() {
   });
 }
 
+/**
+ * « Tout marquer comme lu »: the working space's runs (`null`), or every listed space's
+ * (`markAllRunsReadRequests`). The read state is refreshed even when one space refused.
+ */
 export function useMarkAllRunsRead() {
   const qc = useQueryClient();
-  return $api.useMutation("put", "/api/runs/read-all", {
-    onSuccess: () => invalidateRunReadState(qc),
+  return useMutation({
+    mutationFn: (spaceIds: readonly string[] | null) =>
+      Promise.all(
+        markAllRunsReadRequests(spaceIds).map((params) =>
+          client.PUT("/api/runs/read-all", { params }),
+        ),
+      ),
+    onSettled: () => invalidateRunReadState(qc),
   });
 }

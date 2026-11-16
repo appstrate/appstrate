@@ -21,7 +21,7 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { useOverviewMode } from "../hooks/use-overview-mode";
-import { useShellReach, useReachReady } from "../hooks/use-can-reach";
+import { useCanReach, useReachReady } from "../hooks/use-can-reach";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -66,11 +66,12 @@ export function NavOrg() {
   const { pathname } = useLocation();
   const visiblePathname = useOverlayPath() ?? pathname;
   // The badge and the running spinner are the working space's: « Vue d'ensemble » neither
-  // shows nor asks what feeds them.
+  // shows nor asks what feeds them (no list it already holds counts every space's unread and
+  // running runs, inline ones included).
   const { on: overview } = useOverviewMode();
   const unread = useUnreadRunCount(!overview);
   const hasRunning = useWorkingSpaceRunning(!overview);
-  const canReach = useShellReach();
+  const canReach = useCanReach();
   const ready = useReachReady();
   // In « Vue d'ensemble » a run's detail was opened from Runs: Runs is the active entry, not Agents.
   const openedFromRuns =
@@ -83,9 +84,8 @@ export function NavOrg() {
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
-  // may hold none of them, so no entry is assumed reachable. In « Vue d'ensemble »,
-  // only the entries whose page holds the mode (`holdsOverview`), each opened where
-  // some space admits it (`overviewListVerdict`).
+  // may hold none of them, so no entry is assumed reachable. In « Vue d'ensemble » the
+  // same entries, each opened where some space admits it (`overviewListVerdict`).
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
   const activityItems = reachable([

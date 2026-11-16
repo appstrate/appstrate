@@ -14,7 +14,7 @@ import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 /**
  * `/`: the working space's dashboard, or in « Vue d'ensemble » the mode's home, drawn from every
- * space the reader reaches (the org routes of its three lists), read-only.
+ * space the reader reaches (the org routes of its three lists).
  */
 export function DashboardPage() {
   const { profile, user } = useAuth();

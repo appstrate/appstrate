@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
-import { usePermissions } from "../hooks/use-permissions";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
@@ -24,20 +24,19 @@ const STATES = ["enabled", "disabled"] as const;
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const { on: spanning } = useOverviewMode();
   const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
-  // A schedule is created in one space, which a list spanning spaces does not name.
-  const canCreate = !spanning && can("schedules:write");
+  // A schedule is created in one space: in « Vue d'ensemble », the one the reader picks.
+  const create = useSpaceAction({ permission: "schedules:write" });
 
   const createAction: MenuAction = {
     id: "create",
     label: t("schedules.create"),
     icon: Plus,
-    onSelect: () => setNewScheduleOpen(true),
-    hidden: !canCreate,
+    onSelect: () => create.run(() => setNewScheduleOpen(true)),
+    hidden: !create.offered,
   };
 
   const allColumns = useScheduleColumns({ spanning });
@@ -82,7 +81,7 @@ export function SchedulesListPage() {
         title={t("common:nav.schedules")}
         variant="collection"
         breadcrumbs={[{ label: t("common:nav.schedules") }]}
-        actions={canCreate ? <PageActionsMenu actions={[createAction]} /> : undefined}
+        actions={create.offered ? <PageActionsMenu actions={[createAction]} /> : undefined}
       />
 
       <ListToolbar
@@ -117,6 +116,7 @@ export function SchedulesListPage() {
         count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />
       {newScheduleOpen && <NewScheduleModal onClose={() => setNewScheduleOpen(false)} />}
+      {create.picker}
     </div>
   );
 }
