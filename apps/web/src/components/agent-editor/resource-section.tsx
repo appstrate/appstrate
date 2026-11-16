@@ -28,7 +28,7 @@ import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import type { ResourceEntry } from "./types";
-import { caretRange } from "./utils";
+import { caretRange, isPlatformEntry } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "../table-row-actions";
@@ -276,6 +276,7 @@ export function ResourceSection({
                             icon: Trash2,
                             onSelect: () => remove(entry.id),
                             destructive: true,
+                            hidden: isPlatformEntry(entry),
                           },
                         ]}
                       >

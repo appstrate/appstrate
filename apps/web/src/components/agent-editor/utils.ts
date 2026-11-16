@@ -16,6 +16,7 @@ import {
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -150,6 +151,27 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
   };
 }
 
+/**
+ * The platform's own integration is offered by every agent the editor shows:
+ * its row is always there, and removing it is not an action. A manifest that
+ * does not declare it reads as this entry — declared, no tool selected — and an
+ * entry left that way is not written, so the manifest names the integration
+ * only once the author picks a tool of it.
+ */
+export function isPlatformEntry(entry: Pick<ResourceEntry, "id">): boolean {
+  return entry.id === PLATFORM_INTEGRATION_ID;
+}
+
+const UNSELECTED_PLATFORM_ENTRY: ResourceEntry = {
+  id: PLATFORM_INTEGRATION_ID,
+  version: PLATFORM_INTEGRATION_RANGE,
+  tools: [],
+};
+
+function selectsNoTool(entry: ResourceEntry): boolean {
+  return Array.isArray(entry.tools) && entry.tools.length === 0;
+}
+
 function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
@@ -160,7 +182,10 @@ export function getResourceEntries(
 ): ResourceEntry[] {
   // Integrations: version from `dependencies.integrations` (§4.1), selection from
   // `integrations_configuration` (§4.4); entries pass through whole, so no key is lost on save.
-  if (type === "integrations") return parseManifestIntegrations(m);
+  if (type === "integrations") {
+    const entries = parseManifestIntegrations(m);
+    return entries.some(isPlatformEntry) ? entries : [UNSELECTED_PLATFORM_ENTRY, ...entries];
+  }
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -174,7 +199,9 @@ export function setResourceEntries(
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
-      entries.map((e) => ({ ...e, version: e.version ?? "*" })),
+      entries
+        .filter((e) => !(isPlatformEntry(e) && selectsNoTool(e)))
+        .map((e) => ({ ...e, version: e.version ?? "*" })),
     );
     return;
   }

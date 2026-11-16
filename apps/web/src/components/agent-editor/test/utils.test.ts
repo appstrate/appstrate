@@ -104,9 +104,13 @@ describe("getResourceEntries / setResourceEntries", () => {
   // Niveau 2 — version + tool/scope selection both live on the canonical
   // `dependencies.integrations.<id>` object form (§4.1).
   describe("integrations (deps + integrations_configuration, §4.1/§4.4)", () => {
+    // The platform's own integration leads every list the editor shows.
+    const PLATFORM = { id: "@appstrate/platform", version: "^1.0.0", tools: [] };
+
     it("reads version from deps with no configuration entry", () => {
       const m = { dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/gmail", version: "^1.0.0" },
       ]);
     });
@@ -124,6 +128,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         {
           id: "@vendor/gmail",
           version: "^1.0.0",
@@ -183,6 +188,7 @@ describe("getResourceEntries / setResourceEntries", () => {
       ]);
       const back = getResourceEntries(m, "integrations");
       expect(back).toEqual([
+        PLATFORM,
         { id: "@vendor/none", version: "^1.0.0" },
         { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },
       ]);
@@ -198,6 +204,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         integrations_configuration: { "@vendor/github-mcp": { tools: "*" } },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*" },
       ]);
     });
@@ -241,7 +248,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         },
       };
       const entries = getResourceEntries(m, "integrations");
-      expect(entries).toStrictEqual(parseManifestIntegrations(m));
+      expect(entries).toStrictEqual([PLATFORM, ...parseManifestIntegrations(m)]);
 
       const viaEditor: Record<string, unknown> = { dependencies: {} };
       const viaCore: Record<string, unknown> = { dependencies: {} };
@@ -256,8 +263,69 @@ describe("getResourceEntries / setResourceEntries", () => {
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
       ]);
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
       ]);
+    });
+
+    describe("the platform's own integration", () => {
+      it("is listed, with no tool selected, by a manifest that does not declare it", () => {
+        expect(getResourceEntries({}, "integrations")).toEqual([PLATFORM]);
+      });
+
+      it("is not written while it selects no tool: the manifest declares no integration", () => {
+        const viaEditor: Record<string, unknown> = { name: "@org/agent" };
+        const viaCore: Record<string, unknown> = { name: "@org/agent" };
+        setResourceEntries(
+          viaEditor,
+          "integrations",
+          getResourceEntries(viaEditor, "integrations"),
+        );
+        writeManifestIntegrations(viaCore, []);
+        expect(viaEditor).toStrictEqual(viaCore);
+      });
+
+      it("is written once a tool of it is picked, and read back where it stands", () => {
+        const m: Record<string, unknown> = {
+          dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
+        };
+        setResourceEntries(
+          m,
+          "integrations",
+          getResourceEntries(m, "integrations").map((e) =>
+            e.id === PLATFORM.id ? { ...e, tools: ["log"] } : e,
+          ),
+        );
+        expect(m.dependencies).toEqual({
+          integrations: { "@appstrate/platform": "^1.0.0", "@vendor/gmail": "^1.0.0" },
+        });
+        expect(m.integrations_configuration).toEqual({ "@appstrate/platform": { tools: ["log"] } });
+        expect(getResourceEntries(m, "integrations")).toEqual([
+          { ...PLATFORM, tools: ["log"] },
+          { id: "@vendor/gmail", version: "^1.0.0" },
+        ]);
+      });
+
+      it("leaves the manifest when its last tool is unpicked", () => {
+        const m: Record<string, unknown> = {
+          dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+          integrations_configuration: { "@appstrate/platform": { tools: ["log"] } },
+        };
+        setResourceEntries(
+          m,
+          "integrations",
+          getResourceEntries(m, "integrations").map((e) => ({ ...e, tools: [] })),
+        );
+        expect(getResourceEntries(m, "integrations")).toEqual([PLATFORM]);
+        expect(JSON.stringify(m)).not.toContain("@appstrate/platform");
+      });
+
+      it("keeps a declared entry that inherits the integration's default tools", () => {
+        const m = { dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } } };
+        expect(getResourceEntries(m, "integrations")).toEqual([
+          { id: "@appstrate/platform", version: "^1.0.0" },
+        ]);
+      });
     });
   });
 });
