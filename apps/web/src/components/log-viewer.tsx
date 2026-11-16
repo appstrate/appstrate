@@ -66,11 +66,8 @@ import {
 } from "../lib/platform-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
-import { useMediaQuery } from "../hooks/use-media-query";
+import { LG_AND_UP, useMediaQuery } from "../hooks/use-media-query";
 import { useFillHeight } from "../hooks/use-fill-height";
-
-/** From this width the inspector stands beside the list; below, it opens in a sheet. */
-const INSPECTOR_BESIDE = "(min-width: 1024px)";
 
 interface EntryLook {
   icon: typeof Info;
@@ -509,7 +506,8 @@ export function LogViewer({
   const cardRef = useRef<HTMLDivElement>(null);
   const positionedRef = useRef(false);
   const fillHeight = useFillHeight(cardRef);
-  const inspectorBeside = useMediaQuery(INSPECTOR_BESIDE);
+  // From `lg` the inspector stands beside the list; below, it opens in a sheet.
+  const inspectorBeside = useMediaQuery(LG_AND_UP);
   const inspectorId = useId();
 
   const [autoScroll, setAutoScroll] = useState(true);
