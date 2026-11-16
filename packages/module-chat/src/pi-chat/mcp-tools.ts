@@ -27,6 +27,7 @@ import {
   RESOURCE_BLOB_MAX_BYTES,
   RESOURCE_OVERSIZED_NOTE,
   RESOURCE_TEXT_MAX_BYTES,
+  isRelayedResult,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
@@ -35,9 +36,7 @@ import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
   offerScopeOf,
-  splitConnectPayload,
   splitJsonText,
-  WHOLE_PAYLOAD,
   type ConnectOffer,
   type OfferScope,
 } from "../connect-offer.ts";
@@ -66,6 +65,12 @@ interface PiToolResult {
    * because `details` is redacted and nothing would fall back.
    */
   connectOffers?: ConnectOffer[];
+  /**
+   * The platform marked the result relayed (`_meta["dev.appstrate/relayed"]`): a third party
+   * wrote it whole, so it was passed on verbatim. Persisted beside `connectOffers` (same
+   * contract), so a replay walks the stored text under the scope the live call had.
+   */
+  relayed?: true;
 }
 
 /**
@@ -77,8 +82,8 @@ interface PiToolResult {
  * `ui-stream-mapper.ts`) carries the redacted payload — the live URLs live in
  * exactly one place.
  */
-export function toPiToolResult(payload: unknown): PiToolResult {
-  const { redacted, offers } = splitConnectPayload(payload);
+export function toPiToolResult(payload: unknown, scope: OfferScope): PiToolResult {
+  const { redacted, offers } = scope(payload);
   return {
     content: [{ type: "text", text: JSON.stringify(redacted) }],
     details: redacted,
@@ -88,14 +93,16 @@ export function toPiToolResult(payload: unknown): PiToolResult {
 
 /**
  * Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). `scope` says
- * which part of the payload may carry a connect offer ({@link offerScopeOf}).
+ * which part of the payload may carry a connect offer ({@link offerScopeOf}); a result the
+ * platform marked relayed keeps the mark ({@link PiToolResult.relayed}).
  */
 export function mcpResultToPi(
   result: {
     content: Array<Record<string, unknown>>;
     structuredContent?: unknown;
+    _meta?: unknown;
   },
-  scope: OfferScope = WHOLE_PAYLOAD,
+  scope: OfferScope,
 ): PiToolResult {
   // One list per text block, merged below — a result may split a readiness
   // error across blocks, and each block's connect links must all reach the UI.
@@ -132,7 +139,12 @@ export function mcpResultToPi(
   } else {
     details = { ...result, content };
   }
-  return { content, details, ...(offers.length > 0 ? { connectOffers: offers } : {}) };
+  return {
+    content,
+    details,
+    ...(offers.length > 0 ? { connectOffers: offers } : {}),
+    ...(isRelayedResult(result) ? { relayed: true as const } : {}),
+  };
 }
 
 interface PlatformMcpTools {
@@ -392,10 +404,11 @@ function makeForwardExtension(
           { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
           { signal: callSignal },
         );
-        return withTurnBudgetNote(
-          mcpResultToPi(result as never, offerScopeOf(toolName)),
-          turnBudget,
-        );
+        const scope = offerScopeOf(toolName, {
+          arguments: params,
+          relayed: isRelayedResult(result),
+        });
+        return withTurnBudgetNote(mcpResultToPi(result as never, scope), turnBudget);
       },
     });
   };
@@ -568,6 +581,7 @@ function makeRunAndWaitExtension(
     turnBudget: PiTurnBudget;
   },
 ): ExtensionFactory {
+  const runAndWaitScope = offerScopeOf(RUN_AND_WAIT_TOOL, {});
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: RUN_AND_WAIT_TOOL,
@@ -604,7 +618,7 @@ function makeRunAndWaitExtension(
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(step.payload),
+            output: toPiToolResult(step.payload, runAndWaitScope),
             preliminary: true,
           });
         }
@@ -612,7 +626,7 @@ function makeRunAndWaitExtension(
         // re-emits it under the same id — an idempotent update to the same card).
         // That last write is the one the card keeps, and it carries the budget
         // note appended to `content` — the very channel the card parses.
-        return withTurnBudgetNote(toPiToolResult(finalPayload), ctx.turnBudget);
+        return withTurnBudgetNote(toPiToolResult(finalPayload, runAndWaitScope), ctx.turnBudget);
       },
     });
   };

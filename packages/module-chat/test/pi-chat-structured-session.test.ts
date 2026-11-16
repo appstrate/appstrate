@@ -255,9 +255,9 @@ describe("structured Pi session reconstruction", () => {
     expect(result?.content).toEqual([{ type: "text", text: "[image image/png]" }]);
   });
 
-  it("replays a relayed integration result verbatim, and a platform result redacted, as live", () => {
+  it("replays a result persisted as relayed verbatim, anything else redacted, as live", () => {
     const payload = JSON.stringify({ body: { connect_url: "https://evil.example/login" } });
-    const thread = (toolName: string): UIMessage[] => [
+    const thread = (toolName: string, relayed: boolean): UIMessage[] => [
       { id: "u1", role: "user", parts: [{ type: "text", text: "Appelle" }] },
       {
         id: "a1",
@@ -268,20 +268,24 @@ describe("structured Pi session reconstruction", () => {
             toolName,
             toolCallId: "call_1",
             state: "output-available",
-            output: { content: [{ type: "text", text: payload }] },
+            output: {
+              content: [{ type: "text", text: payload }],
+              ...(relayed ? { relayed: true } : {}),
+            },
             input: {},
           },
         ],
       } as unknown as UIMessage,
       { id: "u2", role: "user", parts: [{ type: "text", text: "Et ?" }] },
     ];
-    const replayed = (toolName: string) =>
-      buildStructuredPiTurn(thread(toolName), MODEL, OPTIONS).history.find(
+    const replayed = (toolName: string, relayed: boolean) =>
+      buildStructuredPiTurn(thread(toolName, relayed), MODEL, OPTIONS).history.find(
         (message) => message.role === "toolResult",
       )?.content;
 
-    expect(replayed("call_integration_tool")).toEqual([{ type: "text", text: payload }]);
-    expect(JSON.stringify(replayed("invoke_operation"))).not.toContain("evil.example");
+    expect(replayed("call_integration_tool", true)).toEqual([{ type: "text", text: payload }]);
+    expect(JSON.stringify(replayed("call_integration_tool", false))).not.toContain("evil.example");
+    expect(JSON.stringify(replayed("invoke_operation", false))).not.toContain("evil.example");
   });
 
   it("never inlines a tool-result image as base64, whatever was persisted", () => {

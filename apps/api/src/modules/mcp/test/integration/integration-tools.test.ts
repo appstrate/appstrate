@@ -909,10 +909,20 @@ describe("mcp integration tools", () => {
       const result = envelope.result as {
         isError?: boolean;
         content: Array<{ type: string; text: string }>;
+        _meta?: Record<string, unknown>;
       };
       expect(result.isError ?? false).toBe(false);
-      // The server's own result, relayed.
+      // The server's own result, relayed, and marked so: a client trusts none of it as the
+      // platform's (the chat builds no connect card from it).
       expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ q: "invoices" }) }]);
+      expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
+      // The platform's own answer is never marked.
+      const refused = await mcp(caller, "tools/call", {
+        name: "call_integration_tool",
+        arguments: { ...where, tool: "nobody__nothing", arguments: {} },
+      });
+      expect((refused.result as { isError?: boolean }).isError).toBe(true);
+      expect((refused.result as { _meta?: unknown })._meta).toBeUndefined();
       // Sent with the connection's credential, never the caller's MCP token.
       const sent = server.requests.slice(exchanges);
       expect(sent.length).toBeGreaterThan(0);

@@ -491,6 +491,8 @@ export { mcpFetch } from "./mcp-fetch.ts";
 export {
   API_CALL_ERROR_META_KEY,
   apiCallStatusLine,
+  isRelayedResult,
+  markRelayedResult,
   UPSTREAM_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
   type ApiCallErrorMeta,

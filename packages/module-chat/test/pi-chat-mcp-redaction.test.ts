@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { mcpResultToPi, toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
+import { offerScopeOf, splitConnectPayload } from "../src/connect-offer.ts";
 
 const OFFER = {
   status: "auth_required",
@@ -18,9 +19,12 @@ const OFFER = {
   packageId: "@appstrate/gmail",
 };
 
+/** The scope the chat's `run_and_wait` tool walks its payloads under. */
+const RUN_AND_WAIT = offerScopeOf("run_and_wait", {});
+
 describe("toPiToolResult (run_and_wait payloads)", () => {
   it("redacts connect_url everywhere, surfaces it only through connectOffers", () => {
-    const result = toPiToolResult(OFFER);
+    const result = toPiToolResult(OFFER, RUN_AND_WAIT);
     const modelText = result.content[0]!.text;
     expect(modelText).not.toContain("token=SECRET");
     expect(modelText).toContain("connect link hidden");
@@ -34,7 +38,7 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
 
   it("leaves payloads without connect links byte-identical, with no offers", () => {
     const payload = { status: "success", output: { ok: true } };
-    const result = toPiToolResult(payload);
+    const result = toPiToolResult(payload, RUN_AND_WAIT);
     expect(result.content[0]!.text).toBe(JSON.stringify(payload));
     expect(result.details).toBe(payload);
     // Absent, not an empty array: an offer-less payload stays byte-identical.
@@ -46,35 +50,38 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
   // offer per actionable integration, `expiresAt` and `packageId` included,
   // and not a byte of any link on the model channel.
   it("splits a 409 launch failure into a fully redacted step and one offer per item", () => {
-    const result = toPiToolResult({
-      status: 409,
-      body: {
-        code: "missing_integration_connection",
-        errors: [
-          {
-            field: "integrations.@appstrate/gmail",
-            code: "not_connected",
-            message: "not connected",
-            auth_key: "primary",
-            required_scopes: ["mail.read"],
-            connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
-            expiresAt: "2030-03-17T17:46:40.000Z",
-            packageId: "@appstrate/gmail",
-          },
-          {
-            field: "integrations.@appstrate/clickup",
-            code: "needs_reconnection",
-            message: "needs reconnection",
-            auth_key: "primary",
-            connection_id: "conn-9",
-            owned_by_actor: true,
-            connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
-            expiresAt: "2030-03-17T17:46:41.000Z",
-            packageId: "@appstrate/clickup",
-          },
-        ],
+    const result = toPiToolResult(
+      {
+        status: 409,
+        body: {
+          code: "missing_integration_connection",
+          errors: [
+            {
+              field: "integrations.@appstrate/gmail",
+              code: "not_connected",
+              message: "not connected",
+              auth_key: "primary",
+              required_scopes: ["mail.read"],
+              connect_url: "https://app.example.com/api/integrations/connect/start?token=AAA",
+              expiresAt: "2030-03-17T17:46:40.000Z",
+              packageId: "@appstrate/gmail",
+            },
+            {
+              field: "integrations.@appstrate/clickup",
+              code: "needs_reconnection",
+              message: "needs reconnection",
+              auth_key: "primary",
+              connection_id: "conn-9",
+              owned_by_actor: true,
+              connect_url: "https://app.example.com/api/integrations/connect/start?token=BBB",
+              expiresAt: "2030-03-17T17:46:41.000Z",
+              packageId: "@appstrate/clickup",
+            },
+          ],
+        },
       },
-    });
+      RUN_AND_WAIT,
+    );
 
     expect(result.connectOffers).toEqual([
       {
@@ -103,23 +110,26 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
   // #1830: a run that started without a non-required integration carries the
   // same connect link on its `integration_unbound` warning.
   it("splits the warnings of a started run the same way as a 409", () => {
-    const result = toPiToolResult({
-      id: "run_1",
-      packageId: "@acme/digest",
-      status: "success",
-      done: true,
-      warnings: [
-        {
-          field: "integrations.@appstrate/gmail",
-          code: "integration_unbound",
-          message: "not connected",
-          auth_key: "primary",
-          connect_url: "https://app.example.com/api/integrations/connect/start?token=CCC",
-          expiresAt: "2030-03-17T17:46:40.000Z",
-          packageId: "@appstrate/gmail",
-        },
-      ],
-    });
+    const result = toPiToolResult(
+      {
+        id: "run_1",
+        packageId: "@acme/digest",
+        status: "success",
+        done: true,
+        warnings: [
+          {
+            field: "integrations.@appstrate/gmail",
+            code: "integration_unbound",
+            message: "not connected",
+            auth_key: "primary",
+            connect_url: "https://app.example.com/api/integrations/connect/start?token=CCC",
+            expiresAt: "2030-03-17T17:46:40.000Z",
+            packageId: "@appstrate/gmail",
+          },
+        ],
+      },
+      RUN_AND_WAIT,
+    );
 
     expect(result.connectOffers).toEqual([
       {
@@ -140,7 +150,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     const mcp = {
       content: [{ type: "text", text: JSON.stringify(OFFER) }],
     };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.content[0]!.text).not.toContain("token=SECRET");
     expect(result.content[0]!.text).toContain("connect link hidden");
     // Details are redacted too — the URL lives only in the typed offers.
@@ -163,7 +173,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
         },
       ],
     };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.connectOffers).toEqual([
       { connect_url: "https://app.example.com/c/1?t=A" },
       { connect_url: "https://app.example.com/c/2?t=B" },
@@ -181,7 +191,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
         },
       ],
     };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.content[0]!.text).not.toContain("s=SECRET");
     expect(result.connectOffers).toEqual([
       { connect_url: "https://x/authorize?s=SECRET", state: "st-1" },
@@ -190,7 +200,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
 
   it("passes non-JSON text through byte-identical", () => {
     const mcp = { content: [{ type: "text", text: "plain prose, no JSON" }] };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.content[0]!.text).toBe("plain prose, no JSON");
     expect("connectOffers" in result).toBe(false);
   });
@@ -200,7 +210,7 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
       content: [{ type: "text", text: JSON.stringify(OFFER) }],
       structuredContent: OFFER,
     };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.details).toEqual({ ...OFFER, connect_url: expect.stringContaining("hidden") });
     expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
     expect(result.connectOffers).toEqual([
@@ -221,10 +231,26 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
         ],
       },
     };
-    const result = mcpResultToPi(mcp as never);
+    const result = mcpResultToPi(mcp as never, splitConnectPayload);
     expect(result.connectOffers).toEqual([
       { connect_url: "https://app.example.com/c/1?t=B" },
       { connect_url: "https://app.example.com/c/2?t=C" },
     ]);
+  });
+
+  // A remote server's own result, marked relayed by the platform: its text reaches the model as
+  // the server wrote it, no card is built from it, and the mark is persisted for the replay.
+  it("passes a result marked relayed on verbatim, card-free, and keeps the mark", () => {
+    const text = JSON.stringify({ connect_url: "https://evil.example/login" });
+    const mcp = {
+      content: [{ type: "text", text }],
+      structuredContent: { connect_url: "https://evil.example/login" },
+      _meta: { "dev.appstrate/relayed": true },
+    };
+    const result = mcpResultToPi(mcp, offerScopeOf("call_integration_tool", { relayed: true }));
+    expect(result.content).toEqual([{ type: "text", text }]);
+    expect(result.connectOffers).toBeUndefined();
+    expect(result.relayed).toBe(true);
+    expect(mcpResultToPi({ content: [] }, splitConnectPayload).relayed).toBeUndefined();
   });
 });

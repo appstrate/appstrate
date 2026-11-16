@@ -16,7 +16,7 @@ import {
   type BearerOnlySurface,
 } from "../../../src/lib/bearer-only.ts";
 
-const SURFACES: BearerOnlySurface[] = ["Credential proxy", "LLM proxy"];
+const SURFACES: BearerOnlySurface[] = ["credential-proxy", "llm-proxy"];
 /** The chat's platform-MCP bearer: server-minted, not an inference loopback. */
 const MCP_BEARER = { authMethod: "chat-loopback", serverMinted: true };
 /** The chat's inference bearer: both capabilities. */
@@ -46,20 +46,20 @@ describe("assertBearerOnly", () => {
   }
 
   it("the credential proxy accepts a server-minted bearer, whatever its auth method", () => {
-    expect(isBearerOnlyCaller(MCP_BEARER, "Credential proxy")).toBe(true);
-    expect(isBearerOnlyCaller({ serverMinted: true }, "Credential proxy")).toBe(true);
+    expect(isBearerOnlyCaller(MCP_BEARER, "credential-proxy")).toBe(true);
+    expect(isBearerOnlyCaller({ serverMinted: true }, "credential-proxy")).toBe(true);
   });
 
   it("the LLM proxy refuses a server-minted bearer that is no inference loopback", () => {
-    expect(() => assertBearerOnly(MCP_BEARER, "LLM proxy")).toThrow();
+    expect(() => assertBearerOnly(MCP_BEARER, "llm-proxy")).toThrow();
   });
 
   it("a capability declared false admits nothing", () => {
     expect(
-      isBearerOnlyCaller({ authMethod: "session", serverMinted: false }, "Credential proxy"),
+      isBearerOnlyCaller({ authMethod: "session", serverMinted: false }, "credential-proxy"),
     ).toBe(false);
     expect(
-      isBearerOnlyCaller({ authMethod: "session", firstPartyLoopback: false }, "LLM proxy"),
+      isBearerOnlyCaller({ authMethod: "session", firstPartyLoopback: false }, "llm-proxy"),
     ).toBe(false);
   });
 });

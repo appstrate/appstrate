@@ -142,8 +142,9 @@ function json(value: unknown): string {
  * surviving text block is rendered as pointers, the same way the forwarder
  * would have rendered it live.
  *
- * `scope` is the tool's ({@link offerScopeOf}), as live: a relayed third-party payload replays
- * verbatim, exactly as the model first read it.
+ * `scope` is the call's ({@link offerScopeOf}), as live — the tool, its arguments and the
+ * persisted `relayed` mark: a relayed third-party payload replays verbatim, exactly as the model
+ * first read it.
  */
 function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent {
   if (value && typeof value === "object") {
@@ -241,7 +242,13 @@ function assistantMessages(
         role: "toolResult",
         toolCallId: part.toolCallId,
         toolName,
-        content: toolResultContent(result, offerScopeOf(toolName)),
+        content: toolResultContent(
+          result,
+          offerScopeOf(toolName, {
+            arguments: part.input,
+            relayed: (result as { relayed?: unknown } | null)?.relayed === true,
+          }),
+        ),
         isError,
       });
       toolResultCount += 1;

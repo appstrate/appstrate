@@ -164,7 +164,7 @@ export function createCredentialProxyRouter() {
       // refused — they would let a drive-by CSRF trigger arbitrary upstream
       // calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      assertBearerOnly(bearerCaller(c), "Credential proxy");
+      assertBearerOnly(bearerCaller(c), "credential-proxy");
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
       const apiKeyId = c.get("apiKeyId") || null;
@@ -497,7 +497,7 @@ export function createCredentialProxyRouter() {
   // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
   // of calls, and each `tools/call` counts once.
   const remoteToolsCaller = (c: Context<AppEnv>) => {
-    assertBearerOnly(bearerCaller(c), "Credential proxy");
+    assertBearerOnly(bearerCaller(c), "credential-proxy");
     return {
       scope: getSpaceScope(c),
       actor: getActor(c),

@@ -46,12 +46,12 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
  *   it books the call as chat usage and may reach the subscription gateway, which
  *   no other server-minted bearer is for.
  */
-const SURFACE_CAPABILITY = {
-  "Credential proxy": "serverMinted",
-  "LLM proxy": "firstPartyLoopback",
+const SURFACES = {
+  "credential-proxy": { label: "Credential proxy", capability: "serverMinted" },
+  "llm-proxy": { label: "LLM proxy", capability: "firstPartyLoopback" },
 } as const;
 
-export type BearerOnlySurface = keyof typeof SURFACE_CAPABILITY;
+export type BearerOnlySurface = keyof typeof SURFACES;
 
 /** What the bearer-only rule reads of a caller: its auth method and declared capabilities. */
 export interface BearerCaller {
@@ -71,7 +71,7 @@ export function bearerCaller(c: Context<AppEnv>): BearerCaller {
 
 /** Whether the caller passes `surface`'s bearer-only rule: an allowlisted bearer, or its capability. */
 export function isBearerOnlyCaller(caller: BearerCaller, surface: BearerOnlySurface): boolean {
-  if (caller[SURFACE_CAPABILITY[surface]] === true) return true;
+  if (caller[SURFACES[surface].capability] === true) return true;
   return !!caller.authMethod && ACCEPTED_AUTH_METHODS.has(caller.authMethod);
 }
 
@@ -79,7 +79,7 @@ export function isBearerOnlyCaller(caller: BearerCaller, surface: BearerOnlySurf
 export function assertBearerOnly(caller: BearerCaller, surface: BearerOnlySurface): void {
   if (!isBearerOnlyCaller(caller, surface)) {
     throw forbidden(
-      `${surface} does not accept auth method "${caller.authMethod}" (cookie sessions and unknown strategies rejected)`,
+      `${SURFACES[surface].label} does not accept auth method "${caller.authMethod}" (cookie sessions and unknown strategies rejected)`,
     );
   }
 }

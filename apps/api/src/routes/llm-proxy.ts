@@ -163,7 +163,7 @@ async function handleProxy(
   apiShape: ProxiedApiShape,
   limits: LlmProxyLimits,
 ): Promise<Response> {
-  assertBearerOnly(bearerCaller(c), "LLM proxy");
+  assertBearerOnly(bearerCaller(c), "llm-proxy");
 
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");

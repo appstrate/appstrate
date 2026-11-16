@@ -10,7 +10,7 @@
 
 import type { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { markRelayedResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
   IntegrationTool,
@@ -102,7 +102,8 @@ const REMOTE_TOOL_USAGE =
   `the server's own tool result, relayed as is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
   "tool has run: a text block that does not fit whole is cut, any other block that does not " +
   "fit is replaced by a note while one fits, a closing note counts what was cut or dropped, " +
-  'and `_meta["dev.appstrate/truncated"]` is `true`. An error ' +
+  'and `_meta["dev.appstrate/truncated"]` is `true`. Such a result, the server\'s, carries ' +
+  '`_meta["dev.appstrate/relayed"]: true`; the platform\'s own answers never do. An error ' +
   "result carrying `content` is the tool's own failure (`isError: true`); one carrying `code`, " +
   "`status` and `detail` is the platform's answer: a refusal before anything was sent, or the " +
   "server failing the exchange: `bad_gateway`, `upstream_invalid_params`, `upstream_mcp_error`, " +
@@ -125,7 +126,8 @@ const truncationNote = (cut: number, omitted: number, droppedStructured: boolean
   `${omitted} other block(s)${droppedStructured ? " and its structuredContent" : ""} ` +
   "dropped, the rest is as it answered.";
 
-const TRUNCATED_META = { "dev.appstrate/truncated": true } as const;
+/** A bounded result's `_meta`: cut, and relayed — only a server's own result is ever bounded. */
+const BOUNDED_META = markRelayedResult({ _meta: { "dev.appstrate/truncated": true } })._meta;
 
 /**
  * A tool result over {@link MAX_RESULT_BYTES}, bounded so that its JSON is at most that many
@@ -144,7 +146,7 @@ function boundedResult(result: CallToolResult): CallToolResult {
   const frame = size({
     content: [{ type: "text", text: truncationNote(blocks.length, blocks.length, true) }],
     ...isError,
-    _meta: TRUNCATED_META,
+    _meta: BOUNDED_META,
   });
   // Each block added to the array costs its JSON and a comma.
   let budget = MAX_RESULT_BYTES - frame;
@@ -191,7 +193,7 @@ function boundedResult(result: CallToolResult): CallToolResult {
   const droppedStructured =
     result.structuredContent !== undefined && !("structuredContent" in structured);
   content.push({ type: "text", text: truncationNote(cut, omitted, droppedStructured) });
-  return { content, ...structured, ...isError, _meta: TRUNCATED_META };
+  return { content, ...structured, ...isError, _meta: BOUNDED_META };
 }
 
 /**
@@ -243,10 +245,12 @@ async function executeRemoteTool(
   if (!response.ok || !result) {
     return { result: jsonResult(body ?? { status: response.status }, true), shownCount: 0 };
   }
+  // The server's own result, marked relayed (`boundedResult` marks its own): the platform's
+  // answers above are not.
   if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
     return { result: boundedResult(result as CallToolResult), shownCount: 1 };
   }
-  return { result: result as CallToolResult, shownCount: 1 };
+  return { result: markRelayedResult(result as CallToolResult), shownCount: 1 };
 }
 
 /** A listed tool with how the MCP tool calls it. */

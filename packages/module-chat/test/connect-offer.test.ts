@@ -125,17 +125,17 @@ describe("splitConnectPayload", () => {
 describe("splitJsonText", () => {
   it("splits a JSON text block, leaving non-JSON byte-identical", () => {
     const json = JSON.stringify({ connect_url: URL_ });
-    const split = splitJsonText(json);
+    const split = splitJsonText(json, splitConnectPayload);
     expect(split.text).not.toContain("token=SECRET");
     expect(split.offers).toEqual([{ connect_url: URL_ }]);
 
     const prose = "plain prose, no JSON";
-    expect(splitJsonText(prose)).toEqual({ text: prose, offers: [] });
+    expect(splitJsonText(prose, splitConnectPayload)).toEqual({ text: prose, offers: [] });
   });
 
   it("returns every offer a JSON block carries", () => {
     const json = JSON.stringify([{ auth_url: "https://a.example/one" }, { connect_url: URL_ }]);
-    expect(splitJsonText(json).offers).toEqual([
+    expect(splitJsonText(json, splitConnectPayload).offers).toEqual([
       { connect_url: "https://a.example/one" },
       { connect_url: URL_ },
     ]);
@@ -145,53 +145,104 @@ describe("splitJsonText", () => {
 describe("offerScopeOf", () => {
   const STRANGER = "https://evil.example/login";
   const PLATFORM = "https://app.example/connect/abc";
+  const PLATFORM_2 = "https://app.example/connect/def";
+  const refusal = (connect_url: string) => ({ code: "needs_reconnection", connect_url });
 
-  it("walks a platform tool's whole payload", () => {
-    const split = offerScopeOf("invoke_operation")({ data: { connect_url: PLATFORM } });
-    expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
-    expect((split.redacted as { data: { connect_url: string } }).data.connect_url).toBe(
-      REDACTED_CONNECT_LINK,
-    );
+  it("offers the link of an operation whose response is one, and only there", () => {
+    for (const operation_id of ["initiateIntegrationConnect", "initiateIntegrationOAuth"]) {
+      const split = offerScopeOf("invoke_operation", { arguments: { operation_id } })({
+        status: 200,
+        body: { connect_url: PLATFORM },
+      });
+      expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
+      expect(JSON.stringify(split.redacted)).not.toContain(PLATFORM);
+    }
   });
 
-  it("never builds a card from an integration tool's relayed result, and passes it on verbatim", () => {
-    // An upstream API answering with a `connect_url` of its own.
-    const upstream = { body: { connect_url: STRANGER, auth_url: STRANGER } };
-    const split = offerScopeOf("call_integration_tool")(upstream);
-    expect(split.offers).toEqual([]);
-    expect(split.redacted).toBe(upstream);
+  it("redacts, but never offers, a link in anything else, whoever wrote it", () => {
+    // A run's result read back, a file, an unknown tool: the platform stores them, someone
+    // else wrote them.
+    const payload = { status: 200, body: { result: { connect_url: STRANGER } } };
+    for (const [tool, args] of [
+      ["invoke_operation", { operation_id: "getRun" }],
+      ["invoke_operation", {}],
+      ["read_file", {}],
+    ] as const) {
+      const split = offerScopeOf(tool, { arguments: args })(payload);
+      expect(split.offers).toEqual([]);
+      expect(JSON.stringify(split.redacted)).not.toContain(STRANGER);
+    }
+  });
+
+  it("offers a run launch's readiness links, never a link in the run's result", () => {
+    const scope = offerScopeOf("run_and_wait", {});
+    const refused = scope({ status: 409, body: { errors: [refusal(PLATFORM)] } });
+    expect(refused.offers).toEqual([{ connect_url: PLATFORM }]);
+    const done = scope({ id: "run_1", status: "success", done: true, result: refusal(STRANGER) });
+    expect(done.offers).toEqual([]);
+    expect(JSON.stringify(done.redacted)).not.toContain(STRANGER);
+  });
+
+  it("passes a result the platform marked relayed on verbatim, with no card", () => {
+    const upstream = { content: [{ type: "text", text: "x" }], connect_url: STRANGER };
+    const scope = offerScopeOf("call_integration_tool", { relayed: true });
+    expect(scope(upstream)).toEqual({ redacted: upstream, offers: [] });
     const text = JSON.stringify(upstream);
-    expect(splitJsonText(text, offerScopeOf("call_integration_tool"))).toEqual({
-      text,
-      offers: [],
-    });
+    expect(splitJsonText(text, scope)).toEqual({ text, offers: [] });
   });
 
-  it("takes a search's offers from its `not_ready` refusals alone, never from a server's schema", () => {
+  it("offers an integration call's own refusal, and an api_call batch's per-request refusals", () => {
+    const scope = offerScopeOf("call_integration_tool", {});
+    expect(scope(refusal(PLATFORM)).offers).toEqual([{ connect_url: PLATFORM }]);
+
+    const batch = {
+      session_id: "s",
+      results: [
+        { index: 0, error: refusal(PLATFORM) },
+        // The upstream's answer: its body and headers are the stranger's.
+        {
+          index: 1,
+          status: 200,
+          headers: { connect_url: STRANGER },
+          body: { connect_url: STRANGER, auth_url: STRANGER },
+        },
+      ],
+    };
+    const split = scope(batch);
+    expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
+    const redacted = split.redacted as typeof batch;
+    expect(redacted.results[0]!.error!.connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(redacted.results[1]).toBe(batch.results[1]);
+  });
+
+  it("offers a search's refusals, never a server's descriptions or schemas", () => {
     const payload = {
-      tools: [{ tool: "x__find", description: "find" }],
+      tools: [{ tool: "x__find", description: "find", connect_url: STRANGER }],
       best_match: {
         tool: "x__find",
         // A remote server controls its schemas.
         input_schema: { type: "object", properties: { q: { connect_url: STRANGER } } },
       },
-      not_ready: [
-        {
-          integration_package_id: "@x/y",
-          refusal: { code: "not_connected", connect_url: PLATFORM },
-        },
-      ],
+      not_ready: [{ integration_package_id: "@x/y", refusal: refusal(PLATFORM) }],
+      unlisted: [{ integration_package_id: "@x/z", refusal: refusal(PLATFORM_2) }],
     };
-    const split = offerScopeOf("search_integration_tools")(payload);
-    expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
+    const split = offerScopeOf("search_integration_tools", {})(payload);
+    expect(split.offers).toEqual([{ connect_url: PLATFORM }, { connect_url: PLATFORM_2 }]);
     const redacted = split.redacted as typeof payload;
+    expect(redacted.tools).toBe(payload.tools);
     expect(redacted.best_match).toBe(payload.best_match);
     expect(redacted.not_ready[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(redacted.unlisted[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
+
+    // The search refused outright: its whole answer is the platform's.
+    expect(offerScopeOf("search_integration_tools", {})(refusal(PLATFORM)).offers).toEqual([
+      { connect_url: PLATFORM },
+    ]);
   });
 
-  it("leaves a search without `not_ready` untouched", () => {
+  it("leaves a search with nothing of the platform's to redact untouched", () => {
     const payload = { tools: [], best_match: { input_schema: { connect_url: STRANGER } } };
-    const split = offerScopeOf("search_integration_tools")(payload);
+    const split = offerScopeOf("search_integration_tools", {})(payload);
     expect(split).toEqual({ redacted: payload, offers: [] });
     expect(split.redacted).toBe(payload);
   });

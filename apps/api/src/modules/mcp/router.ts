@@ -358,7 +358,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
  * the chat's server-minted MCP bearer is, like any MCP client's bearer.
  */
 function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
-  return isBearerOnlyCaller(bearerCaller(c), "Credential proxy");
+  return isBearerOnlyCaller(bearerCaller(c), "credential-proxy");
 }
 
 /**
