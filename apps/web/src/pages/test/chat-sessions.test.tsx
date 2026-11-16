@@ -25,6 +25,8 @@ function conversation(id: string, title: string, unread: boolean): SessionSummar
     unread,
     generating: false,
     updatedAt: "2026-09-05T10:00:00Z",
+    spaceId: "spc_a",
+    restricted: false,
     space_ids: ["spc_a"],
   };
 }

@@ -15,7 +15,7 @@ import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache, type SessionSummary } from "../src/ui/sessions.ts";
 import { transportOf } from "./fake-request.ts";
 
-const base = { unread: false, generating: false, updatedAt: "" };
+const base = { unread: false, generating: false, updatedAt: "", spaceId: null, restricted: false };
 const sessions: SessionSummary[] = [
   { ...base, id: "chs_1", title: "In a space", space_ids: ["spc_a"] },
   { ...base, id: "chs_2", title: "Across", space_ids: ["spc_a", "spc_b"] },

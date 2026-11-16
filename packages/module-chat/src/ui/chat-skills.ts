@@ -36,9 +36,14 @@ const enforcedSkillsSchema = z.object({
   data: z.array(z.object({ id: z.string(), name: z.string(), version: z.string().nullable() })),
 });
 
-/** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
-export async function fetchEnforcedSkills(transport: ChatTransport): Promise<SkillHint[]> {
-  const res = await transport.request(chatPath(transport, "/enforced-skills"));
+/** What `spaceId` imposes, through the chat module (`chat:write`): a member without `skills:read` sees them too. */
+export async function fetchEnforcedSkills(
+  transport: ChatTransport,
+  spaceId: string,
+): Promise<SkillHint[]> {
+  const res = await transport.request(
+    chatPath(transport, `/enforced-skills?${new URLSearchParams({ spaceId })}`),
+  );
   // Strict: a policy read that drifted must fail loudly, never read as "nothing imposed".
   const parsed = enforcedSkillsSchema.safeParse(await res.json());
   if (!parsed.success) throw new Error("Unexpected enforced skills response");

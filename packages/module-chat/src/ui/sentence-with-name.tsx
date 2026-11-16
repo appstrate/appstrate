@@ -16,3 +16,15 @@ export function sentenceWithName(t: ChatTranslate, key: string, name: string): R
     </>
   );
 }
+
+/** {@link sentenceWithName} where the name is a node (a space's tile and name, as the host renders it). */
+export function sentenceWithNode(t: ChatTranslate, key: string, node: ReactNode): ReactNode {
+  const [before, after = ""] = t(key, { name: NAME_SLOT }).split(NAME_SLOT);
+  return (
+    <>
+      {before}
+      {node}
+      {after}
+    </>
+  );
+}

@@ -3,7 +3,7 @@
 /** One kind of conversation: the route every chat call takes, the filter that keys and names the space. */
 
 import { describe, expect, it } from "bun:test";
-import { chatPath, turnBody, turnSpaceId } from "../src/ui/chat-route.ts";
+import { chatPath, selectedOriginSpaceId, turnBody } from "../src/ui/chat-route.ts";
 import {
   deleteSession,
   fetchSessionsPage,
@@ -41,7 +41,7 @@ describe("the chat's routes", () => {
       await deleteSession(transport, "chs_1");
       await markSessionRead(transport, "chs_1");
       await stopSession(transport, "chs_1");
-      await fetchEnforcedSkills(transport).catch(() => {});
+      await fetchEnforcedSkills(transport, "spc_a").catch(() => {});
 
       expect(request.calls.map((c) => c.path.replace(/\?.*/, ""))).toEqual([
         "/api/orgs/org_1/chat/sessions",
@@ -88,17 +88,17 @@ describe("the conversation list as a filter", () => {
   });
 });
 
-describe("the space a new conversation and a turn name", () => {
+describe("the origin space of a new conversation", () => {
   const acting = ["spc_a", "spc_b"];
 
   it("is the selected space when the chat acts there", () => {
-    expect(turnSpaceId({ spaceId: "spc_b" }, acting)).toBe("spc_b");
+    expect(selectedOriginSpaceId({ spaceId: "spc_b" }, acting)).toBe("spc_b");
   });
 
   it("is none in « Vue d'ensemble », in a space the chat cannot act in, and without a transport", () => {
-    expect(turnSpaceId({ spaceId: null }, acting)).toBeUndefined();
-    expect(turnSpaceId({ spaceId: "spc_viewer" }, acting)).toBeUndefined();
-    expect(turnSpaceId(undefined, acting)).toBeUndefined();
+    expect(selectedOriginSpaceId({ spaceId: null }, acting)).toBeUndefined();
+    expect(selectedOriginSpaceId({ spaceId: "spc_viewer" }, acting)).toBeUndefined();
+    expect(selectedOriginSpaceId(undefined, acting)).toBeUndefined();
   });
 
   const base = {
@@ -110,20 +110,29 @@ describe("the space a new conversation and a turn name", () => {
     skills: undefined,
   };
 
-  it("rides in the turn's body only when there is one", () => {
-    expect(turnBody({ ...base, spaceId: "spc_a" })).toMatchObject({
+  it("rides in the body of the turn that creates the conversation, with its limit", () => {
+    expect(turnBody({ ...base, creation: { spaceId: "spc_a" } })).toMatchObject({
       id: "chs_1",
       spaceId: "spc_a",
     });
-    expect("spaceId" in turnBody({ ...base, spaceId: undefined })).toBe(false);
+    expect(turnBody({ ...base, creation: { spaceId: "spc_a", restricted: true } })).toMatchObject({
+      spaceId: "spc_a",
+      restricted: true,
+    });
+  });
+
+  it("is absent from the body of a turn of an existing conversation", () => {
+    const body = turnBody({ ...base, creation: undefined });
+    expect("spaceId" in body).toBe(false);
+    expect("restricted" in body).toBe(false);
   });
 
   it("sends the skills only when the user changed them", () => {
-    expect("skill_mode" in turnBody({ ...base, spaceId: undefined })).toBe(false);
+    expect("skill_mode" in turnBody({ ...base, creation: undefined })).toBe(false);
     expect(
       turnBody({
         ...base,
-        spaceId: undefined,
+        creation: undefined,
         skills: { skillMode: "auto", pinnedSkills: ["@acme/tone"] },
       }),
     ).toMatchObject({ skill_mode: "auto", pinned_skills: ["@acme/tone"] });

@@ -38,6 +38,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
+import { callSpace, useConversationScope } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
@@ -169,7 +170,7 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 /** The space a tool call acted in, named by the host. */
 function CallSpace({ args }: { args: unknown }) {
   const { renderSpaces } = useChatHost();
-  const spaceId = callSpaceId(args);
+  const spaceId = useCallSpaceId(args);
   if (!renderSpaces || !spaceId) return null;
   return (
     <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
@@ -349,7 +350,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   // The call names the space the run ran in: the card reads and links there.
-  const spaceId = callSpaceId(props.args);
+  const spaceId = useCallSpaceId(props.args);
   return (
     <ChatRunProgressCard
       runId={runId}
@@ -504,12 +505,20 @@ function callSpaceId(args: unknown): string | undefined {
   return stringArg(asRecordOrNull(args) ?? undefined, "space_id");
 }
 
+/**
+ * Where a call acted: the space it named, else the origin space of a limited conversation (its
+ * calls reach the pinned endpoint and name none), so the card reads and links in the right space.
+ */
+function useCallSpaceId(args: unknown): string | undefined {
+  return callSpace(callSpaceId(args), useConversationScope());
+}
+
 /** The connect card of a call: it reads the integration where the call acted. */
 function CallOAuthConnectCard({
   args,
   ...card
 }: { args: unknown } & React.ComponentProps<typeof OAuthConnectCard>) {
-  const spaceId = callSpaceId(args);
+  const spaceId = useCallSpaceId(args);
   return <OAuthConnectCard {...card} spaceId={spaceId} />;
 }
 

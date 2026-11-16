@@ -80,7 +80,14 @@ import {
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { chatPath, turnBody, turnSpaceId } from "./chat-route.ts";
+import {
+  chatPath,
+  selectedOriginSpaceId,
+  turnBody,
+  type ConversationCreation,
+} from "./chat-route.ts";
+import { useConversationLimit } from "./conversation-limit.ts";
+import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -460,13 +467,23 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
-  const { t } = useChatHost();
+  const { t, actingSpaceIds } = useChatHost();
   const history = useQuery({
     queryKey: sessionQueryKey(id),
     queryFn: () => loadHistory(transport!, id),
     enabled: persistedAtMount && !!transport,
     staleTime: Infinity,
     gcTime: 0,
+  });
+
+  // The conversation's origin space and limit: stored once it exists, the selected space and a
+  // local choice before its first message (see `conversation-limit.ts`).
+  const { scope, getCreation } = useConversationLimit({
+    id,
+    transport,
+    persistedAtMount,
+    stored: history.data ?? undefined,
+    selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
@@ -515,16 +532,19 @@ const Conversation = memo(function Conversation({
     return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
   }
   return (
-    <ConversationInner
-      id={id}
-      transport={transport}
-      isPersisted={persistedAtMount}
-      initialMessages={initialMessages}
-      composerTools={tools}
-      composerSlot={composerSlot}
-      getChosenSkills={getChosenSkills}
-      {...rest}
-    />
+    <ConversationScopeProvider value={scope}>
+      <ConversationInner
+        id={id}
+        transport={transport}
+        isPersisted={persistedAtMount}
+        initialMessages={initialMessages}
+        composerTools={tools}
+        composerSlot={composerSlot}
+        getChosenSkills={getChosenSkills}
+        getCreation={getCreation}
+        {...rest}
+      />
+    </ConversationScopeProvider>
   );
 });
 
@@ -575,18 +595,18 @@ function ConversationInner({
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
+  getCreation,
 }: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
+  /** The origin space and limit the turn being sent creates the conversation with (none once it exists). */
+  getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
-  const { actingSpaceIds } = useChatHost();
   const filterSpaceId = transport?.spaceId ?? null;
-  // The space a new conversation and each turn name: the one the host is looking at, where the
-  // chat acts. Read at request time (a conversation stays open while the host's space changes).
-  const turnSpace = turnSpaceId(transport, actingSpaceIds);
-  const getTurnSpace = useLatest(turnSpace);
+  // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
+  const getScope = useLatest(useConversationScope());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
 
@@ -630,7 +650,7 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             skills: getChosenSkills(),
-            spaceId: getTurnSpace(),
+            creation: getCreation(),
           }),
         }),
         // Native resume targets our per-session stream endpoint (the chat id is
@@ -639,7 +659,7 @@ function ConversationInner({
           api: `${turnApi}/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders, getChosenSkills, getTurnSpace, turnApi],
+    [buildHeaders, getChosenSkills, getCreation, turnApi],
   );
 
   const chat = useChat({
@@ -746,6 +766,7 @@ function ConversationInner({
     // A conversation that touched no space is listed under every filter, so its row is created
     // in the open one; once the turn touches spaces, the list refetch decides where it stays.
     if (generating) {
+      const { originSpaceId, restricted } = getScope();
       queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) => {
         const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
@@ -753,7 +774,9 @@ function ConversationInner({
             id,
             title: null,
             unread: false,
-            space_ids: turnSpace ? [turnSpace] : [],
+            spaceId: originSpaceId,
+            restricted,
+            space_ids: originSpaceId ? [originSpaceId] : [],
           }),
           generating: true,
           updatedAt: new Date().toISOString(),
@@ -773,7 +796,7 @@ function ConversationInner({
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
     wasGenerating.current = generating;
-  }, [generating, id, filterSpaceId, turnSpace, queryClient]);
+  }, [generating, id, filterSpaceId, getScope, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable

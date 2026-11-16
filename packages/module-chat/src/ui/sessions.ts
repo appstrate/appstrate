@@ -26,7 +26,11 @@ export interface SessionSummary {
   unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */
   updatedAt: string;
-  /** The spaces the conversation touched; empty when it touched none. */
+  /** The origin space: the one selected when the conversation was created, `null` from the overview. */
+  spaceId: string | null;
+  /** Limited to its origin space. Always false without one. */
+  restricted: boolean;
+  /** The spaces the conversation touched (origin first); empty when it touched none. */
   space_ids: string[];
 }
 
@@ -107,6 +111,18 @@ export async function renameSession(
   await transport.request(chatPath(transport, `/sessions/${id}`), jsonInit("PATCH", { title }));
 }
 
+/** Limit (`true`) or lift (`false`) the conversation's confinement to its origin space. */
+export async function setSessionRestricted(
+  transport: ChatTransport,
+  id: string,
+  restricted: boolean,
+): Promise<void> {
+  await transport.request(
+    chatPath(transport, `/sessions/${id}`),
+    jsonInit("PATCH", { restricted }),
+  );
+}
+
 export async function deleteSession(transport: ChatTransport, id: string): Promise<void> {
   await transport.request(chatPath(transport, `/sessions/${id}`), { method: "DELETE" });
 }
@@ -127,10 +143,12 @@ interface StoredMessage {
   content: Record<string, unknown>;
 }
 
-/** A conversation as the detail route serves it: history + skill selection. */
-interface SessionHistory {
+/** A conversation as the detail route serves it: history, skill selection, origin and limit. */
+export interface SessionHistory {
   messages: UIMessage[];
   skills: ChatSkillSelection;
+  spaceId: string | null;
+  restricted: boolean;
 }
 
 /**
@@ -153,10 +171,14 @@ export async function loadHistory(
     messages?: StoredMessage[];
     skill_mode: ChatSkillMode;
     pinned_skills: string[];
+    spaceId?: string | null;
+    restricted?: boolean;
   };
   return {
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
     skills: { skillMode: body.skill_mode, pinnedSkills: body.pinned_skills },
+    spaceId: body.spaceId ?? null,
+    restricted: body.restricted ?? false,
   };
 }

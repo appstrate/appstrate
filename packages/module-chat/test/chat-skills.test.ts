@@ -84,9 +84,11 @@ describe("fetchEnforcedSkills", () => {
       }),
     );
 
-    const got = await fetchEnforcedSkills(transportOver(request));
+    const got = await fetchEnforcedSkills(transportOver(request), "spc_a");
 
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/chat/enforced-skills"]);
+    expect(request.calls.map((c) => c.path)).toEqual([
+      "/api/orgs/org_1/chat/enforced-skills?spaceId=spc_a",
+    ]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", version: "1.2.0" },
       { packageId: "@acme/gone", display_name: "Gone", version: null },
@@ -95,7 +97,7 @@ describe("fetchEnforcedSkills", () => {
 
   it("throws on a refusal", async () => {
     const request = requestAnswering(() => new Response(null, { status: 503 }));
-    await expect(fetchEnforcedSkills(transportOver(request))).rejects.toMatchObject({
+    await expect(fetchEnforcedSkills(transportOver(request), "spc_a")).rejects.toMatchObject({
       status: 503,
     });
   });
@@ -108,7 +110,9 @@ describe("fetchEnforcedSkills", () => {
   ] as const) {
     it(`throws on ${label}`, async () => {
       const request = requestAnswering(() => Response.json(body));
-      await expect(fetchEnforcedSkills(transportOver(request))).rejects.toThrow("Unexpected");
+      await expect(fetchEnforcedSkills(transportOver(request), "spc_a")).rejects.toThrow(
+        "Unexpected",
+      );
     });
   }
 });

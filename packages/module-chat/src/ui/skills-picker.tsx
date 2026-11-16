@@ -6,7 +6,7 @@
 
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
 import { Badge, badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -27,6 +27,7 @@ import {
   skillPickerRows,
   togglePinned,
 } from "./chat-skills.ts";
+import { pinnedSpaceOf, useConversationScope } from "./conversation-scope.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
@@ -106,13 +107,20 @@ export function SkillsPicker({
   children,
 }: SkillsPickerProps) {
   const { t, can, actingSpaceIds } = useChatHost();
+  // A limited conversation reaches its origin space alone: its skills, not the acting set's.
+  const scope = useConversationScope();
+  const pinnedSpaceId = pinnedSpaceOf(scope);
+  const catalogueSpaceIds = useMemo(
+    () => (pinnedSpaceId ? [pinnedSpaceId] : actingSpaceIds),
+    [pinnedSpaceId, actingSpaceIds],
+  );
   const readable = !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the acting set keys it.
-    queryKey: ["packages", "skills", { consumer: "chat" }, actingSpaceIds],
-    queryFn: () => fetchSkills(transport!, actingSpaceIds),
+    queryKey: ["packages", "skills", { consumer: "chat" }, catalogueSpaceIds],
+    queryFn: () => fetchSkills(transport!, catalogueSpaceIds),
     enabled: readable,
     staleTime: 60_000,
   });
@@ -122,7 +130,9 @@ export function SkillsPicker({
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".
   // Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
-  const loading = (readable && catalogue.isPending) || (!!transport && enforcedQuery.isPending);
+  const loading =
+    (readable && catalogue.isPending) ||
+    (enforcedQuery.fetchStatus !== "idle" && enforcedQuery.isPending);
 
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);

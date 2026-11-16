@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { SkillsChip } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 
@@ -33,13 +34,17 @@ function html(queryClient: QueryClient, transport: typeof scoped | undefined): s
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <ChatHostProvider value={host}>
-        <TooltipProvider>
-          <SkillsChip
-            transport={transport}
-            selection={{ skillMode: "manual", pinnedSkills: [] }}
-            onClick={() => {}}
-          />
-        </TooltipProvider>
+        <ConversationScopeProvider
+          value={{ originSpaceId: "spc_1", restricted: false, setRestricted: () => {} }}
+        >
+          <TooltipProvider>
+            <SkillsChip
+              transport={transport}
+              selection={{ skillMode: "manual", pinnedSkills: [] }}
+              onClick={() => {}}
+            />
+          </TooltipProvider>
+        </ConversationScopeProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -54,7 +59,7 @@ describe("SkillsChip", () => {
 
   it("draws the button once the enforced read has answered", () => {
     const qc = new QueryClient();
-    qc.setQueryData(["chat", "enforced-skills"], []);
+    qc.setQueryData(["chat", "enforced-skills", "spc_1"], []);
     expect(html(qc, scoped)).toContain("skills-picker-trigger");
   });
 

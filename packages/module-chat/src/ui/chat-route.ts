@@ -17,11 +17,11 @@ export function chatPath(transport: Pick<ChatTransport, "orgId">, suffix = ""): 
 }
 
 /**
- * The space a new conversation or a turn names: the one the host is looking at, when the chat acts
- * there (the server refuses a space outside the acting set). `undefined` in « Vue d'ensemble » and
- * in a space the chat cannot act in: the conversation then acts in the caller's other spaces.
+ * The space a new conversation takes as its origin: the one the host is looking at, when the chat
+ * acts there (the server refuses a space outside the acting set). `undefined` in « Vue d'ensemble »
+ * and in a space the chat cannot act in: the conversation then has no origin space.
  */
-export function turnSpaceId(
+export function selectedOriginSpaceId(
   transport: Pick<ChatTransport, "spaceId"> | null | undefined,
   actingSpaceIds: readonly string[],
 ): string | undefined {
@@ -29,9 +29,16 @@ export function turnSpaceId(
   return spaceId && actingSpaceIds.includes(spaceId) ? spaceId : undefined;
 }
 
+/** What a turn that creates the conversation carries: its origin space and its limit. */
+export interface ConversationCreation {
+  spaceId?: string;
+  restricted?: true;
+}
+
 /**
  * The body of a turn: the messages, the generation settings, the authoring switch, the skills the
- * user changed (nothing changed = nothing sent) and the space the turn names (`turnSpaceId`).
+ * user changed (nothing changed = nothing sent) and, on the turn that creates the conversation,
+ * its origin space and limit (`creation`; the server ignores them for an existing conversation).
  */
 export function turnBody(args: {
   body: object | undefined;
@@ -40,16 +47,16 @@ export function turnBody(args: {
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
   skills: ChatSkillSelection | undefined;
-  spaceId: string | undefined;
+  creation: ConversationCreation | undefined;
 }) {
-  const { body, id, messages, generation, packageAuthoring, skills, spaceId } = args;
+  const { body, id, messages, generation, packageAuthoring, skills, creation } = args;
   return {
     ...body,
     id,
     messages,
     generation,
     package_authoring: packageAuthoring,
-    ...(spaceId && { spaceId }),
+    ...creation,
     ...(skills && { skill_mode: skills.skillMode, pinned_skills: skills.pinnedSkills }),
   };
 }

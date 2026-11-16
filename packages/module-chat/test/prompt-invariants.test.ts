@@ -615,7 +615,7 @@ describe("the persona and the spaces", () => {
     expect(FULL).toContain(
       "It lists neither the integrations they have connected nor the agents they can run",
     );
-    expect(FULL).toContain("passing its `space_id`");
+    expect(FULL).toContain("naming its `space_id` where the tool asks for one");
     expect(FULL).not.toContain("listed in your context below");
     expect(FULL).not.toContain("shown per integration in your context");
   });
