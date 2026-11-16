@@ -42,9 +42,9 @@ const RING = "ring-(--space-tile-ring,var(--background))";
 
 /**
  * Several spaces' tiles stacked, each overlapping the previous one, ringed in `--space-tile-ring`
- * (the colour of the surface they sit on, which the container sets for each of its states: Card
- * and DataTable do, a list row or a trigger sets its own; `--background` when none does) so the
- * edges stay readable. Past `max`, the rest is counted.
+ * (the colour of the surface they sit on, which the container sets for each of its states: a
+ * conversation row or the chat's top-bar trigger; `--background` when none does) so the edges
+ * stay readable. Past `max`, the rest is counted.
  */
 export function SpaceTileStack({
   spaces,
@@ -119,7 +119,7 @@ export function SpaceNameOf({
 /**
  * Every space a row touched, none counted away: all the tiles in a row, then the names joined
  * (« Studio, Coffre »), truncated with the full names in `title`. One space reads as
- * {@link SpaceName}. The one « spaces of a row » line: cards, tables, conversation lists.
+ * {@link SpaceName}. The line of a conversation's spaces.
  */
 export function SpaceTilesOf({
   spaceIds,

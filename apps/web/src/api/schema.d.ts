@@ -5792,6 +5792,8 @@ export interface components {
         };
         AgentListItem: {
             id: string;
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            home_space_id: string | null;
             /** @description The space whose index lists this row (spc_ prefix): the agent is ACTIVE there, and the row's counters and dependency summary follow the caller's role there. A list spanning spaces lists an agent once per space it is active in. */
             spaceId: string;
             /** @description The icon, `null` when none is set. Written as `lucide:<name>` (a Lucide icon, e.g. `lucide:bot`), `emoji:<one emoji>`, or — on an organization only — an uploaded image as a base64 data URI, `data:image/webp;base64,…` or `data:image/png;base64,…` (at most 12000 bytes and 256×256 px). An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`). An agent's is its manifest `icon`, read as written: it may also be another Iconify id (`<prefix>:<name>`) or an image URL, and a client draws nothing for a value it cannot parse. */
@@ -8405,6 +8407,7 @@ export interface operations {
                      *         {
                      *           "id": "@acme/email-sorter",
                      *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": "lucide:mail",
                      *           "color": "blue",
                      *           "display_name": "Email Sorter",
@@ -8430,6 +8433,7 @@ export interface operations {
                      *         {
                      *           "id": "@appstrate/code-reviewer",
                      *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": null,
                      *           "color": null,
                      *           "display_name": "Code Reviewer",
@@ -20185,6 +20189,7 @@ export interface operations {
                      *         {
                      *           "id": "@acme/email-sorter",
                      *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": "lucide:mail",
                      *           "color": "blue",
                      *           "display_name": "Email Sorter",
@@ -20210,6 +20215,7 @@ export interface operations {
                      *         {
                      *           "id": "@appstrate/code-reviewer",
                      *           "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "icon": null,
                      *           "color": null,
                      *           "display_name": "Code Reviewer",

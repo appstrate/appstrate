@@ -288,7 +288,7 @@ export function DataTable<T>({
   // (`INTEGRATED_TABLE_SURFACE`: every overlay and modal, a framed detail tab), whose card it shares.
   const frameClass = cn(
     "@container/table overflow-hidden",
-    "bg-card rounded-lg border [--dt-surface:var(--color-card)] [--space-tile-ring:var(--dt-surface)] [[data-table-surface=integrated]_&]:rounded-none [[data-table-surface=integrated]_&]:border-0 [[data-table-surface=integrated]_&]:bg-transparent",
+    "bg-card rounded-lg border [--dt-surface:var(--color-card)] [[data-table-surface=integrated]_&]:rounded-none [[data-table-surface=integrated]_&]:border-0 [[data-table-surface=integrated]_&]:bg-transparent",
     "[--dt-surface-hover:color-mix(in_oklab,var(--color-muted)_50%,var(--dt-surface))]",
   );
 
@@ -419,7 +419,7 @@ export function DataTable<T>({
                     className={cn(
                       "group/row border-border/60 relative h-12",
                       interactive
-                        ? "cursor-pointer hover:bg-(--dt-surface-hover) hover:[--space-tile-ring:var(--dt-surface-hover)]"
+                        ? "cursor-pointer hover:bg-(--dt-surface-hover)"
                         : "hover:bg-transparent",
                     )}
                     onClick={interactive ? (e) => handOver(e, () => open(row, href)) : undefined}

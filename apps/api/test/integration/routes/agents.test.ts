@@ -97,6 +97,7 @@ describe("Agents API", () => {
       const agent = body.data.find((f: { id: string }) => f.id === "@myorg/test-agent");
       expect(agent).toBeDefined();
       expect(agent.source).toBe("local");
+      expect(agent.home_space_id).toBe(ctx.defaultSpaceId);
     });
 
     it("returns scope WITH the @ sigil — directly usable as a {scope} path param (#629)", async () => {

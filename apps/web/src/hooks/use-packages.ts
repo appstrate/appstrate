@@ -150,7 +150,7 @@ async function fetchPackageDetail(
  * An index's rows as its lists hold them: each package once, its spaces in the order of the
  * reader's space listing. `sum`: the per-space counters to add up (a stable array).
  */
-function useOnePerPackage<T extends { id: string; spaceId: string }>(
+function useOnePerPackage<T extends { id: string; spaceId: string; home_space_id?: string | null }>(
   sum?: readonly (keyof T)[],
 ): (rows: T[]) => InSpaces<T>[] {
   const { data: spaces } = useSpaces();

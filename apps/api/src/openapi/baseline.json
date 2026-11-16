@@ -853,6 +853,7 @@
                     {
                       "id": "@acme/email-sorter",
                       "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": "lucide:mail",
                       "color": "blue",
                       "display_name": "Email Sorter",
@@ -875,6 +876,7 @@
                     {
                       "id": "@appstrate/code-reviewer",
                       "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": null,
                       "color": null,
                       "display_name": "Code Reviewer",
@@ -962,6 +964,7 @@
                     {
                       "id": "@acme/email-sorter",
                       "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": "lucide:mail",
                       "color": "blue",
                       "display_name": "Email Sorter",
@@ -984,6 +987,7 @@
                     {
                       "id": "@appstrate/code-reviewer",
                       "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "icon": null,
                       "color": null,
                       "display_name": "Code Reviewer",
@@ -34431,11 +34435,16 @@
           "keywords",
           "version",
           "published",
-          "spaceId"
+          "spaceId",
+          "home_space_id"
         ],
         "properties": {
           "id": {
             "type": "string"
+          },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority."
           },
           "spaceId": {
             "type": "string",

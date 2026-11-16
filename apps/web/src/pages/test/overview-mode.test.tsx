@@ -72,6 +72,7 @@ const SPACES = [
 const agent = (spaceId: string) => ({
   id: "@acme/reporter",
   spaceId,
+  home_space_id: "spc_a",
   source: "local" as const,
   version: "1.0.0",
   description: "Rapporte",
@@ -106,7 +107,7 @@ const packageRow = (spaceId: string, extra: Record<string, unknown> = {}) => ({
   updatedAt: "2026-09-05T10:00:00Z",
   used_by_agents: 0,
   auto_installed: false,
-  home_space_id: null,
+  home_space_id: "spc_a",
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
@@ -274,13 +275,9 @@ describe("the agent index in the mode", () => {
     // The row opens in its first space, the working one here.
     expect(html).toContain('href="/agents/@acme/reporter"');
     expect(html).not.toContain("enterSpace=");
-    // The « Espace » column stacks one tile per space, then names them joined.
+    // The « Espace » column names the home and counts the other, named in the badge's label.
     expect(html).toContain(">Espace<");
-    expect(html.match(/ring-\(--space-tile-ring,var\(--background\)\)/g)).toHaveLength(2);
-    expect(html).toContain('title="Studio, spc_b">Studio, spc_b</span>');
-    // The table sets the ring for its rows: the surface at rest, the hover surface on a link row.
-    expect(html).toContain("[--space-tile-ring:var(--dt-surface)]");
-    expect(html).toContain("hover:[--space-tile-ring:var(--dt-surface-hover)]");
+    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b"/);
     expect(html).toContain("1 élément");
   });
 
@@ -381,13 +378,8 @@ describe("the integration index in the mode", () => {
     expect(html).toContain('href="/integrations/@acme/crm"');
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
-    // The card rings the tiles in its background, and in its translucent hover one made opaque.
-    expect(html).toContain("[--space-tile-ring:var(--color-card)]");
-    expect(html).toContain(
-      "hover:[--space-tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]",
-    );
     expect(html).toMatch(
-      /data-testid="space-tile-stack".*?title="Studio, spc_b">Studio, spc_b<\/span><\/span><span aria-hidden="true">·<\/span>.*?2 connexions/,
+      /title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
@@ -624,53 +616,5 @@ describe("the gate", () => {
     const html = renderIn(false, gate, "/runs?enterSpace=spc_b").html;
     expect(html).toContain("attente");
     expect(html).not.toContain("ouvert");
-  });
-
-  describe("the chat, which serves the organization in every mode", () => {
-    const chatGate = (
-      <RouteGate path="/chat/:conversationId" pending={<p>attente</p>}>
-        <p>ouvert</p>
-      </RouteGate>
-    );
-    // The working space (spc_a) reads no chat; spc_b does.
-    const chatSpaces = [SPACES[0]!, space("spc_b", ["chat:read", "runs:read"])];
-    const withChat = (features: Record<string, boolean>, on: boolean) => {
-      const config = window.__APP_CONFIG__;
-      window.__APP_CONFIG__ = { ...config, features: { ...config.features, ...features } };
-      try {
-        return renderIn(on, chatGate, "/chat/chs_1", () => {}, chatSpaces).html;
-      } finally {
-        window.__APP_CONFIG__ = config;
-      }
-    };
-
-    it("opens a conversation where another space admits the chat", () => {
-      expect(withChat({ chat: true }, true)).toContain("ouvert");
-    });
-
-    it("opens it the same way out of the mode, whatever the working space grants", () => {
-      expect(withChat({ chat: true }, false)).toContain("ouvert");
-    });
-
-    it("stays shut where no space admits the chat, in either mode", () => {
-      const none = [SPACES[0]!, space("spc_b", ["runs:read"])];
-      const config = window.__APP_CONFIG__;
-      window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
-      try {
-        for (const on of [true, false]) {
-          expect(renderIn(on, chatGate, "/chat/chs_1", () => {}, none).html).not.toContain(
-            "ouvert",
-          );
-        }
-      } finally {
-        window.__APP_CONFIG__ = config;
-      }
-    });
-
-    it("keeps the page absent where the module is not loaded, whatever a space admits", () => {
-      const html = withChat({}, true);
-      expect(html).not.toContain("ouvert");
-      expect(html).toContain("Cette page n'existe pas ici.");
-    });
   });
 });

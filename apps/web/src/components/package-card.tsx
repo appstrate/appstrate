@@ -16,7 +16,8 @@ import { useSpaceLink } from "../hooks/use-current-space";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
-import { SpaceTilesOf } from "./space-name";
+import { PackageSharedFrom, PackageSpaces } from "./package-spaces";
+import { useSharedFromText } from "../hooks/use-shared-from-text";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -31,6 +32,7 @@ export function PackageCard({
   id,
   spaceId,
   spaceIds,
+  homeSpaceId,
   displayName,
   description,
   type,
@@ -67,6 +69,7 @@ export function PackageCard({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const linkInSpace = useSpaceLink();
+  const sharedFrom = useSharedFromText(homeSpaceId, source === "system");
   // The focus ring is drawn on the stretched overlay, i.e. around the whole
   // card: on the title itself `truncate` would clip it.
   const titleClass =
@@ -74,7 +77,7 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors hover:[--space-tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]">
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
@@ -146,15 +149,29 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || showSpace || meta) && (
+          {(version || showSpace || sharedFrom || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {version && (
                 <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
                   v{version}
                 </UIBadge>
               )}
-              {showSpace && <SpaceTilesOf spaceIds={spaceIds ?? []} />}
-              {showSpace && meta && <span aria-hidden>·</span>}
+              {showSpace ? (
+                <PackageSpaces
+                  homeSpaceId={homeSpaceId}
+                  spaceIds={spaceIds ?? []}
+                  system={source === "system"}
+                />
+              ) : (
+                sharedFrom && (
+                  <PackageSharedFrom
+                    homeSpaceId={homeSpaceId}
+                    system={source === "system"}
+                    variant="text"
+                  />
+                )
+              )}
+              {(showSpace || sharedFrom) && meta && <span aria-hidden>·</span>}
               {meta}
             </div>
           )}

@@ -577,6 +577,8 @@ export interface BasePackageListItem {
 export interface AgentListItem extends BasePackageListItem {
   /** The space whose index lists this row: the agent is active there, and the counters follow the caller's role there. */
   spaceId: string;
+  /** The home space when the caller reaches it, `null` otherwise (system package, withheld home). */
+  home_space_id: string | null;
   /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
   icon: string | null;
   /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */

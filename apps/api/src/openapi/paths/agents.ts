@@ -29,6 +29,7 @@ const agentListResponses = {
             {
               id: "@acme/email-sorter",
               spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
               icon: "lucide:mail",
               color: "blue",
               display_name: "Email Sorter",
@@ -51,6 +52,7 @@ const agentListResponses = {
             {
               id: "@appstrate/code-reviewer",
               spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+              home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
               icon: null,
               color: null,
               display_name: "Code Reviewer",

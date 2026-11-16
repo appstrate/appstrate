@@ -5,7 +5,8 @@ import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { InSpaces } from "../lib/across-spaces";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
-import { useSpaceColumn } from "../components/space-column";
+import { PackageSharedFrom } from "../components/package-spaces";
+import { usePackageSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
   useCatalogueSourceColumn,
@@ -26,7 +27,11 @@ export function useIntegrationListColumns(
   spanning: boolean,
 ): DataColumn<IntegrationRow>[] {
   const { t } = useTranslation("settings");
-  const spaceColumn = useSpaceColumn<IntegrationRow>(spanning);
+  const spaceColumn = usePackageSpaceColumn<IntegrationRow>(spanning, (integration) => ({
+    homeSpaceId: integration.home_space_id,
+    spaceIds: integration.spaceIds,
+    system: integration.source === "system",
+  }));
   const origin = useCatalogueOriginColumn<IntegrationRow>(useOrg().currentOrg?.name ?? "");
   const source = useCatalogueSourceColumn<IntegrationRow>((integration) => integration.source_kind);
 
@@ -40,6 +45,13 @@ export function useIntegrationListColumns(
         <div className="flex min-w-0 items-center gap-2">
           <PackageIcon type="integration" icon={integration.icon} size="sm" />
           <span className="truncate font-medium">{integration.name}</span>
+          {!spanning && (
+            <PackageSharedFrom
+              homeSpaceId={integration.home_space_id}
+              system={integration.source === "system"}
+              variant="icon"
+            />
+          )}
         </div>
       ),
     },
