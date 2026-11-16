@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, spyOn } from "bun:test";
+import { IDENTITY_COLOR_CLASSES } from "@appstrate/ui/identity-colors";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunsTable } from "../runs-table.tsx";
@@ -71,7 +72,7 @@ describe("the runs column set", () => {
 
   it("draws the agent's tile before its name", () => {
     // The tile wears the agent's chosen colour.
-    expect(html).toContain("bg-identity-blue/20");
+    expect(html).toContain(IDENTITY_COLOR_CLASSES.blue);
   });
 
   it("leads to the run, under a name that says which run", () => {
