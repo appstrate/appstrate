@@ -35,7 +35,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSkeleton,
 } from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
@@ -853,7 +852,8 @@ export function ChatConversationSkeleton() {
 /**
  * The conversation list's shape, drawn while its permissions and chunk load:
  * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws.
+ * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
+ * space line under it, as the module's `ConversationRowSkeleton` (same height, same two 16px lines).
  */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
@@ -874,7 +874,13 @@ export function ChatSidebarSkeleton() {
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>
-              <SidebarMenuSkeleton />
+              <div
+                data-sidebar="menu-skeleton"
+                className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+              >
+                <Skeleton className="h-4 w-3/5" />
+                <Skeleton className="h-4 w-2/5" />
+              </div>
             </SidebarMenuItem>
           ))}
         </SidebarMenu>

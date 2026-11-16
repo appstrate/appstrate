@@ -187,6 +187,7 @@
   "context.info.access": "Votre accès",
   "welcome.greeting": "Bonjour, {{name}}",
   "welcome.greetingAnonymous": "Bonjour",
+  "welcome.spaceNotActing": "L'espace sélectionné n'est pas un espace où le chat peut agir : la conversation agira dans vos autres espaces.",
   "composer.queue.add": "Mettre en file",
   "composer.queue.title": "En file — envoyé à la fin de la réponse",
   "composer.queue.titleHeld": "En file — la réponse a été arrêtée",

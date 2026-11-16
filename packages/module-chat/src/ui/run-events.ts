@@ -706,13 +706,13 @@ export function buildRunPageHref(
 
 /**
  * The host's query parameter that enters a space when a link opens (`lib/across-spaces.ts` in
- * the web app, which resolves it): a run an organization session launched lives in the space its
+ * the web app, which resolves it): a run a conversation launched lives in the space its
  * call named, so its link enters that space.
  */
 const ENTER_SPACE_PARAM = "enterSpace";
 
 /**
- * `request` asking in `spaceId`: the run an organization session launched is read in the space
+ * `request` asking in `spaceId`: the run a conversation launched is read in the space
  * its call named, not in the working space the host's headers carry. Unchanged without a space.
  */
 export function requestInSpace(request: ChatRequest, spaceId: string | undefined): ChatRequest {

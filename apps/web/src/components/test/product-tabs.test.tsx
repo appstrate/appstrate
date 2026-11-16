@@ -100,7 +100,7 @@ describe("the products toggle", () => {
         },
       );
       if (seedUnread) {
-        // The working space has one unread reply, the organization's list three.
+        // The selected space's list holds one unread reply, « Vue d'ensemble »'s three.
         const list = (unread: number) => ({
           pages: [
             {
@@ -111,7 +111,7 @@ describe("the products toggle", () => {
           pageParams: [undefined],
         });
         queryClient.setQueryData(["chat", "sessions", "spc_a"], list(1));
-        queryClient.setQueryData(["chat", "sessions", "org:org_1"], list(3));
+        queryClient.setQueryData(["chat", "sessions", null], list(3));
       }
       try {
         return render(<ProductTabs />, { queryClient });
@@ -128,7 +128,7 @@ describe("the products toggle", () => {
     expect(tabs(false, ["runs:read"])).toBe("");
 
     // In the mode the chat opens as it is (no space to ask), and its badge counts the
-    // organization's list: three unread, which the working space's reading never sees.
+    // overview's list: three unread, which the selected space's filter never sees.
     const inMode = tabs(true, chatter, true);
     expect(inMode).toContain('href="/chat"');
     expect(inMode).toContain('aria-label="3 conversations non lues"');

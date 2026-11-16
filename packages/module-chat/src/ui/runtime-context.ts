@@ -12,10 +12,10 @@
  * reimplemented here — one implementation, one set of error semantics.
  *
  * THREE contexts, no more:
- *  - `ChatTransport` — `getHeaders` (the scoping headers: the space keys every
- *    query, and the card-local SSE stream to `/api/realtime` needs the caller's
- *    `X-Org-Id` / `X-Space-Id`, which only the host knows) and `request`, the ONE
- *    function every REST call of the chat goes through.
+ *  - `ChatTransport` — `getHeaders` (the scoping headers: the card-local SSE stream
+ *    to `/api/realtime` needs the caller's `X-Org-Id` / `X-Space-Id`, which only the
+ *    host knows), `request`, the ONE function every REST call of the chat goes
+ *    through, and the organization and space filter the chat's routes are read through.
  *  - `selectConversation` — navigation, see below.
  *  - `ChatHost` — ONE bag of host services, memoized by `ChatPage` from its
  *    props. Deliberately not one context per service: every member is
@@ -43,22 +43,21 @@ export type GetHeaders = () => Record<string, string>;
 export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 /**
- * What the chat page serves: one space (its sessions, `/api/chat/*`, the `X-Space-Id` the headers
- * carry) or the organization (« Vue d'ensemble »: sessions acting across spaces,
- * `/api/orgs/{orgId}/chat/*`, which refuse `X-Space-Id`). The host decides; `scope.ts` derives from
- * it the route base, the headers and the cache key of every chat call.
+ * What the chat page reads. A conversation belongs to the organization and its author, so every
+ * chat call goes to `/api/orgs/{orgId}/chat/*`; `spaceId` is the space the host is looking at,
+ * which filters the conversation list (`?spaceId=`) and is the space a new conversation or a turn
+ * touches. `null` in « Vue d'ensemble »: the list holds every conversation and none is touched.
  */
-export type ChatScope = { kind: "space" } | { kind: "organization"; orgId: string };
-
 export interface ChatTransport {
   getHeaders: GetHeaders;
   request: ChatRequest;
-  scope: ChatScope;
+  orgId: string;
+  spaceId: string | null;
 }
 
 /**
  * The host's rendering of spaces by id (its tile and name, « +2 » for the others). The module
- * names the space of a session or of a tool call through it, in an organization scope only.
+ * names the spaces a conversation touched, and the space of a tool call, through it.
  */
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
@@ -87,11 +86,9 @@ export function jsonInit(method: string, body: unknown): RequestInit {
  * keyed `<Conversation>` remounts on the new id. `null` means "new conversation"
  * (`/chat`). Carried through context so module-chat never imports a router.
  *
- * `spaceId` is the picked session's space (`null`: an organization session). The list of an
- * organization scope holds the sessions of every space: the host leaves « Vue d'ensemble » for
- * the space of a space session, and opens an organization session in place.
+ * A conversation opens in place, whatever the list's filter.
  */
-export type SelectConversation = (id: string | null, spaceId?: string | null) => void;
+export type SelectConversation = (id: string | null) => void;
 
 const SelectConversationContext = createContext<SelectConversation | null>(null);
 
@@ -112,8 +109,8 @@ export function useSelectConversation(): SelectConversation | null {
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
  *
- * `spaceId` names the file's space when it is not the working space (a file a call of an
- * organization session produced elsewhere): the host reads it there. The download and the image
+ * `spaceId` names the file's space when it is not the working space (a file a call of the
+ * conversation produced elsewhere): the host reads it there. The download and the image
  * hook below take it the same way.
  */
 export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
@@ -173,19 +170,19 @@ export interface ChatHost {
   t: ChatTranslate;
   can: ChatCan;
   /**
-   * The caller's grant in one NAMED space, for what a call of an organization session did there
-   * (its run, its files): `can` answers for the scope as a whole. Absent in a mount that has no
-   * space listing: the working scope's `can` then answers.
+   * The caller's grant in one NAMED space, for what a call of a conversation did there (its run,
+   * its files): `can` answers for the chat as a whole. Absent in a mount that has no space
+   * listing: `can` then answers.
    */
   canIn?: ChatCanIn;
   /**
-   * The spaces an organization session acts in (the host's acting set); absent in a space scope.
-   * What the module lists across spaces is narrowed to them: a space outside it is never acted in.
+   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and the
+   * selected space (`ChatTransport.spaceId`) is sent to the server only when it is one of them.
    */
-  actingSpaceIds?: readonly string[];
+  actingSpaceIds: readonly string[];
   /**
-   * The composer may stage a file: the upload lands in the host's working space, which an
-   * organization session resolves only where it acts. Absent means attachable.
+   * The composer may stage a file: the upload lands in the host's working space, which the turn
+   * resolves only where the chat acts. Absent means attachable.
    */
   canAttach?: boolean;
   /**
@@ -210,14 +207,14 @@ export interface ChatHost {
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
-  /** Names spaces in an organization scope; absent in a mount that has no space listing. */
+  /** Names spaces; absent in a mount that has no space listing. */
   renderSpaces?: RenderSpaces;
 }
 
 /**
  * The caller's grants, resolved by the shell. The chat asks for the exact
- * permission each endpoint it calls guards on and holds no RBAC of its own. In an organization
- * scope the shell answers "some space where the chat may act grants it".
+ * permission each endpoint it calls guards on and holds no RBAC of its own. The shell answers
+ * "some space where the chat may act grants it".
  */
 export type ChatCan = (permission: string) => boolean;
 
@@ -242,9 +239,9 @@ export function useChatHost(): ChatHost {
 }
 
 /**
- * The grant a card judges where its call acted: in `spaceId` when the call named one (an
- * organization session), else the scope's own. Judging a run or a file read in the working space
- * would refuse what the call's space grants, and grant what it refuses.
+ * The grant a card judges where its call acted: in `spaceId` when the call named one, else the
+ * chat's own. Judging a run or a file read in the working space would refuse what the call's
+ * space grants, and grant what it refuses.
  */
 export function useCanIn(): (spaceId: string | undefined, permission: string) => boolean {
   const { can, canIn } = useChatHost();

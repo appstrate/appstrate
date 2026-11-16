@@ -21,6 +21,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => false,
+  actingSpaceIds: [],
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
@@ -53,11 +54,11 @@ describe("SkillsChip", () => {
 
   it("draws the button once the enforced read has answered", () => {
     const qc = new QueryClient();
-    qc.setQueryData(["chat", "enforced-skills", "spc_1"], []);
+    qc.setQueryData(["chat", "enforced-skills"], []);
     expect(html(qc, scoped)).toContain("skills-picker-trigger");
   });
 
-  it("draws the button when no space is known (the query is disabled, never loading)", () => {
+  it("draws the button when no transport is known (the query is disabled, never loading)", () => {
     expect(html(new QueryClient(), undefined)).toContain("skills-picker-trigger");
   });
 });

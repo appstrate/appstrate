@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchEnforcedSkills } from "./chat-skills.ts";
 import type { ChatTransport } from "./runtime-context.ts";
-import { chatScopeKey } from "./scope.ts";
 
 /**
  * Shared by the picker and the read-only indicator. Default staleness (30 s):
@@ -11,10 +10,9 @@ import { chatScopeKey } from "./scope.ts";
  * invalidation.
  */
 export function useEnforcedSkills(transport: ChatTransport | undefined) {
-  const scopeKey = chatScopeKey(transport);
   return useQuery({
-    queryKey: ["chat", "enforced-skills", scopeKey],
+    queryKey: ["chat", "enforced-skills"],
     queryFn: () => fetchEnforcedSkills(transport!),
-    enabled: !!scopeKey && !!transport,
+    enabled: !!transport,
   });
 }

@@ -22,6 +22,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
   can: () => true,
+  actingSpaceIds: ["spc_a"],
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
@@ -31,15 +32,17 @@ const host: ChatHost = {
 const scoped = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 /** Seeds the shared read, so the render is the answer and not a fetch. */
-function render(enforced: SkillHint[] | null, transport: ChatTransport = scoped): string {
+function render(enforced: SkillHint[] | null, transport?: ChatTransport | null): string {
   const qc = new QueryClient();
   // `null`: nothing seeded, the read is on its way.
-  if (enforced) qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
+  if (enforced) qc.setQueryData(["chat", "enforced-skills"], enforced);
   return renderToString(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
         <TooltipProvider>
-          <EnforcedSkillsIndicator transport={transport} />
+          <EnforcedSkillsIndicator
+            transport={transport === null ? undefined : (transport ?? scoped)}
+          />
         </TooltipProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
@@ -55,13 +58,8 @@ describe("EnforcedSkillsIndicator", () => {
     expect(render(null)).toContain("animate-pulse");
   });
 
-  it("never waits on a read that does not run: no space, no placeholder", () => {
-    expect(
-      render(
-        [],
-        transportOf(() => ({ "X-Org-Id": "org_1" })),
-      ),
-    ).toBe("");
+  it("never waits on a read that does not run: no transport, no placeholder", () => {
+    expect(render([], null)).toBe("");
   });
 
   it("names every enforced skill, falling back to the package id", () => {

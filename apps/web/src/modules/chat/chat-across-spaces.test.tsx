@@ -20,7 +20,7 @@ const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
 const { ConversationRuns, ShownFile } = await import("./conversation-sidebar.tsx");
-const { useChatCan } = await import("./use-chat-runtime.ts");
+const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { useCanReach } = await import("../../hooks/use-can-reach.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
@@ -152,15 +152,34 @@ describe("the grants the chat module reads", () => {
   const can = (permission: string, chosen: boolean) =>
     renderOverview(<Probe permission={permission} />, spaces, chosen).html;
 
-  it("is, in the overview, what some space where the chat acts grants", () => {
-    expect(can("skills:read", true)).toContain("true");
-    expect(can("chat:write", true)).toContain("true");
-    expect(can("files:read", true)).toContain("false");
+  it("is what some space where the chat acts grants, in the overview and out of it", () => {
+    for (const chosen of [true, false]) {
+      expect(can("skills:read", chosen)).toContain("true");
+      expect(can("chat:write", chosen)).toContain("true");
+      expect(can("files:read", chosen)).toContain("false");
+    }
+  });
+});
+
+describe("the chat's transport", () => {
+  const spaces = [
+    space("spc_a", ["chat:read", "chat:write", "mcp:read", "runs:read"]),
+    space("spc_b", ["chat:read", "chat:write", "mcp:read", "runs:read"]),
+  ];
+
+  function Filter() {
+    const transport = useChatTransport();
+    return <p>{transport ? `${transport.orgId}|${String(transport.spaceId)}` : "none"}</p>;
+  }
+  const filter = (chosen: boolean, list = spaces) => renderOverview(<Filter />, list, chosen).html;
+
+  it("filters the list to the selected space, and to none in « Vue d'ensemble »", () => {
+    expect(filter(false)).toContain("org_1|spc_a");
+    expect(filter(true)).toContain("org_1|null");
   });
 
-  it("is the working space's out of it", () => {
-    expect(can("files:read", false)).toContain("true");
-    expect(can("skills:read", false)).toContain("false");
+  it("is not there until the space listing has answered", () => {
+    expect(renderOverview(<Filter />, undefined, true).html).toContain("none");
   });
 });
 

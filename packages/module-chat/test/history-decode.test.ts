@@ -64,7 +64,7 @@ describe("stopSession", () => {
     await stopSession(transportOver(request), "chs_1");
 
     expect(request.calls).toHaveLength(1);
-    expect(request.calls[0]?.path).toBe("/api/chat/sessions/chs_1/stop");
+    expect(request.calls[0]?.path).toBe("/api/orgs/org_1/chat/sessions/chs_1/stop");
     expect(request.calls[0]?.init?.method).toBe("POST");
   });
 

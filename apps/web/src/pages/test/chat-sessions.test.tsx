@@ -25,8 +25,7 @@ function conversation(id: string, title: string, unread: boolean): SessionSummar
     unread,
     generating: false,
     updatedAt: "2026-09-05T10:00:00Z",
-    spaceId: "spc_a",
-    space_ids: [],
+    space_ids: ["spc_a"],
   };
 }
 
@@ -35,10 +34,11 @@ function cache(data: SessionSummary[]): SessionsCache {
   return { pages: [{ data, hasMore: false }], pageParams: [undefined] };
 }
 
-/** Scoped to one space; a static render reads the cache and never requests. */
+/** Filtered to one space; a static render reads the cache and never requests. */
 const TRANSPORT: ChatTransport = {
   getHeaders: () => ({ "X-Space-Id": "spc_a" }),
-  scope: { kind: "space" },
+  orgId: "org_1",
+  spaceId: "spc_a",
   request: () => Promise.reject(new Error("no request in a static render")),
 };
 
@@ -76,6 +76,7 @@ function hostWith(granted: string[]): ChatHost {
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
+    actingSpaceIds: ["spc_a"],
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,

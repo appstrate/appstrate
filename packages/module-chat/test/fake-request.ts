@@ -2,7 +2,7 @@
 
 /** The host's `ChatRequest` contract, faked: a non-2xx answer is thrown with its `status`/`code`. */
 
-import type { ChatRequest, ChatScope, ChatTransport } from "../src/ui/runtime-context.ts";
+import type { ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
 
 class FakeProblem extends Error {
   constructor(
@@ -34,20 +34,21 @@ export function requestAnswering(
 /** The transport a static render is given: headers as the host scopes them, requests never answered. */
 export function transportOf(
   getHeaders: () => Record<string, string>,
-  scope: ChatScope = { kind: "space" },
+  spaceId: string | null = "spc_a",
 ): ChatTransport {
   return {
     getHeaders,
-    scope,
+    orgId: "org_1",
+    spaceId,
     request: () => Promise.reject(new Error("no request in a static render")),
   };
 }
 
-/** A transport over `request`, to assert the routes and headers the module's calls take. */
+/** A transport over `request`, to assert the routes the module's calls take. */
 export function transportOver(
   request: ChatRequest,
-  scope: ChatScope = { kind: "space" },
+  spaceId: string | null = null,
   getHeaders: () => Record<string, string> = () => ({}),
 ): ChatTransport {
-  return { getHeaders, request, scope };
+  return { getHeaders, request, orgId: "org_1", spaceId };
 }

@@ -67,7 +67,6 @@ import {
   useChatTransport,
   useSelectConversation,
   type ChatCan,
-  type ChatCanIn,
   type ChatTranslate,
   type RenderSpaces,
 } from "./runtime-context.ts";
@@ -80,7 +79,6 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
-import { chatScopeKey, transportForSession } from "./scope.ts";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
 
@@ -161,20 +159,15 @@ export function ChatConversationList({
   activeId,
   t,
   can,
-  canIn,
   renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  /** The caller's grants in a named space: judges a space session's row actions where it lives. */
-  canIn?: ChatCanIn;
-  /** Names spaces: given, the list of an organization scope shows each session's space. */
+  /** Names spaces: given, every row shows the spaces its conversation touched. */
   renderSpaces?: RenderSpaces;
 }) {
   const select = useSelectConversation();
-  // The space line exists in an organization scope only: a space's list is all one space.
-  const spaceLine = useChatTransport()?.scope.kind === "organization" && !!renderSpaces;
   const [input, setInput] = useState("");
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
   const searching = term !== "";
@@ -196,9 +189,6 @@ export function ChatConversationList({
   const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
   // Starting a conversation is a write, as are rename and delete; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
-  // A row's actions are judged where its session lives: a space session's in its space.
-  const canWriteRow = (s: SessionSummary) =>
-    s.spaceId !== null && canIn ? canIn(s.spaceId, "chat:write") : canWrite;
   const hasAny = (base.data?.length ?? 0) > 0;
   const showSearch = hasAny || input !== "";
 
@@ -210,8 +200,8 @@ export function ChatConversationList({
       unread={s.unread && s.id !== activeId}
       now={now}
       t={t}
-      canWrite={canWriteRow(s)}
-      spaceLine={spaceLine ? (renderSpaces ?? null) : null}
+      canWrite={canWrite}
+      spaceLine={renderSpaces ?? null}
     />
   );
   return (
@@ -274,7 +264,7 @@ export function ChatConversationList({
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                {spaceLine ? <ConversationRowSkeleton /> : <SidebarMenuSkeleton />}
+                {renderSpaces ? <ConversationRowSkeleton /> : <SidebarMenuSkeleton />}
               </SidebarMenuItem>
             ))}
           {searching
@@ -331,7 +321,7 @@ export function ChatConversationList({
 
 /**
  * A row's place while the list loads, with the space line's: the same height and the same two
- * 16px lines as `ConversationRow` in an organization scope, so the list does not shift on load.
+ * 16px lines as `ConversationRow`, so the list does not shift on load.
  */
 function ConversationRowSkeleton() {
   return (
@@ -345,9 +335,8 @@ function ConversationRowSkeleton() {
   );
 }
 
-/** The space a session acted in, named by the host: its space, or the ones it touched. */
+/** The spaces a conversation touched, named by the host; « Vue d'ensemble » when it touched none. */
 function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
-  if (session.spaceId !== null) return renderSpaces([session.spaceId]);
   return session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("threads.overview");
 }
 
@@ -384,7 +373,7 @@ function ConversationRow({
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await deleteSession(transportForSession(transport, session), session.id);
+      await deleteSession(transport, session.id);
     } catch {
       // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
       setDeleteFailed(true);
@@ -400,7 +389,7 @@ function ConversationRow({
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
     // The prefix reaches the filtered (search) lists as well as the plain one.
     queryClient.setQueriesData<SessionsCache>(
-      { queryKey: sessionsQueryKey(chatScopeKey(transport)) },
+      { queryKey: sessionsQueryKey(transport.spaceId) },
       (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);
@@ -410,7 +399,7 @@ function ConversationRow({
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={active}
-        onClick={() => select?.(session.id, session.spaceId)}
+        onClick={() => select?.(session.id)}
         size={spaceLine ? "lg" : "default"}
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title.
@@ -601,7 +590,7 @@ function ConversationSettingsDialog({
     setSaving(true);
     setFailed(false);
     try {
-      await renameSession(transportForSession(transport, session), session.id, next);
+      await renameSession(transport, session.id, next);
       await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
       onClose();
     } catch {

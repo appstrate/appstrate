@@ -56,7 +56,6 @@ import type {
 export type {
   ChatCan,
   ChatRequest,
-  ChatScope,
   ChatTranslate,
   ChatTransport,
   GetHeaders,
@@ -81,7 +80,7 @@ import {
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { chatHeaders, chatPath, chatScopeKey } from "./scope.ts";
+import { chatPath, turnBody, turnSpaceId } from "./chat-route.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -174,8 +173,8 @@ export interface ChatPageProps {
   can: ChatCan;
   /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
   canIn?: ChatHost["canIn"];
-  /** The spaces an organization session acts in (see `ChatHost`). Pass a stable array. */
-  actingSpaceIds?: ChatHost["actingSpaceIds"];
+  /** The spaces the chat acts in (see `ChatHost`). Pass a stable array. */
+  actingSpaceIds: ChatHost["actingSpaceIds"];
   /** Whether the composer may stage a file (see `ChatHost`). */
   canAttach?: ChatHost["canAttach"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
@@ -188,7 +187,7 @@ export interface ChatPageProps {
   onPackagesChanged: ChatHost["onPackagesChanged"];
   /** The user's first name, greeted on a new conversation (see `ChatHost`). */
   firstName?: ChatHost["firstName"];
-  /** Names spaces in an organization scope (see `ChatHost`). Pass a stable function. */
+  /** Names spaces (see `ChatHost`). Pass a stable function. */
   renderSpaces?: ChatHost["renderSpaces"];
 }
 
@@ -238,7 +237,7 @@ export function ChatPage({
   // outage is an error state React Query retries — never an empty catalog
   // served as fresh for `staleTime`.
   const modelsQuery = useQuery({
-    queryKey: modelsQueryKey(transport?.getHeaders()["X-Org-Id"]),
+    queryKey: modelsQueryKey(transport?.orgId),
     queryFn: () => fetchModelsEnvelope(transport!.request),
     select: selectChatModels,
     enabled: !!transport,
@@ -270,9 +269,8 @@ export function ChatPage({
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
   const sessions = useSessions(transport);
-  // What the page serves (a space, or the organization): every chat query is keyed by it
-  // (see `sessions.ts`).
-  const pageScopeKey = chatScopeKey(transport);
+  // The list is read under the host's space filter, and so is its cache key (see `sessions.ts`).
+  const filterSpaceId = transport?.spaceId ?? null;
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, getVisible, getVisible);
 
@@ -291,13 +289,13 @@ export function ChatPage({
     if (!visible || !canWrite || !transport) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageScopeKey), (prev) =>
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) =>
       patchSessionsCache(prev, (rows) =>
         rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
       ),
     );
     void markSessionRead(transport, activeId).catch(() => {});
-  }, [sessions.data, activeId, transport, pageScopeKey, queryClient, visible, canWrite]);
+  }, [sessions.data, activeId, transport, filterSpaceId, queryClient, visible, canWrite]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -421,7 +419,7 @@ interface ConversationProps {
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
-  /** `chat:write`: without the picker, the space's enforced skills are still named. */
+  /** `chat:write`: without the picker, the enforced skills are still named. */
   canWrite: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
@@ -463,13 +461,10 @@ const Conversation = memo(function Conversation({
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
   const { t } = useChatHost();
-  const scopeKey = chatScopeKey(transport);
   const history = useQuery({
-    queryKey: sessionQueryKey(scopeKey, id),
+    queryKey: sessionQueryKey(id),
     queryFn: () => loadHistory(transport!, id),
-    // The scope key is the gate: a space route is entered through `X-Space-Id`, so before the
-    // host's space store resolves the key is null and the read waits, instead of a guaranteed 400.
-    enabled: persistedAtMount && !!scopeKey && !!transport,
+    enabled: persistedAtMount && !!transport,
     staleTime: Infinity,
     gcTime: 0,
   });
@@ -558,6 +553,15 @@ function ConversationNotFound({
   );
 }
 
+/** A getter of the latest `value`, for callbacks that outlive the render that made them. */
+function useLatest<T>(value: T): () => T {
+  const ref = useRef(value);
+  useLayoutEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return useCallback(() => ref.current, []);
+}
+
 function ConversationInner({
   id,
   transport,
@@ -577,7 +581,14 @@ function ConversationInner({
   getChosenSkills: () => ChatSkillSelection | undefined;
 }) {
   const queryClient = useQueryClient();
-  const scopeKey = chatScopeKey(transport);
+  const { actingSpaceIds } = useChatHost();
+  const filterSpaceId = transport?.spaceId ?? null;
+  // The space a new conversation and each turn name: the one the host is looking at, where the
+  // chat acts. Read at request time (a conversation stays open while the host's space changes).
+  const turnSpace = turnSpaceId(transport, actingSpaceIds);
+  const getTurnSpace = useLatest(turnSpace);
+  // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
+  const getTransport = useLatest(transport);
 
   // Pre-select the model of this conversation's newest turn. A layout effect,
   // so the composer never paints one frame of the stored default first.
@@ -593,17 +604,16 @@ function ConversationInner({
   // its `Chat` instance only when `id` changes, so a transport rebuilt over
   // fresh state would be silently ignored and every send would keep the model
   // captured at mount. The store read resolves per request, so a model switch
-  // applies to the next send. `transport` is a stable host object.
+  // applies to the next send.
   const buildHeaders = useCallback((): Record<string, string> => {
     const model = getSelectedModel();
     return {
-      // The chat's own routes: an organization scope's refuse `X-Space-Id`.
-      ...(transport ? chatHeaders(transport) : {}),
+      ...getTransport()?.getHeaders(),
       ...(model ? { "X-Model-Id": model } : {}),
     };
-  }, [transport]);
+  }, [getTransport]);
 
-  const turnApi = transport ? chatPath(transport) : "/api/chat";
+  const turnApi = transport ? chatPath(transport) : "";
 
   const turnTransport = useMemo(
     () =>
@@ -611,30 +621,25 @@ function ConversationInner({
         api: turnApi,
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
-          const skills = getChosenSkills();
-          return {
-            body: {
-              ...body,
-              id: chatId,
-              messages,
-              generation: getCompatibleGenerationSettings(),
-              // Read at request time, like the model above, for the same reason.
-              package_authoring: getPackageAuthoringEnabled(),
-              ...(skills && {
-                skill_mode: skills.skillMode,
-                pinned_skills: skills.pinnedSkills,
-              }),
-            },
-          };
-        },
+        // Everything below is read at request time, like the model above, for the same reason.
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
+          body: turnBody({
+            body,
+            id: chatId,
+            messages,
+            generation: getCompatibleGenerationSettings(),
+            packageAuthoring: getPackageAuthoringEnabled(),
+            skills: getChosenSkills(),
+            spaceId: getTurnSpace(),
+          }),
+        }),
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({
           api: `${turnApi}/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders, getChosenSkills, turnApi],
+    [buildHeaders, getChosenSkills, getTurnSpace, turnApi],
   );
 
   const chat = useChat({
@@ -649,9 +654,8 @@ function ConversationInner({
     // is a guaranteed 204. Spending a request on that answer competes for
     // connections with the model list and the session list at exactly the
     // moment the composer is trying to become usable.
-    // …and on the space being known: the resume GET is space-scoped like every
-    // other session read, so without one it would 400 rather than 204.
-    resume: isPersisted && !!scopeKey,
+    // …and on the host's transport being there: the resume GET needs the organization's route.
+    resume: isPersisted && !!transport,
     // One React commit per animation frame (16 ms) instead of one per stream
     // chunk. The SDK applies this to the `messages` subscription only
     // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
@@ -696,7 +700,7 @@ function ConversationInner({
     let cancelled = false;
     void queryClient
       .fetchQuery({
-        queryKey: sessionQueryKey(scopeKey, id),
+        queryKey: sessionQueryKey(id),
         queryFn: () => loadHistory(transport, id),
         // The mounted history query pins `staleTime: Infinity`; force the GET.
         staleTime: 0,
@@ -719,7 +723,6 @@ function ConversationInner({
     setMessages,
     queryClient,
     transport,
-    scopeKey,
     id,
   ]);
 
@@ -740,17 +743,20 @@ function ConversationInner({
   const generating = chat.status === "submitted" || chat.status === "streaming";
   const wasGenerating = useRef(false);
   useEffect(() => {
+    // A conversation belongs to the list under the filter that names the space it touched:
+    // « Vue d'ensemble » holds them all, and a space's list those that touched it. A row not yet
+    // there joins the list only when it belongs to it; a row already there is patched wherever it is.
+    const inFilter = turnSpace === (filterSpaceId ?? undefined);
     if (generating) {
-      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(scopeKey), (prev) => {
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) => {
         const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
+        if (!existing && !inFilter) return prev;
         const row: SessionSummary = {
           ...(existing ?? {
             id,
             title: null,
             unread: false,
-            // A session minted here: its space is the page's, or none for an organization session.
-            spaceId: transport?.scope.kind === "organization" ? null : scopeKey,
-            space_ids: [],
+            space_ids: turnSpace ? [turnSpace] : [],
           }),
           generating: true,
           updatedAt: new Date().toISOString(),
@@ -762,7 +768,7 @@ function ConversationInner({
         );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(scopeKey), (prev) =>
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) =>
         patchSessionsCache(prev, (rows) =>
           rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
         ),
@@ -770,7 +776,7 @@ function ConversationInner({
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
     wasGenerating.current = generating;
-  }, [generating, id, scopeKey, transport, queryClient]);
+  }, [generating, id, filterSpaceId, turnSpace, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable

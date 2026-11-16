@@ -187,6 +187,7 @@
   "context.info.access": "Your access",
   "welcome.greeting": "Hello, {{name}}",
   "welcome.greetingAnonymous": "Hello",
+  "welcome.spaceNotActing": "The selected space is not one where the chat can act: the conversation will act in your other spaces.",
   "composer.queue.add": "Queue message",
   "composer.queue.title": "Queued — sent when the reply ends",
   "composer.queue.titleHeld": "Queued — the reply was stopped",

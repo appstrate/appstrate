@@ -89,7 +89,7 @@ export function ComposerTools({
               </DropdownMenuItem>
             </ComposerPrimitive.AddAttachment>
           ) : (
-            // An upload lands in the working space, where this organization session does not act.
+            // An upload lands in the working space, where the chat does not act.
             <DropdownMenuItem disabled title={t("composer.attachUnavailable")}>
               <PaperclipIcon />
               <span className="flex flex-col">

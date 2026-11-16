@@ -15,22 +15,30 @@ import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 import { requestAnswering, transportOver } from "./fake-request.ts";
 
 describe("fetchSkills", () => {
-  it("GETs the space listing and parses its rows", async () => {
+  it("GETs the organization listing and parses its rows", async () => {
     const request = requestAnswering(() =>
       Response.json({
-        data: [{ id: "@acme/tone", name: "Tone", description: null, version: "1.2.0" }],
+        data: [
+          {
+            id: "@acme/tone",
+            name: "Tone",
+            description: null,
+            version: "1.2.0",
+            spaceId: "spc_a",
+          },
+        ],
       }),
     );
 
-    const got = await fetchSkills(transportOver(request));
+    const got = await fetchSkills(transportOver(request), ["spc_a"]);
 
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/packages/skills"]);
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", description: null, version: "1.2.0" },
     ]);
   });
 
-  it("keeps, in an organization scope, the skills of the spaces the session acts in, one per package", async () => {
+  it("keeps the skills of the spaces the chat acts in, one per package", async () => {
     const row = (id: string, spaceId: string) => ({
       id,
       name: id,
@@ -48,10 +56,7 @@ describe("fetchSkills", () => {
         ],
       }),
     );
-    const transport = {
-      ...transportOver(request),
-      scope: { kind: "organization", orgId: "org_1" },
-    } as const;
+    const transport = transportOver(request);
 
     const got = await fetchSkills(transport, ["spc_act"]);
 
@@ -63,7 +68,7 @@ describe("fetchSkills", () => {
 
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
-    await expect(fetchSkills(transportOver(request))).rejects.toMatchObject({ status: 403 });
+    await expect(fetchSkills(transportOver(request), [])).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -81,7 +86,7 @@ describe("fetchEnforcedSkills", () => {
 
     const got = await fetchEnforcedSkills(transportOver(request));
 
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/chat/enforced-skills"]);
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/chat/enforced-skills"]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", version: "1.2.0" },
       { packageId: "@acme/gone", display_name: "Gone", version: null },

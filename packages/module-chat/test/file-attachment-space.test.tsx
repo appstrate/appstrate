@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A file a call of an organization session produced in another space is judged, previewed and
+ * A file a call of a conversation produced in another space is judged, previewed and
  * shown in THAT space: the grant of the working space neither opens nor refuses it.
  */
 
@@ -21,6 +21,7 @@ const host = (over: Partial<ChatHost>): ChatHost => ({
   },
   t: (key) => key,
   can: () => false,
+  actingSpaceIds: [],
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
@@ -39,13 +40,13 @@ describe("FileAttachment of another space", () => {
   const canIn = (spaceId: string, permission: string) =>
     spaceId === "spc_b" && permission === "files:read";
 
-  it("opens where the file's space grants it, though the scope as a whole does not", () => {
+  it("opens where the file's space grants it, though the chat as a whole does not", () => {
     const html = render({ id: "f1", name: "a.md", spaceId: "spc_b" }, { canIn });
     expect(html).toContain("<button");
     expect(html).toContain("file.previewOf");
   });
 
-  it("refuses where the file's space does not grant it, though the scope does", () => {
+  it("refuses where the file's space does not grant it, though the chat does", () => {
     const html = render({ id: "f1", name: "a.md", spaceId: "spc_a" }, { canIn, can: () => true });
     expect(html).not.toContain("<button");
     expect(html).toContain("file.noAccess");
@@ -57,7 +58,7 @@ describe("FileAttachment of another space", () => {
     expect(imageSpaces).toEqual(["spc_b"]);
   });
 
-  it("judges a file naming no space by the scope", () => {
+  it("judges a file naming no space by the chat's own grant", () => {
     expect(render({ id: "f1", name: "a.md" }, { canIn, can: () => true })).toContain("<button");
     expect(render({ id: "f1", name: "a.md" }, { canIn })).not.toContain("<button");
   });

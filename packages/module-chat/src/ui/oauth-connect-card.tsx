@@ -143,7 +143,7 @@ export function OAuthConnectCard({
   runStarted?: boolean;
   /** RFC 3339 expiry of the connect session behind `authUrl`. */
   expiresAt?: string;
-  /** The space the call acted in (an organization session's call names one): the card reads there. */
+  /** The space the call acted in (the call names one): the card reads there. */
   spaceId?: string;
 }) {
   const aui = useAui();

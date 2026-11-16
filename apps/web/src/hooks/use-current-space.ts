@@ -38,7 +38,7 @@ export function useSpaceLink(): (path: string, spaceId: string | undefined) => s
 
 // Flat, space-less query-key prefixes dropped on space switch. A key that embeds
 // the space (typed-client domains via `useOrgScope`, chat's
-// `["chat", "sessions", spaceId]`) refetches by itself and must NOT be listed;
+// `["chat", "sessions", spaceFilter]`) refetches by itself and must NOT be listed;
 // a list across spaces (`spansSpaces`) does not depend on the current one and is kept.
 const SPACE_SCOPED_KEYS = new Set<string>(
   [

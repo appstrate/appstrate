@@ -38,7 +38,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
@@ -166,10 +166,10 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
   );
 }
 
-/** The space a call of an organization session acted in, named by the host; nothing in a space. */
+/** The space a tool call acted in, named by the host. */
 function CallSpace({ args }: { args: unknown }) {
   const { renderSpaces } = useChatHost();
-  const spaceId = useCallSpaceId(args);
+  const spaceId = callSpaceId(args);
   if (!renderSpaces || !spaceId) return null;
   return (
     <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
@@ -348,8 +348,8 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
-  // An organization session's call names the space the run ran in: the card reads and links there.
-  const spaceId = useCallSpaceId(props.args);
+  // The call names the space the run ran in: the card reads and links there.
+  const spaceId = callSpaceId(props.args);
   return (
     <ChatRunProgressCard
       runId={runId}
@@ -499,13 +499,9 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-/**
- * The space a tool call named (`space_id`): where it acted, in an organization session. A space
- * session's calls act in the working space, which they do not name.
- */
-function useCallSpaceId(args: unknown): string | undefined {
-  const organization = useChatTransport()?.scope.kind === "organization";
-  return organization ? stringArg(asRecordOrNull(args) ?? undefined, "space_id") : undefined;
+/** The space a tool call named (`space_id`): where it acted. */
+function callSpaceId(args: unknown): string | undefined {
+  return stringArg(asRecordOrNull(args) ?? undefined, "space_id");
 }
 
 /** The connect card of a call: it reads the integration where the call acted. */
@@ -513,7 +509,7 @@ function CallOAuthConnectCard({
   args,
   ...card
 }: { args: unknown } & React.ComponentProps<typeof OAuthConnectCard>) {
-  const spaceId = useCallSpaceId(args);
+  const spaceId = callSpaceId(args);
   return <OAuthConnectCard {...card} spaceId={spaceId} />;
 }
 

@@ -12,7 +12,7 @@ import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
-import { chatPath } from "./scope.ts";
+import { chatPath } from "./chat-route.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
 export { mintSessionId } from "../session-id.ts";
@@ -26,42 +26,38 @@ export interface SessionSummary {
   unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */
   updatedAt: string;
-  /** The space of a space session; `null` for an organization session. */
-  spaceId: string | null;
-  /** The spaces an organization session touched; empty for a space session. */
+  /** The spaces the conversation touched; empty when it touched none. */
   space_ids: string[];
 }
 
 /**
  * Prefix every chat-session-list key starts with (module-local, not the typed
  * client). Exported for the app shell, which invalidates on it — a prefix match,
- * so it still reaches the space-scoped keys below.
+ * so it still reaches the filtered keys below.
  */
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 /**
- * The session list of ONE scope (`chatScopeKey`: a space, or the organization). The scope belongs
- * in the key twice over: a key without it would serve another scope's list from cache, and a
- * space's list would stay disabled forever instead of refetching when the space store resolves
- * (its key is null until then).
+ * The conversation list under ONE space filter (`null`: « Vue d'ensemble », every conversation).
+ * The filter belongs in the key: a key without it would serve another filter's list from cache.
  */
-export function sessionsQueryKey(scopeKey: string | null): readonly unknown[] {
-  return [...SESSIONS_QUERY_KEY, scopeKey];
+export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
+  return [...SESSIONS_QUERY_KEY, spaceId];
 }
 
 /**
- * The title-search results of ONE space. Nested under `sessionsQueryKey` on
+ * The title-search results under one filter. Nested under `sessionsQueryKey` on
  * purpose: an invalidation (or `setQueriesData`) on the prefix reaches the
  * filtered lists too. The default list's key shape is unchanged — the
  * local-first patch in `index.tsx` addresses it exactly.
  */
-export function sessionsSearchQueryKey(scopeKey: string | null, q: string): readonly unknown[] {
-  return [...sessionsQueryKey(scopeKey), "search", q];
+export function sessionsSearchQueryKey(spaceId: string | null, q: string): readonly unknown[] {
+  return [...sessionsQueryKey(spaceId), "search", q];
 }
 
-/** One conversation's stored history, in one scope. */
-export function sessionQueryKey(scopeKey: string | null, id: string): readonly unknown[] {
-  return ["chat", "session", id, scopeKey];
+/** One conversation's stored history: the conversation belongs to the organization, whatever the filter. */
+export function sessionQueryKey(id: string): readonly unknown[] {
+  return ["chat", "session", id];
 }
 
 export interface SessionsPage {
@@ -77,6 +73,7 @@ export async function fetchSessionsPage(
   q?: string,
 ): Promise<SessionsPage> {
   const params = new URLSearchParams();
+  if (transport.spaceId) params.set("spaceId", transport.spaceId);
   if (q) params.set("q", q);
   if (startingAfter) params.set("startingAfter", startingAfter);
   const query = params.size > 0 ? `?${params}` : "";

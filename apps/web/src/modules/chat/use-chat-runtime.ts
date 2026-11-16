@@ -2,26 +2,17 @@
 
 /** Host-provided chat inputs, shared by the sidebar list and the page thread. Must not import `@appstrate/module-chat/ui` (entry chunk). */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import type { ChatScope } from "@appstrate/module-chat/ui";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { usePermissions } from "../../hooks/use-permissions";
 import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { useSpaces } from "../../hooks/use-spaces";
 import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
-import {
-  chatScopeId,
-  chatTransport,
-  conversationOfPath,
-  scopeChangeLeavesConversation,
-  type ChatPlace,
-} from "./chat-transport";
+import { chatTransport } from "./chat-transport";
 
 /**
  * Scoping headers + the UI language (server defaults to fr without it), read at
@@ -39,42 +30,39 @@ function useChatGetHeaders() {
 }
 
 /**
- * What the chat serves: the organization in « Vue d'ensemble » (the chat holds the mode), else the
- * working space. `known` once the space listing has answered: before, the mode cannot be told, and a
- * chat page would ask the wrong routes.
+ * The space the chat is filtered to: the selected space, none in « Vue d'ensemble » (the chat holds
+ * the mode). `known` once the space listing has answered: before, the mode cannot be told, and a
+ * chat page would read the wrong list. `ready` once the filter itself is settled: known, and a
+ * space resolved when one is selected.
  */
-export function useChatScope(): { scope: ChatScope; known: boolean } {
+export function useChatFilter(): { spaceId: string | null; known: boolean; ready: boolean } {
   const { on, known } = useOverviewMode();
+  const currentSpaceId = useCurrentSpaceId();
+  const spaceId = on ? null : currentSpaceId;
+  return { spaceId, known, ready: known && (on || spaceId !== null) };
+}
+
+/**
+ * {@link chatTransport} over `getHeaders`, for the filter in force; its identity moves with it.
+ * Undefined until the organization and the filter are settled: the chat's queries wait for it.
+ */
+function useTransportOver(getHeaders: () => Record<string, string>) {
   const orgId = useCurrentOrgId();
+  const { spaceId, ready } = useChatFilter();
   return useMemo(
-    () => ({
-      scope: on && orgId ? { kind: "organization", orgId } : { kind: "space" },
-      known,
-    }),
-    [on, orgId, known],
+    () => (orgId && ready ? chatTransport(getHeaders, orgId, spaceId) : undefined),
+    [getHeaders, orgId, ready, spaceId],
   );
 }
 
-const SPACE_SCOPE: ChatScope = { kind: "space" };
-
-/** The shell's own transport (nav badge, outside a chat page) in a space: scoping headers only, no chat locale. */
-const SHELL_CHAT_TRANSPORT = chatTransport(buildScopingHeaders, SPACE_SCOPE);
-
-/** {@link SHELL_CHAT_TRANSPORT} of the scope the chat serves: the organization's in the mode. */
+/** The shell's own transport (nav badge, outside a chat page): scoping headers only, no chat locale. */
 export function useShellChatTransport() {
-  const { scope } = useChatScope();
-  return useMemo(
-    () =>
-      scope.kind === "space" ? SHELL_CHAT_TRANSPORT : chatTransport(buildScopingHeaders, scope),
-    [scope],
-  );
+  return useTransportOver(buildScopingHeaders);
 }
 
-/** {@link chatTransport} over the page's headers and scope; its identity moves with them. */
+/** {@link chatTransport} over the page's headers (scoping and chat locale). */
 export function useChatTransport() {
-  const getHeaders = useChatGetHeaders();
-  const { scope } = useChatScope();
-  return useMemo(() => chatTransport(getHeaders, scope), [getHeaders, scope]);
+  return useTransportOver(useChatGetHeaders());
 }
 
 /** The `chat` namespace's `t`, in the shape the module takes. */
@@ -87,64 +75,33 @@ export function useChatTranslate() {
 }
 
 /**
- * The grants the chat module reads as its own: the working space's in a space, and in «Vue
- * d'ensemble» "some space where the chat may act grants it" (an organization session acts in the
- * spaces the caller names, never in the working one the overview merely keeps).
+ * The grants the chat module reads as its own: "some space where the chat may act grants it" (a
+ * conversation acts in the spaces the caller names, never in the working one the host merely
+ * stands in).
  */
 export function useChatCan() {
-  const { can } = usePermissions();
-  const { scope } = useChatScope();
   const { data: spaces } = useSpaces();
   const orgPermissions = useOrg().currentOrg?.permissions;
   return useCallback(
-    (permission: string) =>
-      scope.kind === "space"
-        ? can(permission)
-        : grantedInSomeActingSpace(spaces, orgPermissions, permission),
-    [scope.kind, can, spaces, orgPermissions],
+    (permission: string) => grantedInSomeActingSpace(spaces, orgPermissions, permission),
+    [spaces, orgPermissions],
   );
 }
 
 /**
- * The ids of the spaces an organization session acts in (the backend's acting set); undefined in a
- * space scope. The module narrows what it lists across spaces to them (the skills picker).
+ * The ids of the spaces the chat acts in (the backend's acting set). The module lists the skills
+ * of these and sends the selected space only when it is one of them.
  */
-export function useChatActingSpaceIds(): string[] | undefined {
-  const { scope } = useChatScope();
+export function useChatActingSpaceIds(): string[] {
   const { data: spaces } = useSpaces();
   const orgPermissions = useOrg().currentOrg?.permissions;
   return useMemo(
-    () =>
-      scope.kind === "space"
-        ? undefined
-        : actingSpaces(spaces, orgPermissions).map((space) => space.id),
-    [scope.kind, spaces, orgPermissions],
+    () => actingSpaces(spaces, orgPermissions).map((space) => space.id),
+    [spaces, orgPermissions],
   );
 }
 
-/** The caller's grant in a named space: what a call of an organization session did there. */
+/** The caller's grant in a named space: what a call of a conversation did there (its run, its files). */
 export function useChatCanIn() {
   return useRowSpaceGrants();
-}
-
-/**
- * Drops to a new conversation when the chat's scope changes under an open one (the switcher
- * entering or leaving «Vue d'ensemble», or another space): see `scopeChangeLeavesConversation`.
- * The one place for every way the scope changes. Silent until the scope is known.
- */
-export function useLeaveConversationOnScopeChange(conversationId: string | null): void {
-  const { scope, known } = useChatScope();
-  const spaceId = useCurrentSpaceId();
-  const navigate = useNavigate();
-  const scopeId = known ? chatScopeId(scope, spaceId) : null;
-  const seen = useRef<ChatPlace | null>(null);
-  useEffect(() => {
-    if (!scopeId) return;
-    const place = { scopeId, conversationId };
-    const live = conversationOfPath(window.location.pathname);
-    if (scopeChangeLeavesConversation(seen.current, place, live)) {
-      navigate("/chat", { replace: true });
-    }
-    seen.current = place;
-  }, [scopeId, conversationId, navigate]);
 }

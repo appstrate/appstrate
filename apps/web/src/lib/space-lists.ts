@@ -202,7 +202,7 @@ export function overviewRouteVerdict(
 }
 
 /**
- * The spaces an organization session acts in, as the backend's acting set judges them: held with
+ * The spaces the chat acts in, as the backend's acting set judges them: held with
  * a role, the caller's gate granting the chat's acting permissions there.
  */
 export function actingSpaces<S extends ListedSpace>(
@@ -213,9 +213,9 @@ export function actingSpaces<S extends ListedSpace>(
 }
 
 /**
- * What an organization session may do, as the module's `can` reads it: `permission` holds in some
- * space where the chat may act. The working space's grants do not decide: the session acts in the
- * spaces the caller names.
+ * What the chat may do, as the module's `can` reads it: `permission` holds in some space where the
+ * chat may act. The working space's grants do not decide: a conversation acts in the spaces the
+ * caller names.
  */
 export function grantedInSomeActingSpace(
   spaces: readonly ListedSpace[] | undefined,
@@ -229,12 +229,11 @@ export function grantedInSomeActingSpace(
 
 /**
  * Whether the composer may stage a file: an upload lands in the working space, and the turn
- * resolves it only where the session acts. `actingIds` is undefined outside an organization
- * session, where the working space is the session's own.
+ * resolves it only where the chat acts.
  */
 export function canAttachFrom(
-  actingIds: readonly string[] | undefined,
+  actingIds: readonly string[],
   workingSpaceId: string | null,
 ): boolean {
-  return actingIds === undefined || (workingSpaceId !== null && actingIds.includes(workingSpaceId));
+  return workingSpaceId !== null && actingIds.includes(workingSpaceId);
 }

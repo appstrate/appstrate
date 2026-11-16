@@ -184,8 +184,7 @@ describe("actingSpaces and canAttachFrom", () => {
     expect(actingSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
   });
 
-  it("attaches freely outside an organization session, and there only from an acting working space", () => {
-    expect(canAttachFrom(undefined, null)).toBe(true);
+  it("attaches only from a working space where the chat acts", () => {
     expect(canAttachFrom(["spc_a"], "spc_a")).toBe(true);
     expect(canAttachFrom(["spc_a"], "spc_viewer")).toBe(false);
     expect(canAttachFrom(["spc_a"], null)).toBe(false);

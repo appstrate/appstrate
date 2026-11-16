@@ -115,7 +115,7 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
-  /** The space the run ran in when it is not the working space (an organization session's call). */
+  /** The space the run ran in when it is not the working space (a conversation's call). */
   spaceId?: string;
   /**
    * Files from the persisted tool result — survive reload; merged with the live

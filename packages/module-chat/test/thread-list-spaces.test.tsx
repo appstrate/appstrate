@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The conversation list names each session's space in an organization scope (through the host's
- * rendering), and only there: a space's list is all one space.
+ * The conversation list names the spaces each conversation touched (through the host's rendering),
+ * under every filter: a conversation can have touched other spaces than the selected one.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -11,27 +11,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { ChatConversationList } from "../src/ui/thread-list.tsx";
-import { ChatTransportProvider, type ChatScope } from "../src/ui/runtime-context.ts";
+import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache, type SessionSummary } from "../src/ui/sessions.ts";
-import { chatScopeKey } from "../src/ui/scope.ts";
 import { transportOf } from "./fake-request.ts";
 
 const base = { unread: false, generating: false, updatedAt: "" };
 const sessions: SessionSummary[] = [
-  { ...base, id: "chs_1", title: "In a space", spaceId: "spc_a", space_ids: [] },
-  { ...base, id: "chs_2", title: "Across", spaceId: null, space_ids: ["spc_a", "spc_b"] },
-  { ...base, id: "chs_3", title: "Fresh", spaceId: null, space_ids: [] },
+  { ...base, id: "chs_1", title: "In a space", space_ids: ["spc_a"] },
+  { ...base, id: "chs_2", title: "Across", space_ids: ["spc_a", "spc_b"] },
+  { ...base, id: "chs_3", title: "Fresh", space_ids: [] },
 ];
 
-function render(
-  scope: ChatScope,
-  withSeam = true,
-  canIn?: (spaceId: string, permission: string) => boolean,
-): string {
-  const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }), scope);
+/** The list under `filter` (`null`: « Vue d'ensemble »), seeded with `rows`. */
+function render(filter: string | null, withSeam = true, rows = sessions): string {
+  const transport = transportOf(() => ({ "X-Org-Id": "org_1" }), filter);
   const qc = new QueryClient();
-  qc.setQueryData<SessionsCache>(sessionsQueryKey(chatScopeKey(transport)), {
-    pages: [{ data: sessions, hasMore: false }],
+  qc.setQueryData<SessionsCache>(sessionsQueryKey(filter), {
+    pages: [{ data: rows, hasMore: false }],
     pageParams: [undefined],
   });
   return renderToString(
@@ -43,7 +39,6 @@ function render(
               activeId={null}
               t={(key) => key}
               can={() => true}
-              canIn={canIn}
               renderSpaces={
                 withSeam ? (ids) => <i data-spaces={ids.join(",")}>spaces</i> : undefined
               }
@@ -56,32 +51,32 @@ function render(
 }
 
 describe("the conversation list's space line", () => {
-  const org = { kind: "organization", orgId: "org_1" } as const;
+  for (const [mode, filter] of [
+    ["in « Vue d'ensemble »", null],
+    ["under a selected space", "spc_a"],
+  ] as const) {
+    it(`names the spaces every conversation touched ${mode}`, () => {
+      const html = render(filter);
+      expect(html).toContain('data-spaces="spc_a"');
+      expect(html).toContain('data-spaces="spc_a,spc_b"');
+    });
 
-  it("names a space session's space and an organization session's touched spaces", () => {
-    const html = render(org);
-    expect(html).toContain('data-spaces="spc_a"');
-    expect(html).toContain('data-spaces="spc_a,spc_b"');
-  });
+    it(`says « Vue d'ensemble » for a conversation that touched no space ${mode}`, () => {
+      expect(render(filter)).toContain("threads.overview");
+    });
+  }
 
-  it("says « Vue d'ensemble » for an organization session that touched no space", () => {
-    expect(render(org)).toContain("threads.overview");
-  });
-
-  it("draws no space line in a space", () => {
-    const html = render({ kind: "space" });
-    expect(html).not.toContain("data-spaces");
-    expect(html).not.toContain("threads.overview");
+  it("draws a line on every row", () => {
+    // Three rows: three space lines, none of them skipped for being the filter's own space.
+    expect(render("spc_a").match(/h-4 min-w-0 items-center/g)).toHaveLength(3);
   });
 
   it("draws none without the host's rendering", () => {
-    expect(render(org, false)).not.toContain("threads.overview");
+    expect(render(null, false)).not.toContain("threads.overview");
   });
 
-  it("judges a space session's row actions in its own space, an organization session's by the scope", () => {
-    const html = render(org, true, (spaceId) => spaceId === "spc_b");
-    // `spc_a`'s session may not be written by the caller there: only the two organization rows delete.
-    expect(html.match(/aria-label="common:btn\.delete"/g)).toHaveLength(2);
-    expect(html.match(/aria-label="threads\.settings\.openFor"/g)).toHaveLength(2);
+  it("leaves a row's actions to the chat's own grant", () => {
+    const html = render("spc_a");
+    expect(html.match(/aria-label="common:btn\.delete"/g)).toHaveLength(3);
   });
 });

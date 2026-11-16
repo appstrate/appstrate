@@ -124,7 +124,7 @@ interface RunLogStream {
  *                      and skips the SSE tail when already terminal
  *                      (`shouldOpenLiveTail`).
  * @param spaceId      the space the run ran in when it is not the working space
- *                      (a run an organization session launched): its reads and its
+ *                      (a run a conversation launched): its reads and its
  *                      stream name that space.
  */
 export function useRunLogStream(

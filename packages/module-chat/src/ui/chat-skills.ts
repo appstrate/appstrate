@@ -6,30 +6,25 @@ import { z } from "zod";
 import { parseScopedName } from "@appstrate/core/naming";
 import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
 import type { ChatTransport } from "./runtime-context.ts";
-import { chatPath } from "./scope.ts";
+import { chatPath } from "./chat-route.ts";
 
 /**
- * The active skills the picker chooses from: the space's, or, in an organization scope, those of
- * the spaces the session acts in (`actingSpaceIds`; one per package).
+ * The active skills the picker chooses from: those of the spaces the chat acts in
+ * (`actingSpaceIds`; one per package).
  */
 export async function fetchSkills(
   transport: ChatTransport,
-  actingSpaceIds?: readonly string[],
+  actingSpaceIds: readonly string[],
 ): Promise<SkillHint[]> {
-  const { scope } = transport;
-  const res = await transport.request(
-    scope.kind === "organization"
-      ? `/api/orgs/${scope.orgId}/packages/skills`
-      : "/api/packages/skills",
-  );
+  const res = await transport.request(`/api/orgs/${transport.orgId}/packages/skills`);
   const body: unknown = await res.json();
-  // An organization index lists a package once per space it is active in (each row names its
-  // `spaceId`): keep the rows of the spaces the session acts in, then one per package.
-  const acting = scope.kind === "organization" ? new Set(actingSpaceIds ?? []) : null;
+  // The organization index lists a package once per space it is active in (each row names its
+  // `spaceId`): keep the rows of the spaces the chat acts in, then one per package.
+  const acting = new Set(actingSpaceIds);
   const rows = (body as { data?: unknown } | null)?.data;
-  const kept = acting
-    ? { data: (Array.isArray(rows) ? rows : []).filter((row) => acting.has(row?.spaceId)) }
-    : body;
+  const kept = {
+    data: (Array.isArray(rows) ? rows : []).filter((row) => acting.has(row?.spaceId)),
+  };
   const seen = new Set<string>();
   return parseSkillList(kept).filter(
     (skill) => !seen.has(skill.packageId) && seen.add(skill.packageId),

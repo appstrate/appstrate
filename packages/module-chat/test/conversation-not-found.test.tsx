@@ -28,12 +28,15 @@ afterAll(() => {
   else Object.assign(globalThis, { document: realDocument });
 });
 
+/** The spaces the chat acts in. */
+const ACTING = ["spc_a"];
+
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 /** Seeds the history read, so the render is the answer and not a fetch. */
 function render(history: unknown, can: (permission: string) => boolean): string {
   const qc = new QueryClient();
-  qc.setQueryData(sessionQueryKey("spc_a", "chs_gone"), history);
+  qc.setQueryData(sessionQueryKey("chs_gone"), history);
   return renderToString(
     <QueryClientProvider client={qc}>
       <TooltipProvider>
@@ -46,6 +49,7 @@ function render(history: unknown, can: (permission: string) => boolean): string 
           uploadFile={async () => "upload://upl_1"}
           t={(key) => key}
           can={can}
+          actingSpaceIds={ACTING}
         />
       </TooltipProvider>
     </QueryClientProvider>,
@@ -86,6 +90,7 @@ describe("a conversation URL the caller has no conversation for", () => {
             uploadFile={async () => "upload://upl_1"}
             t={(key) => key}
             can={() => true}
+            actingSpaceIds={ACTING}
           />
         </TooltipProvider>
       </QueryClientProvider>,
@@ -102,5 +107,37 @@ describe("a conversation URL the caller has no conversation for", () => {
     );
     expect(html).not.toContain("conversation.notFound.title");
     expect(html).toContain("composer.placeholder");
+  });
+});
+
+describe("a new conversation", () => {
+  const welcome = (spaceId: string | null) =>
+    renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <ChatPage
+            transport={transportOf(() => ({ "X-Org-Id": "org_1" }), spaceId)}
+            conversationId={null}
+            onConversationChange={() => {}}
+            downloadFile={() => {}}
+            useFileImageSrc={() => null}
+            uploadFile={async () => "upload://upl_1"}
+            t={(key) => key}
+            can={() => true}
+            actingSpaceIds={ACTING}
+          />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+  it("says the selected space is not one the chat acts in, and still offers the composer", () => {
+    const html = welcome("spc_viewer");
+    expect(html).toContain("welcome.spaceNotActing");
+    expect(html).toContain("composer.placeholder");
+  });
+
+  it("says nothing in a space the chat acts in, or in « Vue d'ensemble »", () => {
+    expect(welcome("spc_a")).not.toContain("welcome.spaceNotActing");
+    expect(welcome(null)).not.toContain("welcome.spaceNotActing");
   });
 });

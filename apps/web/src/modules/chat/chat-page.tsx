@@ -41,10 +41,9 @@ import {
   useChatActingSpaceIds,
   useChatCan,
   useChatCanIn,
-  useChatScope,
+  useChatFilter,
   useChatTransport,
   useChatTranslate,
-  useLeaveConversationOnScopeChange,
 } from "./use-chat-runtime";
 import { renderSpaces } from "./render-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
@@ -100,14 +99,12 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
-  // The mode decides which sessions the page serves: wait for the listing that tells it.
-  const { known } = useChatScope();
-  // What an organization session may do is judged over the spaces it acts in, not the working one.
+  // The mode decides which conversations the list holds: wait for the listing that tells it.
+  const { known } = useChatFilter();
+  // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
   const canIn = useChatCanIn();
   const actingSpaceIds = useChatActingSpaceIds();
-  // A conversation belongs to the scope that opened it: changing the scope starts a new one.
-  useLeaveConversationOnScopeChange(conversationId ?? null);
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -138,10 +135,10 @@ export function ChatModulePage() {
   // File services the module consumes instead of reimplementing: the typed
   // download (reports failures with a toast) and the typed image preview.
   const downloadFile = useFileDownload();
-  // A file of another space (a call of an organization session) is read in its own.
+  // A file of another space (a call of a conversation) is read in its own.
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
-  // An upload lands in the working space: an organization session may attach only where it acts.
+  // An upload lands in the working space: the chat may attach only where it acts.
   const canAttach = canAttachFrom(actingSpaceIds, currentSpaceId);
   const onDownloadFile = useCallback(
     (id: string, name: string, spaceId?: string) =>
@@ -165,10 +162,10 @@ export function ChatModulePage() {
   // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
-  // The mode decides which sessions the page serves: until it is known the page holds its shape.
+  // The mode decides which conversations the list holds: until it is known the page holds its shape.
   if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
   return (
-    <ChatTransportProvider value={transport}>
+    <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
           <ChatConversationSettingsButton
