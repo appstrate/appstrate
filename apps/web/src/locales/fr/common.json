@@ -292,6 +292,7 @@
   "apiError.file_in_use": "Ce fichier est référencé par des runs : il ne peut pas être supprimé.",
   "apiError.file_uri_in_prompt": "Le prompt référence des fichiers auxquels vous n'avez pas accès.",
   "apiError.duplicate_file_name": "Deux fichiers d'entrée portent le même nom : {{message}}",
+  "apiError.chat_turn_in_flight": "Modifiable une fois la réponse terminée.",
   "apiError.chat_capacity": "Le chat est momentanément saturé. Réessayez dans un instant.",
   "apiError.invalid_cron_expression": "L'expression cron est invalide.",
   "apiError.schedule_actor_invalid": "L'identité d'exécution choisie n'existe plus dans cet espace ou ne peut pas y lancer d'agents.",

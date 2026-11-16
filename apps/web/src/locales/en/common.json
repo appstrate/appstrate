@@ -292,6 +292,7 @@
   "apiError.file_in_use": "This file is referenced by runs: it cannot be deleted.",
   "apiError.file_uri_in_prompt": "The prompt references files you do not have access to.",
   "apiError.duplicate_file_name": "Two input files have the same name: {{message}}",
+  "apiError.chat_turn_in_flight": "Can be changed once the reply is done.",
   "apiError.chat_capacity": "The chat is temporarily at capacity. Try again in a moment.",
   "apiError.invalid_cron_expression": "The cron expression is invalid.",
   "apiError.schedule_actor_invalid": "The chosen run identity no longer exists in this space or cannot run agents in it.",
