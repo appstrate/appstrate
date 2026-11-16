@@ -43,42 +43,26 @@ interface SkillsPickerProps {
   children: ReactNode;
 }
 
-/** Skills in use this turn (the space's imposed ones + the chosen ones), as the old trigger badge counted. */
-function useSkillsInUse(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
-  const enforcedQuery = useEnforcedSkills(transport);
-  const enforcedIds = new Set((enforcedQuery.data ?? []).map((skill) => skill.packageId));
-  const pinned = ownPins(selection.pinnedSkills, enforcedIds);
-  const inUse =
-    (enforcedQuery.data?.length ?? 0) + (injectsSkills(selection.skillMode) ? pinned.length : 0);
-  return { inUse, loading: enforcedQuery.isLoading };
-}
-
 /**
- * The composer chip for a non-default skill selection; it reopens the picker.
- * Its count hangs on the enforced read: a skeleton holds the slot meanwhile,
- * not a chip in its default look.
+ * The entry to the picker in the composer's tool row while no skill is loaded (`SkillChips`'
+ * fallback): drawn for a non-default selection, it reopens the picker.
  */
 export function SkillsChip({
-  transport,
   selection,
   onClick,
 }: {
-  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onClick: () => void;
 }) {
   const { t } = useChatHost();
-  const { inUse, loading } = useSkillsInUse(transport, selection);
   const isDefault =
     selection.skillMode === DEFAULT_SKILL_SELECTION.skillMode &&
     selection.pinnedSkills.length === 0;
   if (isDefault) return null;
-  if (loading) return <Skeleton className="h-7 w-24 rounded-full" />;
   return (
     <button
       type="button"
       data-testid="skills-picker-trigger"
-      aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
       onClick={onClick}
       className={cn(
         badgeVariants({ variant: "secondary" }),
@@ -86,7 +70,7 @@ export function SkillsChip({
       )}
     >
       <BookOpenIcon className="size-3.5" />
-      <span>{inUse > 0 ? t("skills.chip", { n: inUse }) : t("skills.label")}</span>
+      <span>{t("skills.label")}</span>
     </button>
   );
 }

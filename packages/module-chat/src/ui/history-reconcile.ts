@@ -7,11 +7,12 @@
  * fires ONCE. If the turn finalizes between those two GETs — history returned
  * the user message while the reply was still streaming, then the resume GET
  * answered 204 because nothing was generating any more — the client shows a
- * user message with no reply until a manual reload. Nothing re-invalidates the
- * module's history key on its own.
+ * user message with no reply until a manual reload: `useChat` reads its
+ * messages once, whatever the history query holds afterwards.
  *
- * The signal that the gap happened is already in the shared session list: the
- * server row reports `generating: false` with a fresh `updatedAt`, while the
+ * The signal that the gap happened is already in the server's row of the
+ * conversation (its list row, or the conversation itself outside the list's
+ * filter): it reports `generating: false` with a fresh `updatedAt`, while the
  * local thread ends on a `user` message and the local runtime is idle. This
  * function decides, from those facts alone, whether the history should be
  * refetched and swapped into the runtime (`chat.setMessages`, no remount).

@@ -15,10 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ReachableSpaceGrant`, `ReachedSpaces`** (`@appstrate/core/module`, #1886): a space the caller reaches, with
   their role, effective permissions and direct-access switch (`credentialProxyOpen`) there, and whether the credential pins the reach, as
   `PlatformServices.reachableSpaces` answers.
-- **`CHAT_ACTING_PERMISSIONS`, `chatActsIn`** (`@appstrate/core/chat-contract`, #1886): the permissions a
-  space must grant for a chat conversation to act in it (`chat:write`, `chat:read`, `mcp:read`), and
-  the predicate over a space's effective set (a `Set` or an array): the one definition behind the
-  chat's acting set and the web shell's judgement.
+- **`chatActsIn`** (`@appstrate/core/chat-contract`, #1886): whether a space's effective permissions
+  (an array) let a chat conversation act in it (`chat:write`, `chat:read` and `mcp:read`): the one
+  definition behind the chat's acting set and the web shell's judgement.
 - **`AuthResolution.spaceIds`** (`@appstrate/core/module`, #1886): a space allowlist for a credential
   bound to a SET of spaces. It reaches those alone and each request it makes acts in one of them;
   `X-Space-Id` stays free within the set. The chat signs its turn's spaces into its MCP loopback bearer.
@@ -77,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer carries a claim-wide `spaceId`: each skill's entry carries its own `spaceId`, the space its
   `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space only. A claim
   minted with the old shape is malformed and ignored.
+- **`PlatformServices.cleanupSessionFiles`** (`@appstrate/core/module`, #1886) — BREAKING. It takes
+  the session's `orgId` after its id: `(chatSessionId, orgId, tx?)`.
 - **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
   `agentManifestSchema` does not declare it: `runtime_tools` is an undeclared key, which nothing
   reads. The option that tells the author and stored directions apart covers the retired

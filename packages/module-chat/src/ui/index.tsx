@@ -30,7 +30,7 @@ import {
 import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
@@ -69,20 +69,21 @@ export { ChatTransportProvider, SelectConversationProvider } from "./runtime-con
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";
 import {
-  loadHistory,
   markSessionRead,
   mintSessionId,
   patchSessionsCache,
+  sessionQuery,
   sessionQueryKey,
   sessionsQueryKey,
   SESSIONS_QUERY_KEY,
   stopSession,
+  type SessionHistory,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
-import { useSessions } from "./use-sessions.ts";
+import { useActiveSession } from "./use-sessions.ts";
 import {
-  chatPath,
+  createTurnTransport,
   selectedOriginSpaceId,
   turnBody,
   type ConversationCreation,
@@ -183,8 +184,6 @@ export interface ChatPageProps {
   canIn?: ChatHost["canIn"];
   /** The spaces the chat acts in (see `ChatHost`). Pass a stable array. */
   actingSpaceIds: ChatHost["actingSpaceIds"];
-  /** Whether the composer may stage a file (see `ChatHost`). */
-  canAttach?: ChatHost["canAttach"];
   /** The host's working space, where an upload lands (see `ChatHost`). */
   workingSpaceId?: ChatHost["workingSpaceId"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
@@ -217,7 +216,6 @@ export function ChatPage({
   can,
   canIn,
   actingSpaceIds,
-  canAttach,
   workingSpaceId,
   personalModelCredentials,
   modelCredentials,
@@ -282,7 +280,7 @@ export function ChatPage({
   // server-computed (read-state lives in `chat_sessions`, shared across
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
-  const sessions = useSessions(transport);
+  const activeRow = useActiveSession(transport, activeId, isPersisted);
   // The list is read under the host's space filter, and so is its cache key (see `sessions.ts`).
   const filterSpaceId = transport?.spaceId ?? null;
   const queryClient = useQueryClient();
@@ -300,16 +298,18 @@ export function ChatPage({
   const canWrite = can("chat:write");
   useEffect(() => {
     // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
-    if (!visible || !canWrite || !transport) return;
-    const active = sessions.data?.find((s) => s.id === activeId);
-    if (!active?.unread) return;
+    if (!visible || !canWrite || !transport || !activeRow?.unread) return;
     queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) =>
       patchSessionsCache(prev, (rows) =>
         rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
       ),
     );
+    queryClient.setQueryData<SessionHistory | null>(
+      sessionQueryKey(transport.orgId, activeId),
+      (prev) => prev && { ...prev, unread: false },
+    );
     void markSessionRead(transport, activeId).catch(() => {});
-  }, [sessions.data, activeId, transport, filterSpaceId, queryClient, visible, canWrite]);
+  }, [activeRow?.unread, activeId, transport, filterSpaceId, queryClient, visible, canWrite]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -323,7 +323,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      canAttach,
       workingSpaceId,
       personalModelCredentials,
       modelCredentials,
@@ -341,7 +340,6 @@ export function ChatPage({
       can,
       canIn,
       actingSpaceIds,
-      canAttach,
       workingSpaceId,
       personalModelCredentials,
       modelCredentials,
@@ -385,11 +383,9 @@ export function ChatPage({
   );
   const authorsPackages = canAuthorPackages(can);
 
-  // The server's view of the ACTIVE conversation, reduced to two primitives so
-  // the memoised `Conversation` re-renders only when they change (a few times
-  // per turn), not on every list refetch. Feeds the history self-heal in
+  // The active row reduced to two primitives so the memoised `Conversation` re-renders only when
+  // they change (a few times per turn), not on every list refetch. Feeds the history self-heal in
   // `ConversationInner` (see `history-reconcile.ts`).
-  const activeRow = sessions.data?.find((s) => s.id === activeId);
   const serverGenerating = activeRow?.generating;
   const serverUpdatedAt = activeRow?.updatedAt;
 
@@ -439,9 +435,9 @@ interface ConversationProps {
   canPinSkills: boolean;
   /** `chat:write`: without the picker, the enforced skills are still named. */
   canWrite: boolean;
-  /** Server session row `generating`, from the shared list; `undefined` = no row. */
+  /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
   serverGenerating: boolean | undefined;
-  /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
+  /** Server session row `updatedAt`, from the list or the conversation; `undefined` = no row. */
   serverUpdatedAt: string | undefined;
 }
 
@@ -480,21 +476,19 @@ const Conversation = memo(function Conversation({
   const [persistedAtMount] = useState(isPersisted);
   const { t, actingSpaceIds } = useChatHost();
   const history = useQuery({
-    queryKey: sessionQueryKey(id),
-    queryFn: () => loadHistory(transport!, id),
+    ...sessionQuery(transport, id),
     enabled: persistedAtMount && !!transport,
-    staleTime: Infinity,
-    gcTime: 0,
   });
 
   // The conversation's origin space and limit: stored once it exists, the selected space and a
   // local choice before its first message (see `conversation-limit.ts`).
-  const { scope, getCreation, acknowledgeCreation } = useConversationLimit({
+  const { scope, getCreation } = useConversationLimit({
     id,
     transport,
     persistedAtMount,
     stored: history.data ?? undefined,
     selectedSpaceId: selectedOriginSpaceId(transport, actingSpaceIds),
+    generating: rest.serverGenerating === true,
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
@@ -553,7 +547,6 @@ const Conversation = memo(function Conversation({
         composerSlot={composerSlot}
         getChosenSkills={getChosenSkills}
         getCreation={getCreation}
-        acknowledgeCreation={acknowledgeCreation}
         {...rest}
       />
     </ConversationScopeProvider>
@@ -599,15 +592,12 @@ function ConversationInner({
   serverUpdatedAt,
   getChosenSkills,
   getCreation,
-  acknowledgeCreation,
 }: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
-  /** The origin space and limit the turn being sent creates the conversation with (none once it exists). */
+  /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
-  /** The server answered a turn: the conversation exists, so the creation fields stop. */
-  acknowledgeCreation: () => void;
 }) {
   const queryClient = useQueryClient();
   const filterSpaceId = transport?.spaceId ?? null;
@@ -615,12 +605,14 @@ function ConversationInner({
   const getScope = useLatest(useConversationScope());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
+  // The seed, frozen: `useChat` reads it once, and the shared detail refetches under it.
+  const [seedMessages] = useState(initialMessages);
 
   // Pre-select the model of this conversation's newest turn. A layout effect,
   // so the composer never paints one frame of the stored default first.
   useLayoutEffect(() => {
-    attachConversation(id, latestTurnModelId(initialMessages));
-  }, [id, initialMessages]);
+    attachConversation(id, latestTurnModelId(seedMessages));
+  }, [id, seedMessages]);
 
   // Detach on unmount, in its own effect so a re-run above never drops a pick.
   useLayoutEffect(() => () => attachConversation(null, null), []);
@@ -639,26 +631,14 @@ function ConversationInner({
     };
   }, [getTransport]);
 
-  const turnApi = transport ? chatPath(transport) : "";
-
   const turnTransport = useMemo(
     () =>
-      new DefaultChatTransport<UIMessage>({
-        api: turnApi,
-        credentials: "include",
+      createTurnTransport({
+        getTransport,
         headers: buildHeaders,
-        // An answered turn means the server created the row: the next ones carry no creation fields.
-        fetch: Object.assign(
-          async (input: RequestInfo | URL, init?: RequestInit) => {
-            const response = await fetch(input, init);
-            if (response.ok) acknowledgeCreation();
-            return response;
-          },
-          { preconnect: fetch.preconnect },
-        ),
-        // Everything below is read at request time, like the model above, for the same reason.
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: turnBody({
+        // Read at request time, like the model above, for the same reason.
+        body: ({ id: chatId, messages, body }) =>
+          turnBody({
             body,
             id: chatId,
             messages,
@@ -667,19 +647,13 @@ function ConversationInner({
             skills: getChosenSkills(),
             creation: getCreation(),
           }),
-        }),
-        // Native resume targets our per-session stream endpoint (the chat id is
-        // the conversation id = the URL).
-        prepareReconnectToStreamRequest: ({ id: chatId }) => ({
-          api: `${turnApi}/sessions/${chatId}/stream`,
-        }),
       }),
-    [buildHeaders, getChosenSkills, getCreation, acknowledgeCreation, turnApi],
+    [buildHeaders, getChosenSkills, getCreation, getTransport],
   );
 
   const chat = useChat({
     id,
-    messages: initialMessages,
+    messages: seedMessages,
     transport: turnTransport,
     // Reconnect to an in-flight turn on mount (mid-inference reload). 204 when
     // nothing is generating → no-op.
@@ -707,8 +681,8 @@ function ConversationInner({
 
   // History ↔ resume self-heal: the history GET and the resume GET are both
   // one-shot, so a turn that finalizes between them leaves this thread ending
-  // on the user message with nothing to ever fetch the reply. When the shared
-  // session list reports the row idle at a `updatedAt` we have not reconciled
+  // on the user message with nothing to ever fetch the reply. When the server
+  // row reports the conversation idle at a `updatedAt` we have not reconciled
   // (`shouldReconcileHistory` holds the full rule), refetch history and — only
   // if it is LONGER than what the runtime holds — swap it in with
   // `setMessages`. No remount: `useChat` keeps its `Chat` instance while `id`
@@ -735,8 +709,7 @@ function ConversationInner({
     let cancelled = false;
     void queryClient
       .fetchQuery({
-        queryKey: sessionQueryKey(id),
-        queryFn: () => loadHistory(transport, id),
+        ...sessionQuery(transport, id),
         // The mounted history query pins `staleTime: Infinity`; force the GET.
         staleTime: 0,
       })

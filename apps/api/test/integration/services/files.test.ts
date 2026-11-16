@@ -1937,7 +1937,7 @@ describe("files service + routes", () => {
     await db.insert(fileLinks).values({ fileId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
-    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] });
+    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId], orgId: ctx.orgId });
 
     const [row] = await db.select().from(files).where(eq(files.id, doc.id));
     expect(row).toBeDefined();
@@ -1975,7 +1975,7 @@ describe("files service + routes", () => {
     const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
 
-    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] });
+    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId], orgId: ctx.orgId });
 
     const [row] = await db.select().from(files).where(eq(files.id, doc.id));
     expect(row).toBeUndefined();

@@ -14,6 +14,7 @@ import {
   authHeaders,
   orgOnlyHeaders,
   memberContext,
+  memberHolding,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import {
@@ -96,16 +97,16 @@ describe("GET /api/orgs/:orgId/chat/enforced-skills", () => {
     expect(typeof body.data[0]!.name).toBe("string");
   });
 
-  it("answers a member who writes the chat, and refuses one who only reads it", async () => {
+  it("answers a member who reads the chat, and refuses one who does not", async () => {
     await seedEnforcedSkill();
-    // `runner` holds `chat:write`; `viewer` holds `chat:read` alone.
-    const runner = await memberContext(ctx, "member", "runner");
-    const runnerRes = await list(runner);
-    expect(runnerRes.status).toBe(200);
-    expect(await ids(runnerRes)).toEqual([SKILL_ID]);
-
+    // `viewer` holds `chat:read` alone: a read, admitted like the other reads.
     const viewer = await memberContext(ctx, "member", "viewer");
-    expect((await list(viewer)).status).toBe(403);
+    const viewerRes = await list(viewer);
+    expect(viewerRes.status).toBe(200);
+    expect(await ids(viewerRes)).toEqual([SKILL_ID]);
+
+    const outsider = await memberHolding(ctx, ["agents:read"]);
+    expect((await list(outsider)).status).toBe(403);
   });
 
   it("answers the named space's skills alone", async () => {

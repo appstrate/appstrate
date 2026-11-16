@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
 import { ownPins } from "./chat-skills.ts";
-import { useOriginSpaceNode, useSpaceLabel, useConversationScope } from "./conversation-scope.ts";
+import { useOriginSpaceLabel, useOriginSpaceNode } from "./conversation-scope.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
@@ -85,8 +85,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
   const { t } = useChatHost();
   const spaceNode = useOriginSpaceNode();
   // The plain name: the node above carries a tile the accessible name must not.
-  const spaceLabel =
-    useSpaceLabel(useConversationScope().originSpaceId) ?? t("composer.limit.thisSpace");
+  const spaceLabel = useOriginSpaceLabel();
   const label = t("skills.enforcedPillLabel", { space: spaceLabel, names: namesOf(skills) });
   const body = (
     <>

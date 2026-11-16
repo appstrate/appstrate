@@ -79,17 +79,17 @@ function buildPlatformServices(): PlatformServices {
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped
     // file (or validate an existing file) and hand back its stable
-    // `appfile://` URI. The module has no DB access, so it crosses here.
+    // `appfile://` URI. The files service (ACL, storage, quota) is the platform's.
     resolveChatAttachment,
     // Space-enforced chat skills — read with platform authority, since the
     // members they bind may hold no `skills:read`.
     loadEnforcedChatSkills,
     listEnforcedChatSkills,
     // Chat session teardown — detach-or-delete the session's contained files
-    // before the session row is removed (the module has no DB/storage access).
-    cleanupSessionFiles: (chatSessionId, tx) =>
+    // before the session row is removed (the module has no storage access).
+    cleanupSessionFiles: (chatSessionId, orgId, tx) =>
       detachOrDeleteContainedFiles(
-        { chatSessionIds: [chatSessionId] },
+        { chatSessionIds: [chatSessionId], orgId },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.
@@ -100,10 +100,10 @@ function buildPlatformServices(): PlatformServices {
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
     reachableSpaces: async (c, orgId) => ({
-      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => {
-        const wire = toReachableSpaceWire(space);
-        return { ...wire, permissions: [...wire.permissions] };
-      }),
+      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
+        ...toReachableSpaceWire(space),
+        permissions: [...space.permissions],
+      })),
       pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
     }),
     // Module routes run behind the platform middleware chain, so the context

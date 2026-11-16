@@ -83,8 +83,13 @@ describe("the conversation list as a filter", () => {
     }
   });
 
-  it("keys an open conversation's history by the conversation alone: a filter change keeps it", () => {
-    expect(sessionQueryKey("chs_1")).toEqual(["chat", "session", "chs_1"]);
+  it("keys an open conversation by the conversation alone, under the shell's typed-client key", () => {
+    // The shell's realtime refetches this exact key on the conversation's session signal.
+    expect(sessionQueryKey("org_1", "chs_1")).toEqual([
+      "get",
+      "/api/orgs/{orgId}/chat/sessions/{id}",
+      { params: { path: { orgId: "org_1", id: "chs_1" } } },
+    ]);
   });
 });
 

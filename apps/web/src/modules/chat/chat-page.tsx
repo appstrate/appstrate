@@ -28,7 +28,6 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { otherSpaceFileContext } from "../../lib/file-link";
-import { canAttachFrom } from "../../lib/space-lists";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -141,8 +140,6 @@ export function ChatModulePage() {
   // A file of another space (a call of a conversation) is read in its own.
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
-  // An upload lands in the working space: the chat may attach only where it acts.
-  const canAttach = canAttachFrom(actingSpaceIds, currentSpaceId);
   const onDownloadFile = useCallback(
     (id: string, name: string, spaceId?: string) =>
       void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
@@ -194,7 +191,6 @@ export function ChatModulePage() {
               t={translate}
               can={can}
               canIn={canIn}
-              canAttach={canAttach}
               workingSpaceId={currentSpaceId}
               actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}

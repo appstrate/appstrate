@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchEnforcedSkills } from "./chat-skills.ts";
 import { useConversationScope } from "./conversation-scope.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { actsIn, useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /**
  * Shared by the picker and the composer's skill chips: what the conversation's origin space imposes
@@ -16,7 +16,7 @@ import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 export function useEnforcedSkills(transport: ChatTransport | undefined) {
   const { originSpaceId } = useConversationScope();
   const { actingSpaceIds } = useChatHost();
-  const actsInOrigin = !!originSpaceId && actingSpaceIds.includes(originSpaceId);
+  const actsInOrigin = actsIn(actingSpaceIds, originSpaceId);
   return useQuery({
     queryKey: ["chat", "enforced-skills", originSpaceId],
     queryFn: () => fetchEnforcedSkills(transport!, originSpaceId!),

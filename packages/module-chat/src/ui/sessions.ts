@@ -7,7 +7,7 @@
  * only session list/CRUD + history load.
  */
 
-import type { InfiniteData, QueryClient } from "@tanstack/react-query";
+import { queryOptions, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
@@ -59,9 +59,13 @@ export function sessionsSearchQueryKey(spaceId: string | null, q: string): reado
   return [...sessionsQueryKey(spaceId), "search", q];
 }
 
-/** One conversation's stored history: the conversation belongs to the organization, whatever the filter. */
-export function sessionQueryKey(id: string): readonly unknown[] {
-  return ["chat", "session", id];
+/**
+ * One conversation, read by id whatever the list's filter, under the shell's typed-client key for
+ * `GET /api/orgs/{orgId}/chat/sessions/{id}`: one cache for the module and the host, which
+ * refetches it on the conversation's session signal.
+ */
+export function sessionQueryKey(orgId: string, id: string): readonly unknown[] {
+  return ["get", "/api/orgs/{orgId}/chat/sessions/{id}", { params: { path: { orgId, id } } }];
 }
 
 export interface SessionsPage {
@@ -155,12 +159,11 @@ interface StoredMessage {
   content: Record<string, unknown>;
 }
 
-/** A conversation as the detail route serves it: history, skill selection, origin and limit. */
-export interface SessionHistory {
+/** A conversation as the detail route serves it: its row, history and skill selection. */
+export interface SessionHistory extends SessionSummary {
   messages: UIMessage[];
   skills: ChatSkillSelection;
-  spaceId: string | null;
-  restricted: boolean;
+  createdAt: string;
 }
 
 /**
@@ -179,18 +182,31 @@ export async function loadHistory(
     if (errorStatus(error) === 404) return null;
     throw error;
   }
-  const body = (await res.json()) as {
+  const { messages, skill_mode, pinned_skills, ...row } = (await res.json()) as SessionSummary & {
     messages?: StoredMessage[];
     skill_mode: ChatSkillMode;
     pinned_skills: string[];
-    spaceId: string | null;
-    restricted: boolean;
+    createdAt: string;
   };
   return {
+    ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
-    messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillMode: body.skill_mode, pinnedSkills: body.pinned_skills },
-    spaceId: body.spaceId,
-    restricted: body.restricted,
+    messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
+    skills: { skillMode: skill_mode, pinnedSkills: pinned_skills },
   };
+}
+
+/**
+ * The conversation `id` (`null`: none, nothing read). Fresh by push: the host's realtime refetches
+ * it on the conversation's session signal, never on a timer. Waits for the transport.
+ */
+export function sessionQuery(transport: ChatTransport | null | undefined, id: string | null) {
+  return queryOptions({
+    queryKey: sessionQueryKey(transport?.orgId ?? "", id ?? ""),
+    queryFn: () => loadHistory(transport!, id!),
+    enabled: !!transport && !!id,
+    staleTime: Infinity,
+    // Read again on every mount: nothing else refreshes a conversation no one was watching.
+    gcTime: 0,
+  });
 }

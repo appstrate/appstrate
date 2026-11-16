@@ -14,23 +14,15 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { SkillChips } from "../src/ui/enforced-skills.tsx";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
-import { ChatHostProvider, type ChatHost, type ChatTransport } from "../src/ui/runtime-context.ts";
-import { transportOf } from "./fake-request.ts";
+import { ChatHostProvider, type ChatTransport } from "../src/ui/runtime-context.ts";
+import { testHost, transportOf } from "./fake-request.ts";
 import type { ChatSkillSelection, SkillHint } from "../src/skills.ts";
 
-const host: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
+const host = testHost({
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
-  can: () => true,
   actingSpaceIds: ["spc_a"],
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-  onPackagesChanged: () => {},
   useSpaceLabelOf: () => (id) => (id === "spc_a" ? "Studio" : undefined),
-};
+});
 
 const scoped = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 const manual = (pinnedSkills: string[]): ChatSkillSelection => ({
@@ -62,7 +54,7 @@ function render({
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={{ ...host, can: () => canReadSkills }}>
         <ConversationScopeProvider
-          value={{ originSpaceId, restricted: false, setRestricted: () => {} }}
+          value={{ originSpaceId, restricted: false, generating: false, setRestricted: () => {} }}
         >
           <TooltipProvider>
             <SkillChips

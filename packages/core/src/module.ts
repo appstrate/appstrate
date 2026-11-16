@@ -1535,7 +1535,7 @@ export interface PlatformServices {
    * materialize an `upload://` staged upload into a chat-session-scoped file
    * (purpose `user_upload`), or validate that an existing `appfile://` is
    * readable by the session owner under the permissions the request carries.
-   * The chat module has no DB access, so materialization + the
+   * The files service is the platform's, so materialization + the
    * container-inherited ACL check cross through here.
    * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
@@ -1572,7 +1572,7 @@ export interface PlatformServices {
    * platform opens its own transaction, which is correct whenever the caller
    * has no wider unit of work to join.
    */
-  cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, orgId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform

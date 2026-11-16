@@ -230,14 +230,3 @@ export function grantedInSomeActingSpace(
     gateIn(space, orgPermissions)(permission),
   );
 }
-
-/**
- * Whether the composer may stage a file: an upload lands in the working space, and the turn
- * resolves it only where the chat acts.
- */
-export function canAttachFrom(
-  actingIds: readonly string[],
-  workingSpaceId: string | null,
-): boolean {
-  return workingSpaceId !== null && actingIds.includes(workingSpaceId);
-}

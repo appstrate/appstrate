@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { relativeAge } from "@appstrate/core/format";
+import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
@@ -42,7 +43,6 @@ import type {
   SidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
-import { useChatSessionDetail } from "./use-chat-session-detail";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
@@ -298,7 +298,7 @@ function ConversationDetails({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const query = useChatSessionDetail(conversationId, active);
+  const query = useSessionDetail(active ? conversationId : null);
 
   if (!conversationId) {
     return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;

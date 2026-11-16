@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react";
-import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
+import { actsIn, useChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
   /**
@@ -18,6 +18,8 @@ export interface ConversationScope {
   originSpaceId: string | null;
   /** Limited to the origin space: its tools take no `space_id` and act there alone. */
   restricted: boolean;
+  /** A turn is generating: the limit cannot change until it ends. */
+  generating: boolean;
   /** Limit (`true`) or lift (`false`): local until the first message, a PATCH afterwards. */
   setRestricted: (next: boolean) => void;
 }
@@ -25,6 +27,7 @@ export interface ConversationScope {
 const NO_SCOPE: ConversationScope = {
   originSpaceId: null,
   restricted: false,
+  generating: false,
   setRestricted: () => {},
 };
 
@@ -36,62 +39,64 @@ export function useConversationScope(): ConversationScope {
   return useContext(ConversationScopeContext);
 }
 
-/** Why the limit cannot be turned on, when it cannot. */
-export type LimitUnavailable = "no-space" | "outside";
-
 /**
- * Whether « Limiter à cet espace » can be turned on: there is an origin space and the chat acts in
- * it. A conversation already limited can always be released, whatever the acting set became.
+ * Whether « Limiter à cet espace » can change: not while a turn generates (the server refuses),
+ * else there is an origin space and the chat acts in it. A conversation already limited can always
+ * be released, whatever the acting set became.
  */
 export function limitAvailability(
-  scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
+  scope: Pick<ConversationScope, "originSpaceId" | "restricted" | "generating">,
   actingSpaceIds: readonly string[],
-): { available: true } | { available: false; reason: LimitUnavailable } {
+): { available: true } | { available: false; reason: "generating" | "no-space" | "outside" } {
+  if (scope.generating) return { available: false, reason: "generating" };
   if (scope.restricted) return { available: true };
   if (!scope.originSpaceId) return { available: false, reason: "no-space" };
-  if (!actingSpaceIds.includes(scope.originSpaceId)) return { available: false, reason: "outside" };
+  if (!actsIn(actingSpaceIds, scope.originSpaceId)) return { available: false, reason: "outside" };
   return { available: true };
 }
 
-/** Why a file cannot be attached, when it cannot: where the chat does not act, or off a limited origin. */
-export type AttachUnavailable = "outside" | "limited";
-
 /**
- * Whether the composer may stage a file. An upload lands in the working space: the host says
- * whether the chat acts there (`hostCanAttach`), and a LIMITED conversation reaches its origin
- * space alone, so it takes a file only while the working space IS that origin.
+ * Whether the composer may stage a file. An upload lands in the working space, which the turn
+ * resolves only where the chat acts; and a LIMITED conversation reaches its origin space alone, so
+ * it takes a file only while the working space IS that origin.
  */
 export function attachAvailability(
-  hostCanAttach: boolean,
+  actingSpaceIds: readonly string[],
   scope: Pick<ConversationScope, "originSpaceId" | "restricted">,
   workingSpaceId: string | null | undefined,
-): { available: true } | { available: false; reason: AttachUnavailable } {
+): { available: true } | { available: false; reason: "outside" | "limited" } {
   const origin = pinnedSpaceOf(scope);
   if (origin !== undefined && workingSpaceId !== origin) {
     return { available: false, reason: "limited" };
   }
-  return hostCanAttach ? { available: true } : { available: false, reason: "outside" };
+  return actsIn(actingSpaceIds, workingSpaceId)
+    ? { available: true }
+    : { available: false, reason: "outside" };
 }
 
 /** {@link attachAvailability} of the open conversation, in the host's working space. */
 export function useAttachAvailability(): ReturnType<typeof attachAvailability> {
-  const { canAttach = true, workingSpaceId } = useChatHost();
-  return attachAvailability(canAttach, useConversationScope(), workingSpaceId);
+  const { actingSpaceIds, workingSpaceId } = useChatHost();
+  return attachAvailability(actingSpaceIds, useConversationScope(), workingSpaceId);
 }
 
 const noLabels = () => undefined;
 const useNoLabels = () => noLabels;
 
-/** The plain name of the space `spaceId`, when the host names spaces (for accessible names). */
-export function useSpaceLabel(spaceId: string | null | undefined): string | undefined {
-  const { useSpaceLabelOf = useNoLabels } = useChatHost();
-  return useSpaceLabelOf()(spaceId);
+/**
+ * The plain name of the conversation's origin space, for accessible names (the node below carries
+ * a tile a label would drop); the generic « this space » when the host does not name it.
+ */
+export function useOriginSpaceLabel(): string {
+  const { t, useSpaceLabelOf = useNoLabels } = useChatHost();
+  const { originSpaceId } = useConversationScope();
+  return useSpaceLabelOf()(originSpaceId) ?? t("composer.limit.thisSpace");
 }
 
 /**
  * The conversation's origin space as the host renders it (tile and name); without the host's
  * rendering or an origin, the generic « this space ». Never a plain string for an accessible name:
- * use {@link useSpaceLabel} for those.
+ * use {@link useOriginSpaceLabel} for those.
  */
 export function useOriginSpaceNode(): ReactNode {
   const { t, renderSpaces } = useChatHost();
@@ -120,18 +125,4 @@ export function callSpaceOf(part: { providerMetadata?: unknown }): string | unde
   const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)
     ?.appstrate?.spaceId;
   return typeof stamp === "string" && stamp ? stamp : undefined;
-}
-
-/**
- * The accessible names of the limit item and of the chip's remove button: the sentence with the
- * space's plain name, since the visible name is a node (tile and text) that a label would drop.
- */
-export function limitAccessibleNames(
-  t: ChatTranslate,
-  spaceName: string,
-): { item: string; undo: string } {
-  return {
-    item: t("composer.limit", { name: spaceName }),
-    undo: t("composer.limit.undo", { name: spaceName }),
-  };
 }

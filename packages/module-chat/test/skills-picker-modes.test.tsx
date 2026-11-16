@@ -10,23 +10,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
-import { transportOf } from "./fake-request.ts";
+import { testHost, transportOf } from "./fake-request.ts";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 
-const host: ChatHost = {
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: () => null,
-  t: (key) => key,
-  can: () => true,
-  actingSpaceIds: ["spc_a"],
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-};
+const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
@@ -44,7 +34,12 @@ function render(skillMode: ChatSkillMode): string {
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
         <ConversationScopeProvider
-          value={{ originSpaceId: "spc_a", restricted: false, setRestricted: () => {} }}
+          value={{
+            originSpaceId: "spc_a",
+            restricted: false,
+            generating: false,
+            setRestricted: () => {},
+          }}
         >
           <TooltipProvider>
             <SkillsPickerPanel

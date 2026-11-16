@@ -29,12 +29,11 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
-  limitAccessibleNames,
   limitAvailability,
   useAttachAvailability,
   useConversationScope,
+  useOriginSpaceLabel,
   useOriginSpaceNode,
-  useSpaceLabel,
 } from "./conversation-scope.ts";
 import {
   setPackageAuthoringEnabled,
@@ -44,6 +43,12 @@ import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./enforced-skills.tsx";
 import { SkillsChip, SkillsPicker } from "./skills-picker.tsx";
+
+const LIMIT_REASON_KEY = {
+  generating: "composer.limit.generating",
+  "no-space": "composer.limit.noSpace",
+  outside: "composer.limit.outside",
+} as const;
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
@@ -68,11 +73,8 @@ export function ComposerTools({
   const { t, actingSpaceIds } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
-  // The plain name, for the accessible names: the node above carries a tile the name does not.
-  const limitNames = limitAccessibleNames(
-    t,
-    useSpaceLabel(scope.originSpaceId) ?? t("composer.limit.thisSpace"),
-  );
+  // The plain name, for the accessible names: the node below carries a tile the name does not.
+  const spaceLabel = useOriginSpaceLabel();
   const limit = limitAvailability(scope, actingSpaceIds);
   // The space as the host names it; without the host's rendering, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
@@ -146,23 +148,19 @@ export function ComposerTools({
             <DropdownMenuCheckboxItem
               checked={scope.restricted}
               onCheckedChange={scope.setRestricted}
-              aria-label={limitNames.item}
+              aria-label={t("composer.limit", { name: spaceLabel })}
               data-testid="composer-limit-item"
             >
               {sentenceWithNode(t, "composer.limit", spaceNode)}
             </DropdownMenuCheckboxItem>
           ) : (
-            // No origin space (« Vue d'ensemble »), or one the chat cannot act in: nothing to limit to.
+            // A turn generating, no origin space (« Vue d'ensemble »), or one the chat cannot act in.
             <DropdownMenuItem disabled data-testid="composer-limit-item">
               <MapPinIcon />
               <span className="flex flex-col">
                 {t("composer.limit.generic")}
                 <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
-                  {t(
-                    limit.reason === "outside"
-                      ? "composer.limit.outside"
-                      : "composer.limit.noSpace",
-                  )}
+                  {t(LIMIT_REASON_KEY[limit.reason])}
                 </span>
               </span>
             </DropdownMenuItem>
@@ -214,9 +212,10 @@ export function ComposerTools({
           </span>
           <button
             type="button"
-            aria-label={limitNames.undo}
+            aria-label={t("composer.limit.undo", { name: spaceLabel })}
+            disabled={scope.generating}
             onClick={() => scope.setRestricted(false)}
-            className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full"
+            className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
           >
             <XIcon className="size-3" />
           </button>
@@ -229,11 +228,7 @@ export function ComposerTools({
           onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
           fallback={
             showPicker ? (
-              <SkillsChip
-                transport={transport}
-                selection={selection}
-                onClick={() => setSkillsOpen(true)}
-              />
+              <SkillsChip selection={selection} onClick={() => setSkillsOpen(true)} />
             ) : null
           }
         />

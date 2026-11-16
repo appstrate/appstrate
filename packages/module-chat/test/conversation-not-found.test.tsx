@@ -36,7 +36,7 @@ const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a
 /** Seeds the history read, so the render is the answer and not a fetch. */
 function render(history: unknown, can: (permission: string) => boolean): string {
   const qc = new QueryClient();
-  qc.setQueryData(sessionQueryKey("chs_gone"), history);
+  qc.setQueryData(sessionQueryKey("org_1", "chs_gone"), history);
   return renderToString(
     <QueryClientProvider client={qc}>
       <TooltipProvider>
@@ -77,7 +77,7 @@ describe("a conversation URL the caller has no conversation for", () => {
     // history reconcile then writes its 404 (`null`) into this cache entry —
     // which must not replace the user's message, its error and Retry.
     const qc = new QueryClient();
-    qc.setQueryDefaults(["chat", "session"], { initialData: null });
+    qc.setQueryDefaults(["get", "/api/orgs/{orgId}/chat/sessions/{id}"], { initialData: null });
     const html = renderToString(
       <QueryClientProvider client={qc}>
         <TooltipProvider>

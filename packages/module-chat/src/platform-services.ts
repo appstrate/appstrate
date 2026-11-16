@@ -127,21 +127,21 @@ export interface ChatPlatformDeps {
   /**
    * Resolve a chat composer file attachment (`upload://` or `appfile://`) to a
    * durable `appfile://` URI, materializing the upload into a chat-session-scoped
-   * file server-side (the module has no DB access). Throws the platform's
+   * file server-side (the files service — ACL, storage, quota — is the platform's). Throws the platform's
    * quota/cap/not-found errors, which the stream route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
    * Detach-or-delete the files contained by a chat session being deleted. A
    * session file a run still consumes is detached (kept, container NULLed);
-   * an unconsumed one is deleted (row + counter + storage). The module has no DB
-   * or storage access, so this crosses through `ctx.services`. Called before the
+   * an unconsumed one is deleted (row + counter + storage). The module has no
+   * storage access, so this crosses through `ctx.services`. Called before the
    * session row is removed so the FK cascade cannot destroy the evidence first.
    *
    * Pass the SAME transaction that deletes the `chat_sessions` row so the two
    * commit atomically (closes the materialize-in-the-gap orphan window).
    */
-  cleanupSessionFiles(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, orgId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a turn — EVERY turn, on either binding (llm-proxy or
    * native OAuth subscription). The platform resolves the chosen model for the
@@ -216,7 +216,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
-    cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
+    cleanupSessionFiles: (chatSessionId, orgId, tx) =>
+      ctx.services.cleanupSessionFiles(chatSessionId, orgId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
     reachableSpaces: (c, orgId) => ctx.services.reachableSpaces(c, orgId),
     loadEnforcedSkills: (orgId, spaceId) =>

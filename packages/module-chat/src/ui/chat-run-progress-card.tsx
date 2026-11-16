@@ -177,7 +177,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { openFile, t, renderSpaces } = useChatHost();
+  const { openFile, t } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -254,11 +254,7 @@ export function ChatRunProgressCard({
               {agentLabel ?? t("run.fallbackLabel")}
             </span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
-              {spaceId && renderSpaces ? (
-                <span className="text-muted-foreground flex max-w-40 min-w-0 items-center text-xs">
-                  {renderSpaces([spaceId])}
-                </span>
-              ) : null}
+              <CallSpace spaceId={spaceId} />
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
                   {formatDuration(elapsedMs)}
@@ -313,5 +309,16 @@ export function ChatRunProgressCard({
         </Modal>
       ) : null}
     </div>
+  );
+}
+
+/** The space a tool call acted in (the one stamped on it), named by the host. */
+export function CallSpace({ spaceId }: { spaceId: string | undefined }) {
+  const { renderSpaces } = useChatHost();
+  if (!renderSpaces || !spaceId) return null;
+  return (
+    <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
+      {renderSpaces([spaceId])}
+    </span>
   );
 }

@@ -303,6 +303,44 @@ describe("chat sessions", () => {
       const created = await createSession(ctx);
       expect((await patch(ctx, created.id, {})).status).toBe(400);
     });
+
+    it("refuses changing the limit while a turn is running (409), and still renames", async () => {
+      const created = await createSession(ctx, { spaceId: spaceB });
+      await db
+        .update(chatSessions)
+        .set({ activeStreamId: "stream_live" })
+        .where(eq(chatSessions.id, created.id));
+      const refused = await patch(ctx, created.id, { title: "T", restricted: true });
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+      const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, created.id));
+      expect(row).toMatchObject({ title: null, restricted: false });
+      // Restating the stored limit changes nothing, so the turn does not stand in the way.
+      expect((await patch(ctx, created.id, { title: "T", restricted: false })).status).toBe(204);
+    });
+  });
+
+  it("lets an author without mcp:read manage a conversation they cannot start", async () => {
+    // chat:read and chat:write, no mcp:read: no turn acts, but the conversation is theirs.
+    // Its own org: Space B, open, would make any member of this one an operator.
+    const author = await memberHolding(await createTestContext({ orgSlug: "notools" }), [
+      "chat:read",
+      "chat:write",
+    ]);
+    expect(
+      (await orgCall(author, "/sessions", { method: "POST", body: JSON.stringify({}) })).status,
+    ).toBe(403);
+    await db
+      .insert(chatSessions)
+      .values({ id: "chs_no_tools", orgId: author.orgId, userId: author.user.id });
+    const at = (suffix: string, init: RequestInit) =>
+      orgCall(author, `/sessions/chs_no_tools${suffix}`, init);
+    expect((await at("/read", { method: "PUT" })).status).toBe(204);
+    expect((await at("", { method: "PATCH", body: JSON.stringify({ title: "T" }) })).status).toBe(
+      204,
+    );
+    expect((await at("/stop", { method: "POST" })).status).toBe(204);
+    expect((await at("", { method: "DELETE" })).status).toBe(204);
   });
 
   describe("GET …/sessions?spaceId=", () => {

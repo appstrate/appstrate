@@ -182,11 +182,6 @@ export interface ChatHost {
    */
   actingSpaceIds: readonly string[];
   /**
-   * The composer may stage a file: the upload lands in the host's working space, which the turn
-   * resolves only where the chat acts. Absent means attachable.
-   */
-  canAttach?: boolean;
-  /**
    * The host's working space, where an upload lands, `null` when it has none. Distinct from
    * `ChatTransport.spaceId`, the list filter, which is `null` in « Vue d'ensemble » while the
    * working space stays the one entered. A limited conversation takes a file only while this is
@@ -222,6 +217,14 @@ export interface ChatHost {
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
   useSpaceLabelOf?: () => (spaceId: string | null | undefined) => string | undefined;
+}
+
+/** Whether the chat acts in `spaceId` (one of the host's acting set). */
+export function actsIn(
+  actingSpaceIds: readonly string[],
+  spaceId: string | null | undefined,
+): boolean {
+  return !!spaceId && actingSpaceIds.includes(spaceId);
 }
 
 /**

@@ -42,7 +42,7 @@ import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
-import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { CallSpace, ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
@@ -164,17 +164,6 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
       </div>
       <JsonView value={value} />
     </div>
-  );
-}
-
-/** The space a tool call acted in (the one stamped on it), named by the host. */
-function CallSpace({ spaceId }: { spaceId: string | undefined }) {
-  const { renderSpaces } = useChatHost();
-  if (!renderSpaces || !spaceId) return null;
-  return (
-    <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
-      {renderSpaces([spaceId])}
-    </span>
   );
 }
 
@@ -391,8 +380,9 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       const offer = extractAuthOffers(result)[0];
       if (offer || phase !== "success") {
         return (
-          <CallOAuthConnectCard
-            part={props}
+          <OAuthConnectCard
+            // It reads the integration where the call acted.
+            spaceId={callSpaceOf(props)}
             authUrl={offer?.authUrl}
             state={offer?.state}
             // The session route returns no `packageId`; the call's own path
@@ -504,16 +494,6 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-/** The connect card of a call: it reads the integration where the call acted. */
-function CallOAuthConnectCard({
-  part,
-  ...card
-}: { part: { providerMetadata?: unknown; args?: unknown } } & React.ComponentProps<
-  typeof OAuthConnectCard
->) {
-  return <OAuthConnectCard {...card} spaceId={callSpaceOf(part)} />;
-}
-
 export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "search_operations",
   render: (props: AnyToolProps) => (
@@ -570,9 +550,9 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
     <>
       <RunLaunchCard {...props} />
       {extractRunAndWaitAuthOffers(props).map((offer) => (
-        <CallOAuthConnectCard
+        <OAuthConnectCard
           key={offer.authUrl}
-          part={props}
+          spaceId={callSpaceOf(props)}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

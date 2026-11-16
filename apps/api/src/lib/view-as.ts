@@ -482,14 +482,26 @@ export async function callerSpaceAccessById(
 }
 
 /**
- * The caller's effective set in ANY space of `orgId` (empty outside it), not only the request's:
- * org role, space and membership read as one snapshot (RBAC spec §4.4), under the credential ceiling.
+ * Whether the request's credential may name `spaceId` at all: inside the space it pins and inside
+ * its allowlist, each when present.
+ */
+export function credentialAdmitsSpace(c: Context<AppEnv>, spaceId: string): boolean {
+  const pinned = c.get("credentialSpaceId");
+  const allowed = c.get("credentialSpaceIds");
+  return (!pinned || pinned === spaceId) && (!allowed || allowed.includes(spaceId));
+}
+
+/**
+ * The caller's effective set in ANY space of `orgId` (empty outside it, or outside what the request
+ * may name), not only the request's: org role, space and membership read as one snapshot
+ * (RBAC spec §4.4), under the credential ceiling.
  */
 export async function callerPermissionsInSpace(
   c: Context<AppEnv>,
   spaceId: string,
   orgId: string,
 ): Promise<Set<Permission>> {
+  if (!credentialAdmitsSpace(c, spaceId)) return new Set<Permission>();
   const snapshot = isSpaceId(spaceId)
     ? await loadSpaceAccess(spaceId, orgId, c.get("user")?.id ?? null)
     : null;

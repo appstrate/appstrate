@@ -6,10 +6,10 @@
  * uploads, run reads) keep the host's working-space headers.
  */
 
-import type { UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import type { ChatSkillSelection } from "../skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import type { ChatTransport } from "./runtime-context.ts";
+import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
 /** The chat route `suffix` (`/sessions`, `/enforced-skills`, `` for the turn) of the transport's organization. */
 export function chatPath(transport: Pick<ChatTransport, "orgId">, suffix = ""): string {
@@ -26,7 +26,7 @@ export function selectedOriginSpaceId(
   actingSpaceIds: readonly string[],
 ): string | undefined {
   const spaceId = transport?.spaceId;
-  return spaceId && actingSpaceIds.includes(spaceId) ? spaceId : undefined;
+  return spaceId && actsIn(actingSpaceIds, spaceId) ? spaceId : undefined;
 }
 
 /** What a turn that creates the conversation carries: its origin space and its limit. */
@@ -59,4 +59,28 @@ export function turnBody(args: {
     ...creation,
     ...(skills && { skill_mode: skills.skillMode, pinned_skills: skills.pinnedSkills }),
   };
+}
+
+/**
+ * The transport of a conversation's turns. `useChat` keeps the first transport it sees for an id,
+ * so everything it sends is read at request time: the route (a conversation can mount before the
+ * host's transport is ready), the headers and the body. Resume targets the per-session stream
+ * endpoint (the chat id is the conversation id).
+ */
+export function createTurnTransport(read: {
+  getTransport: () => ChatTransport | undefined;
+  headers: () => Record<string, string>;
+  body: (request: { id: string; messages: UIMessage[]; body: object | undefined }) => object;
+}): DefaultChatTransport<UIMessage> {
+  return new DefaultChatTransport<UIMessage>({
+    credentials: "include",
+    headers: read.headers,
+    prepareSendMessagesRequest: (request) => ({
+      api: chatPath(read.getTransport()!),
+      body: read.body(request),
+    }),
+    prepareReconnectToStreamRequest: ({ id }) => ({
+      api: chatPath(read.getTransport()!, `/sessions/${id}/stream`),
+    }),
+  });
 }

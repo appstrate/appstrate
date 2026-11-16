@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The host's `ChatRequest` contract, faked: a non-2xx answer is thrown with its `status`/`code`. */
+/** The host's seams, faked: `ChatRequest` (a non-2xx answer thrown with its `status`/`code`) and `ChatHost`. */
 
-import type { ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
+import type { ChatHost, ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
 
 class FakeProblem extends Error {
   constructor(
@@ -51,4 +51,21 @@ export function transportOver(
   getHeaders: () => Record<string, string> = () => ({}),
 ): ChatTransport {
   return { getHeaders, request, orgId: "org_1", spaceId };
+}
+
+/** A host granting everything, acting nowhere, keys echoed: `overrides` set what a test reads. */
+export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
+  return {
+    openFile: () => {},
+    downloadFile: () => {},
+    useFileImageSrc: () => null,
+    t: (key) => key,
+    can: () => true,
+    actingSpaceIds: [],
+    personalModelCredentials: true,
+    modelCredentials: [],
+    formatBytes: String,
+    onPackagesChanged: () => {},
+    ...overrides,
+  };
 }

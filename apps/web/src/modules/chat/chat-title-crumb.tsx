@@ -15,12 +15,11 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { useSessions } from "@appstrate/module-chat/unread";
+import { useSessionDetail, useSessions } from "@appstrate/module-chat/unread";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
 import { chatTrailEntries, resolveCrumbTitle } from "./chat-crumb-title";
-import { useChatSessionDetail } from "./use-chat-session-detail";
 
 export function ChatTitleCrumb({
   conversationId,
@@ -34,8 +33,8 @@ export function ChatTitleCrumb({
   const { data: sessions, isLoading } = useSessions();
   const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   // The conversation itself, whatever the list's filter: its name when the list lacks the row.
-  const detail = useChatSessionDetail(conversationId, !pending);
-  const title = resolveCrumbTitle(listed, detail.data, t("threads.new"));
+  const detail = useSessionDetail(pending ? null : conversationId);
+  const title = resolveCrumbTitle(listed, detail.data ?? undefined, t("threads.new"));
 
   // `isLoading` is the sessions list's; the conversation's own read only matters when the list lacks the row.
   const loading =

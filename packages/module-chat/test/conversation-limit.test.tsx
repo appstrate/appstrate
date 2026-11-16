@@ -11,15 +11,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import {
-  changeLimit,
-  creationFields,
-  creationGate,
-  useConversationLimit,
-} from "../src/ui/conversation-limit.ts";
+import { changeLimit, creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
 import {
   callSpaceOf,
-  limitAccessibleNames,
   ConversationScopeProvider,
   attachAvailability,
   useAttachAvailability,
@@ -28,7 +22,7 @@ import {
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
 import { ComposerTools } from "../src/ui/composer-tools.tsx";
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import {
   sessionQueryKey,
   sessionsQueryKey,
@@ -36,7 +30,7 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "../src/ui/sessions.ts";
-import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
+import { requestAnswering, testHost, transportOf, transportOver } from "./fake-request.ts";
 
 describe("what the first message carries", () => {
   it("is the origin space, and the limit only when it is on", () => {
@@ -53,45 +47,47 @@ describe("what the first message carries", () => {
   });
 });
 
-describe("the creation fields until the server answers", () => {
-  it("freeze at the first message and ride every attempt until a turn is acknowledged", () => {
-    let selected = "spc_a";
-    const gate = creationGate(() => ({ spaceId: selected, restricted: true }));
-    expect(gate.fields()).toEqual({ spaceId: "spc_a", restricted: true });
-    // A retry after a failed first turn still carries the origin chosen at the first message.
-    selected = "spc_b";
-    expect(gate.fields()).toEqual({ spaceId: "spc_a", restricted: true });
-    gate.acknowledge();
-    // The row exists: the server reads these fields no more, so they are no longer sent.
-    expect(gate.fields()).toBeUndefined();
-  });
-});
-
 describe("when the limit is on offer", () => {
   const acting = ["spc_a"];
 
   it("is when the conversation has an origin space the chat acts in", () => {
-    expect(limitAvailability({ originSpaceId: "spc_a", restricted: false }, acting)).toEqual({
+    expect(
+      limitAvailability({ originSpaceId: "spc_a", restricted: false, generating: false }, acting),
+    ).toEqual({
       available: true,
     });
   });
 
   it("is not in « Vue d'ensemble » or for a conversation without an origin", () => {
-    expect(limitAvailability({ originSpaceId: null, restricted: false }, acting)).toEqual({
+    expect(
+      limitAvailability({ originSpaceId: null, restricted: false, generating: false }, acting),
+    ).toEqual({
       available: false,
       reason: "no-space",
     });
   });
 
   it("is not when the origin space is outside the acting set", () => {
-    expect(limitAvailability({ originSpaceId: "spc_x", restricted: false }, acting)).toEqual({
+    expect(
+      limitAvailability({ originSpaceId: "spc_x", restricted: false, generating: false }, acting),
+    ).toEqual({
       available: false,
       reason: "outside",
     });
   });
 
+  it("is not while a turn generates, even to release the limit (the server refuses)", () => {
+    for (const restricted of [false, true]) {
+      expect(
+        limitAvailability({ originSpaceId: "spc_a", restricted, generating: true }, acting),
+      ).toEqual({ available: false, reason: "generating" });
+    }
+  });
+
   it("always lets a limited conversation be released", () => {
-    expect(limitAvailability({ originSpaceId: "spc_x", restricted: true }, acting)).toEqual({
+    expect(
+      limitAvailability({ originSpaceId: "spc_x", restricted: true, generating: false }, acting),
+    ).toEqual({
       available: true,
     });
   });
@@ -109,15 +105,15 @@ describe("changing the limit of an existing conversation", () => {
     space_ids: ["spc_a"],
   };
   const history: SessionHistory = {
+    ...row,
     messages: [],
     skills: { skillMode: "auto", pinnedSkills: [] },
-    spaceId: "spc_a",
-    restricted: false,
+    createdAt: "",
   };
 
   function seeded() {
     const qc = new QueryClient();
-    qc.setQueryData<SessionHistory | null>(sessionQueryKey("chs_1"), history);
+    qc.setQueryData<SessionHistory | null>(sessionQueryKey("org_1", "chs_1"), history);
     qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
       pages: [{ data: [row], hasMore: false }],
       pageParams: [undefined],
@@ -125,7 +121,7 @@ describe("changing the limit of an existing conversation", () => {
     return qc;
   }
   const restrictedOf = (qc: QueryClient) => ({
-    detail: qc.getQueryData<SessionHistory>(sessionQueryKey("chs_1"))?.restricted,
+    detail: qc.getQueryData<SessionHistory>(sessionQueryKey("org_1", "chs_1"))?.restricted,
     row: qc.getQueryData<SessionsCache>(sessionsQueryKey("spc_a"))?.pages[0]?.data[0]?.restricted,
   });
 
@@ -204,6 +200,7 @@ describe("a new conversation's default limit", () => {
         persistedAtMount: false,
         stored: undefined,
         selectedSpaceId,
+        generating: false,
       });
       return null;
     }
@@ -229,25 +226,17 @@ describe("a new conversation's default limit", () => {
 });
 
 describe("the composer's limit chip", () => {
-  const host: ChatHost = {
-    openFile: () => {},
-    downloadFile: () => {},
-    useFileImageSrc: () => null,
+  const host = testHost({
     t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
-    can: () => true,
     actingSpaceIds: ["spc_a"],
-    personalModelCredentials: true,
-    modelCredentials: [],
-    formatBytes: String,
-    onPackagesChanged: () => {},
     renderSpaces: (ids) => <i data-spaces={ids.join(",")}>Studio</i>,
     useSpaceLabelOf: () => (id) => (id === "spc_a" ? "Studio" : undefined),
-  };
+  });
 
-  function html(scope: ConversationScope, workingSpaceId = "spc_a", over: Partial<ChatHost> = {}) {
+  function html(scope: ConversationScope, workingSpaceId = "spc_a") {
     return renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <ChatHostProvider value={{ ...host, ...over }}>
+        <ChatHostProvider value={host}>
           <ConversationScopeProvider value={scope}>
             <TooltipProvider>
               <ComposerTools
@@ -266,23 +255,36 @@ describe("the composer's limit chip", () => {
   }
 
   it("names the space and offers to lift the limit when the conversation is limited", () => {
-    const out = html({ originSpaceId: "spc_a", restricted: true, setRestricted: () => {} });
+    const out = html({
+      originSpaceId: "spc_a",
+      restricted: true,
+      generating: false,
+      setRestricted: () => {},
+    });
     expect(out).toContain('data-testid="composer-limit-chip"');
     expect(out).toContain('data-spaces="spc_a"');
     expect(out).toContain('aria-label="composer.limit.undo|Studio"');
+    expect(out).not.toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled/);
   });
 
-  it("names the space in the accessible names of the limit item and of the chip's button", () => {
-    const t: ChatHost["t"] = (key, options) => `${key}|${String(options?.name)}`;
-    expect(limitAccessibleNames(t, "Studio")).toEqual({
-      item: "composer.limit|Studio",
-      undo: "composer.limit.undo|Studio",
+  it("cannot be lifted while a turn generates", () => {
+    const out = html({
+      originSpaceId: "spc_a",
+      restricted: true,
+      generating: true,
+      setRestricted: () => {},
     });
+    expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
   });
 
   it("is absent when the conversation is not limited", () => {
     expect(
-      html({ originSpaceId: "spc_a", restricted: false, setRestricted: () => {} }),
+      html({
+        originSpaceId: "spc_a",
+        restricted: false,
+        generating: false,
+        setRestricted: () => {},
+      }),
     ).not.toContain("composer-limit-chip");
   });
 });
@@ -290,38 +292,37 @@ describe("the composer's limit chip", () => {
 describe("attaching a file in a limited conversation", () => {
   it("is allowed only from the origin space", () => {
     const limited = { originSpaceId: "spc_a", restricted: true };
-    expect(attachAvailability(true, limited, "spc_a")).toEqual({ available: true });
-    expect(attachAvailability(true, limited, "spc_b")).toEqual({
+    const acting = ["spc_a", "spc_b"];
+    expect(attachAvailability(acting, limited, "spc_a")).toEqual({ available: true });
+    expect(attachAvailability(acting, limited, "spc_b")).toEqual({
       available: false,
       reason: "limited",
     });
-    expect(attachAvailability(true, limited, null)).toEqual({
+    expect(attachAvailability(acting, limited, null)).toEqual({
       available: false,
       reason: "limited",
     });
   });
 
-  it("follows the host elsewhere: any acting working space for an unlimited conversation", () => {
+  it("is from any working space the chat acts in for an unlimited conversation", () => {
     const open = { originSpaceId: "spc_a", restricted: false };
-    expect(attachAvailability(true, open, "spc_b")).toEqual({ available: true });
-    expect(attachAvailability(false, open, "spc_b")).toEqual({
+    expect(attachAvailability(["spc_b"], open, "spc_b")).toEqual({ available: true });
+    expect(attachAvailability(["spc_a"], open, "spc_b")).toEqual({
       available: false,
       reason: "outside",
     });
-    // On the origin but where the chat does not act: the host's reason.
-    expect(
-      attachAvailability(false, { originSpaceId: "spc_a", restricted: true }, "spc_a"),
-    ).toEqual({
+    expect(attachAvailability(["spc_a"], open, null)).toEqual({
+      available: false,
+      reason: "outside",
+    });
+    // On the origin but where the chat does not act.
+    expect(attachAvailability([], { originSpaceId: "spc_a", restricted: true }, "spc_a")).toEqual({
       available: false,
       reason: "outside",
     });
   });
   it("reads the host's working space, not the list filter: opened in the overview, on its origin", () => {
-    const host = {
-      can: () => true,
-      canAttach: true,
-      actingSpaceIds: ["spc_a"],
-    } as unknown as ChatHost;
+    const host = testHost({ actingSpaceIds: ["spc_a"] });
     function Verdict() {
       const verdict = useAttachAvailability();
       return <b data-available={String(verdict.available)} />;
@@ -331,7 +332,12 @@ describe("attaching a file in a limited conversation", () => {
         // No transport is published: the overview's list filter is null whatever the working space.
         <ChatHostProvider value={{ ...host, workingSpaceId }}>
           <ConversationScopeProvider
-            value={{ originSpaceId: "spc_a", restricted: true, setRestricted: () => {} }}
+            value={{
+              originSpaceId: "spc_a",
+              restricted: true,
+              generating: false,
+              setRestricted: () => {},
+            }}
           >
             <Verdict />
           </ConversationScopeProvider>

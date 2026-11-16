@@ -56,13 +56,7 @@ export async function listReachableSpaces(
     .filter((space) => space.permissions.has("mcp:read"))
     .map((space) => {
       const wire = toReachableSpaceWire(space);
-      return {
-        id: wire.id,
-        name: wire.name,
-        role: wire.role,
-        permissions: wire.permissions,
-        surface: surfaceOf(wire.permissions, space),
-      };
+      return { ...wire, surface: surfaceOf(wire.permissions, wire) };
     });
 }
 

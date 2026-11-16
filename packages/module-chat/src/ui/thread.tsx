@@ -51,7 +51,7 @@ import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useAttachAvailability } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
@@ -181,7 +181,7 @@ function ThreadWelcome({
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
   // still runs, in the caller's other spaces, and touches none of this one.
   const spaceId = useChatTransport()?.spaceId;
-  const outsideActingSet = canWrite && !!spaceId && !actingSpaceIds.includes(spaceId);
+  const outsideActingSet = canWrite && !!spaceId && !actsIn(actingSpaceIds, spaceId);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">

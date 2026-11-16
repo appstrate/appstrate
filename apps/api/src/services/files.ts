@@ -25,7 +25,6 @@
 
 import {
   and,
-  asc,
   eq,
   gt,
   lt,
@@ -1665,12 +1664,9 @@ export async function listFilesForActor(
  * (and delete it + enqueue its job), or the publish's insert fails the FK
  * against the by-then-deleted parent and drops its own object.
  *
- * The run and end-user variants carry their `orgId` explicitly: both callers
- * already resolved it (it is the space scope they are authorized against) and
- * already hold that very org lock, so re-deriving it from the container rows
- * would only be a second read of a value the caller had all along. The chat
- * variant crosses the module boundary with the session id alone, so its org is
- * looked up here.
+ * Every variant carries its `orgId`: each caller already resolved it (the scope
+ * it is authorized against, or the session row it holds), so re-deriving it
+ * from the container rows would only be a second read of a value it had all along.
  *
  * The caller MUST invoke this BEFORE deleting the runs/session/end-user, else
  * the FK cascade destroys the `files` rows (and their links) first.
@@ -1678,7 +1674,7 @@ export async function listFilesForActor(
 export async function detachOrDeleteContainedFiles(
   container:
     | { runIds: string[]; orgId: string }
-    | { chatSessionIds: string[] }
+    | { chatSessionIds: string[]; orgId: string }
     | { endUserId: string; orgId: string },
   tx?: DbOrTx,
 ): Promise<void> {
@@ -1697,26 +1693,13 @@ export async function detachOrDeleteContainedFiles(
       : eq(files.endUserId, endUserId!);
 
   const teardown = async (exec: DbOrTx): Promise<number> => {
-    // Org-first (see the doc comment). Supplied by the caller, or read from the chat sessions
-    // for the module-boundary variant; locked in id order so two teardowns cannot cross.
-    const orgIds: string[] =
-      "orgId" in container
-        ? [container.orgId]
-        : (
-            await exec
-              .selectDistinct({ orgId: chatSessions.orgId })
-              .from(chatSessions)
-              .where(inArray(chatSessions.id, chatSessionIds!))
-              .orderBy(asc(chatSessions.orgId))
-          ).map((session) => session.orgId);
-    for (const orgId of orgIds) {
-      await exec
-        .select({ id: organizations.id })
-        .from(organizations)
-        .where(eq(organizations.id, orgId))
-        .for("update")
-        .limit(1);
-    }
+    // Org-first (see the doc comment).
+    await exec
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, container.orgId))
+      .for("update")
+      .limit(1);
 
     const contained = await exec
       .select({ id: files.id })

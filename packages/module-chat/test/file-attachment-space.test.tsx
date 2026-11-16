@@ -9,25 +9,19 @@ import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { FileAttachment } from "../src/ui/file-attachment.tsx";
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { testHost } from "./fake-request.ts";
 
 const imageSpaces: Array<string | undefined> = [];
 
-const host = (over: Partial<ChatHost>): ChatHost => ({
-  openFile: () => {},
-  downloadFile: () => {},
-  useFileImageSrc: (_id, spaceId) => {
-    imageSpaces.push(spaceId);
-    return "blob:thumb";
-  },
-  t: (key) => key,
-  can: () => false,
-  actingSpaceIds: [],
-  personalModelCredentials: true,
-  modelCredentials: [],
-  formatBytes: String,
-  onPackagesChanged: () => {},
-  ...over,
-});
+const host = (over: Partial<ChatHost>): ChatHost =>
+  testHost({
+    useFileImageSrc: (_id, spaceId) => {
+      imageSpaces.push(spaceId);
+      return "blob:thumb";
+    },
+    can: () => false,
+    ...over,
+  });
 
 const render = (file: Parameters<typeof FileAttachment>[0]["file"], over: Partial<ChatHost>) =>
   renderToString(

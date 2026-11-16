@@ -9,7 +9,6 @@ installFakeStorage();
 
 const {
   actingSpaces,
-  canAttachFrom,
   grantedInSomeActingSpace,
   grantedInSomeSpace,
   grantsInRowSpace,
@@ -191,7 +190,7 @@ describe("grantedInSomeActingSpace", () => {
   });
 });
 
-describe("actingSpaces and canAttachFrom", () => {
+describe("actingSpaces", () => {
   const spaces = [
     space("spc_a", ["chat:read", "chat:write", "mcp:read"]),
     space("spc_viewer", ["chat:read", "mcp:read"]),
@@ -199,12 +198,6 @@ describe("actingSpaces and canAttachFrom", () => {
 
   it("keeps the spaces holding the whole acting triple", () => {
     expect(actingSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
-  });
-
-  it("attaches only from a working space where the chat acts", () => {
-    expect(canAttachFrom(["spc_a"], "spc_a")).toBe(true);
-    expect(canAttachFrom(["spc_a"], "spc_viewer")).toBe(false);
-    expect(canAttachFrom(["spc_a"], null)).toBe(false);
   });
 });
 

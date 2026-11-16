@@ -5,10 +5,10 @@
  * carries. Before the first message the conversation does not exist: its origin is the space the
  * host has selected and its limit a local choice, both sent with that message. Afterwards the
  * origin is frozen and the limit is the server's, changed by a PATCH (optimistic, rolled back on
- * failure) that keeps the session detail and every list row in step.
+ * failure, refused while a turn generates) that keeps the session detail and every list row in step.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { ConversationCreation } from "./chat-route.ts";
 import type { ConversationScope } from "./conversation-scope.ts";
@@ -37,33 +37,14 @@ export function creationFields(created: Created): ConversationCreation {
   };
 }
 
-/**
- * What a conversation started here sends as creation fields. The origin is frozen at the first
- * message and kept for every attempt until the server acknowledges a turn (the row exists): a
- * first turn that failed before the server created it must not lose it. Afterwards nothing is
- * sent, since the server reads these fields only on the turn that creates the conversation.
- */
-export function creationGate(freeze: () => Created) {
-  let frozen: Created | null = null;
-  let acknowledged = false;
-  return {
-    /** The fields of the turn being sent, freezing the origin on the first call. */
-    fields(): ConversationCreation | undefined {
-      if (acknowledged) return undefined;
-      frozen ??= freeze();
-      return creationFields(frozen);
-    },
-    /** The server answered a turn: the conversation exists, its origin is the server's. */
-    acknowledge(): void {
-      acknowledged = true;
-    },
-    frozen: (): Created | null => frozen,
-  };
-}
-
 /** Writes `restricted` on the session detail and on every cached list row of the conversation. */
-function writeRestricted(queryClient: QueryClient, id: string, restricted: boolean): void {
-  queryClient.setQueryData<SessionHistory | null>(sessionQueryKey(id), (prev) =>
+function writeRestricted(
+  queryClient: QueryClient,
+  transport: ChatTransport,
+  id: string,
+  restricted: boolean,
+): void {
+  queryClient.setQueryData<SessionHistory | null>(sessionQueryKey(transport.orgId, id), (prev) =>
     prev ? { ...prev, restricted } : prev,
   );
   queryClient.setQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY }, (prev) =>
@@ -85,12 +66,12 @@ export async function changeLimit(args: {
 }): Promise<void> {
   const { queryClient, transport, id, next, previous, show } = args;
   show(next);
-  writeRestricted(queryClient, id, next);
+  writeRestricted(queryClient, transport, id, next);
   try {
     await setSessionRestricted(transport, id, next);
   } catch (error) {
     show(previous);
-    writeRestricted(queryClient, id, previous);
+    writeRestricted(queryClient, transport, id, previous);
     throw error;
   }
 }
@@ -104,6 +85,8 @@ interface UseConversationLimitArgs {
   stored: Pick<SessionHistory, "spaceId" | "restricted"> | undefined;
   /** The space a new conversation would take as origin (selected and acted in), if any. */
   selectedSpaceId: string | undefined;
+  /** A turn is generating: the server refuses to change the limit until it ends. */
+  generating: boolean;
 }
 
 export function useConversationLimit({
@@ -112,16 +95,17 @@ export function useConversationLimit({
   persistedAtMount,
   stored,
   selectedSpaceId,
+  generating,
 }: UseConversationLimitArgs): {
   scope: ConversationScope;
-  /** The creation fields of the turn being sent: none for a conversation that already exists. */
+  /** The creation fields of the turn being sent: none for a conversation that existed at mount. */
   getCreation: () => ConversationCreation | undefined;
-  /** Called when the server answered a turn: the creation fields stop riding the next ones. */
-  acknowledgeCreation: () => void;
 } {
   const queryClient = useQueryClient();
   const [created, setCreated] = useState<Created | null>(null);
-  const gateRef = useRef<ReturnType<typeof creationGate>>(undefined);
+  // Frozen at the first message: a retry after a failed first turn keeps it. Every later turn
+  // carries it too, and the server ignores it once the conversation exists.
+  const frozen = useRef<Created | null>(null);
   // A conversation started in a space is limited to it unless the user lifts the limit before
   // sending; from the overview there is no origin to limit to, so it starts unlimited.
   const [draftRestricted, setDraftRestricted] = useState(true);
@@ -140,23 +124,17 @@ export function useConversationLimit({
 
   // Read at request time: the turn's transport outlives the render that built it.
   const getLatest = useLatest({ selectedSpaceId, draftRestricted });
-
-  // A conversation started here sends its frozen origin until the server acknowledges a turn
-  // (see `creationGate`).
-  const gate = (gateRef.current ??= creationGate(() => {
-    const { selectedSpaceId: space, draftRestricted: draft } = getLatest();
-    return { spaceId: space ?? null, restricted: draft && !!space };
-  }));
   const getCreation = useCallback((): ConversationCreation | undefined => {
     if (persistedAtMount) return undefined;
-    const fields = gate.fields();
-    const frozen = gate.frozen();
-    if (frozen) setCreated(frozen);
-    return fields;
-  }, [persistedAtMount, gate]);
-  const acknowledgeCreation = useCallback(() => gate.acknowledge(), [gate]);
+    if (!frozen.current) {
+      const { selectedSpaceId: space, draftRestricted: draft } = getLatest();
+      frozen.current = { spaceId: space ?? null, restricted: draft && !!space };
+      setCreated(frozen.current);
+    }
+    return creationFields(frozen.current);
+  }, [persistedAtMount, getLatest]);
 
-  const { mutate } = useMutation({
+  const { mutate, isPending } = useMutation({
     mutationFn: (next: boolean) =>
       changeLimit({
         queryClient,
@@ -168,13 +146,18 @@ export function useConversationLimit({
       }),
   });
 
+  // One change at a time: a second one would roll back to the first's optimistic value.
   const setRestricted = useCallback(
     (next: boolean) => {
       if (!exists) setDraftRestricted(next);
-      else if (transport) mutate(next);
+      else if (transport && !isPending) mutate(next);
     },
-    [exists, transport, mutate],
+    [exists, transport, isPending, mutate],
   );
 
-  return { scope: { originSpaceId, restricted, setRestricted }, getCreation, acknowledgeCreation };
+  const scope = useMemo(
+    () => ({ originSpaceId, restricted, generating, setRestricted }),
+    [originSpaceId, restricted, generating, setRestricted],
+  );
+  return { scope, getCreation };
 }

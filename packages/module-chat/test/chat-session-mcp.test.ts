@@ -15,7 +15,11 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { packageDistTags } from "@appstrate/db/schema";
+import {
+  integrationConnectionShares,
+  integrationConnections,
+  packageDistTags,
+} from "@appstrate/db/schema";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
@@ -316,6 +320,88 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
     const ids = (listed.data.body as { data: Array<{ id: string }> }).data.map((row) => row.id);
     expect(ids).toContain(inDefault.id);
     expect(ids).not.toContain(inGestion.id);
+  });
+
+  /** The org owner's bearer allowlisting the default space alone: its org permissions span every space. */
+  const ownerBearer = () => ({
+    Authorization: `Bearer ${mintMcpLoopbackToken({
+      userId: owner.user.id,
+      email: owner.user.email,
+      name: owner.user.name,
+      orgId: owner.orgId,
+      orgRole: "owner",
+      permissions: [...orgPermissions("owner"), ...presetPermissions("admin"), "mcp:read"],
+      spaceIds: [owner.defaultSpaceId],
+    })}`,
+    "X-Org-Id": owner.orgId,
+  });
+
+  it("names no space outside its allowlist in a path, though its org permissions would serve it", async () => {
+    const headers = ownerBearer();
+    const onSpace = (operationId: string, id: string) =>
+      invoke(headers, owner.defaultSpaceId, operationId, undefined, { id });
+
+    for (const operationId of [
+      "getSpace",
+      "deleteSpace",
+      "convertSpaceToTeam",
+      "sweepPersonalSpace",
+      "listSpaceMembers",
+      "listSpacePackages",
+    ]) {
+      const refused = await onSpace(operationId, gestion.id);
+      expect({ operationId, status: refused.data.status }).toEqual({ operationId, status: 403 });
+    }
+    expect((await onSpace("getSpace", owner.defaultSpaceId)).data.status).toBe(200);
+    // The same bearer on the REST door, where no dispatch pins it: the allowlist alone refuses.
+    const direct = (id: string) => app.request(`/api/spaces/${id}`, { headers });
+    expect((await direct(gestion.id)).status).toBe(403);
+    expect((await direct(owner.defaultSpaceId)).status).toBe(200);
+
+    const listed = await invoke(headers, owner.defaultSpaceId, "listSpaces");
+    const ids = (listed.data.body as { data: Array<{ id: string }> }).data.map((row) => row.id);
+    expect(ids).toEqual([owner.defaultSpaceId]);
+    // Still there: the delete never ran.
+    const gestionNow = await app.request(`/api/spaces/${gestion.id}`, {
+      headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
+    });
+    expect(gestionNow.status).toBe(200);
+  });
+
+  it("shares a connection into no space outside its allowlist, nor into every space", async () => {
+    await seedPackage({ id: "@chatorg/gmail", orgId: owner.orgId, type: "integration" });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@chatorg/gmail",
+        authKey: "google",
+        accountId: "acct-chat",
+        orgId: owner.orgId,
+        spaceId: null,
+        originSpaceId: owner.defaultSpaceId,
+        userId: owner.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "Work",
+      })
+      .returning({ id: integrationConnections.id });
+    const headers = ownerBearer();
+    const share = (spaceId: string) =>
+      app.request(`/api/me/connections/${row!.id}/shares/${spaceId}`, { method: "PUT", headers });
+
+    // Org owner, so `integrations:connect` in Gestion too, yet the bearer does not reach it.
+    expect((await share(gestion.id)).status).toBe(403);
+    expect((await share(owner.defaultSpaceId)).status).toBe(204);
+    const all = await app.request(`/api/me/connections/${row!.id}/shares`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ share_all_spaces: true }),
+    });
+    expect(all.status).toBe(403);
+    const shared = await db
+      .select({ spaceId: integrationConnectionShares.spaceId })
+      .from(integrationConnectionShares);
+    expect(shared.map((s) => s.spaceId)).toEqual([owner.defaultSpaceId]);
   });
 
   it("lists the bearer's spaces in every tool, so a surface is never another caller's", async () => {

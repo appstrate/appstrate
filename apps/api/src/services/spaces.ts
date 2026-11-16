@@ -482,7 +482,7 @@ async function deleteSpaceInTx(
       .from(chatSessions)
       .where(eq(chatSessions.spaceId, spaceId))
   ).map((row) => row.id);
-  await detachOrDeleteContainedFiles({ chatSessionIds: originSessionIds }, tx);
+  await detachOrDeleteContainedFiles({ chatSessionIds: originSessionIds, orgId }, tx);
 
   const docRows = await tx
     .select({ storageKey: files.storageKey, size: files.size })

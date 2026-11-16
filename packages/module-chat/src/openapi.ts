@@ -265,7 +265,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Rename a chat session or change its limit",
       description:
-        "`title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit and is always allowed. At least one field is required.",
+        "`title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one field is required.",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -291,6 +291,11 @@ export const chatPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`chat_turn_in_flight` — `restricted` would change while a turn is running. RFC 9457 problem+json.",
+          content: problem,
+        },
       },
     },
     delete: {
@@ -362,7 +367,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List the skills a space enforces in chat",
       description:
-        "The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).",
+        "The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403).",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         {

@@ -17,16 +17,18 @@ import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { spaceRoleLabel } from "../../hooks/use-roles";
+import { useOrg } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
+import { actingSpaces } from "../../lib/space-lists";
 import { useViewAs } from "../../stores/view-as-store";
-import { useChatActingSpaceIds, useChatCan } from "./use-chat-runtime";
+import { useChatCan } from "./use-chat-runtime";
 import { resolveChatCapabilities, type ResolvedChatCapability } from "./chat-access";
 
 export function ChatAccessSummary() {
   const { t } = useTranslation(["chat", "settings"]);
   const { ready, orgRole } = usePermissions();
   const can = useChatCan();
-  const actingSpaceIds = useChatActingSpaceIds();
+  const orgPermissions = useOrg().currentOrg?.permissions;
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
@@ -38,9 +40,9 @@ export function ChatAccessSummary() {
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
   const roleLabel = spaceRole ?? orgRoleLabel;
-  const spaceGrants = (spaces ?? [])
-    .filter((space) => actingSpaceIds.includes(space.id))
-    .map(({ permissions, personal, access }) => ({ permissions, personal, access }));
+  const spaceGrants = actingSpaces(spaces, orgPermissions).map(
+    ({ permissions, personal, access }) => ({ permissions, personal, access }),
+  );
   const capabilities = resolveChatCapabilities({ can, spaceGrants, authoring });
   const RoleIcon = persona ? EyeIcon : ShieldIcon;
 

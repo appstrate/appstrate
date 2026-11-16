@@ -11,15 +11,17 @@
  */
 
 import { useMemo } from "react";
-import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import { useChatTransport, type ChatTransport } from "./runtime-context.ts";
 import {
   fetchSessionsPage,
   flattenSessions,
+  sessionQuery,
   sessionsQueryKey,
   sessionsSearchQueryKey,
   type SessionsCache,
+  type SessionSummary,
 } from "./sessions.ts";
 
 // Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
@@ -80,6 +82,29 @@ export function useSessions(transport?: ChatTransport, q = "") {
   // ChatPage owns the provider below its render, so its own observer receives
   // the host transport directly. Descendants read the same one from context.
   return useInfiniteQuery(sessionsQuery(transport ?? contextTransport, true, q));
+}
+
+/**
+ * One conversation by id, whatever the list's filter (`null`: none): the same cache entry as the
+ * chat page's history, so the shell's title, spaces and info read what the thread holds.
+ */
+export function useSessionDetail(id: string | null) {
+  return useQuery(sessionQuery(useChatTransport(), id));
+}
+
+/**
+ * The server's view of the open conversation `id`: its row in the filtered list, else the
+ * conversation itself, which opens in place whatever the filter. One not yet created
+ * (`persisted` false) has only the list's local row.
+ */
+export function useActiveSession(
+  transport: ChatTransport | undefined,
+  id: string,
+  persisted: boolean,
+): SessionSummary | undefined {
+  const listed = useSessions(transport).data?.find((s) => s.id === id);
+  const detail = useQuery(sessionQuery(transport, persisted ? id : null));
+  return listed ?? detail.data ?? undefined;
 }
 
 /**

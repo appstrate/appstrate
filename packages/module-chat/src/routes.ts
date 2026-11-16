@@ -33,14 +33,14 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import {
   PERMISSION_REQUIREMENT_MARKER,
   requireModulePermission,
 } from "@appstrate/core/permissions";
-import { forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
+import { conflict, forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
@@ -215,18 +215,16 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     return next();
   });
 
-  const guard = (permission: ChatPermission): PermissionGuard => {
+  // `acting`: the route starts a turn or a conversation, so it needs a space the turn may act
+  // in, not just any `chat:write`. Managing an existing conversation needs the permission alone.
+  const guard = (permission: ChatPermission, acting = false): PermissionGuard => {
     const check: PermissionGuard = async (c, next) => {
       // The guard type sees the context through its `get` alone; it is the router's own.
       const reachable = (c as Context<ChatEnv>).get("reachable");
-      // Writing is acting: it needs a space the turn may act in, not just any `chat:write`.
-      const holders =
-        permission === "chat:write"
-          ? actingSpaces(reachable)
-          : spacesHolding(reachable, permission);
+      const holders = acting ? actingSpaces(reachable) : spacesHolding(reachable, permission);
       if (holders.length === 0) {
         throw forbidden(
-          permission === "chat:write"
+          acting
             ? "You hold chat:write, chat:read and mcp:read together in no space of this organization."
             : `You hold ${permission} in no space of this organization.`,
         );
@@ -243,7 +241,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   router.post(
     "/api/orgs/:orgId/chat/sessions",
     rateLimited(30),
-    guard("chat:write"),
+    guard("chat:write", true),
     handlers.create,
   );
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
@@ -274,7 +272,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   router.get(
     "/api/orgs/:orgId/chat/enforced-skills",
     rateLimited(120),
-    guard("chat:write"),
+    guard("chat:read"),
     async (c) => {
       const spaceId = c.req.query("spaceId");
       if (!spaceId) throw invalidRequest("spaceId is required", "spaceId");
@@ -293,7 +291,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // 20/min: every call fans out into metered LLM traffic. The server is the
   // single writer of messages (user before inference, assistant on finalize) —
   // there is no client message-write endpoint.
-  router.post("/api/orgs/:orgId/chat", rateLimited(20), guard("chat:write"), (c) =>
+  router.post("/api/orgs/:orgId/chat", rateLimited(20), guard("chat:write", true), (c) =>
     handleChatStream(c, deps),
   );
 
@@ -405,7 +403,9 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
           "restricted",
         );
       }
-      await db
+      // A turn in flight keeps the reach it was minted with, so the limit changes between turns.
+      const limitChanges = restricted !== undefined && restricted !== session.restricted;
+      const updated = await db
         .update(chatSessions)
         .set({
           ...(title === undefined ? {} : { title }),
@@ -413,7 +413,18 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
           // Renaming reorders the sidebar; limiting or lifting the limit does not (as pins don't).
           ...(title === undefined ? {} : { updatedAt: new Date() }),
         })
-        .where(eq(chatSessions.id, session.id));
+        .where(
+          and(
+            eq(chatSessions.id, session.id),
+            limitChanges ? isNull(chatSessions.activeStreamId) : undefined,
+          ),
+        )
+        .returning({ id: chatSessions.id });
+      if (updated.length === 0) {
+        throw limitChanges
+          ? conflict("chat_turn_in_flight", "The limit cannot change while a turn is running.")
+          : notFound("Chat session not found");
+      }
       notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);
     },
@@ -450,7 +461,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       // S3 object). The teardown locks the org row FOR UPDATE — the same
       // serialization point the materialize path takes — so the two serialize.
       await db.transaction(async (tx) => {
-        await deps.cleanupSessionFiles(session.id, tx);
+        await deps.cleanupSessionFiles(session.id, session.orgId, tx);
         await tx.delete(chatSessions).where(eq(chatSessions.id, session.id));
       });
       notifySessionUpdate(session.id, session.orgId, session.userId);

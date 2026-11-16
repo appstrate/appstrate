@@ -1016,6 +1016,12 @@ describe("handleChatStream", () => {
         expect(system).toContain(
           '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
         );
+        if (skillMode === "strict") {
+          expect(system).toContain(
+            "those this conversation's origin space requires and those the user chose",
+          );
+          expect(system).toContain("whatever the spaces hold");
+        }
         // The turn's token still reaches no skill: the content needed none, and
         // `read_resource` is named for the injected files only (no loading rule is taught).
         expect(system).not.toContain("LOAD IT BEFORE acting");
@@ -1634,32 +1640,22 @@ describe("handleChatStream", () => {
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
       });
 
-      it("refuses a space outside the acting set with a 400 naming the field, before anything is written", async () => {
-        for (const spaceId of [spaceC, "spc_not_reached"]) {
+      it("refuses an invalid origin with a 400 naming the field, before anything is written", async () => {
+        // The rule is `conversationOrigin`'s (chat-sessions.test.ts); this is the turn's door to it.
+        for (const [body, param] of [
+          [{ spaceId: spaceC }, "spaceId"],
+          [{ restricted: true }, "restricted"],
+        ] as const) {
           const sessionId = mintSessionId();
           const { engine, calls } = scriptedEngine();
-          const res = await postChat(sessionId, undefined, engine, {
-            reachable: reach,
-            body: { spaceId: spaceId },
-          });
+          const res = await postChat(sessionId, undefined, engine, { reachable: reach, body });
           expect(res.status).toBe(400);
-          expect(((await res.json()) as { param?: string }).param).toBe("spaceId");
+          expect(((await res.json()) as { param?: string }).param).toBe(param);
           expect(calls).toEqual([]);
           expect(
             await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)),
           ).toEqual([]);
         }
-      });
-
-      it("refuses a limit without an origin space with a 400 naming the field", async () => {
-        const { engine, calls } = scriptedEngine();
-        const res = await postChat(mintSessionId(), undefined, engine, {
-          reachable: reach,
-          body: { restricted: true },
-        });
-        expect(res.status).toBe(400);
-        expect(((await res.json()) as { param?: string }).param).toBe("restricted");
-        expect(calls).toEqual([]);
       });
     });
 
@@ -2041,32 +2037,6 @@ describe("handleChatStream", () => {
           });
         });
 
-        it("says in strict mode that the origin space requires skills", async () => {
-          const { res, calls } = await turn(
-            mintSessionId(),
-            {
-              dispatch: skillsDispatch([]),
-              body: {
-                spaceId: ctx.defaultSpaceId,
-                skill_mode: "strict",
-                pinned_skills: [],
-              },
-              loadEnforcedChatSkills: async (_orgId, space) => [enforced(space, TONE)],
-            },
-            reachWith([ctx.defaultSpaceId]),
-          );
-          expect(res.status).toBe(200);
-          await collectUiChunks(res);
-          const system = calls[0]!.system;
-          expect(system).toContain(
-            "those this conversation's origin space requires and those the user chose",
-          );
-          expect(system).toContain("whatever the spaces hold");
-          expect(system).toContain(
-            `This space — Alpha (\`${ctx.defaultSpaceId}\`), where this conversation was started — requires these skills in every conversation.`,
-          );
-        });
-
         it("injects the origin space's enforced skills only, even when it acts in another space too", async () => {
           const loaded: string[] = [];
           const { res, calls } = await turn(
@@ -2146,22 +2116,6 @@ describe("handleChatStream", () => {
           expect(res.status).toBe(200);
           await collectUiChunks(res);
           expect(loaded).toEqual([]);
-        });
-
-        it("refuses the turn when the origin space cannot load its enforced skills", async () => {
-          const { res, calls } = await turn(
-            mintSessionId(),
-            {
-              dispatch: skillsDispatch([]),
-              body: { spaceId: spaceB },
-              loadEnforcedChatSkills: async () => {
-                throw new Error("storage outage");
-              },
-            },
-            reachWith([ctx.defaultSpaceId, spaceB]),
-          );
-          expect(res.status).toBe(503);
-          expect(calls).toEqual([]);
         });
 
         it("lists a limited conversation's origin space's skills alone", async () => {

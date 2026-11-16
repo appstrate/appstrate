@@ -12,11 +12,10 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { useSessions } from "@appstrate/module-chat/unread";
+import { useSessionDetail, useSessions } from "@appstrate/module-chat/unread";
 import { SpaceName, SpaceTileStack, type SpaceListed } from "../../components/space-name";
 import { useSpacesOf } from "../../hooks/use-spaces";
 import { spaceLabel } from "../../lib/space-label";
-import { useChatSessionDetail } from "./use-chat-session-detail";
 
 /** Tiles drawn in the trigger before the rest is counted. */
 const VISIBLE_SPACE_TILES = 3;
@@ -70,7 +69,7 @@ export function ConversationSpaces({ conversationId }: { conversationId: string 
   const { data: sessions } = useSessions();
   const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   // The same query as the title crumb's and the info panel's, refetched by the session signal.
-  const detail = useChatSessionDetail(conversationId);
+  const detail = useSessionDetail(conversationId);
   const spaces = useSpacesOf(detail.data?.space_ids ?? listed?.space_ids ?? []);
   return <ConversationSpacesControl spaces={spaces} />;
 }

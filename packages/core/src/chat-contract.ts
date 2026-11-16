@@ -193,18 +193,16 @@ export interface EnforcedChatSkillRef {
 /**
  * What a conversation's turn needs in a space to act in it: the turn is the caller's to
  * run (`chat:write`), the conversation stays openable once the space is touched (`chat:read`), and the
- * tools can name the space (`mcp:read`). The one definition behind the chat's acting set
- * (`actingSpaces`) and the web shell's judgement; test it with {@link chatActsIn}.
+ * tools can name the space (`mcp:read`). Read through {@link chatActsIn} alone.
  */
-export const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
 
-/** Whether a space's effective permission set (a `Set` or an array) lets a conversation act in it. */
-export function chatActsIn(permissions: ReadonlySet<string> | readonly string[]): boolean {
-  const has = (permission: string) =>
-    Array.isArray(permissions)
-      ? permissions.includes(permission)
-      : (permissions as ReadonlySet<string>).has(permission);
-  return CHAT_ACTING_PERMISSIONS.every(has);
+/**
+ * Whether a space's effective permissions let a conversation act in it: the one definition behind
+ * the chat's acting set (`actingSpaces`) and the web shell's judgement.
+ */
+export function chatActsIn(permissions: readonly string[]): boolean {
+  return CHAT_ACTING_PERMISSIONS.every((permission) => permissions.includes(permission));
 }
 
 /** The chat loopback strategy's auth method — the only source `skill://` reads trust for an injected-skills claim. */
