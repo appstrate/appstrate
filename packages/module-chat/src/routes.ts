@@ -47,16 +47,20 @@ import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import type { EnforcedChatSkillRef } from "@appstrate/core/chat-contract";
 import { handleChatStream } from "./chat-stream.ts";
-import type { ChatEnv, ChatScope } from "./prompt.ts";
+import type { ChatEnv } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
 import { organizationSessionVisible } from "./persistence.ts";
-import { spacesHolding, type ChatPermission, type ChatPlatformDeps } from "./platform-services.ts";
+import {
+  enforcedSkillsOf,
+  spacesHolding,
+  type ChatPermission,
+  type ChatPlatformDeps,
+} from "./platform-services.ts";
 
 const SESSIONS_PAGE_SIZE = 100;
 
@@ -224,24 +228,6 @@ function organizationScope(c: Context<ChatEnv>) {
   return scope;
 }
 
-/**
- * The enforced skills of a scope: its space's, or for an organization scope the
- * union over the spaces where the caller may chat, one entry per package.
- */
-async function listEnforcedSkillRefs(
-  deps: ChatPlatformDeps,
-  orgId: string,
-  scope: ChatScope,
-): Promise<EnforcedChatSkillRef[]> {
-  if (scope.kind === "space") return deps.listEnforcedSkills(orgId, scope.spaceId);
-  const perSpace = await Promise.all(
-    spacesHolding(scope.reachable, "chat:write").map((space) =>
-      deps.listEnforcedSkills(orgId, space.id),
-    ),
-  );
-  return [...new Map(perSpace.flat().map((skill) => [skill.packageId, skill])).values()];
-}
-
 export function createChatRouter(deps: ChatPlatformDeps) {
   const router = new Hono<ChatEnv>();
 
@@ -403,7 +389,10 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // GET …/enforced-skills — names only, from the database: a member without
   // `skills:read` may call it. Gated like the turn that injects them.
   const enforcedSkills: SessionHandler = async (c) => {
-    const skills = await listEnforcedSkillRefs(deps, c.get("orgId"), c.get("chatScope"));
+    const orgId = c.get("orgId");
+    const skills = await enforcedSkillsOf(c.get("chatScope"), (spaceId) =>
+      deps.listEnforcedSkills(orgId, spaceId),
+    );
     return c.json({
       object: "list",
       data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),

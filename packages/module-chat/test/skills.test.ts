@@ -18,7 +18,7 @@ const content = (id: string, body = `# ${id}`): SkillContent => ({
   version: "1.0.0",
   uri: `skill://space-1/${id.slice(1)}/skill/SKILL.md`,
   content: body,
-  served: { definition: "published", version: "1.0.0" },
+  served: { definition: "published", version: "1.0.0", spaceId: "space-1" },
 });
 
 const enforcedSkill = (id: string, body: string | null = `# ${id}`): EnforcedChatSkill => ({
@@ -109,14 +109,14 @@ describe("resolveChatSkills — space-enforced skills", () => {
           version: "2.0.0",
           uri: "skill://space-1/b/house/skill/SKILL.md",
           content: "# @b/house",
-          served: { definition: "published", version: "2.0.0" },
+          served: { definition: "published", version: "2.0.0", spaceId: "space-1" },
         },
         {
           packageId: "@z/house",
           version: "2.0.0",
           uri: "skill://space-1/z/house/skill/SKILL.md",
           content: "# @z/house",
-          served: { definition: "published", version: "2.0.0" },
+          served: { definition: "published", version: "2.0.0", spaceId: "space-1" },
         },
       ]);
       expect(result.chosen.map((s) => s.packageId)).toEqual(
@@ -226,14 +226,17 @@ describe("injectedSkills", () => {
     const result = resolve(
       { skillMode: "strict", pinnedSkills: ["@a/big", "@a/gone", "@a/mine"] },
       [
-        { ...content("@a/mine"), served: { definition: "draft", lockVersion: 3 } },
+        {
+          ...content("@a/mine"),
+          served: { definition: "draft", lockVersion: 3, spaceId: "space-1" },
+        },
         content("@a/big", "x".repeat(BUDGET)),
       ],
       [enforcedSkill("@b/house"), enforcedSkill("@b/unpublished", null)],
     );
     expect(injectedSkills(result)).toEqual({
-      "@b/house": { definition: "published", version: "2.0.0" },
-      "@a/mine": { definition: "draft", lockVersion: 3 },
+      "@b/house": { definition: "published", version: "2.0.0", spaceId: "space-1" },
+      "@a/mine": { definition: "draft", lockVersion: 3, spaceId: "space-1" },
     });
   });
 

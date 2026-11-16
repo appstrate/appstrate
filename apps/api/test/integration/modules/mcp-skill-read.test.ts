@@ -52,7 +52,6 @@ import { eq } from "drizzle-orm";
 import {
   CHAT_LOOPBACK_AUTH_METHOD,
   INJECTED_SKILLS_AUTH_EXTRA,
-  type InjectedSkill,
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
 import { resolveSkillRead } from "../../../src/services/skill-read.ts";
@@ -204,9 +203,23 @@ async function strictTurnPermissions(): Promise<string[]> {
   return turnPermissions(resolved, { authoring: false, skillMode: "strict" });
 }
 
+/** A claim entry before its space: `spaceId` overrides the space the claim is built for. */
+type ServedSkill = (
+  { definition: "published"; version: string | null } | { definition: "draft"; lockVersion: number }
+) & { spaceId?: string };
+
+/** The claim of skills bound to `spaceId`, unless an entry names its own. */
+function claimOf(skills: Record<string, ServedSkill>, spaceId: string): InjectedSkills {
+  return {
+    skills: Object.fromEntries(
+      Object.entries(skills).map(([id, served]) => [id, { spaceId, ...served }]),
+    ) as InjectedSkills["skills"],
+  };
+}
+
 /** The chat turn's MCP bearer, minted by the real loopback strategy. */
 function turnHeaders(
-  skills: InjectedSkills["skills"],
+  skills: Record<string, ServedSkill>,
   opts: {
     permissions?: string[];
     spaceId?: string;
@@ -224,12 +237,12 @@ function turnHeaders(
     orgId: owner.orgId,
     orgRole: opts.orgRole ?? "owner",
     permissions: opts.permissions ?? ["mcp:read", "chat:write"],
-    injectedSkills: { spaceId: opts.claimSpaceId ?? spaceId, skills },
+    injectedSkills: claimOf(skills, opts.claimSpaceId ?? spaceId),
   });
   return inSpace({ Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId }, spaceId);
 }
 
-const PUBLISHED_1_0: InjectedSkill = { definition: "published", version: "1.0.0" };
+const PUBLISHED_1_0: ServedSkill = { definition: "published", version: "1.0.0" };
 
 /**
  * `resolveSkillRead` on a hand-built request context, to reach the service's
@@ -387,6 +400,27 @@ describe("skill:// — a skill the chat turn injected", () => {
     }
   });
 
+  it("binds each skill of one claim to the space its own URI names", async () => {
+    const teamB = await seedSpace({ orgId: owner.orgId, name: "Team B" });
+    const team = "@readskill/team";
+    await seedSkill(team, teamB.id);
+    await publish(team, "1.0.0");
+    await seedPackageShare(owner.defaultSpaceId, team);
+    await seedSpacePackage(owner.defaultSpaceId, team);
+    const skills = { [TONE]: PUBLISHED_1_0, [team]: { ...PUBLISHED_1_0, spaceId: teamB.id } };
+    const inA = turnHeaders(skills);
+    const inB = turnHeaders(skills, { spaceId: teamB.id });
+    const teamInB = uriOf(team, "SKILL.md", { spaceId: teamB.id });
+    // Each is served in the space it is bound to...
+    expect((await readResource(inA, uriOf(TONE))).text).toContain("1.0.0");
+    expect((await readResource(inB, teamInB)).text).toContain(`published ${team} 1.0.0`);
+    // ...and refused in the other one, though the same bearer holds both.
+    expect(await readResource(inA, uriOf(team))).toEqual(NOT_FOUND);
+    expect(await readResource(inB, uriOf(TONE, "SKILL.md", { spaceId: teamB.id }))).toEqual(
+      NOT_FOUND,
+    );
+  });
+
   it("answers from the claim or refuses — never from the turn's own skills:read", async () => {
     await seedPackage({ id: "@readskill/agent", orgId: owner.orgId });
     const headers = turnHeaders(
@@ -451,7 +485,7 @@ describe("skill:// — a chat turn under a role preview", () => {
           orgRole: "member",
           space: { spaceId: owner.defaultSpaceId, role: { kind: "preset", preset } },
         },
-        injectedSkills: { spaceId: owner.defaultSpaceId, skills: { [TONE]: PUBLISHED_1_0 } },
+        injectedSkills: claimOf({ [TONE]: PUBLISHED_1_0 }, owner.defaultSpaceId),
       });
       return inSpace(
         { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
@@ -467,7 +501,7 @@ describe("skill:// — a chat turn under a role preview", () => {
 });
 
 describe("resolveSkillRead — the service's own reading of the claim", () => {
-  const claim = () => ({ spaceId: owner.defaultSpaceId, skills: { [TONE]: PUBLISHED_1_0 } });
+  const claim = () => claimOf({ [TONE]: PUBLISHED_1_0 }, owner.defaultSpaceId);
 
   it("trusts the claim from the chat loopback strategy only", async () => {
     expect(
@@ -479,8 +513,9 @@ describe("resolveSkillRead — the service's own reading of the claim", () => {
 
   it("ignores a malformed claim", async () => {
     for (const malformed of [
-      { skills: { [TONE]: PUBLISHED_1_0 } },
-      { spaceId: owner.defaultSpaceId, skills: { [TONE]: { definition: "latest" } } },
+      { skills: { [TONE]: { definition: "published", version: "1.0.0" } } },
+      { spaceId: owner.defaultSpaceId, ...claim() },
+      { skills: { [TONE]: { spaceId: owner.defaultSpaceId, definition: "latest" } } },
       { ...claim(), extra: true },
       "not a claim",
     ]) {

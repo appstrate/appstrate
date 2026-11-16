@@ -98,10 +98,9 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
 
   it("carries the injected skills into `extra[INJECTED_SKILLS_AUTH_EXTRA]`, only on the MCP bearer", async () => {
     const injectedSkills = {
-      spaceId: "spc_1",
       skills: {
-        "@acme/house": { definition: "published" as const, version: "2.0.0" },
-        "@acme/mine": { definition: "draft" as const, lockVersion: 4 },
+        "@acme/house": { definition: "published" as const, version: "2.0.0", spaceId: "spc_1" },
+        "@acme/mine": { definition: "draft" as const, lockVersion: 4, spaceId: "spc_2" },
       },
     };
     const token = mintMcpLoopbackToken({
@@ -121,7 +120,7 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
         mintMcpLoopbackToken({
           ...claims,
           permissions: callerPermissions,
-          injectedSkills: { spaceId: "spc_1", skills: {} },
+          injectedSkills: { skills: {} },
         }),
       ),
     } as never);
@@ -129,14 +128,16 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
   });
 
   it("drops a malformed injected-skills claim and keeps the token", async () => {
-    const published = { definition: "published", version: "1.0.0" };
+    const published = { definition: "published", version: "1.0.0", spaceId: "spc_1" };
     for (const injectedSkills of [
-      { skills: { "@acme/x": published } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "latest", version: "1.0.0" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", version: "1.0.0" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { definition: "draft", lockVersion: 1.5 } } },
-      { spaceId: "spc_1", skills: { "@acme/x": { ...published, content: "leak" } } },
-      { spaceId: "spc_1", skills: { "@acme/x": published }, orgId: "org_2" },
+      // Each entry is bound to a space; the claim as a whole is not.
+      { skills: { "@acme/x": { definition: "published", version: "1.0.0" } } },
+      { spaceId: "spc_1", skills: { "@acme/x": published } },
+      { skills: { "@acme/x": { ...published, definition: "latest" } } },
+      { skills: { "@acme/x": { definition: "draft", version: "1.0.0", spaceId: "spc_1" } } },
+      { skills: { "@acme/x": { definition: "draft", lockVersion: 1.5, spaceId: "spc_1" } } },
+      { skills: { "@acme/x": { ...published, content: "leak" } } },
+      { skills: { "@acme/x": published }, orgId: "org_2" },
     ]) {
       const token = mintMcpLoopbackToken({
         ...claims,

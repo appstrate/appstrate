@@ -43,9 +43,10 @@ export interface SkillReadSpace extends SpaceScope {
 
 /**
  * The skills this request's chat turn injected, or `null`. The claim is a
- * chat-turn grant: it holds in the turn's space only, and lapses with the
- * caller's LIVE `chat:write` there — revoking chat access revokes it. A
- * malformed claim is ignored.
+ * chat-turn grant: it lapses with the caller's LIVE `chat:write` in the space
+ * the request entered — revoking chat access revokes it — and each skill of it
+ * holds in its own space only (see `resolveSkillReadAccess`). A malformed claim
+ * is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in
  * `@appstrate/core/chat-contract`) because a claim any loaded strategy could
@@ -57,7 +58,7 @@ function turnClaim(c: Context<AppEnv>, space: SkillReadSpace): InjectedSkills["s
   if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
   if (!space.permissions.has(CHAT_TURN)) return null;
   const claim = injectedSkillsSchema.safeParse(c.get("authExtra")?.[INJECTED_SKILLS_AUTH_EXTRA]);
-  return claim.success && claim.data.spaceId === space.spaceId ? claim.data.skills : null;
+  return claim.success ? claim.data.skills : null;
 }
 
 /** What a read serves: `spec` `undefined` = the stored tree; `draftLock` pins that tree. */
@@ -69,7 +70,7 @@ interface SkillReadAccess {
 
 /**
  * Which definition this caller may read, `null` when refused. A skill the turn
- * injected answers from the claim alone, without `skills:*` — the chat already
+ * injected in this space answers from the claim alone, without `skills:*` — the chat already
  * put its SKILL.md in context — and never falls through: the published version
  * it was served at (a system skill's shipped tree), or its draft pinned to the
  * `lock_version` injected; a `definition` other than the one injected is
@@ -84,7 +85,8 @@ async function resolveSkillReadAccess(
   definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
   const claim = turnClaim(c, space);
-  if (claim && Object.hasOwn(claim, packageId)) {
+  // A skill is claimed in the space its URI names: entered in another, it is an ordinary read.
+  if (claim && Object.hasOwn(claim, packageId) && claim[packageId]!.spaceId === space.spaceId) {
     const served = claim[packageId]!;
     const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type !== "skill") return null;

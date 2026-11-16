@@ -768,8 +768,7 @@ describe("handleChatStream", () => {
     expect(await tokenPermissions(input)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
     // The bearer names what was injected, so `resources/read` serves it without `skills:read`.
     expect(await tokenInjectedSkills(input)).toEqual({
-      spaceId: ctx.defaultSpaceId,
-      skills: { [PIN]: { definition: "published", version: "1.0.0" } },
+      skills: { [PIN]: { definition: "published", version: "1.0.0", spaceId: ctx.defaultSpaceId } },
     });
 
     await waitForAssistantPersist(sessionId);
@@ -1009,8 +1008,14 @@ describe("handleChatStream", () => {
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
         // Readable through `resources/read` all the same: the bearer names it, bound to the space.
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
-          spaceId: ctx.defaultSpaceId,
-          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
+          skills: {
+            "@acme/house": {
+              definition: "published",
+              version: "2.0.0",
+              // The space its URI names, as the platform minted it.
+              spaceId: "space-1",
+            },
+          },
         });
 
         await waitForAssistantPersist(sessionId);
@@ -1035,8 +1040,14 @@ describe("handleChatStream", () => {
           '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">',
         );
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
-          spaceId: ctx.defaultSpaceId,
-          skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
+          skills: {
+            "@acme/house": {
+              definition: "published",
+              version: "2.0.0",
+              // The space its URI names, as the platform minted it.
+              spaceId: "space-1",
+            },
+          },
         });
 
         await waitForAssistantPersist(sessionId);
@@ -1697,6 +1708,237 @@ describe("handleChatStream", () => {
         await collectUiChunks(res);
         expect("organization" in calls[0]!.platformMcp).toBe(false);
         expect(await touched(sessionId)).toEqual([]);
+      });
+
+      describe("skills across spaces", () => {
+        const TONE = "@acme/tone";
+        const ONLY_B = "@acme/only-b";
+        const uriIn = (space: string, id: string) =>
+          `skill://${space}/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
+        const bodyOf = (space: string, id: string) => `${id} as read in ${space}`;
+
+        /** The skills the organization endpoint lists, in the order it lists them. */
+        function skillsDispatch(listed: Array<[space: string, id: string]>, read: string[] = []) {
+          return async (req: Request): Promise<Response> => {
+            if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
+            const message = (await req.json()) as {
+              id?: number;
+              method: string;
+              params?: Record<string, unknown>;
+            };
+            const result = (value: unknown) =>
+              Response.json({ jsonrpc: "2.0", id: message.id, result: value });
+            switch (message.method) {
+              case "initialize":
+                return result({
+                  protocolVersion: message.params?.protocolVersion,
+                  capabilities: {
+                    resources: {},
+                    extensions: { "io.modelcontextprotocol/skills": {} },
+                  },
+                  serverInfo: { name: "fake-platform", version: "1.0.0" },
+                });
+              case "skills/list": {
+                const meta = message.params?._meta as Record<string, unknown> | undefined;
+                return result({
+                  skills:
+                    meta?.[SKILL_DEFINITION_META_KEY] === "draft"
+                      ? []
+                      : listed.map(([space, id]) => ({
+                          uri: uriIn(space, id),
+                          frontmatter: {
+                            name: id.split("/")[1],
+                            description: `${id} in ${space}`,
+                            metadata: { version: "1.0.0" },
+                          },
+                          resources: [
+                            {
+                              uri: uriIn(space, id),
+                              digest: sha256(bodyOf(space, id)),
+                              size: bodyOf(space, id).length,
+                            },
+                          ],
+                        })),
+                });
+              }
+              case "resources/read": {
+                const uri = message.params?.uri as string;
+                read.push(uri);
+                const [space, id] = listed.find(([s, i]) => uriIn(s, i) === uri)!;
+                return result({
+                  contents: [{ uri, mimeType: "text/markdown", text: bodyOf(space, id) }],
+                });
+              }
+              default:
+                return new Response(null, { status: 202 });
+            }
+          };
+        }
+
+        /** The reach with `skills:read` on both spaces, and `chat:write` where `chatIn` names it. */
+        const reachWith = (chatIn: string[]): ChatScope => ({
+          kind: "organization",
+          reachable: reach.map((space) => ({
+            ...space,
+            permissions: [
+              ...new Set([
+                ...space.permissions.filter((permission) => permission !== "chat:write"),
+                "skills:read",
+                ...(chatIn.includes(space.id) ? ["chat:write"] : []),
+              ]),
+            ],
+          })),
+        });
+        const enforced = (space: string, id: string) => ({
+          packageId: id,
+          name: id,
+          version: "2.0.0",
+          uri: uriIn(space, id),
+          content: `${id} required, from ${space}`,
+        });
+
+        it("lists one skill per package in auto, the first space in reach order winning, each with its own URI", async () => {
+          // The server lists Beta's copy first: only the reach order decides.
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([
+                [spaceB, TONE],
+                [spaceB, ONLY_B],
+                [ctx.defaultSpaceId, TONE],
+              ]),
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          const system = calls[0]!.system;
+          expect(system).toContain(
+            `- \`${ONLY_B}\` (v1.0.0) \`${uriIn(spaceB, ONLY_B)}\` — ${ONLY_B} in ${spaceB}\n` +
+              `- \`${TONE}\` (v1.0.0) \`${uriIn(ctx.defaultSpaceId, TONE)}\``,
+          );
+          expect(system).not.toContain(uriIn(spaceB, TONE));
+          expect(system).not.toContain("<skill id=");
+        });
+
+        it("injects a pinned skill of another space and binds its claim to that space", async () => {
+          const read: string[] = [];
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(read).toEqual([uriIn(spaceB, ONLY_B)]);
+          expect(calls[0]!.system).toContain(
+            `<skill id="${ONLY_B}" uri="${uriIn(spaceB, ONLY_B)}" version="1.0.0">\n${bodyOf(spaceB, ONLY_B)}\n</skill>`,
+          );
+          expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+            skills: { [ONLY_B]: { definition: "published", version: "1.0.0", spaceId: spaceB } },
+          });
+        });
+
+        it("says in strict mode that the spaces it can act in require skills", async () => {
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              body: { skill_mode: "strict", pinned_skills: [] },
+              loadEnforcedChatSkills: async (_orgId, space) => [enforced(space, TONE)],
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          const system = calls[0]!.system;
+          expect(system).toContain(
+            "those the spaces this conversation can act in require and those the user chose",
+          );
+          expect(system).toContain("whatever the spaces hold");
+          expect(system).toContain(
+            "The spaces this conversation can act in require these skills in every conversation.",
+          );
+          expect(system).not.toContain("the space requires");
+          expect(system).not.toContain("This space requires");
+        });
+
+        it("injects the union of the enforced skills of the spaces it may chat in, once each", async () => {
+          const loaded: string[] = [];
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                loaded.push(space);
+                return space === ctx.defaultSpaceId
+                  ? [enforced(space, TONE)]
+                  : [enforced(space, TONE), enforced(space, ONLY_B)];
+              },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(loaded.sort()).toEqual([ctx.defaultSpaceId, spaceB].sort());
+          const system = calls[0]!.system;
+          expect(system.match(new RegExp(`<skill id="${TONE}"`, "g"))).toHaveLength(1);
+          expect(system).toContain(`uri="${uriIn(ctx.defaultSpaceId, TONE)}"`);
+          expect(system).toContain(`uri="${uriIn(spaceB, ONLY_B)}"`);
+          expect(await tokenInjectedSkills(calls[0]!)).toEqual({
+            skills: {
+              [ONLY_B]: { definition: "published", version: "2.0.0", spaceId: spaceB },
+              [TONE]: {
+                definition: "published",
+                version: "2.0.0",
+                spaceId: ctx.defaultSpaceId,
+              },
+            },
+          });
+        });
+
+        it("reads no enforced skill of a space where the caller cannot chat", async () => {
+          const loaded: string[] = [];
+          const { res } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                loaded.push(space);
+                return [];
+              },
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(loaded).toEqual([ctx.defaultSpaceId]);
+        });
+
+        it("refuses the turn when one space cannot load its enforced skills", async () => {
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => {
+                if (space === spaceB) throw new Error("storage outage");
+                return [];
+              },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(503);
+          expect(calls).toEqual([]);
+        });
       });
 
       it("hands an attachment the spaces the caller may chat in and records the space it resolved in", async () => {

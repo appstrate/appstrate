@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ToolIntegration`** (`@appstrate/core/integration`, #2233): `{ id, tool, title? }`, the
   integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
   `data.integration`.
+- **`ReachableSpaceGrant`** (`@appstrate/core/module`, #1886): a space the caller reaches, with their role
+  and effective permissions there, as `PlatformServices.reachableSpaces` lists it.
+- **`spaceIdRefusal`, `describeSpace`, `NamedSpace`, `SpaceIdRefusal`**
+  (`@appstrate/core/mcp-result`, #1886): the refusal of a missing or unknown `space_id` on an
+  organization-wide MCP connection, shared by the MCP server and the chat's local tools.
 
 ### Fixed
 
@@ -58,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`injectedSkillsSchema`** (`@appstrate/core/chat-contract`, #1886) — BREAKING. The claim no
+  longer carries a claim-wide `spaceId`: each skill's entry carries its own `spaceId`, the space its
+  `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space only. A claim
+  minted with the old shape is malformed and ignored.
 - **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
   `agentManifestSchema` does not declare it: `runtime_tools` is an undeclared key, which nothing
   reads. The option that tells the author and stored directions apart covers the retired

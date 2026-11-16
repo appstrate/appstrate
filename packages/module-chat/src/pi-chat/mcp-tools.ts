@@ -18,6 +18,7 @@
  * and `list_skills` lists the space's skills through `skills/list`.
  */
 
+import { spaceIdRefusal } from "@appstrate/core/mcp-result";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
 import {
@@ -495,7 +496,7 @@ function makeListSkillsExtension(
       name: LIST_SKILLS_TOOL,
       label: LIST_SKILLS_TOOL,
       description:
-        'List the skills of the current space: each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
+        'List the skills this conversation can read: those of the current space, or in an organization conversation those of every space it can act in. Each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
       parameters: unsafeSchema<{ definition?: "published" | "draft" }>({
         type: "object",
         properties: {
@@ -581,8 +582,7 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
 /**
  * The space an organization `run_and_wait` names, with the other arguments, after
  * recording it on the session; or the refusal the server gives any space-acting tool
- * (`spaceArgumentRefusal`, `apps/api/src/modules/mcp/spaces.ts`): the space is never
- * defaulted.
+ * (`spaceIdRefusal`): the space is never defaulted.
  */
 async function namedSpace(
   params: unknown,
@@ -591,32 +591,11 @@ async function namedSpace(
   { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
 > {
   const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
-  const accepted = organization.spaces.map((space) => space.id);
-  const list = organization.spaces
-    .map((space) => `${space.name} (\`${space.id}\`, role ${space.role})`)
-    .join("; ");
-  if (named === undefined || named === null) {
-    return {
-      refusal: {
-        code: "missing_argument",
-        error: `space_id is required. Spaces you can act in: ${list}.`,
-        arguments: ["space_id"],
-        accepted,
-      },
-    };
-  }
-  if (typeof named !== "string" || !accepted.includes(named)) {
-    return {
-      refusal: {
-        code: "unknown_space",
-        error: `Unknown space_id: ${String(named)}. Spaces you can act in: ${list}.`,
-        arguments: ["space_id"],
-        accepted,
-      },
-    };
-  }
-  await organization.touch(named);
-  return { spaceId: named, args };
+  const refusal = spaceIdRefusal(organization.spaces, named);
+  if (refusal) return { refusal: { ...refusal } };
+  const spaceId = named as string;
+  await organization.touch(spaceId);
+  return { spaceId, args };
 }
 
 /**

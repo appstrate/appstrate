@@ -1182,10 +1182,9 @@ describe("buildCallerContextBlock", () => {
     expect(out).not.toContain("b draft body");
     expect(out).toContain("`@acme/b` was chosen for this conversation but could not be read.");
     expect(injected).toEqual({
-      spaceId: "spc_1",
       skills: {
-        "@acme/a": { definition: "draft", lockVersion: 7 },
-        "@acme/c": { definition: "published", version: "2.0.0" },
+        "@acme/a": { definition: "draft", lockVersion: 7, spaceId: "spc_1" },
+        "@acme/c": { definition: "published", version: "2.0.0", spaceId: "spc_1" },
       },
     });
   });
@@ -1233,7 +1232,7 @@ describe("buildCallerContextBlock", () => {
     );
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
-    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+    expect(injected).toEqual({ skills: {} });
   });
 
   it("gives a chosen skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
@@ -1269,7 +1268,7 @@ describe("buildCallerContextBlock", () => {
     expect(out).not.toContain("<skill");
     expect(out).not.toContain("saved again");
     expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
-    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+    expect(injected).toEqual({ skills: {} });
   });
 
   it("gives a chosen published skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
@@ -1297,7 +1296,7 @@ describe("buildCallerContextBlock", () => {
     );
     expect(out).not.toContain("another body");
     expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
-    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+    expect(injected).toEqual({ skills: {} });
   });
 
   it("lists the space's skills in auto over the skills connection, draft first, reading none", async () => {
@@ -1339,7 +1338,7 @@ describe("buildCallerContextBlock", () => {
     );
     expect(out).not.toContain("@acme/other");
     expect(out).not.toContain("<skill");
-    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+    expect(injected).toEqual({ skills: {} });
 
     // Without `skills:write` (authoring off), the turn's `read_resource` refuses a
     // draft URI: the catalogue lists the published entry, and no unpublished draft.

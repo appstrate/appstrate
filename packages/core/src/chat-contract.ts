@@ -188,17 +188,26 @@ export interface EnforcedChatSkillRef {
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 
 /**
- * The skills a chat turn injected, as served, in the turn's space: a published
- * version, or the draft at the `lockVersion` it had. Parsed when the chat
- * strategy verifies the signed bearer, and again where the platform reads it.
+ * The skills a chat turn injected, as served: a published version, or the draft
+ * at the `lockVersion` it had. Each is bound to `spaceId`, the space its own
+ * `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space
+ * only. Parsed when the chat strategy verifies the signed bearer, and again where
+ * the platform reads it.
  */
 export const injectedSkillsSchema = z.strictObject({
-  spaceId: z.string(),
   skills: z.record(
     z.string(),
     z.discriminatedUnion("definition", [
-      z.strictObject({ definition: z.literal("published"), version: z.string().nullable() }),
-      z.strictObject({ definition: z.literal("draft"), lockVersion: z.number().int() }),
+      z.strictObject({
+        definition: z.literal("published"),
+        version: z.string().nullable(),
+        spaceId: z.string(),
+      }),
+      z.strictObject({
+        definition: z.literal("draft"),
+        lockVersion: z.number().int(),
+        spaceId: z.string(),
+      }),
     ]),
   ),
 });

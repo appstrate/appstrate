@@ -120,17 +120,17 @@ three branches, in this order:
 1. the skill was injected in this turn: the chat signs an `injectedSkills`
    claim into the turn's MCP bearer (`injectedSkillsSchema`,
    `@appstrate/core/chat-contract`, surfaced as
-   `authExtra[INJECTED_SKILLS_AUTH_EXTRA]`): `{ spaceId, skills }`, each skill
-   either `{ definition: "published", version }` or
-   `{ definition: "draft", lockVersion }` — enforced skills as published,
+   `authExtra[INJECTED_SKILLS_AUTH_EXTRA]`): `{ skills }`, each skill
+   either `{ definition: "published", version, spaceId }` or
+   `{ definition: "draft", lockVersion, spaceId }` (`spaceId`: the space its URI names) — enforced skills as published,
    chosen ones as `skills/list` named them, a draft pinned to the
    `lock_version` of its entry's `_meta["dev.appstrate/lock_version"]` (an
    entry without it is malformed: the skill is left out with a "could not be
    read" notice), and the `SKILL.md` read is injected only when its bytes match
    the `sha256` digest the entry lists (a draft saved between the list and the
    read gets the same notice, with no retry). The read serves exactly that definition, with no `skills:*` needed, and
-   honours the claim only on the chat loopback bearer, in the claim's space,
-   while the caller still holds `chat:write` there; a skill released mid-turn
+   honours the claim only on the chat loopback bearer, in the space the skill's
+   entry names, while the caller still holds `chat:write` there; a skill released mid-turn
    is still served for the rest of that turn, and an edited draft answers
    `-32600` with `data.code: "injected_draft_changed"`. A skill that got a notice (unavailable, over
    budget) is not named. A malformed claim is dropped and the token kept;
@@ -191,3 +191,19 @@ failure answers the same 503.
 - **Read-only indicator:** a member with `chat:write` but no picker (no
   `skills:read`) sees the enforced names in the composer
   (`EnforcedSkillsIndicator`).
+
+## In an organization session
+
+An organization session (`/api/orgs/{orgId}/chat`, #1886) has no one space, so its skills come from every
+space it reaches:
+
+- **Enforced skills** are the union of `loadEnforcedSkills` over each reachable space where the caller
+  holds `chat:write`, read concurrently by `enforcedSkillsOf` (`platform-services.ts`), one entry per
+  package (the first space in reach order, the order `GET /api/spaces` uses), sorted by id. A failed read
+  in any one space is a 503 for the turn. `GET /api/orgs/{orgId}/chat/enforced-skills` calls the same
+  function. The lead line and the strict note say "the spaces this conversation can act in require".
+- **Reading** (`auto` catalogue, drafts, chosen skills) goes over the organization MCP endpoint and keeps
+  one entry per package, the first space in reach order listing it.
+- **The claim** (`injectedSkillsSchema`) binds each skill to its own space: every entry carries the
+  `spaceId` its `skill://<spaceId>/…` URI names, and `resources/read` serves the skill only in a request
+  that entered that space. A space session's claim has the same shape, all entries in its one space.

@@ -57,6 +57,8 @@ const encode = (text: string) => new TextEncoder().encode(text);
 const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const skillMd = (name: string) => `---\nname: ${name}\ndescription: Sets the ${name}.\n---\nBody\n`;
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
 interface Entry {
   uri: string;
   frontmatter: Record<string, unknown>;
@@ -386,7 +388,7 @@ describe("skills/get and resources/read in a chat turn", () => {
    * `skills:*` unless `permissions` grants them.
    */
   function turnHeaders(
-    skills: InjectedSkills["skills"],
+    skills: Record<string, DistributiveOmit<InjectedSkills["skills"][string], "spaceId">>,
     permissions = ["mcp:read", "chat:write"],
   ): Record<string, string> {
     const token = mintMcpLoopbackToken({
@@ -396,7 +398,14 @@ describe("skills/get and resources/read in a chat turn", () => {
       orgId: owner.orgId,
       orgRole: "owner",
       permissions,
-      injectedSkills: { spaceId: owner.defaultSpaceId, skills },
+      injectedSkills: {
+        skills: Object.fromEntries(
+          Object.entries(skills).map(([id, served]) => [
+            id,
+            { ...served, spaceId: owner.defaultSpaceId },
+          ]),
+        ) as InjectedSkills["skills"],
+      },
     });
     return inSpace(
       { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
@@ -410,7 +419,7 @@ describe("skills/get and resources/read in a chat turn", () => {
   }
 
   /** The same turn holding `skills:read` too, so a refusal does not come from lacking it. */
-  const withSkillsRead = (skills: InjectedSkills["skills"]) =>
+  const withSkillsRead = (skills: Parameters<typeof turnHeaders>[0]) =>
     turnHeaders(skills, ["mcp:read", "chat:write", "skills:read"]);
 
   async function expectRefused(headers: Record<string, string>, uri: string): Promise<void> {

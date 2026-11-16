@@ -11,6 +11,7 @@ import {
   type InjectedSkill,
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 
 export interface SkillHint {
   packageId: string;
@@ -40,6 +41,11 @@ export function parseSkillList(body: unknown): SkillHint[] {
     const { id, name, description, version } = parsed.data;
     return [{ packageId: id, display_name: name, description, version }];
   });
+}
+
+/** The space a `skill://<spaceId>/…` URI names: the one its claim entry binds the skill to. */
+export function skillUriSpaceId(uri: string): string {
+  return uri.slice(SKILL_URI_PREFIX.length).split("/")[0]!;
 }
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
@@ -80,7 +86,7 @@ interface ResolvedChatSkills {
 }
 
 /**
- * The skills to inject: the space's first, in the platform's id order, then the
+ * The skills to inject: the required ones first, in the platform's id order, then the
  * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
  * one budget. A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
@@ -112,7 +118,7 @@ export function resolveChatSkills(
         version,
         uri,
         content,
-        served: { definition: "published", version },
+        served: { definition: "published", version, spaceId: skillUriSpaceId(uri) },
       });
     }
   }

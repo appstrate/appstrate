@@ -159,7 +159,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
     expect(injectedUri(block.text)).toBe(uri);
     expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" definition="draft">`);
     const served = block.injected.skills[SKILL_ID];
-    expect(block.injected.spaceId).toBe(owner.defaultSpaceId);
+    expect(served?.spaceId).toBe(owner.defaultSpaceId);
     expect(served?.definition).toBe("draft");
 
     expect((await readResource(unclaimed, uri)).error).toBeDefined();
@@ -206,7 +206,11 @@ describe("a chosen skill injected in a strict turn, read back through `resources
     );
     const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
     expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" version="1.3.0">`);
-    expect(block.injected.skills[SKILL_ID]).toEqual({ definition: "published", version: "1.3.0" });
+    expect(block.injected.skills[SKILL_ID]).toEqual({
+      definition: "published",
+      version: "1.3.0",
+      spaceId: owner.defaultSpaceId,
+    });
 
     expect((await readResource(unclaimed, uri)).error).toBeDefined();
     const read = await readResource(bearer, uri);

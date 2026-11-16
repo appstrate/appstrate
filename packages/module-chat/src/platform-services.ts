@@ -32,6 +32,7 @@ import type {
 } from "@appstrate/core/module";
 import { ApiError } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
+import type { ChatScope } from "./prompt.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -53,6 +54,28 @@ export function spacesHolding(
   permission: string,
 ): ReachableSpaceGrant[] {
   return spaces.filter((space) => space.permissions.includes(permission));
+}
+
+/**
+ * The skills a scope's conversations require, read with `load` per space. A space
+ * scope reads its own. An organization scope reads every reachable space where the
+ * caller holds `chat:write` (the turn that injects them is gated the same), one
+ * entry per package — the first space in reach order — sorted by package id; a
+ * space whose read fails fails the whole read.
+ */
+export async function enforcedSkillsOf<T extends { packageId: string }>(
+  scope: ChatScope,
+  load: (spaceId: string) => Promise<T[]>,
+): Promise<T[]> {
+  if (scope.kind === "space") return load(scope.spaceId);
+  const perSpace = await Promise.all(
+    spacesHolding(scope.reachable, "chat:write").map((space) => load(space.id)),
+  );
+  const byPackage = new Map<string, T>();
+  for (const skill of perSpace.flat()) {
+    if (!byPackage.has(skill.packageId)) byPackage.set(skill.packageId, skill);
+  }
+  return [...byPackage.values()].sort((a, b) => a.packageId.localeCompare(b.packageId));
 }
 
 export interface ChatPlatformDeps {

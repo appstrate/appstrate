@@ -21,7 +21,6 @@ import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
-  SKILL_URI_PREFIX,
   parseSkillUriPackage,
   skillFileDigest,
 } from "@appstrate/core/skill-uri";
@@ -40,6 +39,7 @@ import {
   injectedSkills,
   injectsSkills,
   resolveChatSkills,
+  skillUriSpaceId,
   type ChatSkillSelection,
   type SkillContent,
 } from "./skills.ts";
@@ -112,8 +112,9 @@ export type ChatEnv = {
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
-const SKILLS_ENFORCED_LEAD =
-  "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.";
+/** `organization`: the conversation acts across spaces, each of which may require skills. */
+const skillsEnforcedLead = (organization: boolean) =>
+  `${organization ? "The spaces this conversation can act in require these skills" : "This space requires these skills"} in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.`;
 // The turn's MCP bearer names every injected definition, so `resources/read`
 // serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
@@ -127,8 +128,12 @@ const SKILLS_INJECTED_LEAD =
 // `list_skills` is registered on a `manual` turn alone: the rule rides that mode's context.
 const SKILLS_MANUAL_NOTE =
   "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
-const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+const skillsStrictNote = (organization: boolean) => {
+  const [required, holds, requirement] = organization
+    ? ["the spaces this conversation can act in require", "the spaces hold", "their requirement"]
+    : ["the space requires", "the space holds", "the space's requirement"];
+  return `This conversation is restricted to the skills shown here — those ${required} and those the user chose, if any: that is why this turn holds no \`skills:*\` permission, whatever the user's role. Any listing therefore shows no skill, whatever ${holds} — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; ${requirement} stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.`;
+};
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -375,6 +380,8 @@ function formatSkillsSection(opts: {
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
   enforced: readonly EnforcedChatSkill[];
+  /** An organization session: the skills are those of every space it reaches. */
+  organization: boolean;
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
@@ -385,13 +392,13 @@ function formatSkillsSection(opts: {
       ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
       : [];
   const groups: string[][] = [];
-  if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
+  if (opts.selection.skillMode === "strict") groups.push([skillsStrictNote(opts.organization)]);
   if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
     groups.push([SKILLS_MANUAL_NOTE]);
   }
   if (skills.enforced.length) {
     groups.push([
-      `${SKILLS_ENFORCED_LEAD} ${files}`,
+      `${skillsEnforcedLead(opts.organization)} ${files}`,
       ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
@@ -448,6 +455,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
     enforced: opts.enforced,
+    organization: opts.spaces !== undefined,
   });
   const skillSection = skills.text;
   const name = ctx.user?.name?.trim();
@@ -581,18 +589,24 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
  */
 export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readResource" | "close">;
 
-/** The space's entries of a `skills/list`, by package id. */
+/**
+ * The entries of a `skills/list` that sit in one of `spaces`, one per package: the
+ * one in the first of `spaces` that lists it. A space session passes its own space
+ * alone; an organization session passes its reach, in the order `GET /api/spaces` uses.
+ */
 function entriesByPackage(
   entries: readonly ListedSkillEntry[],
-  spaceId: string,
+  spaces: readonly string[],
 ): Map<string, ListedSkillEntry> {
-  const byPackage = new Map<string, ListedSkillEntry>();
+  const byPackage = new Map<string, { entry: ListedSkillEntry; rank: number }>();
   for (const entry of entries) {
-    if (!entry.uri.startsWith(`${SKILL_URI_PREFIX}${spaceId}/`)) continue;
+    const rank = spaces.indexOf(skillUriSpaceId(entry.uri));
     const pkg = parseSkillUriPackage(entry.uri);
-    if (pkg) byPackage.set(pkg.packageId, entry);
+    if (rank === -1 || !pkg) continue;
+    const kept = byPackage.get(pkg.packageId);
+    if (!kept || rank < kept.rank) byPackage.set(pkg.packageId, { entry, rank });
   }
-  return byPackage;
+  return new Map([...byPackage].map(([packageId, { entry }]) => [packageId, entry]));
 }
 
 /**
@@ -613,7 +627,7 @@ interface ChatSkillsRead {
  * The skills of a turn, read over the MCP Skills extension (SEP-2640): a skill
  * is the caller's draft when `skills/list` lists it among the drafts the caller
  * may read, else its published version. With `catalogue`, every such skill of
- * the space is listed by its `uri`; each of `chosen` is injected as the text
+ * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even in `strict`, whose turn holds no `skills:*`. A chosen skill
  * in neither list, or whose read is refused, is left out; a malformed answer (a
@@ -626,7 +640,7 @@ interface ChatSkillsRead {
  */
 async function readChatSkills(
   openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
-  spaceId: string,
+  spaces: readonly string[],
   opts: { catalogue: boolean; catalogueDrafts: boolean; chosen: readonly string[] },
 ): Promise<ChatSkillsRead> {
   const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
@@ -644,7 +658,7 @@ async function readChatSkills(
   try {
     const list = (meta?: Record<string, unknown>) =>
       client.listSkills(meta ? { meta, signal } : { signal }).then(
-        ({ skills }) => entriesByPackage(skills, spaceId),
+        ({ skills }) => entriesByPackage(skills, spaces),
         (err: unknown) => {
           logger.warn("skills/list failed — its skills left out of the turn", {
             definition: meta ? "draft" : "published",
@@ -728,14 +742,19 @@ function isListedSkillMd(entry: ListedSkillEntry, text: string): boolean {
  * draft entry without one.
  */
 function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served"] | null {
+  const spaceId = skillUriSpaceId(entry.uri);
   if (draft) {
     const lockVersion = entry._meta?.[SKILL_LOCK_VERSION_META_KEY];
     return Number.isSafeInteger(lockVersion)
-      ? { definition: "draft", lockVersion: lockVersion as number }
+      ? { definition: "draft", lockVersion: lockVersion as number, spaceId }
       : null;
   }
   const version = (entry.frontmatter.metadata as { version?: unknown } | undefined)?.version;
-  return { definition: "published", version: typeof version === "string" ? version : null };
+  return {
+    definition: "published",
+    version: typeof version === "string" ? version : null,
+    spaceId,
+  };
 }
 
 /** The preset, or a custom bundle's name (its id when unnamed). */
@@ -781,8 +800,10 @@ async function readCallerContext(
  * without them.
  *
  * An organization scope has no space to read `/api/me/context` in: its block
- * carries the identity, the spaces its calls name and the turn's permissions.
- * Its skills are not read here (they are per space, named in each call).
+ * carries the identity, the spaces its calls name and the turn's permissions. Its
+ * skills are those of every space it reaches, read over the organization endpoint,
+ * one per package (the first space in reach order), each bound in the claim to the
+ * space its URI names.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
@@ -824,38 +845,43 @@ export async function buildCallerContextBlock(
   // Degraded: nothing says which chosen skills are active, so none is named, but
   // the mode (strict's note) stays.
   const unresolved: ChatSkillSelection = { skillMode: skills.skillMode, pinnedSkills: [] };
-  if (scope.kind === "organization") {
-    const enforced = await args.enforced;
-    const spaces = spacesHolding(scope.reachable, "mcp:read");
-    return {
-      text: formatCallerContext(identity, {
-        ...common,
-        spaceRole: null,
-        spaces,
-        skills: unresolved,
-        enforced,
-      }).text,
-      injected: undefined,
-    };
-  }
-  const { spaceId } = scope;
-  // Bound to this space: `resources/read` honours the claim only for it.
-  const claimed = ({ text, injected }: RenderedContext) => ({
-    text,
-    injected: { spaceId, skills: injected },
-  });
-  const ctxHeaders = new Headers(headers);
-  ctxHeaders.set("x-space-id", spaceId);
   const injects = injectsSkills(skills.skillMode);
-  const [context, turnSkills, enforced] = await Promise.all([
-    readCallerContext(deps, origin, ctxHeaders),
-    readChatSkills(args.openSkillsClient, spaceId, {
+  const readSkills = (spaces: readonly string[]) =>
+    readChatSkills(args.openSkillsClient, spaces, {
       catalogue: capabilities.readsSkills && !injects,
       // The drafts the caller reads are the turn's only while the turn keeps the
       // caller's `skills:write` (the authoring switch drops it).
       catalogueDrafts: args.permissions.includes("skills:write"),
       chosen: injects ? skills.pinnedSkills : [],
-    }),
+    });
+  // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
+  const claimed = ({ text, injected }: RenderedContext) => ({
+    text,
+    injected: { skills: injected },
+  });
+  if (scope.kind === "organization") {
+    const [turnSkills, enforced] = await Promise.all([
+      readSkills(scope.reachable.map((space) => space.id)),
+      args.enforced,
+    ]);
+    return claimed(
+      formatCallerContext(identity, {
+        ...common,
+        spaceRole: null,
+        spaces: spacesHolding(scope.reachable, "mcp:read"),
+        skills,
+        skillContents: turnSkills.contents,
+        skillCatalogue: turnSkills.catalogue,
+        enforced,
+      }),
+    );
+  }
+  const { spaceId } = scope;
+  const ctxHeaders = new Headers(headers);
+  ctxHeaders.set("x-space-id", spaceId);
+  const [context, turnSkills, enforced] = await Promise.all([
+    readCallerContext(deps, origin, ctxHeaders),
+    readSkills([spaceId]),
     args.enforced,
   ]);
   const opts = { ...common, spaceRole: spaceRoleLabel(c.get("spaceRole")), spaceId, enforced };
@@ -880,6 +906,7 @@ export async function buildCallerContextBlock(
       catalogue: [],
       contents: new Map(),
       enforced,
+      organization: false,
     }),
   );
 }

@@ -114,8 +114,13 @@ describe("platform MCP surface key purity", () => {
         orgRole: "owner",
         spaceId: otherSpaceA.id,
         injectedSkills: {
-          spaceId: otherSpaceA.id,
-          skills: { "@purity/tone": { definition: "published", version: "1.0.0" } },
+          skills: {
+            "@purity/tone": {
+              definition: "published",
+              version: "1.0.0",
+              spaceId: otherSpaceA.id,
+            },
+          },
         },
       },
       // Another org, another user, another org role.

@@ -106,8 +106,8 @@ import {
   searchTokens,
 } from "./search.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { describeSpace } from "@appstrate/core/mcp-result";
 import {
-  describeSpace,
   grantedIn,
   grantedSpaces,
   spaceArgumentRefusal,

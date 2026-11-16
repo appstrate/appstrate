@@ -54,7 +54,7 @@ import {
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
-import { spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
+import { enforcedSkillsOf, spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
 import type { OrganizationSpaces, PlatformMcpSpaces } from "./pi-chat/mcp-tools.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
@@ -413,11 +413,13 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // The space's enforced skills depend on nothing but the ids, so they start
+  // The enforced skills (the space's, or those of every space an organization session
+  // may chat in) depend on nothing but the ids, so they start
   // now; phase A's join awaits them, so their 503 refuses the turn before any
   // file is materialized.
-  const enforcedSkills: Promise<EnforcedChatSkill[]> =
-    scope.kind === "space" ? deps.loadEnforcedSkills(orgId, scope.spaceId) : Promise.resolve([]);
+  const enforcedSkills: Promise<EnforcedChatSkill[]> = enforcedSkillsOf(scope, (enforcedIn) =>
+    deps.loadEnforcedSkills(orgId, enforcedIn),
+  );
   // Then the caller-context block. It depends on the space id and the caller's
   // headers and the session row (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row

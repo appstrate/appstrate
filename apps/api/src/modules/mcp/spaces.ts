@@ -12,6 +12,7 @@ import { parseFileUri } from "@appstrate/core/file-uri";
 import { callerReachableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
+import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-result";
 import type { Refusal } from "./tool-results.ts";
 
 /** A space this connection may act in, with the caller's permissions there. */
@@ -82,11 +83,6 @@ export async function requestedSpaceId(
   return undefined;
 }
 
-/** One line per space, for refusals and instructions. */
-export function describeSpace(space: McpSpace): string {
-  return `${space.name} (\`${space.id}\`, role ${space.role})`;
-}
-
 /** The reachable spaces where `granted` holds; undefined when not org-wide or when all hold. */
 export function grantedSpaces(
   spaces: OrgWideSpaces | undefined,
@@ -118,24 +114,8 @@ export const NO_FALLBACK_HINT =
 
 /** The refusal a call's `space_id` earns, or undefined when it names the entered space. */
 export function spaceArgumentRefusal(spaces: OrgWideSpaces, spaceId: unknown): Refusal | undefined {
-  const accepted = spaces.reachable.map((s) => s.id);
-  const list = spaces.reachable.map(describeSpace).join("; ");
-  if (spaceId === undefined || spaceId === null) {
-    return {
-      code: "missing_argument",
-      error: `space_id is required. Spaces you can act in: ${list}.`,
-      arguments: ["space_id"],
-      accepted,
-    };
-  }
-  if (typeof spaceId !== "string" || !accepted.includes(spaceId)) {
-    return {
-      code: "unknown_space",
-      error: `Unknown space_id: ${String(spaceId)}. Spaces you can act in: ${list}.`,
-      arguments: ["space_id"],
-      accepted,
-    };
-  }
+  const named = spaceIdRefusal(spaces.reachable, spaceId);
+  if (named) return named;
   if (spaceId !== spaces.current.id) {
     return {
       code: "space_mismatch",
