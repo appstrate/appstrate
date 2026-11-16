@@ -105,6 +105,7 @@
     "./log-line": "./src/log-line.ts",
     "./connect-handshake": "./src/connect-handshake.ts",
     "./mcp-result": "./src/mcp-result.ts",
+    "./mcp-spaces": "./src/mcp-spaces.ts",
     "./realtime-url": "./src/realtime-url.ts",
     "./model-selectable": "./src/model-selectable.ts"
   },

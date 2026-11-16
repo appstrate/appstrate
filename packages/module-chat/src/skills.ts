@@ -101,9 +101,13 @@ export function resolveChatSkills(
   for (const { packageId, version, uri, content } of enforced) {
     // The space its URI names is the one its claim entry binds the skill to.
     const spaceId = uri === null ? undefined : parseSkillUri(uri)?.spaceId;
-    if (content === null || uri === null || spaceId === undefined) {
+    if (content === null || uri === null) {
       resolved.notices.push(
         `The skill \`${packageId}\` is required by ${requiredBy} but has no published version to follow.`,
+      );
+    } else if (spaceId === undefined) {
+      resolved.notices.push(
+        `The skill \`${packageId}\` is required by ${requiredBy} but its address names no space, so it cannot be served.`,
       );
     } else if (content.length > left) {
       resolved.notices.push(

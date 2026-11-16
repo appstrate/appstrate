@@ -9837,6 +9837,84 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.chat_session_spaces": {
+      "name": "chat_session_spaces",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_chat_session_spaces_space": {
+          "name": "idx_chat_session_spaces_space",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_session_spaces_session_org_fk": {
+          "name": "chat_session_spaces_session_org_fk",
+          "tableFrom": "chat_session_spaces",
+          "tableTo": "chat_sessions",
+          "columnsFrom": ["session_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "chat_session_spaces_space_org_fk": {
+          "name": "chat_session_spaces_space_org_fk",
+          "tableFrom": "chat_session_spaces",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "chat_session_spaces_session_id_space_id_pk": {
+          "name": "chat_session_spaces_session_id_space_id_pk",
+          "columns": ["session_id", "space_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.chat_sessions": {
       "name": "chat_sessions",
       "schema": "",
@@ -10029,78 +10107,6 @@
           "value": "restricted = false OR space_id IS NOT NULL"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.chat_session_spaces": {
-      "name": "chat_session_spaces",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_chat_session_spaces_space": {
-          "name": "idx_chat_session_spaces_space",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "chat_session_spaces_session_id_chat_sessions_id_fk": {
-          "name": "chat_session_spaces_session_id_chat_sessions_id_fk",
-          "tableFrom": "chat_session_spaces",
-          "tableTo": "chat_sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "chat_session_spaces_space_id_spaces_id_fk": {
-          "name": "chat_session_spaces_space_id_spaces_id_fk",
-          "tableFrom": "chat_session_spaces",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_session_spaces_session_id_space_id_pk": {
-          "name": "chat_session_spaces_session_id_space_id_pk",
-          "columns": ["session_id", "space_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

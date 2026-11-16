@@ -242,7 +242,7 @@ describe("injectedSkills", () => {
     });
   });
 
-  it("names the spaces the conversation can act in in the notices about a required skill", () => {
+  it("names the origin space in the notices about a required skill", () => {
     const result = resolve(
       { skillMode: "auto", pinnedSkills: [] },
       [],
@@ -250,6 +250,18 @@ describe("injectedSkills", () => {
     );
     expect(result.notices).toEqual([
       "The skill `@a/house` is required by this conversation's origin space but has no published version to follow.",
+    ]);
+  });
+
+  it("gives a required skill whose address names no space its own notice", () => {
+    const result = resolve(
+      { skillMode: "auto", pinnedSkills: [] },
+      [],
+      [{ ...enforcedSkill("@a/house"), uri: "https://example.com/SKILL.md" }],
+    );
+    expect(result.enforced).toEqual([]);
+    expect(result.notices).toEqual([
+      "The skill `@a/house` is required by this conversation's origin space but its address names no space, so it cannot be served.",
     ]);
   });
 

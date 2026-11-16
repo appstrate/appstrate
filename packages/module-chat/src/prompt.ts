@@ -90,6 +90,10 @@ export type ChatEnv = {
 const SKILLS_HEADING = "## Skills";
 const enforcedLead = (origin: { id: string; name: string }) =>
   `This space — ${origin.name} (\`${origin.id}\`), where this conversation was started — requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.`;
+// An unlimited conversation outlives the author's right to act in its origin space: the
+// skills that space requires then apply to nobody, and the model is told so.
+const ORIGIN_LAPSED_NOTICE =
+  "The space where this conversation was started requires skills in every conversation, but you can no longer act in it: those skills do not apply to this turn.";
 // The turn's MCP bearer names every injected definition, so `resources/read`
 // serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
@@ -193,13 +197,13 @@ Then read \`result.summary\` from the \`run_and_wait\` result and reply to the u
 )}
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": ["<connection id>", …] }\` map (always an array, even for one id), used to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\` — pick from those, don't go list connections; never pick one with \`needs_reconnection: true\`, the run fails on it — ask the user to reconnect it instead; and a candidate with \`owned_by_actor: false\` is a colleague's shared account, so use it only when the user named it, otherwise ask), and to bind several connections of one integration when the task needs them all; \`[]\` runs without that integration (refused for one the agent marks \`required\`, unless an admin imposes connections on it: \`[]\` then adds nothing); connections an admin imposes on an integration stay bound whatever you pass, so there the map only adds to them, and an addition the admin closed answers \`override_outranked\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
-After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in the space the failed call named, which someone allowed to manage that space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
+After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in the space the failed call acted in (the conversation's space when it is limited to one), which someone allowed to manage that space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
 
 `,
   "\n",
 )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call named — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the \`space_id\` of the failed call and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call acted in — the space the call's \`space_id\` named, or the conversation's space when it is limited to one and its calls carry none — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` that space's id and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
@@ -273,7 +277,7 @@ interface RenderedContext {
 
 /**
  * `## Skills`, or "". Kept apart so {@link buildCallerContextBlock} appends it on
- * every path: the spaces' skills never depend on anything else answering.
+ * every path: the origin space's required skills never depend on anything else answering.
  */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
@@ -283,6 +287,8 @@ function formatSkillsSection(opts: {
   enforced: readonly EnforcedChatSkill[];
   /** The origin space, which owns the enforced skills. */
   origin?: { id: string; name: string };
+  /** The origin space exists but the author can no longer act there: its required skills lapse. */
+  originLapsed: boolean;
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
@@ -303,6 +309,7 @@ function formatSkillsSection(opts: {
       ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
+  if (opts.originLapsed) groups.push([ORIGIN_LAPSED_NOTICE]);
   if (listed.length) groups.push(listed.map(skillLine));
   if (skills.chosen.length) {
     groups.push([
@@ -329,6 +336,8 @@ type CallerContextOpts = {
   origin?: { id: string; name: string };
   /** Limited to the origin space: the pinned endpoint serves it alone and its tools take no `space_id`. */
   restricted: boolean;
+  /** The conversation has an origin space where its author can no longer act. */
+  originLapsed: boolean;
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
@@ -336,7 +345,7 @@ type CallerContextOpts = {
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
   skillCatalogue?: readonly CatalogueSkill[];
-  /** Required: a caller that forgot it would drop the spaces' skills silently. */
+  /** Required: a caller that forgot it would drop the origin space's required skills silently. */
   enforced: readonly EnforcedChatSkill[];
 };
 
@@ -352,6 +361,7 @@ export function formatCallerContext(
     contents: opts.skillContents ?? new Map(),
     enforced: opts.enforced,
     origin: opts.origin,
+    originLapsed: opts.originLapsed,
   });
   const skillSection = skills.text;
   const name = identity.user.name?.trim();
@@ -439,8 +449,8 @@ export function formatCallerContext(
 export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readResource" | "close">;
 
 /**
- * The entries of a `skills/list` that sit in one of `spaces`, one per package: the
- * one in the first of `spaces` that lists it: the acting set, in the order `GET /api/spaces` uses.
+ * The entries of a `skills/list` that sit in one of `spaces`, one per package: the one in the
+ * first of `spaces` that lists it (the turn's spaces, in the order `GET /api/spaces` uses).
  */
 function entriesByPackage(
   entries: readonly ListedSkillEntry[],
@@ -609,7 +619,7 @@ function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served
 
 /**
  * Build the caller-context system-prompt block: the identity, the spaces the turn can
- * act in (its acting set, the origin space alone when the conversation is limited) with the
+ * act in (the acting set, the origin space alone when the conversation is limited) with the
  * origin space as the default, when there is one, and the turn's permissions. Built from the
  * already-authenticated request context, with no read of the platform: the integrations and
  * the agents differ per space, so the model looks them up with its tools. The skills are
@@ -626,6 +636,8 @@ export async function buildCallerContextBlock(
     origin?: { id: string; name: string };
     /** Limited to the origin space. */
     restricted: boolean;
+    /** The conversation has an origin space where its author can no longer act. */
+    originLapsed: boolean;
     user: { id: string; name?: string | null; email?: string | null };
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
@@ -673,6 +685,7 @@ export async function buildCallerContextBlock(
     spaces: args.spaces,
     origin: args.origin,
     restricted: args.restricted,
+    originLapsed: args.originLapsed,
     skills,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,

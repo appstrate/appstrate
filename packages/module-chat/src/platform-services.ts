@@ -36,15 +36,15 @@ import { logger } from "./logger.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-import type {
-  ChatAttachmentRequest,
-  ChatUsageRecord,
-  ResolvedChatAttachment,
-  ChatModelResolution,
-  EnforcedChatSkill,
-  EnforcedChatSkillRef,
+import {
+  chatActsIn,
+  type ChatAttachmentRequest,
+  type ChatUsageRecord,
+  type ResolvedChatAttachment,
+  type ChatModelResolution,
+  type EnforcedChatSkill,
+  type EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
-import { CHAT_ACTING_PERMISSIONS } from "@appstrate/core/chat-contract";
 
 /** The permissions the chat's session routes ask. */
 export type ChatPermission = "chat:read" | "chat:write";
@@ -57,18 +57,22 @@ export function spacesHolding(
   return spaces.filter((space) => space.permissions.includes(permission));
 }
 
+/** The ids of the spaces whose set grants `chat:read`: the spaces a conversation is opened in. */
+export function readableSpaceIds(reachable: readonly ReachableSpaceGrant[]): string[] {
+  return spacesHolding(reachable, "chat:read").map((space) => space.id);
+}
+
 /**
  * The spaces a conversation's turn may act in: those of the caller's reach where
  * they hold `chat:write` (the turn is theirs to run), `chat:read` (the conversation must stay
  * openable for them once the space is touched) and `mcp:read` (the tools can name it). The
  * one set behind the spaces the prompt and the tools advertise, the spaces a call may touch,
- * the bearer's ceiling, the enforced skills, the attachments and the skills read; a space
- * outside it is neither listed nor acted in. Visibility of a conversation stays `chat:read`.
+ * the bearer's ceiling and space allowlist, the attachments and the skills read; a space
+ * outside it is neither listed nor acted in. A conversation's enforced skills are its origin
+ * space's alone, not the set's. Visibility of a conversation stays `chat:read`.
  */
 export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
-  return spaces.filter((space) =>
-    CHAT_ACTING_PERMISSIONS.every((p) => space.permissions.includes(p)),
-  );
+  return spaces.filter((space) => chatActsIn(space.permissions));
 }
 
 /** Whether `spaceId` is one of the acting set: the single test behind every "can still act there". */

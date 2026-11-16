@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spaces,
@@ -26,6 +26,7 @@ import {
   organizations,
   storageDeletionJobs,
   chatSessions,
+  fileLinks,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -415,7 +416,7 @@ describe("storage-deletion outbox", () => {
     expect(new Set(workspaceJobs.map((job) => job.reason))).toEqual(new Set(["space_deleted"]));
   });
 
-  it("deleteSpace also queues the files its conversations hold in OTHER spaces", async () => {
+  it("deleteSpace deletes an unconsumed file its conversations hold in another space, keeps a consumed one", async () => {
     const origin = await createSpace(scope.orgId, { name: "Origin" }, ctx.user.id);
     const sessionId = `chs_${crypto.randomUUID()}`;
     await db.insert(chatSessions).values({
@@ -424,28 +425,45 @@ describe("storage-deletion outbox", () => {
       userId: ctx.user.id,
       spaceId: origin.id,
     });
-    // A file attached from the default space, contained by the conversation.
+    // Two files attached from the default space, contained by the conversation; a run in that
+    // space still consumes one of them.
     const runId = await seedRunRow(scope);
-    const doc = await publishDoc(scope, runId, "attached.txt", "attached bytes");
+    const unconsumed = await publishDoc(scope, runId, "unconsumed.txt", "unconsumed bytes");
+    const consumed = await publishDoc(scope, runId, "consumed.txt", "consumed bytes");
     await db
       .update(files)
       .set({ runId: null, chatSessionId: sessionId })
-      .where(eq(files.id, doc.id));
-    const { inKey } = split(doc.storageKey);
+      .where(inArray(files.id, [unconsumed.id, consumed.id]));
+    await db
+      .insert(fileLinks)
+      .values({ fileId: consumed.id, consumerRunId: runId, orgId: scope.orgId });
+    const { inKey: unconsumedKey } = split(unconsumed.storageKey);
+    const { inKey: consumedKey } = split(consumed.storageKey);
 
     await deleteSpace(scope.orgId, origin.id);
 
-    expect(await db.select().from(files).where(eq(files.id, doc.id))).toHaveLength(0);
+    expect(await db.select().from(files).where(eq(files.id, unconsumed.id))).toHaveLength(0);
     const jobs = await db
       .select({ reason: storageDeletionJobs.reason })
       .from(storageDeletionJobs)
-      .where(eq(storageDeletionJobs.storageKey, inKey));
+      .where(eq(storageDeletionJobs.storageKey, unconsumedKey));
     expect(jobs).toHaveLength(1);
+
+    const [kept] = await db.select().from(files).where(eq(files.id, consumed.id));
+    expect(kept).toBeDefined();
+    expect(kept!.chatSessionId).toBeNull();
+    expect(kept!.spaceId).toBe(scope.spaceId);
+    expect(
+      await db
+        .select()
+        .from(storageDeletionJobs)
+        .where(eq(storageDeletionJobs.storageKey, consumedKey)),
+    ).toHaveLength(0);
     const [after] = await db
       .select({ used: organizations.filesBytesUsed })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId));
-    expect(after!.used).toBe(0);
+    expect(after!.used).toBe(kept!.size);
   });
 
   it("deleteEndUser purges owned bytes but preserves its surviving run workspace", async () => {

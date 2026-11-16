@@ -222,3 +222,24 @@ describe("chatLoopbackStrategy rejection paths", () => {
     expect(res).toBeNull();
   });
 });
+
+describe("the spaces a bearer is bound to", () => {
+  const resolve = (token: string) =>
+    chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+
+  it("carries the turn's spaces as the credential allowlist, and the inference bearer none", async () => {
+    const bound = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], spaceIds: ["spc_a", "spc_b"] }),
+    );
+    expect(bound!.spaceIds).toEqual(["spc_a", "spc_b"]);
+    // An empty list is a bound credential that reaches nothing, not an unbound one.
+    const empty = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], spaceIds: [] }),
+    );
+    expect(empty!.spaceIds).toEqual([]);
+    expect((await resolve(mintLoopbackToken(claims)))!.spaceIds).toBeUndefined();
+    expect(
+      (await resolve(mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"] })))!.spaceIds,
+    ).toBeUndefined();
+  });
+});

@@ -79,7 +79,6 @@ import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { CHAT_ACTING_PERMISSIONS, CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { ceilingAllows } from "../../lib/permissions.ts";
 import { followRunLogs } from "../../services/realtime-access.ts";
@@ -527,20 +526,20 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
-    // A chat's bearer acts in the chat's acting set alone: the spaces its tools name, the
-    // skills it lists and the `space_id` it may send all come from this one list.
-    const chatActs = c.get("authMethod") === CHAT_LOOPBACK_AUTH_METHOD;
-    const reachable = (
-      await listReachableSpaces(c, orgId, (permissions, space) =>
-        deriveMcpSurface(permissions, ceiling, actor, proxied, space),
-      )
-    ).filter(
-      (space) => !chatActs || CHAT_ACTING_PERMISSIONS.every((p) => space.permissions.has(p)),
+    // A credential bound to a set of spaces reaches those alone (`callerReachableSpaces`): the
+    // spaces its tools name, the skills it lists and the `space_id` it may send come from this
+    // one list.
+    const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
+      deriveMcpSurface(permissions, ceiling, actor, proxied, space),
     );
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
     if (!chosen) {
-      throw forbidden("You hold no role with MCP access in any space of this organization.");
+      throw forbidden(
+        c.get("credentialSpaceIds") === undefined
+          ? "You hold no role with MCP access in any space of this organization."
+          : "You hold no role with MCP access in any space this credential reaches.",
+      );
     }
     await enterSpaceById(c, chosen.id, orgId);
     // The admission's read is the one the guards apply: a role changed since
@@ -597,15 +596,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
-    // Dispatched calls re-enter the space this request entered — and, on the
-    // endpoint pinned to it, stay confined to it whatever the credential pins:
-    // a list spanning spaces then reaches that space only. On the organization-wide
-    // endpoint an external client's org-wide read keeps spanning the spaces it reaches;
-    // a chat turn's is confined too, because the chat records a space as touched only
-    // when a call names it: its read must reach that space alone.
+    // Dispatched calls re-enter the space this request entered — and, on the endpoint pinned to
+    // it, stay confined to it whatever the credential pins: a list spanning spaces then reaches
+    // that space only. On the organization-wide endpoint an external client's org-wide read keeps
+    // spanning the spaces it reaches; a credential bound to a set of spaces acts in ONE space
+    // per request, so its read reaches the entered space alone.
     authHeaders.set("x-space-id", scope.spaceId);
-    const spansSpaces =
-      orgSpaces !== undefined && c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD;
+    const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
       : (request) => dispatchInProcess(request, scope.spaceId);

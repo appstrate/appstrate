@@ -25,6 +25,7 @@
 
 import {
   and,
+  asc,
   eq,
   gt,
   lt,
@@ -1323,53 +1324,57 @@ export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
 ): Promise<ResolvedChatAttachment> {
   const actor: Actor = { type: "user", id: request.userId };
-  const fileId = isFileUri(request.uri) ? parseFileUri(request.uri) : null;
-  const uploadId = fileId ? null : parseUploadUri(request.uri);
-  if (isFileUri(request.uri) && !fileId) {
-    throw invalidRequest(`Malformed file URI '${request.uri}'`);
-  }
-  if (!fileId && !uploadId) {
-    throw invalidRequest(`Attachment URI must be an 'upload://' or 'appfile://' URI`);
+  let source: { fileId: string } | { uploadId: string };
+  if (isFileUri(request.uri)) {
+    const fileId = parseFileUri(request.uri);
+    if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
+    source = { fileId };
+  } else {
+    const uploadId = parseUploadUri(request.uri);
+    if (!uploadId) {
+      throw invalidRequest(`Attachment URI must be an 'upload://' or 'appfile://' URI`);
+    }
+    source = { uploadId };
   }
 
   // The attachment resolves in the space it belongs to, which must be one the
   // caller may attach in: a file or upload of any other space is as absent as a
   // missing one.
-  const [owner] = fileId
-    ? await db
-        .select({ spaceId: files.spaceId })
-        .from(files)
-        .where(and(eq(files.id, fileId), eq(files.orgId, request.orgId)))
-        .limit(1)
-    : await db
-        .select({ spaceId: uploads.spaceId })
-        .from(uploads)
-        .where(and(eq(uploads.id, uploadId!), eq(uploads.orgId, request.orgId)))
-        .limit(1);
+  const [owner] =
+    "fileId" in source
+      ? await db
+          .select({ spaceId: files.spaceId })
+          .from(files)
+          .where(and(eq(files.id, source.fileId), eq(files.orgId, request.orgId)))
+          .limit(1)
+      : await db
+          .select({ spaceId: uploads.spaceId })
+          .from(uploads)
+          .where(and(eq(uploads.id, source.uploadId), eq(uploads.orgId, request.orgId)))
+          .limit(1);
   const space = request.spaces.find((candidate) => candidate.id === owner?.spaceId);
   if (!space) {
-    throw notFound(fileId ? `File '${fileId}' not found` : `Upload '${uploadId}' not found`);
+    throw notFound(
+      "fileId" in source
+        ? `File '${source.fileId}' not found`
+        : `Upload '${source.uploadId}' not found`,
+    );
   }
   const scope: SpaceScope = { orgId: request.orgId, spaceId: space.id };
   // Before the ACL read and above all before an upload is materialized: a caller the chat
   // refuses in this space leaves no file behind.
-  await request.beforeResolve?.(space.id);
+  await request.beforeResolve(space.id);
 
-  if (fileId) {
-    const resolved = await getFileForActor(scope, actor, fileId, space.permissions);
-    if (!resolved) throw notFound(`File '${fileId}' not found`);
-    const { row } = resolved;
-    return {
-      uri: fileUri(row.id),
-      name: row.name,
-      mime: row.mime,
-      size: row.size,
-      spaceId: space.id,
-    };
+  let row: Awaited<ReturnType<typeof createFileFromUpload>>;
+  if ("fileId" in source) {
+    const resolved = await getFileForActor(scope, actor, source.fileId, space.permissions);
+    if (!resolved) throw notFound(`File '${source.fileId}' not found`);
+    row = resolved.row;
+  } else {
+    row = await createFileFromUpload(scope, actor, source.uploadId, {
+      chatSessionId: request.chatSessionId,
+    });
   }
-  const row = await createFileFromUpload(scope, actor, uploadId!, {
-    chatSessionId: request.chatSessionId,
-  });
   return {
     uri: fileUri(row.id),
     name: row.name,
@@ -1630,7 +1635,7 @@ export async function listFilesForActor(
 // ---------------------------------------------------------------------------
 
 /**
- * Container-teardown for a deleted run set, chat session, or end-user: decide,
+ * Container-teardown for a deleted run set, chat-session set, or end-user: decide,
  * per contained file, whether to DETACH it (a live consumer outside the
  * deleted set still references it — the "durable & chainable" promise) or DELETE
  * it (nothing else needs it). Replaces the blind FK cascade for these
@@ -1673,35 +1678,38 @@ export async function listFilesForActor(
 export async function detachOrDeleteContainedFiles(
   container:
     | { runIds: string[]; orgId: string }
-    | { chatSessionId: string }
+    | { chatSessionIds: string[] }
     | { endUserId: string; orgId: string },
   tx?: DbOrTx,
 ): Promise<void> {
   const runIds = "runIds" in container ? container.runIds : null;
   // An empty run set contains nothing — skip the transaction entirely.
   if (runIds && runIds.length === 0) return;
-  const chatSessionId = "chatSessionId" in container ? container.chatSessionId : null;
+  const chatSessionIds = "chatSessionIds" in container ? container.chatSessionIds : null;
+  // An empty session set contains nothing, same as an empty run set.
+  if (chatSessionIds && chatSessionIds.length === 0) return;
   const endUserId = "endUserId" in container ? container.endUserId : null;
 
   const containedWhere = runIds
     ? inArray(files.runId, runIds)
-    : chatSessionId
-      ? eq(files.chatSessionId, chatSessionId)
+    : chatSessionIds
+      ? inArray(files.chatSessionId, chatSessionIds)
       : eq(files.endUserId, endUserId!);
 
   const teardown = async (exec: DbOrTx): Promise<number> => {
-    // Org-first (see the doc comment). One container, one org: supplied by the
-    // caller, or read from the chat session for the module-boundary variant.
-    let orgId: string | null = "orgId" in container ? container.orgId : null;
-    if (orgId === null) {
-      const [session] = await exec
-        .select({ orgId: chatSessions.orgId })
-        .from(chatSessions)
-        .where(eq(chatSessions.id, chatSessionId!))
-        .limit(1);
-      orgId = session?.orgId ?? null;
-    }
-    if (orgId !== null) {
+    // Org-first (see the doc comment). Supplied by the caller, or read from the chat sessions
+    // for the module-boundary variant; locked in id order so two teardowns cannot cross.
+    const orgIds: string[] =
+      "orgId" in container
+        ? [container.orgId]
+        : (
+            await exec
+              .selectDistinct({ orgId: chatSessions.orgId })
+              .from(chatSessions)
+              .where(inArray(chatSessions.id, chatSessionIds!))
+              .orderBy(asc(chatSessions.orgId))
+          ).map((session) => session.orgId);
+    for (const orgId of orgIds) {
       await exec
         .select({ id: organizations.id })
         .from(organizations)
@@ -1741,7 +1749,7 @@ export async function detachOrDeleteContainedFiles(
       await exec
         .update(files)
         .set(
-          runIds ? { runId: null } : chatSessionId ? { chatSessionId: null } : { endUserId: null },
+          runIds ? { runId: null } : chatSessionIds ? { chatSessionId: null } : { endUserId: null },
         )
         .where(inArray(files.id, detachIds));
     }

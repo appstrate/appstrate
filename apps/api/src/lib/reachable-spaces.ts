@@ -5,7 +5,7 @@ import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/
 import type { AppEnv } from "../types/index.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
-import type { SpaceRoleRef } from "./space-role.ts";
+import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
 import { forbidden } from "./errors.ts";
 import { dispatchSpacePin } from "./internal-dispatch.ts";
 import {
@@ -38,7 +38,9 @@ export interface ReachableSpace {
  * is not reached; a principal without an org role reaches none, and a
  * request pinned to a space reaches that space only: by its credential
  * (`credentialSpaceId`: a space API key, a space-bound token), else by the
- * space-pinned MCP endpoint dispatching it (`dispatchSpacePin`).
+ * space-pinned MCP endpoint dispatching it (`dispatchSpacePin`). A credential
+ * bound to a SET of spaces (`credentialSpaceIds`) reaches those alone, within
+ * whatever a pin leaves.
  *
  * `orgRole` is the caller's role in `orgId`, read off the request by default; a
  * read crossing into another organization names it (`ForeignOrgStanding`).
@@ -76,8 +78,9 @@ async function resolveReachableSpaces(
     personaMemberships(personaFor(c, orgId)),
   );
   const pinned = c.get("credentialSpaceId") ?? dispatchSpacePin(c);
+  const allowed = c.get("credentialSpaceIds");
   return entries.flatMap(({ space, role }) =>
-    role && (!pinned || space.id === pinned)
+    role && (!pinned || space.id === pinned) && (!allowed || allowed.includes(space.id))
       ? [
           {
             id: space.id,
@@ -93,6 +96,17 @@ async function resolveReachableSpaces(
         ]
       : [],
   );
+}
+
+/** A reachable space as the wire names it: the role by its wire name, the set by value. */
+export function toReachableSpaceWire(space: ReachableSpace) {
+  return {
+    id: space.id,
+    name: space.name,
+    role: toSpaceRoleWire(space.role)!.name,
+    permissions: space.permissions,
+    credentialProxyOpen: space.credentialProxyOpen,
+  };
 }
 
 /**

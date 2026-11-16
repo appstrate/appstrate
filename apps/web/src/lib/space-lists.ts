@@ -7,7 +7,7 @@
  * it each list is the current space's.
  */
 
-import { CHAT_ACTING_PERMISSIONS } from "@appstrate/core/chat-contract";
+import { chatActsIn } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
 import { isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
 import { isSpaceEnterable } from "../hooks/use-current-space";
@@ -183,22 +183,24 @@ export function holdsOverview(path: RoutePath | undefined): boolean {
 }
 
 /**
- * In the mode, a route that spans spaces opens where some space admits it, whatever the working
- * space grants: a list's route (its rows are every space's) and a route serving the organization
- * (`spansSpaces`: the chat). `undefined` for any other route, which the working space decides.
+ * A route that spans spaces opens where some space admits it, whatever the working space grants:
+ * a route serving the organization (`spansSpaces`: the chat) in every mode, a list's route (its
+ * rows are every space's) in « Vue d'ensemble » only. `undefined` for any other route, which the
+ * working space decides, as does every route before the space listing has answered.
  */
-export function overviewRouteVerdict(
+export function spanningRouteVerdict(
   path: RoutePath,
   spaces: readonly ListedSpace[] | undefined,
+  overview: boolean,
 ): "granted" | "denied" | undefined {
-  const list = listOf(path);
+  const list = overview ? listOf(path) : undefined;
   const admits: Admits | undefined = list
     ? listAdmits(list)
     : spansSpaces(path)
       ? routeAdmits(path)
       : undefined;
-  if (!admits) return undefined;
-  return (spaces ?? []).some(admittedIn(admits)) ? "granted" : "denied";
+  if (!admits || !spaces) return undefined;
+  return spaces.some(admittedIn(admits)) ? "granted" : "denied";
 }
 
 /**
@@ -209,7 +211,9 @@ export function actingSpaces<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
   orgPermissions: readonly string[] | undefined,
 ): S[] {
-  return spacesWhere(spaces, orgPermissions, (can) => CHAT_ACTING_PERMISSIONS.every(can));
+  return spacesWhere(spaces, orgPermissions, (_can, space) =>
+    chatActsIn([...(orgPermissions ?? []), ...space.permissions]),
+  );
 }
 
 /**

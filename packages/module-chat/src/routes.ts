@@ -54,6 +54,7 @@ import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
 import { createSession, sessionVisible, touchedSpaceIds, touchedUnder } from "./persistence.ts";
 import {
+  readableSpaceIds,
   spacesHolding,
   canActIn,
   conversationOrigin,
@@ -304,7 +305,7 @@ function sessionScope(c: Context<ChatEnv>): SessionScope {
   return {
     orgId: c.get("orgId"),
     userId: c.get("user").id,
-    readable: spacesHolding(c.get("reachable"), "chat:read").map((space) => space.id),
+    readable: readableSpaceIds(c.get("reachable")),
   };
 }
 
@@ -381,7 +382,8 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         restricted: origin?.restricted ?? false,
       });
       notifySessionUpdate(row.id, row.orgId, row.userId);
-      return c.json(toSessionDto(row, row.spaceId ? [row.spaceId] : []), 201);
+      const [dto] = await toSessionDtos([row]);
+      return c.json(dto, 201);
     },
 
     // GET …/sessions/:id — the conversation's messages, in seq order (history load)

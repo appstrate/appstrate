@@ -58,10 +58,10 @@ import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import {
   actingSpaces,
   conversationOrigin,
-  spacesHolding,
+  readableSpaceIds,
   type ChatPlatformDeps,
 } from "./platform-services.ts";
-import type { OrganizationSpaces } from "./pi-chat/mcp-tools.ts";
+import type { TurnSpaces } from "./pi-chat/mcp-tools.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
@@ -333,7 +333,7 @@ export async function handleChatStream(
           sessionId,
           orgId,
           user.id,
-          spacesHolding(reachable, "chat:read").map((space) => space.id),
+          readableSpaceIds(reachable),
           bodySkills,
           originRequest,
         )
@@ -411,23 +411,18 @@ export async function handleChatStream(
     // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
-    // before the act (see `touchSessionSpace`; the origin space is touched by definition). A
-    // space outside the set — unknown, unreachable, or reached without one of the grants — is
-    // refused: nothing is recorded and the call is not made. Skills are procedures, not data:
-    // injecting one touches no space; only a call or a `read_resource` naming a space does.
-    const organization: OrganizationSpaces = {
+    // before the act (see `touchSessionSpace`; the origin space is touched by definition).
+    // The tools refuse a space outside the set — unknown, unreachable, or reached without one
+    // of the grants — before they record: nothing is recorded and the call is not made. Skills
+    // are procedures, not data: injecting one touches no space; only a call or a
+    // `read_resource` naming a space does.
+    const organization: TurnSpaces = {
       spaces,
       touch: async (touchedSpaceId) => {
-        const space = spaces.find((candidate) => candidate.id === touchedSpaceId);
-        if (!space) {
-          throw new Error(
-            `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${spaces.map((s) => `\`${s.id}\``).join(", ")}).`,
-          );
-        }
         if (!sessionId || !lastMessage?.id) return;
         await touchSessionSpace(
           { id: sessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
-          space.id,
+          touchedSpaceId,
         );
       },
       spaceOfUri: async (uri) => {
@@ -439,6 +434,8 @@ export async function handleChatStream(
       skills: conv.selection,
       originSpace,
       restricted: conv.restricted,
+      // An origin space the author can no longer act in (a limited conversation was refused above).
+      originLapsed: conv.spaceId !== null && !originSpace,
       spaces,
       callerPermissions,
       organization,
@@ -482,11 +479,21 @@ export async function handleChatStream(
     { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
   > = turn
     .then(
-      ({ skills, permissions, capabilities, spaces, originSpace, restricted, callerPermissions }) =>
+      ({
+        skills,
+        permissions,
+        capabilities,
+        spaces,
+        originSpace,
+        restricted,
+        originLapsed,
+        callerPermissions,
+      }) =>
         buildCallerContextBlock(c, {
           spaces,
           origin: originSpace,
           restricted,
+          originLapsed,
           user,
           // UI language forwarded by the client; validated/defaulted in the builder.
           locale: c.req.header("X-Chat-Locale"),
@@ -513,6 +520,7 @@ export async function handleChatStream(
                   orgRole,
                   permissions: [...callerPermissions],
                   viewAs: persona,
+                  spaceIds: spaces.map((space) => space.id),
                 })}`,
                 "x-org-id": orgId,
               },
@@ -573,9 +581,8 @@ export async function handleChatStream(
   // error with no MCP/stop-controller to leak. Only the last message can carry
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
-    // The spaces an attachment may resolve in, each under the caller's set there: the
-    // turn's spaces. The container ACL reads as wide as
-    // the caller does: an `appfile://` the user picked from the gallery — which
+    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
+    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
     // `runs:read-all` widens to the whole space's run outputs — must still resolve when
     // they attach it. Picker and attach answer the same set.
     const attachmentSpaces = spaces.map((space) => ({
@@ -791,6 +798,8 @@ export async function handleChatStream(
       viewAs: persona,
       // What `resources/read` serves without `skills:*`: the definitions this prompt injected.
       injectedSkills,
+      // The spaces the bearer reaches: the turn's, whichever endpoint it connects to.
+      spaceIds: spaces.map((space) => space.id),
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -828,7 +837,7 @@ export async function handleChatStream(
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
-          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, reachable),
+          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, spaces),
           listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).

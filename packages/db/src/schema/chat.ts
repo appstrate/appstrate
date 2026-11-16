@@ -13,6 +13,7 @@ import {
   unique,
   uniqueIndex,
   primaryKey,
+  foreignKey,
   boolean,
   check,
 } from "drizzle-orm/pg-core";
@@ -103,18 +104,26 @@ export const chatSessions = pgTable(
 export const chatSessionSpaces = pgTable(
   "chat_session_spaces",
   {
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => chatSessions.id, { onDelete: "cascade" }),
-    spaceId: text("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    spaceId: text("space_id").notNull(),
+    /** The session's org, and so the space's: both composite FKs below pin it. */
+    orgId: uuid("org_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.sessionId, table.spaceId] }),
     // Scanned by the space FK's cascade.
     index("idx_chat_session_spaces_space").on(table.spaceId),
+    foreignKey({
+      name: "chat_session_spaces_session_org_fk",
+      columns: [table.sessionId, table.orgId],
+      foreignColumns: [chatSessions.id, chatSessions.orgId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "chat_session_spaces_space_org_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("cascade"),
   ],
 );
 

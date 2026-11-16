@@ -101,6 +101,11 @@ export type AppEnv = {
     /** The space the credential itself pins (API key, strategy); `X-Space-Id` never sets it. */
     credentialSpaceId?: string;
     /**
+     * The spaces a credential bound to a SET reaches (`AuthResolution.spaceIds`): the reach is
+     * cut to them and a request acts in one of them. Absent for a credential bound to none.
+     */
+    credentialSpaceIds?: readonly string[];
+    /**
      * Resolved space row (id/orgId/isDefault) set by
      * `requireSpaceContext()` alongside `spaceId`. Services called from
      * space-scoped routes should accept this shape directly instead of taking

@@ -96,6 +96,11 @@ interface LoopbackClaims extends LoopbackIdentity {
   chatSessionId?: string | null;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
   injectedSkills?: InjectedSkills;
+  /**
+   * The turn's spaces, as a credential allowlist (`AuthResolution.spaceIds`): the only spaces
+   * the bearer reaches; MCP bearer only. Absent means unbound — the inference bearer.
+   */
+  spaceIds?: string[];
 }
 
 function sign(payload: string): string {
@@ -111,6 +116,7 @@ function mint(
   chatSessionId?: string | null,
   viewAs?: unknown,
   injectedSkills?: InjectedSkills,
+  spaceIds?: readonly string[],
 ): string {
   const payload = Buffer.from(
     JSON.stringify({
@@ -123,6 +129,7 @@ function mint(
       ...(injectedSkills && Object.keys(injectedSkills.skills).length > 0
         ? { injectedSkills }
         : {}),
+      ...(spaceIds ? { spaceIds: [...spaceIds] } : {}),
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -157,10 +164,15 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own `/api/mcp/o/:org` connection.
+ * its own connection: the organization endpoint (`/api/mcp/o/:org`), or the one pinned to
+ * the origin space of a limited conversation.
+ *
+ * `spaceIds` are the turn's spaces and the ONLY ones the bearer reaches, on both endpoints
+ * (the generic credential allowlist, `AuthResolution.spaceIds`); each request it makes acts
+ * in one of them.
  *
  * `permissions` MUST be the caller's already-resolved permission set (the union over
- * the conversation's acting set): the MCP meta-tools re-enter the platform in-process
+ * the turn's spaces): the MCP meta-tools re-enter the platform in-process
  * and re-authorize each underlying operation against exactly this set, so
  * carrying the caller's own permissions (narrowed by `turnPermissions` when the
  * turn may not author agents) never amplifies beyond what the caller could
@@ -176,11 +188,22 @@ export function mintMcpLoopbackToken(
     permissions: readonly string[];
     viewAs?: unknown;
     injectedSkills?: InjectedSkills;
+    /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
+    spaceIds?: readonly string[];
   },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, viewAs, injectedSkills, ...rest } = identity;
-  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs, injectedSkills);
+  const { permissions, viewAs, injectedSkills, spaceIds, ...rest } = identity;
+  return mint(
+    rest,
+    permissions,
+    false,
+    opts?.ttlMs ?? TOKEN_TTL_MS,
+    null,
+    viewAs,
+    injectedSkills,
+    spaceIds,
+  );
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {
@@ -215,6 +238,13 @@ export const chatLoopbackStrategy: AuthStrategy = {
     // A malformed map widens nothing: dropped, `skill://` reads fall back to `skills:read`.
     const injected = injectedSkillsSchema.safeParse(claims.injectedSkills);
     const injectedSkills = injected.success ? injected.data : undefined;
+    // An allowlist narrows, so a malformed one is refused (fail closed) rather than dropped.
+    if (
+      claims.spaceIds !== undefined &&
+      (!Array.isArray(claims.spaceIds) || !claims.spaceIds.every((id) => typeof id === "string"))
+    ) {
+      return null;
+    }
 
     return {
       user: { id: claims.userId, email: claims.email, name: claims.name },
@@ -228,6 +258,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // is server-minted from a process-local secret (see top-of-file rationale).
       firstPartyLoopback: claims.firstPartyLoopback === true,
       permissions,
+      ...(claims.spaceIds !== undefined ? { spaceIds: claims.spaceIds } : {}),
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
       // the preview). `chatSessionId` is stamped on the usage row by the
       // llm-proxy; `viewAs` is re-published before any permission is resolved.

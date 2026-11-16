@@ -67,8 +67,13 @@ async function listSessionIds(ctx: TestContext, query = ""): Promise<string[]> {
 
 const orgCallAs = (ctx: TestContext, id: string) => orgCall(ctx, `/sessions/${id}`);
 
-const touch = (sessionId: string, spaceId: string) =>
-  db.insert(chatSessionSpaces).values({ sessionId, spaceId });
+const touch = async (sessionId: string, spaceId: string) => {
+  const [session] = await db
+    .select({ orgId: chatSessions.orgId })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId));
+  await db.insert(chatSessionSpaces).values({ sessionId, spaceId, orgId: session!.orgId });
+};
 
 const touchedBy = async (sessionId: string): Promise<string[]> =>
   (
@@ -203,6 +208,24 @@ describe("chat sessions", () => {
         spaceId: spaceB,
         restricted: true,
       });
+    });
+
+    it("records a touched space only within the conversation's organization (composite FKs)", async () => {
+      const created = await createSession(ctx);
+      const foreign = await createTestContext({ orgSlug: "othertenant" });
+      // The space is another organization's: refused whatever `org_id` claims.
+      for (const orgId of [ctx.orgId, foreign.orgId]) {
+        await expect(
+          (async () => {
+            await db
+              .insert(chatSessionSpaces)
+              .values({ sessionId: created.id, spaceId: foreign.defaultSpaceId, orgId });
+          })(),
+        ).rejects.toThrow();
+      }
+      expect(await touchedBy(created.id)).toEqual([]);
+      await touch(created.id, spaceB);
+      expect(await touchedBy(created.id)).toEqual([spaceB]);
     });
 
     it("deletes the conversation with its origin space", async () => {

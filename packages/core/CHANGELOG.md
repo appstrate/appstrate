@@ -15,12 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ReachableSpaceGrant`, `ReachedSpaces`** (`@appstrate/core/module`, #1886): a space the caller reaches, with
   their role, effective permissions and direct-access switch (`credentialProxyOpen`) there, and whether the credential pins the reach, as
   `PlatformServices.reachableSpaces` answers.
-- **`CHAT_ACTING_PERMISSIONS`** (`@appstrate/core/chat-contract`, #1886): the permissions a space must
-  grant for a chat conversation to act in it (`chat:write`, `chat:read`, `mcp:read`), the one
-  definition behind the chat's acting set, the MCP server's reach for a chat's bearer and the web shell.
-- **`spaceIdRefusal`, `describeSpace`, `NamedSpace`, `SpaceIdRefusal`**
-  (`@appstrate/core/mcp-result`, #1886): the refusal of a missing or unknown `space_id` on an
-  organization-wide MCP connection, shared by the MCP server and the chat's local tools.
+- **`CHAT_ACTING_PERMISSIONS`, `chatActsIn`** (`@appstrate/core/chat-contract`, #1886): the permissions a
+  space must grant for a chat conversation to act in it (`chat:write`, `chat:read`, `mcp:read`), and
+  the predicate over a space's effective set (a `Set` or an array): the one definition behind the
+  chat's acting set and the web shell's judgement.
+- **`AuthResolution.spaceIds`** (`@appstrate/core/module`, #1886): a space allowlist for a credential
+  bound to a SET of spaces. It reaches those alone and each request it makes acts in one of them;
+  `X-Space-Id` stays free within the set. The chat signs its turn's spaces into its MCP loopback bearer.
+- **`describeSpace`, `spaceIdRefusal`, `NamedSpace`** (`@appstrate/core/mcp-spaces`, #1886): the
+  refusal of a missing or unknown `space_id` on an organization-wide MCP connection, shared by the
+  MCP server and the chat's local tools.
+- **`ChatAttachmentRequest.beforeResolve`** (`@appstrate/core/chat-contract`, #1886) is required: the
+  platform calls it with the space a file belongs to before anything is materialized there.
 
 ### Fixed
 

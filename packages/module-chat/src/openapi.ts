@@ -450,6 +450,7 @@ export const chatPaths = {
                 modelId: { type: "string" },
                 spaceId: {
                   type: "string",
+                  minLength: 1,
                   description:
                     "The origin space of a conversation this turn creates, one of the spaces it can act in (else a 400 naming the field). Ignored for an existing conversation. Absent from the overview.",
                 },

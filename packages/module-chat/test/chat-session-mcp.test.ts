@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A conversation's loopback bearer against the REAL organization MCP
- * endpoint (`/api/mcp/o/:org`).
+ * A chat turn's loopback bearer against the REAL MCP endpoints (`/api/mcp/o/:org`, and
+ * `/api/mcp/o/:org/s/:space`).
  *
  * The bearer is a CEILING, not a grant: its permission list is the union of the
- * caller's effective sets over every space they reach, and each space entry
+ * caller's effective sets over the turn's spaces, and each space entry
  * recomputes `(org ∪ role in that space) ∩ ceiling`. So a permission held in one
  * space is in the list and still cannot act in another where the caller's role
- * lacks it. The caller here is `operator` in the default space, `admin` in
- * "Gestion" and `viewer` in "Lecture".
+ * lacks it. It also carries the turn's spaces as a credential allowlist: it reaches
+ * those alone, on both endpoints, and each request acts in one of them. The caller
+ * here is `operator` in the default space, `admin` in "Gestion" and `viewer` in
+ * "Lecture"; the turn's spaces are the first two (a viewer holds no `chat:write`).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -62,7 +64,14 @@ const unionOf = (...presets: Array<"operator" | "admin" | "viewer">) => [
   ]),
 ];
 
-function bearer(user: TestContext, permissions: readonly string[]): Record<string, string> {
+/** The turn's spaces: where the caller can act (Lecture's viewer holds no `chat:write`). */
+const turnSpaces = () => [owner.defaultSpaceId, gestion.id];
+
+function bearer(
+  user: TestContext,
+  permissions: readonly string[],
+  spaceIds: readonly string[] = turnSpaces(),
+): Record<string, string> {
   return {
     Authorization: `Bearer ${mintMcpLoopbackToken({
       userId: user.user.id,
@@ -71,6 +80,7 @@ function bearer(user: TestContext, permissions: readonly string[]): Record<strin
       orgId: owner.orgId,
       orgRole: "member",
       permissions,
+      spaceIds,
     })}`,
     "X-Org-Id": owner.orgId,
   };
@@ -81,15 +91,26 @@ async function rpc(
   headers: Record<string, string>,
   method: string,
   params: Record<string, unknown>,
+  pinnedSpaceId?: string,
 ): Promise<JsonRpcEnvelope> {
-  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId));
+  const { envelope } = await post(headers, method, params, pinnedSpaceId);
+  return envelope;
+}
+
+async function post(
+  headers: Record<string, string>,
+  method: string,
+  params: Record<string, unknown>,
+  pinnedSpaceId?: string,
+): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
+  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId, pinnedSpaceId));
   const res = await app.request(`${url.pathname}${url.search}`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
   });
   const body = await res.text();
-  return body ? (JSON.parse(body) as JsonRpcEnvelope) : {};
+  return { status: res.status, envelope: body ? (JSON.parse(body) as JsonRpcEnvelope) : {} };
 }
 
 async function invoke(
@@ -129,7 +150,7 @@ beforeEach(async () => {
   });
 });
 
-describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
+describe("a chat turn's loopback bearer on the MCP endpoints", () => {
   it("carries a permission only one space grants, without lending it to another", async () => {
     // The ceiling holds `agents:write` (Gestion's admin) though the default space's operator lacks it.
     expect(presetPermissions("operator")).not.toContain("agents:write");
@@ -152,7 +173,7 @@ describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
     expect((inDefault.data.space as { id: string }).id).toBe(owner.defaultSpaceId);
   });
 
-  it("refuses a space outside the chat's acting set (a viewer there) like one the caller does not reach", async () => {
+  it("refuses a space outside the bearer's allowlist (a viewer there) like one the caller does not reach", async () => {
     const headers = bearer(caller, ceiling);
     // The caller reaches Lecture as a viewer, who holds no `chat:write`: the chat acts nowhere there.
     expect(presetPermissions("viewer")).not.toContain("chat:write");
@@ -167,6 +188,29 @@ describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
     expect(unknown.isError).toBe(true);
     expect(unknown.data.code).toBe("unknown_space");
     expect(unknown.data.accepted as string[]).not.toContain(foreign.id);
+  });
+
+  it("enters no space outside its allowlist, though the caller reaches it, on the organization and the pinned endpoints", async () => {
+    // The caller is an admin in Gestion; the bearer allowlists the default space alone.
+    const headers = bearer(caller, ceiling, [owner.defaultSpaceId]);
+    const named = await invoke(headers, gestion.id, "listAgents");
+    expect(named.isError).toBe(true);
+    expect(named.data.code).toBe("unknown_space");
+    expect(named.data.accepted as string[]).toEqual([owner.defaultSpaceId]);
+
+    // The same bearer on the endpoint pinned to Gestion: refused as a space it does not reach.
+    const pinnedOutside = await post(headers, "tools/list", {}, gestion.id);
+    expect(pinnedOutside.status).toBe(404);
+    // On the pinned endpoint of a space it allowlists, it is served.
+    const pinnedInside = await post(headers, "tools/list", {}, owner.defaultSpaceId);
+    expect(pinnedInside.status).toBe(200);
+    expect(pinnedInside.envelope.result?.tools).toBeDefined();
+  });
+
+  it("refuses an empty allowlist without claiming the caller holds no role", async () => {
+    const { status, envelope } = await post(bearer(caller, ceiling, []), "tools/list", {});
+    expect(status).toBe(403);
+    expect(JSON.stringify(envelope)).toContain("this credential reaches");
   });
 
   it("serves an external org-wide client every space it reaches, the viewer one included", async () => {
@@ -184,7 +228,7 @@ describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
     expect(listed).toContain(lecture.id);
   });
 
-  it("lists the skills of the acting set alone", async () => {
+  it("lists the skills of the bearer's spaces alone", async () => {
     const encode = (text: string) => new TextEncoder().encode(text);
     const seedSkill = async (id: string, name: string, spaceId: string) => {
       await seedPackage({
@@ -274,9 +318,9 @@ describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
     expect(ids).not.toContain(inGestion.id);
   });
 
-  it("lists the acting set in every tool, so a surface is never another caller's", async () => {
-    const listed = async (user: TestContext) => {
-      const envelope = await rpc(bearer(user, ceiling), "tools/list", {});
+  it("lists the bearer's spaces in every tool, so a surface is never another caller's", async () => {
+    const listed = async (user: TestContext, spaceIds: readonly string[]) => {
+      const envelope = await rpc(bearer(user, ceiling, spaceIds), "tools/list", {});
       const tools = envelope.result?.tools as Array<{
         name: string;
         inputSchema: { properties: { space_id: { enum: string[] } } };
@@ -288,7 +332,9 @@ describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
     // one caller the other's spaces.
     const stranger = await memberContext(owner, "member", "operator");
     // Lecture (viewer: no `chat:write`) is reached but is no place the chat acts.
-    expect((await listed(caller)).sort()).toEqual([owner.defaultSpaceId, gestion.id].sort());
-    expect(await listed(stranger)).toEqual([owner.defaultSpaceId]);
+    expect((await listed(caller, turnSpaces())).sort()).toEqual(
+      [owner.defaultSpaceId, gestion.id].sort(),
+    );
+    expect(await listed(stranger, turnSpaces())).toEqual([owner.defaultSpaceId]);
   });
 });

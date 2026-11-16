@@ -953,6 +953,15 @@ interface AuthResolutionBase {
    * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
   spaceId?: string;
+  /**
+   * Optional space ALLOWLIST: the credential is bound to this SET of spaces and reaches only
+   * those (a list spanning spaces is cut to them, entering any other space is a 404), and each
+   * request it makes acts in ONE space of the set (the MCP endpoint dispatches it pinned to the
+   * space it entered). Unlike {@link spaceId} it never pins `X-Space-Id`: the request still
+   * names its space, from within the set. An empty list reaches nothing. Propagated to
+   * `c.get("credentialSpaceIds")`.
+   */
+  spaceIds?: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */

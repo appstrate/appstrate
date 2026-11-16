@@ -18,7 +18,7 @@
  * and `list_skills` lists the acting spaces' skills through `skills/list`.
  */
 
-import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-result";
+import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
 import {
@@ -162,12 +162,12 @@ export interface PiTurnBudget {
  * limited conversation's pinned endpoint serves its origin space alone), and the record of
  * the spaces the conversation touched.
  */
-export interface OrganizationSpaces {
+export interface TurnSpaces {
   spaces: readonly NamedSpace[];
   /**
-   * Record `spaceId` on the session BEFORE the call naming it is dispatched. Throws, and
-   * the call is not made, for a space outside `spaces` (unknown or unreachable ones
-   * included, none recorded) and when the space cannot be recorded.
+   * Record `spaceId` (one of `spaces`: callers refuse the others first) on the session BEFORE
+   * the call naming it is dispatched. Throws, and the call is not made, when the space cannot
+   * be recorded.
    */
   touch(spaceId: string): Promise<void>;
   /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */
@@ -178,7 +178,7 @@ type BuildPlatformMcpToolsOptions = {
   /** Platform MCP endpoint (`/api/mcp/o/:org[/s/:space]?context=injected`). */
   url: string;
   /** The spaces a call may name: each space-acting call takes its `space_id`. */
-  organization: OrganizationSpaces;
+  organization: TurnSpaces;
   /**
    * The space the URL pins (a limited conversation's origin): its calls carry no `space_id`,
    * and `run_and_wait`'s REST hops name it in `X-Space-Id`.
@@ -404,7 +404,7 @@ function makeForwardExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
-  organization: OrganizationSpaces,
+  organization: TurnSpaces,
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -418,8 +418,11 @@ function makeForwardExtension(
       async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        // The call names its space: recorded before it is made.
+        // The call names its space: refused like `run_and_wait`'s when it is outside the turn's
+        // spaces, else recorded before it is made.
         if (typeof args.space_id === "string") {
+          const refusal = spaceIdRefusal(organization.spaces, args.space_id);
+          if (refusal) return withTurnBudgetNote(toPiToolResult({ ...refusal }), turnBudget);
           await organization.touch(args.space_id);
         }
         const client = await untilAborted(getClient(), callSignal);
@@ -445,7 +448,7 @@ function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
-  organization: OrganizationSpaces,
+  organization: TurnSpaces,
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -473,7 +476,11 @@ function makeReadResourceExtension(
         }
         // A resource of a space the conversation reads from touches it.
         const resourceSpace = await organization.spaceOfUri(uri);
-        if (resourceSpace) await organization.touch(resourceSpace);
+        if (resourceSpace) {
+          const refusal = spaceIdRefusal(organization.spaces, resourceSpace);
+          if (refusal) throw new Error(refusal.error);
+          await organization.touch(resourceSpace);
+        }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
         const content = result.contents.map((c) => ({
@@ -593,7 +600,7 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
  */
 async function namedSpace(
   params: unknown,
-  organization: OrganizationSpaces,
+  organization: TurnSpaces,
 ): Promise<
   { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
 > {
@@ -618,7 +625,7 @@ function makeRunAndWaitExtension(
     /** Auth + org headers; the space rides in `X-Space-Id`, set per call from the space it names. */
     headers: Record<string, string>;
     /** The spaces one of which each call names. */
-    organization: OrganizationSpaces;
+    organization: TurnSpaces;
     /** The space the endpoint pins, when it does: no call names one. */
     pinnedSpaceId?: string;
     /** Transport for the launch POST and the poll loop — see the option above. */

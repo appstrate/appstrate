@@ -9,10 +9,13 @@ import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
-import { callerReachableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
-import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import {
+  callerReachableSpaces,
+  toReachableSpaceWire,
+  type ReachableSpace,
+} from "../../lib/reachable-spaces.ts";
 import type { McpSurface } from "./tools.ts";
-import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-result";
+import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
 
 /** A space this connection may act in, with the caller's permissions there. */
@@ -51,13 +54,16 @@ export async function listReachableSpaces(
 ): Promise<McpSpace[]> {
   return (await callerReachableSpaces(c, orgId))
     .filter((space) => space.permissions.has("mcp:read"))
-    .map((space) => ({
-      id: space.id,
-      name: space.name,
-      role: toSpaceRoleWire(space.role)!.name,
-      permissions: space.permissions,
-      surface: surfaceOf(space.permissions, space),
-    }));
+    .map((space) => {
+      const wire = toReachableSpaceWire(space);
+      return {
+        id: wire.id,
+        name: wire.name,
+        role: wire.role,
+        permissions: wire.permissions,
+        surface: surfaceOf(wire.permissions, space),
+      };
+    });
 }
 
 /**

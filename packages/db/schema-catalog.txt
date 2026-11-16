@@ -43,6 +43,7 @@ column chat_messages.message_id text not null
 column chat_messages.seq bigint not null default nextval('chat_messages_seq_seq'::regclass)
 column chat_messages.session_id text not null
 column chat_session_spaces.created_at timestamp with time zone not null default now()
+column chat_session_spaces.org_id uuid not null
 column chat_session_spaces.session_id text not null
 column chat_session_spaces.space_id text not null
 column chat_sessions.active_stream_id text
@@ -707,9 +708,9 @@ constraint audit_events audit_events_pkey PRIMARY KEY (id)
 constraint chat_messages chat_messages_pkey PRIMARY KEY (seq)
 constraint chat_messages chat_messages_session_id_chat_sessions_id_fk FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 constraint chat_messages uq_chat_messages_session_message UNIQUE (session_id, message_id)
-constraint chat_session_spaces chat_session_spaces_session_id_chat_sessions_id_fk FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 constraint chat_session_spaces chat_session_spaces_session_id_space_id_pk PRIMARY KEY (session_id, space_id)
-constraint chat_session_spaces chat_session_spaces_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint chat_session_spaces chat_session_spaces_session_org_fk FOREIGN KEY (session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE CASCADE
+constraint chat_session_spaces chat_session_spaces_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_pkey PRIMARY KEY (id)
 constraint chat_sessions chat_sessions_restricted_needs_space CHECK (((restricted = false) OR (space_id IS NOT NULL)))

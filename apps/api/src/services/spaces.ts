@@ -22,7 +22,11 @@ import { prefixedId } from "@appstrate/db/ids";
 import { lockOrganizationRow, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
+import {
+  decrementOrgFileBytes,
+  detachOrDeleteContainedFiles,
+  storageKeyToDeletionJob,
+} from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere } from "./package-placement.ts";
@@ -466,24 +470,24 @@ async function deleteSpaceInTx(
     );
   }
 
-  // A conversation's origin space owns the conversation, and `files.chat_session_id` cascades
-  // with it: a file attached from ANOTHER space still dies with the conversation. Enumerate
-  // those with the space's own files, or their objects and bytes would outlive the row.
+  // A conversation originating in this space dies with it (`chat_sessions.space_id` cascades), and
+  // `files.chat_session_id` cascades with the conversation. The origin is not an owner of what the
+  // conversation holds in OTHER spaces: such a file goes through the chat detach-or-delete rule
+  // (a file a run still consumes is kept, detached; the rest is deleted with its outbox job and
+  // byte decrement), BEFORE the enumeration below so nothing is counted twice. Files living in
+  // this space are enumerated plainly: they leave with it.
+  const originSessionIds = (
+    await tx
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(eq(chatSessions.spaceId, spaceId))
+  ).map((row) => row.id);
+  await detachOrDeleteContainedFiles({ chatSessionIds: originSessionIds }, tx);
+
   const docRows = await tx
     .select({ storageKey: files.storageKey, size: files.size })
     .from(files)
-    .where(
-      or(
-        eq(files.spaceId, spaceId),
-        inArray(
-          files.chatSessionId,
-          tx
-            .select({ id: chatSessions.id })
-            .from(chatSessions)
-            .where(eq(chatSessions.spaceId, spaceId)),
-        ),
-      ),
-    );
+    .where(eq(files.spaceId, spaceId));
   const uploadRows = await tx
     .select({ storageKey: uploads.storageKey })
     .from(uploads)

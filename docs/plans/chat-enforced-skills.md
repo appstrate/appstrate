@@ -198,7 +198,7 @@ A conversation (`/api/orgs/{orgId}/chat`, #1886) has a nullable **origin space**
 space selected when it was created, NULL from « Vue d'ensemble ». It is not an owner, but it owns the
 enforced skills:
 
-- **Enforced skills** are the origin space's, exactly as before the feature (`deps.loadEnforcedSkills(orgId,
+- **Enforced skills** are the origin space's (`deps.loadEnforcedSkills(orgId,
 originSpaceId)`), none for a conversation without an origin space or whose author can no longer act there.
   Acting in another space does not load that space's, and neither does an external MCP client acting there.
   A failed read is a 503 for the turn. `GET /api/orgs/{orgId}/chat/enforced-skills?spaceId=` calls the same

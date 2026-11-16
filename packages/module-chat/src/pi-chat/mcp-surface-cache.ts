@@ -3,11 +3,12 @@
 /**
  * Keyed completely: the server derives `instructions` and `tools/list` from `permissions`,
  * `ceiling`, `actor.type`, `contextInjected`, the boot-time catalog and, on the organization
- * endpoint, the caller's reachable spaces (every space-acting tool lists them in its `space_id`, and a space's
- * `credentialProxyOpen` decides which tools it declares), which for the chat's bearer reduce to
- * the minted list, the URL's `context` and pin, and those spaces (enforced by `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a
- * narrower surface a mid-handshake role change stored under the wider key; tool calls are
- * authorized live regardless.
+ * endpoint, the spaces the credential reaches (every space-acting tool lists them in its
+ * `space_id`, and a space's `credentialProxyOpen` decides which tools it declares). For the
+ * chat's bearer those are the turn's spaces, which it allowlists, so the key reduces to the
+ * minted permission list, the URL's `context` and pin, and those spaces (enforced by
+ * `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a narrower surface a mid-handshake role
+ * change stored under the wider key; tool calls are authorized live regardless.
  */
 
 import type { ReachableSpaceGrant } from "@appstrate/core/module";
@@ -21,10 +22,10 @@ export interface PlatformMcpSurface {
 export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 
 /**
- * `permissions` MUST be the list minted into the bearer. The org and space ids of the path
- * reach no descriptor; whether it names a space does, and on the organization endpoint
- * `spaces` (the caller's reach: ids, names, roles, sets and direct-access
- * switches) are written into every one.
+ * `permissions` and `spaces` MUST be the lists minted into the bearer (its permissions and its
+ * space allowlist). The org and space ids of the path reach no descriptor; whether it names a
+ * space does, and on the organization endpoint `spaces` (ids, names, roles, sets and
+ * direct-access switches) are written into every one.
  */
 export function platformMcpSurfaceKey(
   url: string,

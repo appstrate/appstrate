@@ -33,8 +33,7 @@ import {
   listEnforcedChatSkills,
   loadEnforcedChatSkills,
 } from "../../services/chat-enforced-skills.ts";
-import { reachAcrossSpaces } from "../reachable-spaces.ts";
-import { toSpaceRoleWire } from "../space-role.ts";
+import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -90,7 +89,7 @@ function buildPlatformServices(): PlatformServices {
     // before the session row is removed (the module has no DB/storage access).
     cleanupSessionFiles: (chatSessionId, tx) =>
       detachOrDeleteContainedFiles(
-        { chatSessionId },
+        { chatSessionIds: [chatSessionId] },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.
@@ -101,13 +100,10 @@ function buildPlatformServices(): PlatformServices {
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
     reachableSpaces: async (c, orgId) => ({
-      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
-        id: space.id,
-        name: space.name,
-        role: toSpaceRoleWire(space.role)!.name,
-        permissions: [...space.permissions],
-        credentialProxyOpen: space.credentialProxyOpen,
-      })),
+      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => {
+        const wire = toReachableSpaceWire(space);
+        return { ...wire, permissions: [...wire.permissions] };
+      }),
       pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
     }),
     // Module routes run behind the platform middleware chain, so the context

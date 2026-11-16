@@ -95,6 +95,7 @@ function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, 
       // These cases materialize the session owner's own uploads; the container
       // ACL never widens, so the narrowest set is the honest one to hand it.
       spaces: [{ id: scope.spaceId, permissions: new Set() }],
+      beforeResolve: async () => {},
     });
 }
 

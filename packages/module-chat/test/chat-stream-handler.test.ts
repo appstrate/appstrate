@@ -96,7 +96,6 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
 // caller-context block was rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
-const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
 const TEST_REQUEST_ID = "req_chat_handler_test";
 
@@ -248,6 +247,16 @@ async function tokenPermissions(input: PiChatInput): Promise<string[]> {
   return [...(resolved!.permissions ?? [])].sort();
 }
 
+/** The spaces the turn's bearer allowlists, as the loopback strategy resolves them. */
+async function tokenSpaceIds(input: PiChatInput): Promise<readonly string[] | undefined> {
+  const authorization = input.platformMcp?.headers?.Authorization;
+  const resolved = await chatLoopbackStrategy.authenticate({
+    headers: new Headers({ authorization: authorization as string }),
+  } as never);
+  expect(resolved).not.toBeNull();
+  return resolved!.spaceIds;
+}
+
 // A turn persists in a background task that outlives its response, and the registry of those
 // tasks is a process-wide singleton: a test that returns while one is still settling hands it
 // to whichever file runs next (`inflight.test.ts` then counts a turn it never tracked).
@@ -376,7 +385,6 @@ describe("handleChatStream", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-space-id": SPACE_ID,
         "x-org-id": ctx.orgId,
       },
       body: JSON.stringify({
@@ -1449,7 +1457,7 @@ describe("handleChatStream", () => {
     });
 
     /** The turn `postChat` runs over `reachable`. */
-    async function orgTurn(
+    async function turn(
       sessionId: string,
       overrides: Parameters<typeof postChat>[3] = {},
       reachable: ReachableSpaceGrant[] = reach,
@@ -1461,7 +1469,7 @@ describe("handleChatStream", () => {
 
     it("hands the engine the organization endpoint and a ceiling over the acting set, not the whole reach", async () => {
       const sessionId = mintSessionId();
-      const { res, calls } = await orgTurn(sessionId);
+      const { res, calls } = await turn(sessionId);
       expect(res.status).toBe(200);
       await collectUiChunks(res);
       await waitForAssistantPersist(sessionId);
@@ -1484,16 +1492,22 @@ describe("handleChatStream", () => {
           "skills:write",
         ].sort(),
       );
-      // The ceiling is keyed with the spaces it lists, and the session is persisted.
+      // The bearer allowlists the turn's spaces (not the whole reach), keyed with the surface
+      // they list, and the session is persisted.
+      expect(await tokenSpaceIds(input)).toEqual([ctx.defaultSpaceId, spaceB]);
       expect(input.platformMcp.surfaceKey).toBe(
-        platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), reach),
+        platformMcpSurfaceKey(
+          input.platformMcp.url,
+          await tokenPermissions(input),
+          input.platformMcp.organization.spaces,
+        ),
       );
       const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
       expect(row).toBeDefined();
     });
 
     it("narrows the union by the authoring switch", async () => {
-      const { res, calls } = await orgTurn(mintSessionId(), { packageAuthoring: false });
+      const { res, calls } = await turn(mintSessionId(), { packageAuthoring: false });
       expect(res.status).toBe(200);
       await collectUiChunks(res);
       const granted = await tokenPermissions(calls[0]!);
@@ -1503,7 +1517,7 @@ describe("handleChatStream", () => {
     });
 
     it("lists the spaces in the prompt instead of a current space", async () => {
-      const { res, calls } = await orgTurn(mintSessionId());
+      const { res, calls } = await turn(mintSessionId());
       expect(res.status).toBe(200);
       await collectUiChunks(res);
       const system = calls[0]!.system;
@@ -1686,8 +1700,14 @@ describe("handleChatStream", () => {
           ].sort(),
         );
         expect(input.platformMcp.organization.spaces.map((space) => space.id)).toEqual([spaceB]);
+        // The bearer allowlists the origin space alone, so the surface is keyed on it alone.
+        expect(await tokenSpaceIds(input)).toEqual([spaceB]);
         expect(input.platformMcp.surfaceKey).toBe(
-          platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), reach),
+          platformMcpSurfaceKey(
+            input.platformMcp.url,
+            await tokenPermissions(input),
+            input.platformMcp.organization.spaces,
+          ),
         );
         const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
         expect(row).toMatchObject({ spaceId: spaceB, restricted: true });
@@ -1708,7 +1728,7 @@ describe("handleChatStream", () => {
         expect(system).not.toContain("takes the `space_id` of one of them");
       });
 
-      it("touches its origin space with nothing recorded, and refuses any other", async () => {
+      it("touches its origin space with nothing recorded, the only space its tools may name", async () => {
         const sessionId = mintSessionId();
         const { res, calls } = await limitedTurn(sessionId);
         expect(res.status).toBe(200);
@@ -1716,7 +1736,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
         const { organization } = calls[0]!.platformMcp;
         await organization.touch(spaceB);
-        await expect(organization.touch(ctx.defaultSpaceId)).rejects.toThrow(/cannot act in/);
+        expect(organization.spaces.map((space) => space.id)).toEqual([spaceB]);
         expect(await db.select().from(chatSessionSpaces)).toEqual([]);
       });
 
@@ -1771,14 +1791,14 @@ describe("handleChatStream", () => {
     it("refuses a turn on a conversation that touched a space its author no longer reads", async () => {
       const sessionId = mintSessionId();
       await ensureSession(sessionId, ctx.orgId, ctx.user.id, []);
-      await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB });
+      await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB, orgId: ctx.orgId });
 
       const lostBeta = [{ ...reach[0]! }, { ...reach[1]!, permissions: ["mcp:read"] }];
-      const refused = await orgTurn(sessionId, {}, lostBeta);
+      const refused = await turn(sessionId, {}, lostBeta);
       expect(refused.res.status).toBe(404);
       expect(refused.calls).toEqual([]);
       // Still reading Beta: the same session answers.
-      const open = await orgTurn(sessionId);
+      const open = await turn(sessionId);
       expect(open.res.status).toBe(200);
       await collectUiChunks(open.res);
     });
@@ -1793,7 +1813,7 @@ describe("handleChatStream", () => {
         ).map((row) => row.spaceId);
 
       async function organizationOf(sessionId: string, reachable: ReachableSpaceGrant[] = reach) {
-        const { res, calls } = await orgTurn(sessionId, {}, reachable);
+        const { res, calls } = await turn(sessionId, {}, reachable);
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
@@ -1826,22 +1846,29 @@ describe("handleChatStream", () => {
         expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
       });
 
-      it("refuses, recording nothing, a space outside the acting set: unknown, reached without the grants, or unreadable", async () => {
-        const sessionId = mintSessionId();
-        const organization = await organizationOf(sessionId);
-        await expect(organization.touch("spc_not_reached")).rejects.toThrow(/cannot act in/);
+      it("leaves a space outside the acting set out of the turn's spaces and of its bearer: unknown, reached without the grants, or unreadable", async () => {
+        const turned = async (reachable: ReachableSpaceGrant[]) => {
+          const { res, calls } = await turn(mintSessionId(), {}, reachable);
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          return calls[0]!;
+        };
         // Gamma is reached with `chat:read` and `mcp:read` but cannot chat in it.
-        await expect(organization.touch(spaceC)).rejects.toThrow(/cannot act in/);
-        expect(await touched(sessionId)).toEqual([]);
+        const input = await turned(reach);
+        expect(input.platformMcp.organization.spaces.map((space) => space.id)).toEqual([
+          ctx.defaultSpaceId,
+          spaceB,
+        ]);
+        expect(await tokenSpaceIds(input)).toEqual([ctx.defaultSpaceId, spaceB]);
+        expect(await tokenSpaceIds(input)).not.toContain(spaceC);
 
-        // Reached with `mcp:read` alone: recording it would hide the session from its author.
-        const unreadableId = mintSessionId();
-        const unreadable = await organizationOf(unreadableId, [
+        // Reached with `mcp:read` and `chat:write` alone: acting there would hide the session
+        // from its author, so it is no place the turn acts.
+        const unreadable = await turned([
           reach[0]!,
           { ...reach[1]!, permissions: ["mcp:read", "chat:write"] },
         ]);
-        await expect(unreadable.touch(spaceB)).rejects.toThrow(/cannot act in/);
-        expect(await touched(unreadableId)).toEqual([]);
+        expect(await tokenSpaceIds(unreadable)).toEqual([ctx.defaultSpaceId]);
       });
 
       describe("skills across spaces", () => {
@@ -1931,7 +1958,7 @@ describe("handleChatStream", () => {
 
         it("lists one skill per package in auto, the first space in reach order winning, each with its own URI", async () => {
           // The server lists Beta's copy first: only the reach order decides.
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([
@@ -1955,7 +1982,7 @@ describe("handleChatStream", () => {
 
         it("reads no skill of a space outside the acting set, listed or chosen", async () => {
           const read: string[] = [];
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch(
@@ -1974,7 +2001,7 @@ describe("handleChatStream", () => {
           expect(calls[0]!.system).toContain(`\`${TONE}\``);
           expect(calls[0]!.system).not.toContain(ONLY_B);
 
-          const pinned = await orgTurn(
+          const pinned = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
@@ -1989,7 +2016,7 @@ describe("handleChatStream", () => {
 
         it("injects a pinned skill of another space and binds its claim to that space", async () => {
           const read: string[] = [];
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch(
@@ -2015,7 +2042,7 @@ describe("handleChatStream", () => {
         });
 
         it("says in strict mode that the origin space requires skills", async () => {
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([]),
@@ -2042,7 +2069,7 @@ describe("handleChatStream", () => {
 
         it("injects the origin space's enforced skills only, even when it acts in another space too", async () => {
           const loaded: string[] = [];
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([]),
@@ -2076,7 +2103,7 @@ describe("handleChatStream", () => {
 
         it("injects none without an origin space (the overview), whatever the spaces enforce", async () => {
           const loaded: string[] = [];
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([]),
@@ -2105,7 +2132,7 @@ describe("handleChatStream", () => {
             undefined,
             () => ({ spaceId: spaceB, restricted: false }),
           );
-          const { res } = await orgTurn(
+          const { res } = await turn(
             sessionId,
             {
               dispatch: skillsDispatch([]),
@@ -2122,7 +2149,7 @@ describe("handleChatStream", () => {
         });
 
         it("refuses the turn when the origin space cannot load its enforced skills", async () => {
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([]),
@@ -2138,7 +2165,7 @@ describe("handleChatStream", () => {
         });
 
         it("lists a limited conversation's origin space's skills alone", async () => {
-          const { res, calls } = await orgTurn(
+          const { res, calls } = await turn(
             mintSessionId(),
             {
               dispatch: skillsDispatch([
@@ -2159,14 +2186,14 @@ describe("handleChatStream", () => {
       it("hands an attachment the acting set, and records the space it resolves in before materializing", async () => {
         const sessionId = mintSessionId();
         const requests: ChatAttachmentRequest[] = [];
-        const { res } = await orgTurn(sessionId, {
+        const { res } = await turn(sessionId, {
           parts: [
             { type: "text", text: "lis ceci" },
             { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
           ],
           resolveChatAttachment: async (request) => {
             requests.push(request);
-            await request.beforeResolve?.(spaceB);
+            await request.beforeResolve(spaceB);
             return {
               uri: "appfile://file_abcdefgh",
               name: "b.txt",

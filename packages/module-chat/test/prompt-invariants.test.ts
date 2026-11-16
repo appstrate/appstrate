@@ -205,7 +205,7 @@ describe("full persona invariants", () => {
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {
       expect(persona).toMatch(
-        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in the space the failed call named/,
+        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in the space the failed call acted in/,
       );
       expect(persona).toContain(
         "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",
@@ -604,10 +604,11 @@ describe("the persona and package authoring", () => {
 });
 
 describe("the persona and the spaces", () => {
-  it("tells the model to activate in the space the failed call named", () => {
-    expect(FULL).toContain("with `spaceId` the `space_id` of the failed call");
+  it("tells the model to activate in the space the failed call acted in", () => {
+    expect(FULL).toContain("with `spaceId` that space's id");
+    expect(FULL).toContain("the conversation's space when it is limited to one");
     expect(FULL).not.toContain("the current space from your context block");
-    expect(FULL).toMatch(/the space the failed call named/);
+    expect(FULL).toMatch(/the space the failed call acted in/);
   });
 
   it("claims the context lists neither integrations nor agents, which are looked up per space", () => {

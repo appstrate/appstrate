@@ -1316,6 +1316,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri: `appfile://${fileId}`,
         spaces: [{ id: ctx.defaultSpaceId, permissions }],
+        beforeResolve: async () => {},
       });
 
     // The colleague's run output: readable with the grant, indistinguishable
@@ -1362,7 +1363,7 @@ describe("files service + routes", () => {
     expect(await ids(grants.slice(0, 1))).toEqual(new Set([first.id]));
 
     // Someone else's conversation resolves nothing.
-    const stranger = await createTestUser({ email: "org-session-stranger@docs.test" });
+    const stranger = await createTestUser({ email: "chat-session-stranger@docs.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     expect(
       (
@@ -1397,6 +1398,7 @@ describe("files service + routes", () => {
         chatSessionId,
         uri,
         spaces,
+        beforeResolve: async () => {},
       });
     const here = { id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN };
 
@@ -1935,7 +1937,7 @@ describe("files service + routes", () => {
     await db.insert(fileLinks).values({ fileId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
-    await detachOrDeleteContainedFiles({ chatSessionId: sessionId });
+    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] });
 
     const [row] = await db.select().from(files).where(eq(files.id, doc.id));
     expect(row).toBeDefined();
@@ -1973,7 +1975,7 @@ describe("files service + routes", () => {
     const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
     const doc = await createFileFromUpload(scope, userActor, up, { chatSessionId: sessionId });
 
-    await detachOrDeleteContainedFiles({ chatSessionId: sessionId });
+    await detachOrDeleteContainedFiles({ chatSessionIds: [sessionId] });
 
     const [row] = await db.select().from(files).where(eq(files.id, doc.id));
     expect(row).toBeUndefined();

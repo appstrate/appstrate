@@ -121,7 +121,7 @@ export async function touchSessionSpace(
   if (spaceId === session.originSpaceId) return;
   const inserted = await db
     .insert(chatSessionSpaces)
-    .values({ sessionId: session.id, spaceId })
+    .values({ sessionId: session.id, spaceId, orgId: session.orgId })
     .onConflictDoNothing()
     .returning({ spaceId: chatSessionSpaces.spaceId });
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
@@ -158,7 +158,7 @@ export interface TurnConversation {
 }
 
 /** The origin space and limit a conversation is created with; throws the 400 for an invalid one. */
-export type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
+type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
 
 /**
  * Create the session row if it does not exist yet (idempotent). The client

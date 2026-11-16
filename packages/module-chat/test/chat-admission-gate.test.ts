@@ -84,7 +84,7 @@ function fakeContext(opts: {
     principalKind: "user",
     orgRole: "member",
   };
-  const headers = new Headers({ "x-space-id": opts.spaceId });
+  const headers = new Headers();
   return {
     get: (k: string) => vars[k],
     req: {

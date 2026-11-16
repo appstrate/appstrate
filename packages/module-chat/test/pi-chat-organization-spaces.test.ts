@@ -18,7 +18,7 @@ import {
   type OrgWideSpaces,
 } from "../../../apps/api/src/modules/mcp/spaces.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
-import { buildPlatformMcpTools, type OrganizationSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
 /** Nothing listens here: a hop that escapes the injected fetch throws. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -122,7 +122,7 @@ function transcript() {
   return { fetch: fetchImpl, events, launches, polls, toolCalls };
 }
 
-function organizationOf(events: string[]): OrganizationSpaces {
+function organizationOf(events: string[]): TurnSpaces {
   return {
     spaces: SPACES,
     touch: async (spaceId) => {
@@ -150,6 +150,29 @@ async function tools(transport: ReturnType<typeof transcript>, pinnedSpaceId?: s
 }
 
 const text = (result: { content: Array<{ text: string }> }) => result.content[0]!.text;
+
+describe("a forwarded tool", () => {
+  it("refuses a space outside the turn's, in the same words as run_and_wait, before recording it", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const refused = JSON.parse(
+        text(
+          await tool("invoke_operation").execute("c1", {
+            operation_id: "listAgents",
+            space_id: "spc_nope",
+          }),
+        ),
+      );
+      expect(refused.code).toBe("unknown_space");
+      expect(refused.accepted).toEqual(SPACES.map((space) => space.id));
+      expect(transport.events).toEqual([]);
+      expect(transport.toolCalls).toEqual([]);
+    } finally {
+      await built.close();
+    }
+  });
+});
 
 describe("the conversation's run_and_wait", () => {
   it("takes the space from its arguments, strips it, sends it as X-Space-Id, and records it first", async () => {

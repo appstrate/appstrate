@@ -6,7 +6,7 @@
  * (`resolveSkillReadAccess`):
  *
  *  1. a skill the chat turn injected (the chat bearer's signed claim, in the
- *     turn's space, while the caller may chat there): the version injected, or
+ *     space its entry names, while the caller may chat there): the version injected, or
  *     the draft while unchanged — whatever the turn's `skills:*`;
  *  2. otherwise `skills:read`: the latest published version, and the draft to
  *     an author;
@@ -223,7 +223,6 @@ function turnHeaders(
   opts: {
     permissions?: string[];
     spaceId?: string;
-    claimSpaceId?: string;
     user?: { id: string; email: string; name: string };
     orgRole?: string;
   } = {},
@@ -237,7 +236,7 @@ function turnHeaders(
     orgId: owner.orgId,
     orgRole: opts.orgRole ?? "owner",
     permissions: opts.permissions ?? ["mcp:read", "chat:write"],
-    injectedSkills: claimOf(skills, opts.claimSpaceId ?? spaceId),
+    injectedSkills: claimOf(skills, spaceId),
   });
   return inSpace({ Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId }, spaceId);
 }
@@ -376,7 +375,7 @@ describe("skill:// — a skill the chat turn injected", () => {
     expect(await readResource(headers, uriOf(TONE))).toEqual(NOT_FOUND);
   });
 
-  it("holds in the turn's space only", async () => {
+  it("holds in the space its claim entry names only", async () => {
     const teamB = await seedSpace({ orgId: owner.orgId, name: "Team B" });
     const team = "@readskill/team";
     await seedSkill(team, teamB.id);
@@ -391,12 +390,14 @@ describe("skill:// — a skill the chat turn injected", () => {
     expect(
       (await readResource(turnHeaders(skills, { spaceId: teamB.id }), inTeamB)).text,
     ).toContain(`published ${team} 1.0.0`);
-    // A claim minted for another space is ignored, whichever side differs.
-    for (const [opts, uri] of [
-      [{ spaceId: teamB.id, claimSpaceId: owner.defaultSpaceId }, inTeamB],
-      [{ spaceId: owner.defaultSpaceId, claimSpaceId: teamB.id }, uriOf(team)],
+    // An entry naming another space is ignored, whichever side differs.
+    const inDefault = { [team]: { ...PUBLISHED_1_0, spaceId: owner.defaultSpaceId } };
+    const inTeamBEntry = { [team]: { ...PUBLISHED_1_0, spaceId: teamB.id } };
+    for (const [claim, entered, uri] of [
+      [inDefault, teamB.id, inTeamB],
+      [inTeamBEntry, owner.defaultSpaceId, uriOf(team)],
     ] as const) {
-      expect(await readResource(turnHeaders(skills, opts), uri)).toEqual(NOT_FOUND);
+      expect(await readResource(turnHeaders(claim, { spaceId: entered }), uri)).toEqual(NOT_FOUND);
     }
   });
 

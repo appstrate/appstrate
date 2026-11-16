@@ -75,6 +75,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     orgId: caller.ctx.orgId,
     orgRole: caller.orgRole,
     permissions,
+    spaceIds: caller.spaces.map((space) => space.id),
     ...(caller.viewAs !== undefined ? { viewAs: caller.viewAs } : {}),
     ...(caller.injectedSkills ? { injectedSkills: caller.injectedSkills } : {}),
   });

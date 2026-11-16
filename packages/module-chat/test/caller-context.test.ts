@@ -2,8 +2,8 @@
 
 /**
  * The chat injects a "## Your context" block into the system prompt so the agent knows who it
- * is acting for, their role, the spaces the conversation can act in (and the one the user is
- * looking at) and the skills it follows. `formatCallerContext` renders that block from the
+ * is acting for, their role, the spaces the conversation can act in (its origin space being the
+ * default of a request naming none) and the skills it follows. `formatCallerContext` renders that block from the
  * caller's identity; `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
@@ -93,6 +93,7 @@ const BASE_OPTS = {
   rolePreview: false,
   spaces: REACH,
   restricted: false,
+  originLapsed: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
   enforced: [],
@@ -177,7 +178,7 @@ describe("formatCallerContext", () => {
     }
   });
 
-  it("lists the space's skills in auto, and none when the turn cannot load one", () => {
+  it("lists the turn's skills in auto, and none when the turn cannot load one", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
     const skillCatalogue = [listedSkill("@acme/pdf", "Reads PDFs.", "1.0.0")];
     const PDF_LINE = "- `@acme/pdf` (v1.0.0) `skill://space-1/acme/pdf/pdf/SKILL.md` — Reads PDFs.";
@@ -698,10 +699,15 @@ describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
   describe("the origin space", () => {
-    const build = (extra: { origin?: typeof ORIGIN; restricted?: boolean }) =>
+    const build = (extra: {
+      origin?: typeof ORIGIN;
+      restricted?: boolean;
+      originLapsed?: boolean;
+    }) =>
       blockText(fakeContext({ orgRole: "member" }), {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         ...extra,
         user,
         capabilities: caps(BUILDER),
@@ -717,6 +723,17 @@ describe("buildCallerContextBlock", () => {
       expect(out).toContain(
         "This conversation was started in One (`spc_1`): use it when a request names no space; never move a refused action into another space.",
       );
+    });
+
+    it("tells the model an origin space's required skills lapse once its author cannot act there", async () => {
+      const out = await build({ originLapsed: true });
+      expect(out).toContain("## Skills");
+      expect(out).toContain(
+        "requires skills in every conversation, but you can no longer act in it: those skills do not apply to this turn.",
+      );
+      // An origin the author still acts in, or none at all, says nothing of the sort.
+      expect(await build({ origin: ORIGIN })).not.toContain("no longer act in it");
+      expect(await build({})).not.toContain("no longer act in it");
     });
 
     it("names no default without an origin space (the overview)", async () => {
@@ -756,6 +773,7 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         user,
         // Strict: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
@@ -827,6 +845,7 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -855,6 +874,7 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -885,6 +905,7 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -898,7 +919,7 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ skills: {} });
   });
 
-  it("lists the space's skills in auto over the skills connection, draft first, reading none", async () => {
+  it("lists the turn's skills in auto over the skills connection, draft first, reading none", async () => {
     const skills = fakeSkillsClient({
       published: [
         skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0"),
@@ -914,6 +935,7 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
+        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         // The turn keeps `skills:write`: it reads the drafts the caller reads.

@@ -108,7 +108,7 @@ export interface ChatAttachmentRequest {
    * never materialized into a space the caller was refused. The conversation records the
    * space as touched here.
    */
-  beforeResolve?: (spaceId: string) => Promise<void>;
+  beforeResolve: (spaceId: string) => Promise<void>;
 }
 
 /**
@@ -194,9 +194,18 @@ export interface EnforcedChatSkillRef {
  * What a conversation's turn needs in a space to act in it: the turn is the caller's to
  * run (`chat:write`), the conversation stays openable once the space is touched (`chat:read`), and the
  * tools can name the space (`mcp:read`). The one definition behind the chat's acting set
- * (`actingSpaces`), the MCP server's reach for a chat's bearer and the web shell's judgement.
+ * (`actingSpaces`) and the web shell's judgement; test it with {@link chatActsIn}.
  */
 export const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+
+/** Whether a space's effective permission set (a `Set` or an array) lets a conversation act in it. */
+export function chatActsIn(permissions: ReadonlySet<string> | readonly string[]): boolean {
+  const has = (permission: string) =>
+    Array.isArray(permissions)
+      ? permissions.includes(permission)
+      : (permissions as ReadonlySet<string>).has(permission);
+  return CHAT_ACTING_PERMISSIONS.every(has);
+}
 
 /** The chat loopback strategy's auth method — the only source `skill://` reads trust for an injected-skills claim. */
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";

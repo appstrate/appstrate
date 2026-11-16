@@ -44,7 +44,7 @@ import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
-import { buildPlatformMcpTools, dispatchSpace, type OrganizationSpaces } from "./mcp-tools.ts";
+import { buildPlatformMcpTools, dispatchSpace, type TurnSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -91,7 +91,7 @@ export interface PiChatInput {
   platformMcp: {
     url: string;
     /** The spaces a call may name, and the record of those the conversation touched. */
-    organization: OrganizationSpaces;
+    organization: TurnSpaces;
     /** The space the URL pins: a limited conversation's origin. */
     pinnedSpaceId?: string;
     headers: Record<string, string>;
