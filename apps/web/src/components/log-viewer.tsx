@@ -640,6 +640,8 @@ export function LogViewer({
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: drawnRows.length,
+    // A measured height belongs to its row, not to its position: folding a group moves rows.
+    getItemKey: (index) => drawnRows[index]!.id,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 40,
     overscan: 10,
