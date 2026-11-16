@@ -17,7 +17,7 @@ import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Api, Message } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
-import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
+import { offerScopeOf, splitJsonText, type OfferScope } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -141,8 +141,11 @@ function json(value: unknown): string {
  * shape, still replays through this function. So a content array with no
  * surviving text block is rendered as pointers, the same way the forwarder
  * would have rendered it live.
+ *
+ * `scope` is the tool's ({@link offerScopeOf}), as live: a relayed third-party payload replays
+ * verbatim, exactly as the model first read it.
  */
-function toolResultContent(value: unknown): ToolResultContent {
+function toolResultContent(value: unknown, scope: OfferScope): ToolResultContent {
   if (value && typeof value === "object") {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) {
@@ -152,7 +155,7 @@ function toolResultContent(value: unknown): ToolResultContent {
         return [
           {
             type: "text",
-            text: splitJsonText(String((part as { text?: unknown }).text ?? "")).text,
+            text: splitJsonText(String((part as { text?: unknown }).text ?? ""), scope).text,
           },
         ];
       });
@@ -166,7 +169,7 @@ function toolResultContent(value: unknown): ToolResultContent {
       if (pointers.length > 0) return pointers;
     }
   }
-  return [{ type: "text", text: json(redactConnectPayload(value)) }];
+  return [{ type: "text", text: json(scope(value).redacted) }];
 }
 
 function userMessage(message: UIMessage, nextTimestamp: () => number): Message | null {
@@ -238,7 +241,7 @@ function assistantMessages(
         role: "toolResult",
         toolCallId: part.toolCallId,
         toolName,
-        content: toolResultContent(result),
+        content: toolResultContent(result, offerScopeOf(toolName)),
         isError,
       });
       toolResultCount += 1;

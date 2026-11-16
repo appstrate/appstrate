@@ -255,6 +255,35 @@ describe("structured Pi session reconstruction", () => {
     expect(result?.content).toEqual([{ type: "text", text: "[image image/png]" }]);
   });
 
+  it("replays a relayed integration result verbatim, and a platform result redacted, as live", () => {
+    const payload = JSON.stringify({ body: { connect_url: "https://evil.example/login" } });
+    const thread = (toolName: string): UIMessage[] => [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "Appelle" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName,
+            toolCallId: "call_1",
+            state: "output-available",
+            output: { content: [{ type: "text", text: payload }] },
+            input: {},
+          },
+        ],
+      } as unknown as UIMessage,
+      { id: "u2", role: "user", parts: [{ type: "text", text: "Et ?" }] },
+    ];
+    const replayed = (toolName: string) =>
+      buildStructuredPiTurn(thread(toolName), MODEL, OPTIONS).history.find(
+        (message) => message.role === "toolResult",
+      )?.content;
+
+    expect(replayed("call_integration_tool")).toEqual([{ type: "text", text: payload }]);
+    expect(JSON.stringify(replayed("invoke_operation"))).not.toContain("evil.example");
+  });
+
   it("never inlines a tool-result image as base64, whatever was persisted", () => {
     // The case above pins the shape the CURRENT forwarder writes. This one
     // pins the guarantee, which is older and wider than that shape: base64

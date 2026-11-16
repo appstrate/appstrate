@@ -2,10 +2,12 @@
 
 /**
  * Build the Pi extension factories that expose the platform's own MCP tools
- * (`search_operations` / `describe_operation` / `invoke_operation` +
- * `run_and_wait`) to the in-process Pi chat session — the same meta-tools the
- * platform MCP server exposes, so the assistant pilots the platform with the
- * caller's own permissions.
+ * to the in-process Pi chat session — exactly the tools the platform MCP server
+ * declares to the caller (`search_operations` / `describe_operation` /
+ * `invoke_operation`, `run_and_wait`, `search_integration_tools` /
+ * `call_integration_tool`, and whatever it adds later), so the assistant pilots
+ * the platform with the caller's own permissions, through the one door every
+ * MCP client uses.
  *
  * Unlike the runtime container (which forwards a FIXED descriptor set), the chat
  * discovers the server's tools dynamically via `listTools()` and registers one
@@ -32,10 +34,12 @@ import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
-  redactConnectPayload,
+  offerScopeOf,
   splitConnectPayload,
   splitJsonText,
+  WHOLE_PAYLOAD,
   type ConnectOffer,
+  type OfferScope,
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
@@ -82,11 +86,17 @@ export function toPiToolResult(payload: unknown): PiToolResult {
   };
 }
 
-/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). */
-export function mcpResultToPi(result: {
-  content: Array<Record<string, unknown>>;
-  structuredContent?: unknown;
-}): PiToolResult {
+/**
+ * Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). `scope` says
+ * which part of the payload may carry a connect offer ({@link offerScopeOf}).
+ */
+export function mcpResultToPi(
+  result: {
+    content: Array<Record<string, unknown>>;
+    structuredContent?: unknown;
+  },
+  scope: OfferScope = WHOLE_PAYLOAD,
+): PiToolResult {
   // One list per text block, merged below — a result may split a readiness
   // error across blocks, and each block's connect links must all reach the UI.
   const blockOffers: ConnectOffer[][] = [];
@@ -96,7 +106,7 @@ export function mcpResultToPi(result: {
     // passes through byte-identical). The scrubbed URLs are captured as the
     // typed offers instead.
     if (c.type === "text") {
-      const split = splitJsonText(String(c.text ?? ""));
+      const split = splitJsonText(String(c.text ?? ""), scope);
       blockOffers.push(split.offers);
       return { type: "text" as const, text: split.text };
     }
@@ -105,7 +115,7 @@ export function mcpResultToPi(result: {
     if (c.type === "image") {
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
     }
-    return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
+    return { type: "text" as const, text: JSON.stringify(scope(c).redacted) };
   });
   let offers = mergeConnectOffers(blockOffers);
   // `details` is Pi's in-memory UI channel (never serialized to the model,
@@ -113,7 +123,7 @@ export function mcpResultToPi(result: {
   // exist only in the typed `connectOffers` field the connect cards read.
   let details: unknown;
   if (result.structuredContent !== undefined) {
-    const sc = splitConnectPayload(result.structuredContent);
+    const sc = scope(result.structuredContent);
     // structuredContent is the canonical payload — its offers replace the
     // text-derived ones wholesale, rather than merging with a text block that
     // may be a partial rendering of the same thing.
@@ -382,7 +392,10 @@ function makeForwardExtension(
           { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
           { signal: callSignal },
         );
-        return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
+        return withTurnBudgetNote(
+          mcpResultToPi(result as never, offerScopeOf(toolName)),
+          turnBudget,
+        );
       },
     });
   };

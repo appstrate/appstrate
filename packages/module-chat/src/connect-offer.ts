@@ -37,13 +37,12 @@ export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders 
  * Two, and no camelCase twin, because an offer is only ever read from
  * Appstrate's own wire: the chat opens ONE MCP connection, to the platform's
  * own org-scoped endpoint (`platform-mcp.ts`), dispatched in-process through
- * the REST pipeline, and that endpoint does not offer the chat's loopback
- * bearer the integration tools, `search_integration_tools` and
- * `call_integration_tool` (`proxyAcceptsCredential`,
- * `apps/api/src/modules/mcp/router.ts`), so no third-party tool result reaches
- * this walk. And a spelling-based denylist
- * could not be a foreign-payload safety net anyway: a stranger is as free to
- * call the field `url` or `href`.
+ * the REST pipeline, and walks only what the platform itself wrote. The
+ * integration tools relay third-party content beside it; their results are
+ * walked under an {@link OfferScope} that keeps that content out of the walk
+ * ({@link offerScopeOf}), so a stranger's `connect_url` key never becomes a
+ * card. A spelling-based denylist could not be that safety net anyway: a
+ * stranger is as free to call the field `url` or `href`.
  *
  * What pins the spelling is the endpoints themselves, not a casing gate:
  * `bun run check` has no HTTP-response casing check at all. The two spellings
@@ -87,10 +86,9 @@ interface SplitResult {
 
 /**
  * Where one walk pushes its offers, in walk order and undeduped — dedupe lives
- * in {@link mergeConnectOffers} alone. `null` on the redact-only path, which
- * then builds no offer at all.
+ * in {@link mergeConnectOffers} alone.
  */
-type OfferSink = ConnectOffer[] | null;
+type OfferSink = ConnectOffer[];
 
 /**
  * Optional offer fields, read under their wire spelling only — same reason as
@@ -136,7 +134,7 @@ function splitValue(value: unknown, depth: number, sink: OfferSink): SplitResult
       // placeholder, malformed value or other scheme is scrubbed but never
       // offered. Persist the same normalized href the browser will navigate.
       const connectUrl = normalizeHttpUrl(v);
-      if (connectUrl) sink?.push({ connect_url: connectUrl, ...pickOfferFields(obj) });
+      if (connectUrl) sink.push({ connect_url: connectUrl, ...pickOfferFields(obj) });
       continue;
     }
     const r = splitValue(v, depth + 1, sink);
@@ -165,25 +163,72 @@ export function splitConnectPayload(payload: unknown): {
   return { redacted: r.value, offers: r.offers };
 }
 
-/** Redact-only view of {@link splitConnectPayload} (model-channel scrubbing). */
-export function redactConnectPayload(payload: unknown): unknown {
-  return splitValue(payload, 0, null).value;
-}
-
 /**
- * Split a text block that may hold a JSON payload: parses, redacts, and
- * re-stringifies ONLY when something changed — non-JSON text passes through
+ * Split a text block that may hold a JSON payload under `scope` ({@link offerScopeOf}): parses,
+ * redacts, and re-stringifies ONLY when something changed — non-JSON text passes through
  * byte-identical, never regex-mangled.
  */
-export function splitJsonText(text: string): { text: string; offers: ConnectOffer[] } {
+export function splitJsonText(
+  text: string,
+  scope: OfferScope = WHOLE_PAYLOAD,
+): { text: string; offers: ConnectOffer[] } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return { text, offers: [] };
   }
-  const r = splitWithOffers(parsed);
-  return { text: r.changed ? JSON.stringify(r.value) : text, offers: r.offers };
+  const split = scope(parsed);
+  return {
+    text: split.redacted === parsed ? text : JSON.stringify(split.redacted),
+    offers: split.offers,
+  };
+}
+
+/**
+ * The part of a tool's JSON payload the platform itself wrote, split into its redacted copy and
+ * the connect offers it carries. A connect card is a platform-trusted surface: its link must come
+ * from the platform, never from content it relays. Most tools answer with the platform's own
+ * payload ({@link WHOLE_PAYLOAD}); the integration tools relay third-party content — an upstream
+ * API's body, a remote MCP server's tool schemas — where any `connect_url`/`auth_url` key is a
+ * stranger's, and a card built from it would hand the user that stranger's link.
+ */
+export type OfferScope = (payload: unknown) => { redacted: unknown; offers: ConnectOffer[] };
+
+export const WHOLE_PAYLOAD: OfferScope = (payload) => splitConnectPayload(payload);
+
+/** Third-party content throughout: passed on verbatim, no card. */
+const NO_OFFER: OfferScope = (payload) => ({ redacted: payload, offers: [] });
+
+/** Offers from the platform-written subtree under `key` alone; the rest passes on verbatim. */
+function offersUnder(key: string): OfferScope {
+  return (payload) => {
+    const record =
+      typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : undefined;
+    if (!record || record[key] === undefined) return { redacted: payload, offers: [] };
+    const split = splitConnectPayload(record[key]);
+    return {
+      redacted: split.redacted === record[key] ? payload : { ...record, [key]: split.redacted },
+      offers: split.offers,
+    };
+  };
+}
+
+/**
+ * Tools whose result relays third-party content. `call_integration_tool` answers with the
+ * upstream's result; `search_integration_tools` with remote servers' descriptions and schemas,
+ * beside its own `not_ready` list, whose refusals carry the platform's single-use connect links.
+ */
+const TOOL_OFFER_SCOPES: Readonly<Record<string, OfferScope>> = {
+  call_integration_tool: NO_OFFER,
+  search_integration_tools: offersUnder("not_ready"),
+};
+
+/** The offer scope of a platform MCP tool, by its (unprefixed) name. */
+export function offerScopeOf(toolName: string): OfferScope {
+  return TOOL_OFFER_SCOPES[toolName] ?? WHOLE_PAYLOAD;
 }
 
 /**

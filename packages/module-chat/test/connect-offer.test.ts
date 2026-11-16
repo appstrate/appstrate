@@ -11,7 +11,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   mergeConnectOffers,
-  redactConnectPayload,
+  offerScopeOf,
   REDACTED_CONNECT_LINK,
   splitConnectPayload,
   splitJsonText,
@@ -142,19 +142,58 @@ describe("splitJsonText", () => {
   });
 });
 
-describe("redactConnectPayload", () => {
-  // The redact-only walk builds no offer at all, so it must still scrub every
-  // link and still hand back the original reference when nothing matched.
-  it("scrubs every connect link and keeps the reference when nothing matched", () => {
-    const redacted = redactConnectPayload({
-      first: { connect_url: URL_ },
-      second: { auth_url: "https://a.example/two" },
-    }) as { first: { connect_url: string }; second: { auth_url: string } };
-    expect(redacted.first.connect_url).toBe(REDACTED_CONNECT_LINK);
-    expect(redacted.second.auth_url).toBe(REDACTED_CONNECT_LINK);
+describe("offerScopeOf", () => {
+  const STRANGER = "https://evil.example/login";
+  const PLATFORM = "https://app.example/connect/abc";
 
-    const untouched = { ok: true, nested: { a: [1, 2] } };
-    expect(redactConnectPayload(untouched)).toBe(untouched);
+  it("walks a platform tool's whole payload", () => {
+    const split = offerScopeOf("invoke_operation")({ data: { connect_url: PLATFORM } });
+    expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
+    expect((split.redacted as { data: { connect_url: string } }).data.connect_url).toBe(
+      REDACTED_CONNECT_LINK,
+    );
+  });
+
+  it("never builds a card from an integration tool's relayed result, and passes it on verbatim", () => {
+    // An upstream API answering with a `connect_url` of its own.
+    const upstream = { body: { connect_url: STRANGER, auth_url: STRANGER } };
+    const split = offerScopeOf("call_integration_tool")(upstream);
+    expect(split.offers).toEqual([]);
+    expect(split.redacted).toBe(upstream);
+    const text = JSON.stringify(upstream);
+    expect(splitJsonText(text, offerScopeOf("call_integration_tool"))).toEqual({
+      text,
+      offers: [],
+    });
+  });
+
+  it("takes a search's offers from its `not_ready` refusals alone, never from a server's schema", () => {
+    const payload = {
+      tools: [{ tool: "x__find", description: "find" }],
+      best_match: {
+        tool: "x__find",
+        // A remote server controls its schemas.
+        input_schema: { type: "object", properties: { q: { connect_url: STRANGER } } },
+      },
+      not_ready: [
+        {
+          integration_package_id: "@x/y",
+          refusal: { code: "not_connected", connect_url: PLATFORM },
+        },
+      ],
+    };
+    const split = offerScopeOf("search_integration_tools")(payload);
+    expect(split.offers).toEqual([{ connect_url: PLATFORM }]);
+    const redacted = split.redacted as typeof payload;
+    expect(redacted.best_match).toBe(payload.best_match);
+    expect(redacted.not_ready[0]!.refusal.connect_url).toBe(REDACTED_CONNECT_LINK);
+  });
+
+  it("leaves a search without `not_ready` untouched", () => {
+    const payload = { tools: [], best_match: { input_schema: { connect_url: STRANGER } } };
+    const split = offerScopeOf("search_integration_tools")(payload);
+    expect(split).toEqual({ redacted: payload, offers: [] });
+    expect(split.redacted).toBe(payload);
   });
 });
 

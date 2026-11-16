@@ -3,33 +3,63 @@
 /**
  * Bearer-only auth gate.
  *
- * `assertBearerOnly` accepts the three bearer strategies (or any caller that
- * declared the first-party loopback capability) and rejects cookie sessions /
- * unknown ids. Core gates on the DECLARED capability, not on any specific
- * module's auth-method id.
+ * Both surfaces accept the three allowlisted bearer strategies and reject cookie
+ * sessions / unknown ids. Outside the list, each admits only its own DECLARED
+ * capability, never a module's auth-method id: the credential proxy a
+ * `serverMinted` bearer, the LLM proxy a `firstPartyLoopback` one.
  */
 
 import { describe, expect, it } from "bun:test";
-import { assertBearerOnly } from "../../../src/lib/bearer-only.ts";
+import {
+  assertBearerOnly,
+  isBearerOnlyCaller,
+  type BearerOnlySurface,
+} from "../../../src/lib/bearer-only.ts";
 
-const LOOPBACK = { firstPartyLoopback: true };
+const SURFACES: BearerOnlySurface[] = ["Credential proxy", "LLM proxy"];
+/** The chat's platform-MCP bearer: server-minted, not an inference loopback. */
+const MCP_BEARER = { authMethod: "chat-loopback", serverMinted: true };
+/** The chat's inference bearer: both capabilities. */
+const INFERENCE_BEARER = {
+  authMethod: "chat-loopback",
+  serverMinted: true,
+  firstPartyLoopback: true,
+};
 
 describe("assertBearerOnly", () => {
-  for (const method of ["api_key", "oauth2-instance", "oauth2-dashboard"]) {
-    it(`accepts ${method}`, () => {
-      expect(() => assertBearerOnly(method, "LLM proxy")).not.toThrow();
+  for (const surface of SURFACES) {
+    for (const authMethod of ["api_key", "oauth2-instance", "oauth2-dashboard"]) {
+      it(`${surface} accepts ${authMethod}`, () => {
+        expect(() => assertBearerOnly({ authMethod }, surface)).not.toThrow();
+      });
+    }
+
+    for (const authMethod of ["session", "unknown-strategy", undefined]) {
+      it(`${surface} rejects ${String(authMethod)} without a capability`, () => {
+        expect(() => assertBearerOnly({ authMethod }, surface)).toThrow();
+      });
+    }
+
+    it(`${surface} accepts the inference bearer`, () => {
+      expect(isBearerOnlyCaller(INFERENCE_BEARER, surface)).toBe(true);
     });
   }
 
-  it("accepts any caller declaring the first-party loopback capability", () => {
-    // No accepted authMethod string, but the declared capability claims it.
-    expect(() => assertBearerOnly("chat-loopback", "LLM proxy", LOOPBACK)).not.toThrow();
-    expect(() => assertBearerOnly(undefined, "LLM proxy", LOOPBACK)).not.toThrow();
+  it("the credential proxy accepts a server-minted bearer, whatever its auth method", () => {
+    expect(isBearerOnlyCaller(MCP_BEARER, "Credential proxy")).toBe(true);
+    expect(isBearerOnlyCaller({ serverMinted: true }, "Credential proxy")).toBe(true);
   });
 
-  for (const method of ["session", "unknown-strategy", undefined]) {
-    it(`rejects ${String(method)} without the loopback capability`, () => {
-      expect(() => assertBearerOnly(method, "LLM proxy")).toThrow();
-    });
-  }
+  it("the LLM proxy refuses a server-minted bearer that is no inference loopback", () => {
+    expect(() => assertBearerOnly(MCP_BEARER, "LLM proxy")).toThrow();
+  });
+
+  it("a capability declared false admits nothing", () => {
+    expect(
+      isBearerOnlyCaller({ authMethod: "session", serverMinted: false }, "Credential proxy"),
+    ).toBe(false);
+    expect(
+      isBearerOnlyCaller({ authMethod: "session", firstPartyLoopback: false }, "LLM proxy"),
+    ).toBe(false);
+  });
 });

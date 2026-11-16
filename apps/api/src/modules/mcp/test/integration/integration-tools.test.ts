@@ -8,8 +8,8 @@
  *
  *   - who is offered the two tools: a space admin, an operator, the owner of a personal space
  *     and a credential holding `credential-proxy:call` or `credential-proxy:call-own`, never a
- *     runner, a credential whose scopes omit both, or a cookie session or the chat's loopback
- *     bearer, which the bearer-only proxy refuses;
+ *     runner, a credential whose scopes omit both, or a cookie session, which the bearer-only
+ *     proxy refuses — the chat's server-minted loopback bearer is offered them like any other;
  *   - `call_integration_tool` with `{ns}__api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal. A connection another
  *     member shared is reached once named by a holder of `credential-proxy:call`, never with
@@ -18,8 +18,8 @@
  *     own, and for a holder of `credential-proxy:call` those shared into the space;
  *   - a remote MCP integration's typed tool (a fake server on loopback) searched, described and
  *     called on both endpoints, an integration nobody connected in `not_ready` with its connect
- *     link, the chat's loopback bearer refused at the routes themselves, and a closed space's
- *     pinned endpoint offering nothing to call.
+ *     link, the same through the chat's loopback bearer, and a closed space's pinned endpoint
+ *     offering nothing to call.
  *
  * The upstream is a stub of the global `fetch` the proxy calls, as in
  * `test/integration/routes/credential-proxy.test.ts`, which covers the proxy's access rule and
@@ -71,6 +71,7 @@ import mcpModule from "../../index.ts";
 // By path, as `test/integration/modules/mcp-read-skill.test.ts` does: the minting secret is
 // process-local to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../../../packages/module-chat/src/loopback-auth.ts";
+import { orgPermissions, presetPermissions } from "../../../../lib/permissions.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -369,9 +370,9 @@ describe("mcp integration tools", () => {
       expect(names).toContain("invoke_operation");
     });
 
-    it("declares neither over the chat's loopback bearer, which the proxy refuses", async () => {
-      // The bearer carries the user's resolved permissions: everything that declares the tools
-      // to an instance token, on a credential the proxy does not accept.
+    it("declares both over the chat's loopback bearer, which is server-minted", async () => {
+      // The bearer carries the user's resolved permissions: the chat is offered exactly the
+      // tools an instance token holding them is.
       const token = mintMcpLoopbackToken({
         userId: owner.user.id,
         email: owner.user.email,
@@ -384,8 +385,8 @@ describe("mcp integration tools", () => {
         path: spacePath(owner),
         headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("search_integration_tools");
-      expect(names).not.toContain("call_integration_tool");
+      expect(names).toContain("search_integration_tools");
+      expect(names).toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
       expect(names).toContain("run_and_wait");
     });
@@ -935,31 +936,20 @@ describe("mcp integration tools", () => {
       );
     });
 
-    it("refuses the chat's loopback bearer at the routes themselves, not only at the endpoint", async () => {
+    it("does the same through the chat's loopback bearer, re-entering the proxy routes with it", async () => {
+      // What the chat mints for a turn: the caller's resolved permissions, server-minted.
       const token = mintMcpLoopbackToken({
         userId: owner.user.id,
         email: owner.user.email,
         name: owner.user.name,
         orgId: owner.orgId,
         orgRole: "owner",
-        permissions: [...CALL_OWN_ROLE, "credential-proxy:call"],
+        permissions: [...new Set([...orgPermissions("owner"), ...presetPermissions("admin")])],
       });
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": owner.orgId,
-        "X-Space-Id": owner.defaultSpaceId,
-      };
-      const listed = await app.request("/api/credential-proxy/tools", { headers });
-      expect(listed.status).toBe(403);
-      expect(((await listed.json()) as { code: string }).code).toBe("forbidden");
-      const called = await app.request("/api/credential-proxy/tools/call", {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ integration_package_id: REMOTE_ID, name: "search" }),
+      await searchAndCall({
+        path: spacePath(owner),
+        headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
-      expect(called.status).toBe(403);
-      expect(((await called.json()) as { code: string }).code).toBe("forbidden");
-      expect(server.requests).toEqual([]);
     });
 
     it("refuses a call on the endpoint pinned to a space that closes the credential proxy, before any exchange", async () => {
