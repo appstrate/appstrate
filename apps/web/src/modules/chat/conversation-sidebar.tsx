@@ -42,7 +42,7 @@ import type {
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth } from "./use-panel-width";
-import { useMediaQuery } from "./use-media-query";
+import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
@@ -441,7 +441,7 @@ export function ConversationSidebar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const desktop = useMediaQuery("(min-width: 1024px)");
+  const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
   const size = usePanelWidth(panelRef);

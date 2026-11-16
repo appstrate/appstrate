@@ -2,6 +2,9 @@
 
 import { useSyncExternalStore } from "react";
 
+/** Tailwind's `lg` breakpoint and wider. */
+export const LG_AND_UP = "(min-width: 1024px)";
+
 /** Live `matchMedia` match; `false` where there is no window (static markup). */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(

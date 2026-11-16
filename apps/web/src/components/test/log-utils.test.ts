@@ -5,12 +5,16 @@ import {
   buildLogEntries,
   buildTurnRows,
   filterJournal,
+  journalGroupElapsedMs,
   journalIntegrationIds,
   journalLevel,
+  expandedJournalGroups,
+  journalRows,
   journalSearchText,
   toolLabel,
   type ExecutionEntry,
   type JournalFilters,
+  type JournalRow,
   type RawLog,
   type ToolExecutionEntry,
 } from "../log-utils";
@@ -705,6 +709,7 @@ describe("toolLabel and journalSearchText — the names a tool call goes by", ()
   it("names the runner's own tools by their label", () => {
     expect(toolLabel(call("output"), t)).toBe("t(log.harness.output)");
     expect(toolLabel(call("publish_file"), t)).toBe("t(log.harness.publish_file)");
+    expect(toolLabel(call("bash"), t)).toBe("t(log.harness.bash)");
   });
 
   it("keeps the name the model called for a call without identity", () => {
@@ -792,5 +797,138 @@ describe("filterJournal — what the journal shows", () => {
 
   it("keeps the entries of the chosen levels", () => {
     expect(ids({ levels: ["info"], types: ["journal"] })).toEqual(["j"]);
+  });
+});
+
+describe("journalRows — runner lines fold into one row", () => {
+  const system = (id: string, level = "info"): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level,
+    message: id,
+    sourceType: "progress",
+  });
+  const say = (id: string): ExecutionEntry => ({ id, kind: "agent", level: "debug", message: id });
+  const none = { levels: [], types: [], query: "" };
+  const shape = (rows: JournalRow[]) =>
+    rows.map((row) =>
+      row.kind === "group" ? `${row.id}[${row.entries.map((e) => e.id).join(",")}]` : row.id,
+    );
+
+  it("folds runs of two or more at the start, in the middle and at the end", () => {
+    const entries = [
+      system("a"),
+      system("b", "debug"),
+      say("m1"),
+      system("c"),
+      system("d"),
+      system("e"),
+      say("m2"),
+      system("f"),
+      system("g"),
+    ];
+    expect(shape(journalRows(entries, none))).toEqual([
+      "group:a[a,b]",
+      "m1",
+      "group:c[c,d,e]",
+      "m2",
+      "group:f[f,g]",
+    ]);
+  });
+
+  it("leaves a single runner line as a row of its own", () => {
+    expect(shape(journalRows([say("m1"), system("a"), say("m2")], none))).toEqual([
+      "m1",
+      "a",
+      "m2",
+    ]);
+  });
+
+  it("never folds a warning or an error, which ends the run", () => {
+    const entries = [
+      system("a"),
+      system("w", "warn"),
+      system("b"),
+      system("c"),
+      system("x", "error"),
+      system("d"),
+    ];
+    expect(shape(journalRows(entries, none))).toEqual(["a", "w", "group:b[b,c]", "x", "d"]);
+  });
+
+  it("folds nothing but the runner's lines", () => {
+    const line: ExecutionEntry = { id: "j", kind: "log", level: "info", message: "j" };
+    expect(shape(journalRows([say("m1"), say("m2"), line, { ...line, id: "k" }], none))).toEqual([
+      "m1",
+      "m2",
+      "j",
+      "k",
+    ]);
+  });
+
+  it("keeps a group's id as its run grows", () => {
+    const first = journalRows([system("a"), system("b")], none);
+    const grown = journalRows([system("a"), system("b"), system("c")], none);
+    expect(first[0]?.id).toBe(grown[0]!.id);
+  });
+
+  it("folds nothing while a search or a level or type filter is in force", () => {
+    const entries = [system("a"), system("b")];
+    for (const filters of [
+      { ...none, query: "a" },
+      { ...none, levels: ["info"] },
+      { ...none, types: ["system"] },
+    ]) {
+      expect(shape(journalRows(entries, filters))).toEqual(["a", "b"]);
+    }
+  });
+
+  it("measures a group from its first line to its last, 0 when undated", () => {
+    const dated = (id: string, at: string) => ({ ...system(id), createdAt: at });
+    const [group] = journalRows(
+      [dated("a", "2026-07-01T10:00:00.000Z"), dated("b", "2026-07-01T10:00:02.500Z")],
+      none,
+    );
+    const [undated] = journalRows([system("a"), system("b")], none);
+    if (group?.kind !== "group" || undated?.kind !== "group") throw new Error("not grouped");
+    expect(journalGroupElapsedMs(group)).toBe(2500);
+    expect(journalGroupElapsedMs(undated)).toBe(0);
+  });
+});
+
+describe("expandedJournalGroups — a group is open while its lines arrive", () => {
+  const system = (id: string): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level: "info",
+    message: id,
+    sourceType: "progress",
+  });
+  const say = (id: string): ExecutionEntry => ({ id, kind: "agent", level: "debug", message: id });
+  const none = { levels: [], types: [], query: "" };
+  const boot = [system("a"), system("b")];
+  const later = [...boot, say("m"), system("c"), system("d")];
+  const open = (entries: ExecutionEntry[], state: Parameters<typeof expandedJournalGroups>[1]) => [
+    ...expandedJournalGroups(journalRows(entries, none), state),
+  ];
+
+  it("opens a live run's last group, then folds it once another event follows", () => {
+    expect(open(boot, { open: {}, live: true })).toEqual(["group:a"]);
+    expect(open([...boot, say("m")], { open: {}, live: true })).toEqual([]);
+  });
+
+  it("does the same for a group later in the run, and folds every group when the run ends", () => {
+    expect(open(later, { open: {}, live: true })).toEqual(["group:c"]);
+    expect(open(later, { open: {}, live: false })).toEqual([]);
+  });
+
+  it("keeps a group as the reader set it", () => {
+    expect(open(later, { open: { "group:a": true, "group:c": false }, live: true })).toEqual([
+      "group:a",
+    ]);
+  });
+
+  it("keeps the group holding the open row open", () => {
+    expect(open(later, { open: {}, live: false, selectedEntryId: "b" })).toEqual(["group:a"]);
   });
 });
