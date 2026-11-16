@@ -73,7 +73,7 @@ authority. `listEnforcedChatSkills` answers `EnforcedChatSkillRef
 ## The turn
 
 `handleChatStream` starts the read at the beginning of phase B, in parallel with
-the session upsert, keyed on the acting set (the spaces the router read), and awaits it in
+the session upsert, keyed on the conversation's origin space (read from the session row once it resolves), and awaits it in
 phase A's join (with the model list and the session row). A 503 therefore
 refuses the turn before attachment materialization, credential resolution, the
 admission gate, the user message, the active-stream marker and the MCP session.
@@ -161,7 +161,7 @@ version, since its `@draft` URI names it by definition.
 
 ## `GET /api/orgs/{orgId}/chat/enforced-skills`
 
-Answers the names for the acting set:
+Answers the names of one space's enforced skills, `?spaceId=` (required, a space the caller reads chats in: else a 400 naming the field):
 `{ object: "list", data: [{ id, name, version }] }`, read from the database
 through `listEnforcedChatSkills` (no archive download). It never returns
 content, because a member without `skills:read` may call it.
@@ -192,20 +192,23 @@ failure answers the same 503.
   `skills:read`) sees the enforced names in the composer
   (`EnforcedSkillsIndicator`).
 
-## Across the acting set
+## The origin space, and the spaces a conversation acts in
 
-A conversation (`/api/orgs/{orgId}/chat`, #1886) has no owning space, so its skills come from every
-space it can act in:
+A conversation (`/api/orgs/{orgId}/chat`, #1886) has a nullable **origin space** (`chat_sessions.space_id`): the
+space selected when it was created, NULL from « Vue d'ensemble ». It is not an owner, but it owns the
+enforced skills:
 
-- **Enforced skills** are the union of `loadEnforcedSkills` over the acting set (the reachable spaces where
-  the caller holds `chat:write`, `chat:read` and `mcp:read`: `actingSpaces`, `platform-services.ts`), read
-  concurrently by `enforcedSkillsOf`, one entry per package (the first space in reach order, the order
-  `GET /api/spaces` uses, that has a published version of it, else the first), sorted by id. A failed read
-  in any one space is a 503 for the turn. `GET /api/orgs/{orgId}/chat/enforced-skills` calls the same
-  function. The lead line and the strict note say "the spaces this conversation can act in require".
+- **Enforced skills** are the origin space's, exactly as before the feature (`deps.loadEnforcedSkills(orgId,
+originSpaceId)`), none for a conversation without an origin space or whose author can no longer act there.
+  Acting in another space does not load that space's, and neither does an external MCP client acting there.
+  A failed read is a 503 for the turn. `GET /api/orgs/{orgId}/chat/enforced-skills?spaceId=` calls the same
+  read for the space it names (a new conversation in the selected space, an existing conversation's origin).
+  The lead line names the space (« This space — <name> (`id`), where this conversation was started — requires
+  these skills in every conversation ») and the strict note says « those this conversation's origin space
+  requires ».
 - **Reading** (`auto` catalogue, drafts, chosen skills) goes over the organization MCP endpoint, limited to
-  the acting set, and keeps one entry per package, the first space in reach order listing it. Skills are
-  procedures, not data: injecting one touches no space.
+  the acting set, and keeps one entry per package, the first space in reach order listing it; a limited
+  conversation reads its origin space alone. Skills are procedures, not data: injecting one touches no space.
 - **The claim** (`injectedSkillsSchema`) binds each skill to its own space: every entry carries the
   `spaceId` its `skill://<spaceId>/…` URI names, and `resources/read` serves the skill only in a request
   that entered that space.

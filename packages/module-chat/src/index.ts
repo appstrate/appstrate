@@ -27,7 +27,7 @@
  */
 
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import { createChatRouter, createSessionSchema, renameSessionSchema } from "./routes.ts";
+import { createChatRouter, createSessionSchema, updateSessionSchema } from "./routes.ts";
 import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
@@ -155,8 +155,8 @@ const chatModule: AppstrateModule = {
       {
         method: "PATCH",
         path: `${base}/sessions/{id}`,
-        jsonSchema: z.toJSONSchema(renameSessionSchema) as Record<string, unknown>,
-        description: "Rename chat session",
+        jsonSchema: z.toJSONSchema(updateSessionSchema) as Record<string, unknown>,
+        description: "Update chat session",
       },
     ];
   },

@@ -4,10 +4,12 @@
  * Chat API — session CRUD + history READ, and the enforced skills (names).
  *
  * There is ONE kind of conversation: it belongs to the organization and its
- * author, under `/api/orgs/:orgId/chat/*`. It has no owning space; the spaces
- * it TOUCHED (`chat_session_spaces`) are what spaces filter it by, and it is
- * visible to its author only while they reach, with `chat:read`, every one of
- * them. Sessions are personal: every query filters by (orgId, userId).
+ * author, under `/api/orgs/:orgId/chat/*`. Its nullable ORIGIN space
+ * (`chat_sessions.space_id`) is not an owner; the TOUCHED set (the origin space
+ * plus `chat_session_spaces`) is what spaces filter it by, and it is visible to its
+ * author only while they reach, with `chat:read`, every space of that set. A
+ * conversation may be limited (`restricted`) to its origin space. Sessions are
+ * personal: every query filters by (orgId, userId).
  *
  * Persistence is server-authoritative and has exactly TWO writers, both in
  * `persistence.ts`. `POST /api/orgs/:orgId/chat` is the only one on a request
@@ -31,21 +33,9 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  exists,
-  ilike,
-  inArray,
-  notExists,
-  or,
-  sql,
-  type SQL,
-} from "drizzle-orm";
+import { and, asc, desc, eq, ilike, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
+import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import {
   PERMISSION_REQUIREMENT_MARKER,
   requireModulePermission,
@@ -62,11 +52,10 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { createSession, sessionVisible } from "./persistence.ts";
+import { createSession, sessionVisible, touchedSpaceIds, touchedUnder } from "./persistence.ts";
 import {
-  enforcedSkillsOf,
   spacesHolding,
-  actingSpace,
+  conversationOrigin,
   actingSpaces,
   type ChatPermission,
   type ChatPlatformDeps,
@@ -87,13 +76,21 @@ function likeContains(text: string): string {
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  /** The space the user is looking at: the conversation touches it at creation. */
+  /** The conversation's origin space: the space selected when it is created. */
   spaceId: z.string().min(1).optional(),
+  /** Limited to the origin space (`spaceId` required). */
+  restricted: z.boolean().optional(),
 });
 
-export const renameSessionSchema = z.object({
-  title: z.string().min(1).max(200),
-});
+export const updateSessionSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    /** Limit (`true`, needs an origin space the caller can act in) or lift (`false`) it. */
+    restricted: z.boolean().optional(),
+  })
+  .refine((body) => body.title !== undefined || body.restricted !== undefined, {
+    error: "title or restricted is required",
+  });
 
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
@@ -115,30 +112,17 @@ function toSessionDto(row: SessionRow, touchedSpaceIds: readonly string[]) {
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
     skill_mode: row.skillMode,
     pinned_skills: row.pinnedSkills,
+    spaceId: row.spaceId,
+    restricted: row.restricted,
     space_ids: touchedSpaceIds,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-/** The DTOs of `rows`, the touched spaces of all of them read in ONE query. */
+/** The DTOs of `rows`, the touched set of all of them read in ONE query. */
 async function toSessionDtos(rows: SessionRow[]) {
-  const touched = new Map<string, string[]>();
-  if (rows.length > 0) {
-    const links = await db
-      .select({ sessionId: chatSessionSpaces.sessionId, spaceId: chatSessionSpaces.spaceId })
-      .from(chatSessionSpaces)
-      .where(
-        inArray(
-          chatSessionSpaces.sessionId,
-          rows.map((row) => row.id),
-        ),
-      )
-      .orderBy(asc(chatSessionSpaces.createdAt), asc(chatSessionSpaces.spaceId));
-    for (const { sessionId, spaceId } of links) {
-      touched.set(sessionId, [...(touched.get(sessionId) ?? []), spaceId]);
-    }
-  }
+  const touched = await touchedSpaceIds(rows.map((row) => row.id));
   return rows.map((row) => toSessionDto(row, touched.get(row.id) ?? []));
 }
 
@@ -152,7 +136,7 @@ function toMessageDto(row: MessageRow) {
 /**
  * What a session query is scoped to: the author alone (ownership is part of the
  * query, not a display filter), and the spaces they read with `chat:read` — a
- * session is visible while every space it touched is among them.
+ * session is visible while every space of its touched set is among them.
  */
 interface SessionScope {
   orgId: string;
@@ -167,20 +151,6 @@ const openableBy = (scope: SessionScope): SQL =>
     eq(chatSessions.userId, scope.userId),
     sessionVisible(scope.readable),
   )!;
-
-/**
- * The sessions a space filter lists: those that touched `spaceId`, and those that touched
- * no space at all — a conversation that has acted nowhere holds no space's data, so it
- * belongs to every filter until its first act decides.
- */
-const listedUnderSpace = (spaceId: string): SQL => {
-  const touches = (extra?: SQL) =>
-    db
-      .select({ one: sql`1` })
-      .from(chatSessionSpaces)
-      .where(and(eq(chatSessionSpaces.sessionId, chatSessions.id), extra));
-  return or(exists(touches(eq(chatSessionSpaces.spaceId, spaceId))), notExists(touches()))!;
-};
 
 async function findOwnedSession(id: string, scope: SessionScope): Promise<SessionRow | undefined> {
   const [session] = await db
@@ -275,7 +245,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     handlers.create,
   );
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
-  router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.rename);
+  router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.update);
   router.put(
     "/api/orgs/:orgId/chat/sessions/:id/read",
     rateLimited(120),
@@ -296,17 +266,20 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     handlers.stop,
   );
 
-  // GET …/enforced-skills — names only, from the database: a member without
-  // `skills:read` may call it. Gated like the turn that injects them.
+  // GET …/enforced-skills?spaceId= — the names of a space's enforced skills, from the
+  // database: a member without `skills:read` may call it. The composer shows them for a
+  // new conversation in the selected space, or for an existing conversation's origin.
   router.get(
     "/api/orgs/:orgId/chat/enforced-skills",
     rateLimited(120),
     guard("chat:write"),
     async (c) => {
-      const orgId = c.get("orgId");
-      const skills = await enforcedSkillsOf(c.get("reachable"), (spaceId) =>
-        deps.listEnforcedSkills(orgId, spaceId),
-      );
+      const spaceId = c.req.query("spaceId");
+      if (!spaceId) throw invalidRequest("spaceId is required", "spaceId");
+      if (!sessionScope(c).readable.includes(spaceId)) {
+        throw invalidRequest("spaceId must be a space you can read chats in", "spaceId");
+      }
+      const skills = await deps.listEnforcedSkills(c.get("orgId"), spaceId);
       return c.json({
         object: "list",
         data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
@@ -342,7 +315,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
     list: async (c: Context<ChatEnv>) => {
       const scope = sessionScope(c);
       const limit = parseListLimit(c, { defaultLimit: SESSIONS_PAGE_SIZE });
-      // `?spaceId=` keeps the conversations that touched that space or none, in a space the caller
+      // `?spaceId=` keeps the conversations whose touched set holds that space or is empty, in a space the caller
       // must read: a space outside their reach is refused, like any unknown filter value.
       const spaceId = c.req.query("spaceId");
       if (spaceId !== undefined && !scope.readable.includes(spaceId)) {
@@ -350,7 +323,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       }
       const listed = and(
         openableBy(scope),
-        spaceId === undefined ? undefined : listedUnderSpace(spaceId),
+        spaceId === undefined ? undefined : touchedUnder(spaceId),
       )!;
       const conditions: SQL[] = [listed];
       // `?q=` narrows by title; blank = no filter. Untitled rows never match
@@ -394,20 +367,20 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       return c.json(listResponse(await toSessionDtos(page), { hasMore }));
     },
 
-    // POST …/sessions — start a new conversation, touching the space the user is looking at
+    // POST …/sessions — start a new conversation, with its origin space and limit
     create: async (c: Context<ChatEnv>) => {
       const data = await readJsonBody(c, createSessionSchema, { allowEmpty: true });
-      const touched =
-        data.spaceId === undefined ? undefined : actingSpace(c.get("reachable"), data.spaceId);
+      const origin = conversationOrigin(c.get("reachable"), data);
       const row = await createSession({
         id: mintSessionId(),
         orgId: c.get("orgId"),
         userId: c.get("user").id,
         title: data.title ?? null,
-        touchedSpaceId: touched?.id,
+        spaceId: origin?.spaceId ?? null,
+        restricted: origin?.restricted ?? false,
       });
       notifySessionUpdate(row.id, row.orgId, row.userId);
-      return c.json(toSessionDto(row, touched ? [touched.id] : []), 201);
+      return c.json(toSessionDto(row, row.spaceId ? [row.spaceId] : []), 201);
     },
 
     // GET …/sessions/:id — the conversation's messages, in seq order (history load)
@@ -418,13 +391,27 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       return c.json({ ...dto, messages: messages.map(toMessageDto) });
     },
 
-    // PATCH …/sessions/:id — rename
-    rename: async (c: Context<ChatEnv>) => {
+    // PATCH …/sessions/:id — rename, limit to the origin space, or lift the limit
+    update: async (c: Context<ChatEnv>) => {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
-      const { title } = await readJsonBody(c, renameSessionSchema);
+      const { title, restricted } = await readJsonBody(c, updateSessionSchema);
+      // Limiting needs an origin space the caller can still act in; lifting is always allowed.
+      if (
+        restricted &&
+        !actingSpaces(c.get("reachable")).some((space) => space.id === session.spaceId)
+      ) {
+        throw invalidRequest(
+          "restricted needs an origin space this conversation can act in",
+          "restricted",
+        );
+      }
       await db
         .update(chatSessions)
-        .set({ title, updatedAt: new Date() })
+        .set({
+          ...(title === undefined ? {} : { title }),
+          ...(restricted === undefined ? {} : { restricted }),
+          updatedAt: new Date(),
+        })
         .where(eq(chatSessions.id, session.id));
       notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);

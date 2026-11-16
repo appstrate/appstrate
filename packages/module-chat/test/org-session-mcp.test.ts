@@ -82,7 +82,7 @@ async function rpc(
   method: string,
   params: Record<string, unknown>,
 ): Promise<JsonRpcEnvelope> {
-  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId, null));
+  const url = new URL(platformMcpUrl(ORIGIN, owner.orgId));
   const res = await app.request(`${url.pathname}${url.search}`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },

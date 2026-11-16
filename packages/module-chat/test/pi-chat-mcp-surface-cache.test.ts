@@ -625,3 +625,16 @@ describe("list_skills", () => {
     }
   });
 });
+
+describe("platform MCP surface key and the pinned endpoint", () => {
+  it("keys the organization endpoint and a space-pinned one apart, whatever the permissions", () => {
+    const permissions = uniquePermissions();
+    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_1/s/spc_1?context=injected`, permissions)).not.toBe(
+      surfaceKey(`${ORIGIN}/api/mcp/o/org_1?context=injected`, permissions),
+    );
+    // The ids of the path reach no descriptor: two pins of the same shape share a key.
+    expect(surfaceKey(`${ORIGIN}/api/mcp/o/org_1/s/spc_1?context=injected`, permissions)).toBe(
+      surfaceKey(`${ORIGIN}/api/mcp/o/org_2/s/spc_2?context=injected`, permissions),
+    );
+  });
+});

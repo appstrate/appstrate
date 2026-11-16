@@ -2,7 +2,8 @@
 
 /**
  * The tool layer of a conversation: the connection is the organization
- * endpoint, whose space-acting tools each take a `space_id`.
+ * endpoint, whose space-acting tools each take a `space_id`, or, for a limited
+ * conversation, the endpoint pinned to its origin space, whose calls name none.
  *
  * The local `run_and_wait` takes the space from its arguments (refusing a missing
  * one in the server's own words), strips it before the shared launch, sends it as
@@ -16,6 +17,7 @@ import {
   spaceArgumentRefusal,
   type OrgWideSpaces,
 } from "../../../apps/api/src/modules/mcp/spaces.ts";
+import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type OrganizationSpaces } from "../src/pi-chat/mcp-tools.ts";
 
 /** Nothing listens here: a hop that escapes the injected fetch throws. */
@@ -130,11 +132,12 @@ function organizationOf(events: string[]): OrganizationSpaces {
   };
 }
 
-async function tools(transport: ReturnType<typeof transcript>) {
+async function tools(transport: ReturnType<typeof transcript>, pinnedSpaceId?: string) {
   const built = await buildPlatformMcpTools({
-    url: `${ORIGIN}/api/mcp/o/org_1?context=injected`,
+    url: platformMcpUrl(ORIGIN, "org_1", pinnedSpaceId),
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: organizationOf(transport.events),
+    pinnedSpaceId,
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
@@ -231,6 +234,37 @@ describe("the conversation's forwarded tools and resources", () => {
       transport.events.length = 0;
       await tool("read_resource").execute("c2", { uri: "appfile://file_unplaced00" });
       expect(transport.events).toEqual(["resources/read"]);
+    } finally {
+      await built.close();
+    }
+  });
+});
+
+describe("a limited conversation's tools on the pinned endpoint", () => {
+  it("launches a run in the pinned space with no space_id, and records nothing", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      const result = await tool("run_and_wait").execute("call_1", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+      });
+      expect(JSON.parse(text(result))).toMatchObject({ id: RUN_ID, status: "success" });
+      expect(transport.events).toEqual(["launch"]);
+      expect(transport.launches[0]!.spaceHeader).toBe("spc_beta");
+      expect(transport.polls).toEqual(["spc_beta"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("forwards a call that names no space without recording any", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport, "spc_beta");
+    try {
+      await tool("invoke_operation").execute("c1", { operation_id: "listAgents" });
+      expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();
     }

@@ -72,39 +72,22 @@ export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableS
 }
 
 /**
- * The space the user is looking at (`spaceId` of a conversation's creation or turn), which
- * must be one of the acting set: a 400 naming the field otherwise.
+ * The origin space and limit a conversation is created with (`spaceId`, `restricted` of the
+ * session creation or of the turn that lazily creates it). The space must be one of the
+ * acting set, and the limit needs a space: a 400 naming the field otherwise.
  */
-export function actingSpace(
+export function conversationOrigin(
   reachable: readonly ReachableSpaceGrant[],
-  spaceId: string,
-): ReachableSpaceGrant {
-  const space = actingSpaces(reachable).find((candidate) => candidate.id === spaceId);
-  if (!space)
-    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
-  return space;
-}
-
-/**
- * The skills the conversations require, read with `load` per space of the acting set (the
- * turn that injects them is gated the same), one entry per package — the first space in
- * reach order that has a published version of it, else the first — sorted by package id;
- * a space whose read fails fails the whole read.
- */
-export async function enforcedSkillsOf<T extends { packageId: string; version: string | null }>(
-  reachable: readonly ReachableSpaceGrant[],
-  load: (spaceId: string) => Promise<T[]>,
-): Promise<T[]> {
-  const perSpace = await Promise.all(actingSpaces(reachable).map((space) => load(space.id)));
-  const byPackage = new Map<string, T>();
-  for (const skill of perSpace.flat()) {
-    const kept = byPackage.get(skill.packageId);
-    // An entry without a version has no content to inject: a later space's published one wins.
-    if (!kept || (kept.version === null && skill.version !== null)) {
-      byPackage.set(skill.packageId, skill);
-    }
+  input: { spaceId?: string; restricted?: boolean },
+): { spaceId: string; restricted: boolean } | undefined {
+  if (input.spaceId === undefined) {
+    if (input.restricted) throw invalidRequest("restricted needs a spaceId", "restricted");
+    return undefined;
   }
-  return [...byPackage.values()].sort((a, b) => a.packageId.localeCompare(b.packageId));
+  if (!actingSpaces(reachable).some((space) => space.id === input.spaceId)) {
+    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+  }
+  return { spaceId: input.spaceId, restricted: input.restricted === true };
 }
 
 export interface ChatPlatformDeps {
@@ -195,7 +178,7 @@ function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string)
       status: 503,
       code: "enforced_skills_unavailable",
       title: "Service Unavailable",
-      detail: `The skills the spaces this conversation can act in require could not be loaded. ${why}`,
+      detail: `The skills this space requires in its conversations could not be loaded. ${why}`,
       cause,
     });
   });

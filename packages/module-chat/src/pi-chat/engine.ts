@@ -92,6 +92,8 @@ export interface PiChatInput {
     url: string;
     /** The spaces a call may name, and the record of those the conversation touched. */
     organization: OrganizationSpaces;
+    /** The space the URL pins: a limited conversation's origin. */
+    pinnedSpaceId?: string;
     headers: Record<string, string>;
     fetch?: typeof fetch;
     surfaceKey?: string;

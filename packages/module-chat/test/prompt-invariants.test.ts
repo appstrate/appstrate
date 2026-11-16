@@ -58,6 +58,7 @@ const CONTEXT_OPTS = {
   capabilities: caps(BUILDER),
   rolePreview: false,
   spaces: SPACES,
+  restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
   enforced: [],
@@ -626,14 +627,14 @@ describe("the persona and the spaces", () => {
     );
   });
 
-  describe("the space the user is looking at", () => {
+  describe("the origin space", () => {
     const sentence = (space: string) =>
-      `The user is looking at ${space}: use it when a request names no space; never move a refused action into another space.`;
+      `This conversation was started in ${space}: use it when a request names no space; never move a refused action into another space.`;
 
     it("is a default for a request naming no space, never a pin", () => {
       const out = contextText(identityOf("Ada"), {
         ...CONTEXT_OPTS,
-        defaultSpace: { id: "spc_b", name: "Beta" },
+        origin: { id: "spc_b", name: "Beta" },
       });
       expect(out).toContain(sentence("Beta (`spc_b`)"));
       // Every acting space stays listed: the default pins none.
@@ -644,10 +645,23 @@ describe("the persona and the spaces", () => {
 
     it("is absent from the overview, where the model asks when the request does not say", () => {
       const out = contextText(identityOf("Ada"), CONTEXT_OPTS);
-      expect(out).not.toContain("The user is looking at");
+      expect(out).not.toContain("This conversation was started in");
       expect(out).toContain(
         "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
       );
+    });
+
+    it("names the one space a limited conversation acts in, and that the user lifts the limit", () => {
+      const out = contextText(identityOf("Ada"), {
+        ...CONTEXT_OPTS,
+        spaces: SPACES.slice(1, 2),
+        origin: { id: "spc_b", name: "Beta" },
+        restricted: true,
+      });
+      expect(out).toContain("This conversation is limited to Beta (`spc_b`, role admin)");
+      expect(out).toContain("The user lifts the limit in the composer");
+      expect(out).not.toContain("spc_a");
+      expect(out).not.toContain("Ask the user which space");
     });
   });
 });

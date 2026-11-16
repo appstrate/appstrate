@@ -3070,7 +3070,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). `spaceId` is the space the user is looking at: the default of a request that names none (never a pin), which an existing conversation touches before the turn acts; absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, through the space-pinned MCP endpoint, and is refused (403) once the caller can no longer act there. The conversation's origin space is the default of a request that names no space (never a pin); `spaceId` and `restricted` set it, and are read only when this turn creates the conversation — an existing one keeps its own. Absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -3087,8 +3087,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the skills the spaces enforce in chat
-         * @description The skills the spaces a conversation can act in impose on its turns, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. One entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
+         * List the skills a space enforces in chat
+         * @description The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
          */
         get: operations["listChatEnforcedSkills"];
         put?: never;
@@ -3108,13 +3108,13 @@ export interface paths {
         };
         /**
          * List chat sessions
-         * @description List every conversation the caller can open in the organization, most recent activity (`updatedAt`) first: their own whose touched spaces they all reach with `chat:read`; with `?spaceId=`, those that touched that space or touched none yet (a conversation that has acted nowhere holds no space data). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
+         * @description List every conversation the caller can open in the organization, most recent activity (`updatedAt`) first: their own whose touched spaces they all reach with `chat:read`; with `?spaceId=`, those whose touched spaces include that space, or that touched none yet (a conversation that has acted nowhere holds no space data). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
          */
         get: operations["listChatSessions"];
         put?: never;
         /**
          * Create a chat session
-         * @description Starts a conversation of the organization and its author. With `spaceId` — the space the user is looking at, which must be one of the spaces the conversation can act in (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together; else a 400 naming the field) — the conversation touches it at creation, so it is listed in that space before anything else. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
+         * @description Starts a conversation of the organization and its author. `spaceId` is its origin space — the space selected when it is created, which must be one of the spaces the conversation can act in (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together; else a 400 naming the field) — and it is touched by definition, so the conversation is listed in that space before anything else. `restricted: true` limits it to that space and needs `spaceId` (else a 400 naming the field). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
          */
         post: operations["createChatSession"];
         delete?: never;
@@ -3138,8 +3138,11 @@ export interface paths {
         delete: operations["deleteChatSession"];
         options?: never;
         head?: never;
-        /** Rename a chat session */
-        patch: operations["renameChatSession"];
+        /**
+         * Rename a chat session or change its limit
+         * @description `title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit and is always allowed. At least one field is required.
+         */
+        patch: operations["updateChatSession"];
         trace?: never;
     };
     "/api/orgs/{orgId}/chat/sessions/{id}/read": {
@@ -6024,13 +6027,17 @@ export interface components {
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read. */
             unread: boolean;
             /**
-             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the spaces enforce (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
+             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the origin space enforces (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
              * @enum {string}
              */
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
-            /** @description The spaces the conversation touched: the space selected when it started or when a turn was sent, tool calls naming a `space_id`, attachments. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`. */
+            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview. Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to. */
+            spaceId: string | null;
+            /** @description Whether the conversation is limited to its origin space: its tools act there alone, through the space-pinned MCP endpoint. Always false without an origin space. */
+            restricted: boolean;
+            /** @description The touched spaces: the origin space (first), then those a tool call named by `space_id`, a `skill://` or `appfile://` read or an attachment touched, by touch time. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`. */
             space_ids: string[];
             /** Format: date-time */
             createdAt: string;
@@ -20262,8 +20269,10 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
-                    /** @description The space the user is looking at, one of the spaces the conversation can act in (else a 400 naming the field): the default of a request naming no space, touched by the conversation before the turn acts. Absent from the overview. */
+                    /** @description The origin space of a conversation this turn creates, one of the spaces it can act in (else a 400 naming the field). Ignored for an existing conversation. Absent from the overview. */
                     spaceId?: string;
+                    /** @description Limits a conversation this turn creates to its origin space; needs `spaceId` (else a 400 naming the field). Ignored for an existing conversation. */
+                    restricted?: boolean;
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them. */
                     package_authoring?: boolean;
@@ -20315,7 +20324,7 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the acting spaces enforce could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the skills the origin space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20328,7 +20337,10 @@ export interface operations {
     };
     listChatEnforcedSkills: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The space whose enforced skills are listed. */
+                spaceId: string;
+            };
             header?: never;
             path: {
                 /** @description Organization ID — the organization a list spanning its spaces reads. */
@@ -20360,10 +20372,11 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the conversation may act in could not be loaded. RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded. RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20431,8 +20444,10 @@ export interface operations {
             content: {
                 "application/json": {
                     title?: string;
-                    /** @description The space the user is looking at: the conversation touches it at creation. Absent from the overview. */
+                    /** @description The origin space: the space selected when the conversation is created. Absent from the overview. */
                     spaceId?: string;
+                    /** @description Limit the conversation to its origin space; needs `spaceId`. */
+                    restricted?: boolean;
                 };
             };
         };
@@ -20508,7 +20523,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    renameChatSession: {
+    updateChatSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -20522,12 +20537,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    title: string;
+                    title?: string;
+                    restricted?: boolean;
                 };
             };
         };
         responses: {
-            /** @description Session renamed */
+            /** @description Session updated */
             204: {
                 headers: {
                     [name: string]: unknown;

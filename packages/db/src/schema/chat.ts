@@ -13,6 +13,8 @@ import {
   unique,
   uniqueIndex,
   primaryKey,
+  boolean,
+  check,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -42,6 +44,16 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * The conversation's ORIGIN space: the space selected when it was created, NULL when it
+     * was created from the overview. It is not an owner: lists, filters and opening do not
+     * depend on it. It gives the enforced skills, the default space of a request naming none,
+     * and the space a limited conversation is confined to. Deleting the space deletes the
+     * conversation.
+     */
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    /** Confined to its origin space (the space-pinned MCP endpoint); needs an origin space. */
+    restricted: boolean("restricted").notNull().default(false),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
     // turn is generating. Set when a `POST /api/orgs/:orgId/chat` turn starts, cleared when
@@ -70,6 +82,8 @@ export const chatSessions = pgTable(
   },
   (table) => [
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
+    index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
+    check("chat_sessions_restricted_needs_space", sql`restricted = false OR space_id IS NOT NULL`),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
     // covering exactly these columns for the FK to attach. Trivially valid —
@@ -79,11 +93,12 @@ export const chatSessions = pgTable(
 );
 
 /**
- * The spaces a conversation touched: the space selected when it started or when a turn
- * was sent, tool calls naming a `space_id`, attachments. A conversation belongs to the
- * organization and its author, with no owning space; spaces are filters over this record.
- * It is opened only while its reader reaches every one of them with `chat:read`; a deleted
- * space drops out of the record by cascade.
+ * The spaces a conversation touched besides its origin space (`chat_sessions.space_id`,
+ * which is touched by definition and recorded here never): tool calls naming a `space_id`,
+ * `skill://` / `appfile://` reads, attachments. A conversation belongs to the organization
+ * and its author; spaces are filters over the touched set. It is opened only while its
+ * reader reaches every space of that set with `chat:read`; a deleted space drops out of the
+ * record by cascade.
  */
 export const chatSessionSpaces = pgTable(
   "chat_session_spaces",

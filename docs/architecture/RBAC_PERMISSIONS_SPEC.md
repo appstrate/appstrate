@@ -429,8 +429,10 @@ ALTER TABLE org_invitations
 ALTER TABLE oauth_clients
   ADD COLUMN signup_space_assignments jsonb NOT NULL DEFAULT '[]';
 
--- a chat conversation belongs to its organization and author; the spaces it touched
--- (chat_session_spaces) filter it and gate who may open it
+-- a chat conversation belongs to its organization and author; its origin space
+-- (chat_sessions.space_id, nullable) plus the spaces it touched (chat_session_spaces) form
+-- the touched set that filters it and gates who may open it; chat_sessions.restricted
+-- limits it to the origin space
 ```
 
 Design notes:

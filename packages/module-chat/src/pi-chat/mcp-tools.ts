@@ -157,9 +157,10 @@ export interface PiTurnBudget {
 }
 
 /**
- * What the organization connection (`/api/mcp/o/:org`, whose space-acting tools
- * each take a `space_id`) needs from its conversation: the spaces a call may name,
- * and the record of the spaces the conversation touched.
+ * What a conversation's connection needs from it: the spaces a call may name (on the
+ * organization endpoint, `/api/mcp/o/:org`, each space-acting tool takes a `space_id`; a
+ * limited conversation's pinned endpoint serves its origin space alone), and the record of
+ * the spaces the conversation touched.
  */
 export interface OrganizationSpaces {
   spaces: readonly NamedSpace[];
@@ -174,10 +175,15 @@ export interface OrganizationSpaces {
 }
 
 type BuildPlatformMcpToolsOptions = {
-  /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
+  /** Platform MCP endpoint (`/api/mcp/o/:org[/s/:space]?context=injected`). */
   url: string;
   /** The spaces a call may name: each space-acting call takes its `space_id`. */
   organization: OrganizationSpaces;
+  /**
+   * The space the URL pins (a limited conversation's origin): its calls carry no `space_id`,
+   * and `run_and_wait`'s REST hops name it in `X-Space-Id`.
+   */
+  pinnedSpaceId?: string;
   /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
@@ -336,6 +342,7 @@ export async function buildPlatformMcpTools(
           origin: runOrigin,
           headers: opts.headers,
           organization,
+          pinnedSpaceId: opts.pinnedSpaceId,
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,
@@ -600,6 +607,8 @@ function makeRunAndWaitExtension(
     headers: Record<string, string>;
     /** The spaces one of which each call names. */
     organization: OrganizationSpaces;
+    /** The space the endpoint pins, when it does: no call names one. */
+    pinnedSpaceId?: string;
     /** Transport for the launch POST and the poll loop — see the option above. */
     fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
@@ -614,9 +623,13 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
-        // The space the call names, taken out of the arguments (the shared launch refuses an
-        // argument it does not declare) and recorded before anything is launched.
-        const target = await namedSpace(params, ctx.organization);
+        // Pinned: the URL's space. Otherwise the one the call names, taken out of the
+        // arguments (the shared launch refuses an argument it does not declare) and recorded
+        // before anything is launched.
+        const target =
+          ctx.pinnedSpaceId === undefined
+            ? await namedSpace(params, ctx.organization)
+            : { spaceId: ctx.pinnedSpaceId, args: (params ?? {}) as Record<string, unknown> };
         if ("refusal" in target) {
           return withTurnBudgetNote(toPiToolResult(target.refusal), ctx.turnBudget);
         }

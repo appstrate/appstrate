@@ -21,7 +21,7 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, isNull, notExists, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   chatMessages,
@@ -52,69 +52,92 @@ function toContent(message: UIMessage): ChatMessageContent {
 }
 
 /**
- * A conversation is visible while every space it touched is readable: no touched
- * space outside `readable`. One predicate for the open, the list and the turn, so
- * none can drift from the others.
+ * The touched set T of the outer `chat_sessions` row, as `(space_id, touched_at)` rows: its
+ * origin space (first), then each `chat_session_spaces` row by touch time. The one
+ * definition behind the list filter, the visibility rule and the DTO's `space_ids`.
+ */
+const touchedSpaces = sql`(
+  SELECT ${chatSessions.spaceId} AS space_id, '-infinity'::timestamptz AS touched_at
+    WHERE ${chatSessions.spaceId} IS NOT NULL
+  UNION ALL
+  SELECT ${chatSessionSpaces.spaceId}, ${chatSessionSpaces.createdAt}
+    FROM ${chatSessionSpaces} WHERE ${chatSessionSpaces.sessionId} = ${chatSessions.id}
+)`;
+
+/**
+ * A conversation is visible while every space of its touched set is readable: none outside
+ * `readable`. One predicate for the open, the list and the turn, so none can drift from the
+ * others.
  */
 export function sessionVisible(readable: readonly string[]): SQL {
-  return notExists(
-    db
-      .select({ one: sql`1` })
-      .from(chatSessionSpaces)
-      .where(
-        and(
-          eq(chatSessionSpaces.sessionId, chatSessions.id),
-          notInArray(chatSessionSpaces.spaceId, [...readable]),
-        ),
-      ),
-  );
-}
-
-/** Record that the session touched `spaceId` (idempotent); whether the record grew. */
-async function insertTouch(
-  client: ChatDbClient,
-  sessionId: string,
-  spaceId: string,
-): Promise<boolean> {
-  const inserted = await client
-    .insert(chatSessionSpaces)
-    .values({ sessionId, spaceId })
-    .onConflictDoNothing()
-    .returning({ spaceId: chatSessionSpaces.spaceId });
-  return inserted.length > 0;
+  const unreadable =
+    readable.length === 0
+      ? sql`true`
+      : sql`touched.space_id NOT IN (${sql.join(
+          readable.map((id) => sql`${id}`),
+          sql`, `,
+        )})`;
+  return sql`NOT EXISTS (SELECT 1 FROM ${touchedSpaces} AS touched WHERE ${unreadable})`;
 }
 
 /**
- * Record that a conversation acted in `spaceId`, BEFORE the act is dispatched: it is
- * then listed and opened only while its author reaches that space too. The session list
- * is told when the record grew, so its space line refreshes.
+ * The conversations a space filter lists: those whose touched set holds `spaceId`, and
+ * those whose set is empty — one that holds no space's data belongs to every filter until
+ * its first act decides.
+ */
+export function touchedUnder(spaceId: string): SQL {
+  return sql`(EXISTS (SELECT 1 FROM ${touchedSpaces} AS touched WHERE touched.space_id = ${spaceId})
+    OR NOT EXISTS (SELECT 1 FROM ${touchedSpaces} AS touched))`;
+}
+
+/** The touched set of each of `sessionIds`: origin space first, then by touch time. */
+export async function touchedSpaceIds(
+  sessionIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const touched = new Map<string, string[]>();
+  if (sessionIds.length === 0) return touched;
+  const rows = await db
+    .select({ sessionId: chatSessions.id, spaceId: sql<string>`touched.space_id` })
+    .from(chatSessions)
+    .innerJoin(sql`LATERAL ${touchedSpaces} AS touched`, sql`true`)
+    .where(inArray(chatSessions.id, [...sessionIds]))
+    .orderBy(sql`touched.touched_at`, sql`touched.space_id`);
+  for (const { sessionId, spaceId } of rows) {
+    touched.set(sessionId, [...(touched.get(sessionId) ?? []), spaceId]);
+  }
+  return touched;
+}
+
+/**
+ * Record that a conversation acted in `spaceId`, BEFORE the act is dispatched: it is then
+ * listed and opened only while its author reaches that space too. Its origin space is touched
+ * by definition and recorded nowhere else. The session list is told when the record grew, so
+ * its space line refreshes.
  */
 export async function touchSessionSpace(
-  session: { id: string; orgId: string; userId: string },
+  session: { id: string; orgId: string; userId: string; originSpaceId: string | null },
   spaceId: string,
 ): Promise<void> {
-  if (await insertTouch(db, session.id, spaceId)) {
-    notifySessionUpdate(session.id, session.orgId, session.userId);
-  }
+  if (spaceId === session.originSpaceId) return;
+  const inserted = await db
+    .insert(chatSessionSpaces)
+    .values({ sessionId: session.id, spaceId })
+    .onConflictDoNothing()
+    .returning({ spaceId: chatSessionSpaces.spaceId });
+  if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
 
-/**
- * Create a conversation, touching `touchedSpaceId` (the space the user is looking at) in
- * the same transaction as the insert: it is listed in that space before anything else.
- */
+/** Create a conversation with its origin space and limit (`restricted` needs the space). */
 export async function createSession(input: {
   id: string;
   orgId: string;
   userId: string;
   title: string | null;
-  touchedSpaceId?: string;
+  spaceId: string | null;
+  restricted: boolean;
 }): Promise<typeof chatSessions.$inferSelect> {
-  const { touchedSpaceId, ...values } = input;
-  return db.transaction(async (tx) => {
-    const [row] = await tx.insert(chatSessions).values(values).returning();
-    if (touchedSpaceId) await insertTouch(tx, row!.id, touchedSpaceId);
-    return row!;
-  });
+  const [row] = await db.insert(chatSessions).values(input).returning();
+  return row!;
 }
 
 /** The space a file belongs to, or undefined when `orgId` holds no such file. */
@@ -127,11 +150,19 @@ export async function fileSpaceId(orgId: string, fileId: string): Promise<string
   return row?.spaceId;
 }
 
+/** What a turn takes from the conversation row: its skill selection, origin space and limit. */
+export interface TurnConversation {
+  selection: ChatSkillSelection;
+  spaceId: string | null;
+  restricted: boolean;
+}
+
 /**
  * Create the session row if it does not exist yet (idempotent). The client
  * mints the id; the stream route creates the row through here, writing the
- * turn's skill `selection` in the same statement when it carries one. Returns
- * the row's skill selection.
+ * turn's skill `selection` in the same statement when it carries one, and the
+ * `origin` space and limit ONLY when it creates the row: an existing conversation keeps
+ * its own. Returns what the turn takes from the row.
  */
 export async function ensureSession(
   id: string,
@@ -143,13 +174,8 @@ export async function ensureSession(
    */
   readable: readonly string[],
   selection?: ChatSkillSelection,
-  /**
-   * The space the user is looking at: the session touches it — at creation, in the
-   * same transaction as the insert, or, an existing one, because the user brought the
-   * conversation there — before the turn acts.
-   */
-  touchedSpaceId?: string,
-): Promise<ChatSkillSelection> {
+  origin?: { spaceId: string; restricted: boolean },
+): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -169,34 +195,43 @@ export async function ensureSession(
   // below already says 404. One round trip AND no write.
   //
   // 404, not 403, so we don't reveal that the id exists for someone else.
-  const touched = await db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(chatSessions)
-      .values({ id, orgId, userId, title: null, ...selection })
-      .onConflictDoUpdate({
-        target: chatSessions.id,
-        // `updatedAt` stays either way, so a pin never reorders the sidebar.
-        set: selection ?? { id: sql`${chatSessions.id}` },
-        setWhere: and(
-          eq(chatSessions.orgId, orgId),
-          eq(chatSessions.userId, userId),
-          sessionVisible(readable),
-        ),
-      })
-      .returning({
-        orgId: chatSessions.orgId,
-        userId: chatSessions.userId,
-        skillMode: chatSessions.skillMode,
-        pinnedSkills: chatSessions.pinnedSkills,
-      });
-    if (!row || row.orgId !== orgId || row.userId !== userId) {
-      throw notFound("Chat session not found");
-    }
-    const grew = touchedSpaceId ? await insertTouch(tx, id, touchedSpaceId) : false;
-    return { selection: { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills }, grew };
-  });
-  if (touched.grew) notifySessionUpdate(id, orgId, userId);
-  return touched.selection;
+  const [row] = await db
+    .insert(chatSessions)
+    .values({
+      id,
+      orgId,
+      userId,
+      title: null,
+      spaceId: origin?.spaceId ?? null,
+      restricted: origin?.restricted ?? false,
+      ...selection,
+    })
+    .onConflictDoUpdate({
+      target: chatSessions.id,
+      // `updatedAt` stays either way, so a pin never reorders the sidebar.
+      set: selection ?? { id: sql`${chatSessions.id}` },
+      setWhere: and(
+        eq(chatSessions.orgId, orgId),
+        eq(chatSessions.userId, userId),
+        sessionVisible(readable),
+      ),
+    })
+    .returning({
+      orgId: chatSessions.orgId,
+      userId: chatSessions.userId,
+      skillMode: chatSessions.skillMode,
+      pinnedSkills: chatSessions.pinnedSkills,
+      spaceId: chatSessions.spaceId,
+      restricted: chatSessions.restricted,
+    });
+  if (!row || row.orgId !== orgId || row.userId !== userId) {
+    throw notFound("Chat session not found");
+  }
+  return {
+    selection: { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills },
+    spaceId: row.spaceId,
+    restricted: row.restricted,
+  };
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

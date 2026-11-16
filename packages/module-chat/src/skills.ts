@@ -97,7 +97,7 @@ export function resolveChatSkills(
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  const requiredBy = "a space this conversation can act in";
+  const requiredBy = "this space";
   for (const { packageId, version, uri, content } of enforced) {
     // The space its URI names is the one its claim entry binds the skill to.
     const spaceId = uri === null ? undefined : parseSkillUri(uri)?.spaceId;

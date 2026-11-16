@@ -92,10 +92,14 @@ const BASE_OPTS = {
   capabilities: caps(BUILDER),
   rolePreview: false,
   spaces: REACH,
+  restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
   enforced: [],
 } as const;
+
+/** The origin space, which owns the enforced skills. */
+const ORIGIN = { id: "spc_1", name: "One" };
 
 /** A line of the `auto` catalogue: the published entry of `@<scope>/<name>`, or its draft. */
 const listedSkill = (packageId: string, description: string, version: string | null = null) => {
@@ -290,7 +294,7 @@ describe("formatCallerContext", () => {
     const HOUSE_BLOCK =
       '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\n---\nname: house\n---\nHouse body.\n</skill>';
     const ENFORCED_LEAD =
-      "The spaces this conversation can act in require these skills in every conversation.";
+      "This space — One (`spc_1`), where this conversation was started — requires these skills in every conversation.";
     const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
 
     it("renders them in every mode, for a turn that cannot read skills", () => {
@@ -299,6 +303,7 @@ describe("formatCallerContext", () => {
           { user: { name: "Ada" }, org: { role: "member" } },
           {
             ...BASE_OPTS,
+            origin: ORIGIN,
             capabilities: caps(NO_SKILLS),
             skills: { skillMode, pinnedSkills: [] },
             enforced: [HOUSE],
@@ -319,7 +324,7 @@ describe("formatCallerContext", () => {
       const lead = (permissions: readonly string[]) =>
         contextText(
           { user: { name: "Ada" } },
-          { ...BASE_OPTS, capabilities: caps(permissions), enforced: [HOUSE] },
+          { ...BASE_OPTS, origin: ORIGIN, capabilities: caps(permissions), enforced: [HOUSE] },
         );
       const noTransport = lead(NO_SKILLS.filter((p) => p !== "mcp:read"));
       expect(noTransport).toContain(`${ENFORCED_LEAD} Each is a procedure`);
@@ -335,6 +340,7 @@ describe("formatCallerContext", () => {
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
+          origin: ORIGIN,
           enforced: [HOUSE],
           skillCatalogue: [
             listedSkill("@acme/house", "House rules"),
@@ -351,6 +357,7 @@ describe("formatCallerContext", () => {
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
+          origin: ORIGIN,
           enforced: [{ ...HOUSE, version: null, uri: null, content: null }],
           skillCatalogue: [listedSkill("@acme/house", "House rules")],
         },
@@ -365,6 +372,7 @@ describe("formatCallerContext", () => {
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
+          origin: ORIGIN,
           capabilities: caps(NO_SKILLS),
           skills: {
             skillMode: "strict",
@@ -417,6 +425,7 @@ describe("formatCallerContext", () => {
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
+            origin: ORIGIN,
             capabilities: caps(permissions),
             skills: { skillMode, pinnedSkills: ["@acme/mine"] },
             skillContents: new Map([
@@ -452,18 +461,19 @@ describe("formatCallerContext", () => {
       }
     });
 
-    it("keeps strict's note true: the spaces' requirement stays whatever the composer says", () => {
+    it("keeps strict's note true: the space's requirement stays whatever the composer says", () => {
       const out = contextText(
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
+          origin: ORIGIN,
           capabilities: caps(NO_SKILLS),
           skills: { skillMode: "strict", pinnedSkills: [] },
           enforced: [HOUSE],
         },
       );
       expect(out).toContain(
-        "those the spaces this conversation can act in require and those the user chose",
+        "those this conversation's origin space requires and those the user chose",
       );
       expect(out).toContain("The user lifts only their own restriction");
       expect(out).toContain("their requirement stays");
@@ -472,10 +482,10 @@ describe("formatCallerContext", () => {
     it("notices an enforced skill with no readable version", () => {
       const out = contextText(
         { user: { name: "Ada" } },
-        { ...BASE_OPTS, enforced: [{ ...HOUSE, version: null, content: null }] },
+        { ...BASE_OPTS, origin: ORIGIN, enforced: [{ ...HOUSE, version: null, content: null }] },
       );
       expect(out).toContain(
-        "`@acme/house` is required by a space this conversation can act in but has no published version to follow.",
+        "`@acme/house` is required by this space but has no published version to follow.",
       );
       expect(out).not.toContain(ENFORCED_LEAD);
     });
@@ -487,6 +497,7 @@ describe("formatCallerContext", () => {
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
+            origin: ORIGIN,
             now: new Date("2026-06-25T09:05:00.000Z"),
             enforced: [other, HOUSE],
             skillCatalogue: [listedSkill("@acme/pdf", "PDF")],
@@ -686,18 +697,12 @@ function fakeSkillsClient(opts: {
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
-  describe("the space the user is looking at", () => {
-    const READ_ONLY = {
-      id: "spc_2",
-      name: "Two",
-      role: "viewer",
-      permissions: ["chat:read"],
-      credentialProxyOpen: true,
-    };
-    const build = (defaultSpaceId?: string) =>
+  describe("the origin space", () => {
+    const build = (extra: { origin?: typeof ORIGIN; restricted?: boolean }) =>
       blockText(fakeContext({ orgRole: "member" }), {
-        reachable: [...REACH, READ_ONLY],
-        defaultSpaceId,
+        spaces: REACH,
+        restricted: false,
+        ...extra,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -706,21 +711,28 @@ describe("buildCallerContextBlock", () => {
         openSkillsClient: NO_SKILLS,
       });
 
-    it("lists the acting spaces only and names the selected one as the default", async () => {
-      const out = await build("spc_1");
+    it("lists the acting spaces and names the origin space as the default", async () => {
+      const out = await build({ origin: ORIGIN });
       expect(out).toContain("- `spc_1` — One (role builder)");
-      expect(out).not.toContain("spc_2");
       expect(out).toContain(
-        "The user is looking at One (`spc_1`): use it when a request names no space",
+        "This conversation was started in One (`spc_1`): use it when a request names no space; never move a refused action into another space.",
       );
     });
 
-    it("names no default for a space outside the acting set, or none (the overview)", async () => {
-      for (const selected of ["spc_2", "spc_unknown", undefined]) {
-        const out = await build(selected);
-        expect(out).not.toContain("The user is looking at");
-        expect(out).toContain("Ask the user which space when the request does not say");
-      }
+    it("names no default without an origin space (the overview)", async () => {
+      const out = await build({});
+      expect(out).not.toContain("This conversation was started in");
+      expect(out).toContain("Ask the user which space when the request does not say");
+    });
+
+    it("says a limited conversation acts in its origin space alone, without a space_id", async () => {
+      const out = await build({ origin: ORIGIN, restricted: true });
+      expect(out).toContain("This conversation is limited to One (`spc_1`, role builder)");
+      expect(out).toContain("takes no `space_id`");
+      expect(out).toContain("The user lifts the limit in the composer");
+      expect(out).not.toContain("every tool that acts in a space takes the `space_id`");
+      expect(out).not.toContain("Ask the user which space");
+      expect(out).toContain("Permissions this turn (your role in that space)");
     });
   });
 
@@ -742,7 +754,8 @@ describe("buildCallerContextBlock", () => {
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
         user,
         // Strict: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
@@ -789,7 +802,8 @@ describe("buildCallerContextBlock", () => {
 
   it("leaves the chosen skills out when the skills connection cannot open", async () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
-      reachable: REACH,
+      spaces: REACH,
+      restricted: false,
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
@@ -811,7 +825,8 @@ describe("buildCallerContextBlock", () => {
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -838,7 +853,8 @@ describe("buildCallerContextBlock", () => {
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -867,7 +883,8 @@ describe("buildCallerContextBlock", () => {
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -895,7 +912,8 @@ describe("buildCallerContextBlock", () => {
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
         user,
         capabilities: caps(BUILDER),
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
@@ -924,7 +942,8 @@ describe("buildCallerContextBlock", () => {
       texts: {},
     });
     const readOnlyOut = await blockText(fakeContext({ orgRole: "member" }), {
-      reachable: REACH,
+      spaces: REACH,
+      restricted: false,
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
@@ -939,7 +958,8 @@ describe("buildCallerContextBlock", () => {
     // A turn that cannot load a skill lists none, and opens nothing.
     let opened = false;
     await blockText(fakeContext({ orgRole: "member" }), {
-      reachable: REACH,
+      spaces: REACH,
+      restricted: false,
       user,
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
@@ -959,7 +979,8 @@ describe("buildCallerContextBlock", () => {
       texts: {},
     });
     const out = await blockText(fakeContext({ orgRole: "member" }), {
-      reachable: REACH,
+      spaces: REACH,
+      restricted: false,
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
@@ -984,7 +1005,9 @@ describe("buildCallerContextBlock", () => {
       '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nHouse body.\n</skill>';
     const build = (enforced: Promise<readonly EnforcedChatSkill[]>) =>
       blockText(fakeContext({ orgRole: "member" }), {
-        reachable: REACH,
+        spaces: REACH,
+        restricted: false,
+        origin: ORIGIN,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],

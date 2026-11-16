@@ -21,7 +21,7 @@
 import type { Context } from "hono";
 import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
@@ -48,6 +48,7 @@ import { finalizeChatStream } from "./finalize-stream.ts";
 import {
   ensureSession,
   fileSpaceId,
+  type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
   touchSessionSpace,
@@ -55,9 +56,8 @@ import {
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import {
-  actingSpace,
   actingSpaces,
-  enforcedSkillsOf,
+  conversationOrigin,
   spacesHolding,
   type ChatPlatformDeps,
 } from "./platform-services.ts";
@@ -166,10 +166,11 @@ export const chatStreamSchema = z
       }),
     modelId: z.string().optional(),
     /**
-     * The space the user is looking at: the default of a request naming no space, which the
-     * conversation touches before the turn acts. Absent in the overview (no default).
+     * The origin space and limit of the conversation, read ONLY when this turn creates its
+     * row (an existing conversation keeps its own). Absent from the overview (no default).
      */
     spaceId: z.string().min(1).optional(),
+    restricted: z.boolean().optional(),
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
     package_authoring: z.boolean().optional(),
@@ -261,15 +262,10 @@ export async function handleChatStream(
   const user = c.get("user");
   const requestId = c.get("requestId");
   // The spaces the caller reaches, of which the acting set is the part the turn may act in;
-  // each call of the turn is decided in the space it names.
+  // each call of the turn is decided in the space it names. The conversation's own limit and
+  // origin space narrow it once its row is known (`turn` below).
   const reachable = c.get("reachable");
   const acting = actingSpaces(reachable);
-  // The caller's grants this turn starts from: the union over their acting set. It is a
-  // CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
-  // `lib/auth-pipeline.ts`), so no space's grants reach another.
-  const callerPermissions: ReadonlySet<string> = new Set(
-    acting.flatMap((space) => space.permissions),
-  );
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
@@ -281,9 +277,9 @@ export async function handleChatStream(
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
   const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
-  // A space outside the acting set is refused before anything is written.
-  const defaultSpace =
-    body.spaceId === undefined ? undefined : actingSpace(reachable, body.spaceId);
+  // The origin space and limit a conversation created by this turn takes; a space outside the
+  // acting set, or a limit without a space, is refused before anything is written.
+  const createdOrigin = conversationOrigin(reachable, body);
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
@@ -296,29 +292,6 @@ export async function handleChatStream(
   const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
   const turnStart = Date.now();
-
-  // A conversation acts in the spaces of its acting set alone (`actingSpaces`) and records
-  // each one it acts in before the act (see `touchSessionSpace`). A space outside the
-  // set — unknown, unreachable, or reached without one of the grants — is refused: nothing is
-  // recorded and the call is not made. Skills are procedures, not data: injecting one touches
-  // no space; only a call or a `read_resource` naming a space does.
-  const organization: OrganizationSpaces = {
-    spaces: acting,
-    touch: async (touchedSpaceId) => {
-      const space = acting.find((candidate) => candidate.id === touchedSpaceId);
-      if (!space) {
-        throw new Error(
-          `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${acting.map((s) => `\`${s.id}\``).join(", ")}).`,
-        );
-      }
-      if (!sessionId || !lastMessage?.id) return;
-      await touchSessionSpace({ id: sessionId, orgId, userId: user.id }, space.id);
-    },
-    spaceOfUri: async (uri) => {
-      const fileId = parseFileUri(uri);
-      return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
-    },
-  };
 
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
@@ -344,7 +317,7 @@ export async function handleChatStream(
     body.skill_mode && body.pinned_skills
       ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
       : undefined;
-  const sessionSkills: Promise<ChatSkillSelection> =
+  const conversation: Promise<TurnConversation> =
     sessionId && lastMessage?.id
       ? ensureSession(
           sessionId,
@@ -352,9 +325,13 @@ export async function handleChatStream(
           user.id,
           spacesHolding(reachable, "chat:read").map((space) => space.id),
           bodySkills,
-          defaultSpace?.id,
+          createdOrigin,
         )
-      : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
+      : Promise.resolve({
+          selection: bodySkills ?? DEFAULT_SKILL_SELECTION,
+          spaceId: createdOrigin?.spaceId ?? null,
+          restricted: createdOrigin?.restricted ?? false,
+        });
 
   const origin = selfOrigin();
   // Single platform-call seam: re-enter the platform app in-process (or loopback
@@ -401,27 +378,77 @@ export async function handleChatStream(
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
   // Flipping a switch changes the system prompt and, through the narrowed token, the
-  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode
-  // lives on the session row, so the turn's grants follow its upsert.
-  const turn = sessionSkills.then((skills) => {
+  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode, the
+  // origin space and the limit live on the session row, so the turn's scope follows its upsert.
+  const turn = conversation.then((conv) => {
+    // The origin space, while the caller can still act there.
+    const originSpace = acting.find((space) => space.id === conv.spaceId);
+    // A limited conversation acts in its origin space alone, and is refused once it cannot.
+    if (conv.restricted && !originSpace) {
+      throw forbidden(
+        "This conversation is limited to its origin space, where you can no longer act.",
+      );
+    }
+    const spaces = conv.restricted && originSpace ? [originSpace] : acting;
+    // The caller's grants this turn starts from: the union over the turn's spaces. It is a
+    // CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
+    // `lib/auth-pipeline.ts`), so no space's grants reach another.
+    const callerPermissions: ReadonlySet<string> = new Set(
+      spaces.flatMap((space) => space.permissions),
+    );
     const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
-      skillMode: skills.skillMode,
+      skillMode: conv.selection.skillMode,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));
     // `auto` shows the whole catalogue in the context and `strict` lists nothing:
     // only a `manual` turn lists the spaces' skills on the user's request.
-    const listsSkills = capabilities.readsSkills && skills.skillMode === "manual";
-    return { skills, permissions, capabilities, listsSkills };
+    const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
+    // A conversation acts in the spaces of its turn alone and records each one it acts in
+    // before the act (see `touchSessionSpace`; the origin space is touched by definition). A
+    // space outside the set — unknown, unreachable, or reached without one of the grants — is
+    // refused: nothing is recorded and the call is not made. Skills are procedures, not data:
+    // injecting one touches no space; only a call or a `read_resource` naming a space does.
+    const organization: OrganizationSpaces = {
+      spaces,
+      touch: async (touchedSpaceId) => {
+        const space = spaces.find((candidate) => candidate.id === touchedSpaceId);
+        if (!space) {
+          throw new Error(
+            `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${spaces.map((s) => `\`${s.id}\``).join(", ")}).`,
+          );
+        }
+        if (!sessionId || !lastMessage?.id) return;
+        await touchSessionSpace(
+          { id: sessionId, orgId, userId: user.id, originSpaceId: conv.spaceId },
+          space.id,
+        );
+      },
+      spaceOfUri: async (uri) => {
+        const fileId = parseFileUri(uri);
+        return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
+      },
+    };
+    return {
+      skills: conv.selection,
+      originSpace,
+      restricted: conv.restricted,
+      spaces,
+      callerPermissions,
+      organization,
+      permissions,
+      capabilities,
+      listsSkills,
+    };
   });
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // The enforced skills (those of every space of the acting set) depend on nothing but the ids, so they start
-  // now; phase A's join awaits them, so their 503 refuses the turn before any
-  // file is materialized.
-  const enforcedSkills: Promise<EnforcedChatSkill[]> = enforcedSkillsOf(reachable, (enforcedIn) =>
-    deps.loadEnforcedSkills(orgId, enforcedIn),
+  // The enforced skills are the origin space's alone (none without one): they start as soon
+  // as the row resolves; phase A's join awaits them, so their 503 refuses the turn before
+  // any file is materialized.
+  const enforcedSkills: Promise<EnforcedChatSkill[]> = turn.then(({ originSpace }) =>
+    originSpace ? deps.loadEnforcedSkills(orgId, originSpace.id) : [],
   );
   // Then the caller-context block. It depends on the reach and the session row
   // (the turn's grants and its skills) — never on the
@@ -448,51 +475,56 @@ export async function handleChatStream(
   const contextBlockPromise: Promise<
     { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
   > = turn
-    .then(({ skills, permissions, capabilities }) =>
-      buildCallerContextBlock(c, {
-        reachable,
-        defaultSpaceId: defaultSpace?.id,
-        user,
-        // UI language forwarded by the client; validated/defaulted in the builder.
-        locale: c.req.header("X-Chat-Locale"),
-        capabilities,
-        permissions,
-        skills,
-        enforced: enforcedSkills,
-        // The turn's skills are read before the claim naming them exists, so
-        // over a connection of their own: the caller's permissions, not narrowed by
-        // `turnPermissions`, and no claim — what the caller reads.
-        // One in-process `initialize` plus the reads, only on a turn that lists
-        // (`auto` with `skills:read`) or injects skills; closed before the turn's
-        // connection opens.
-        openSkillsClient: (signal) =>
-          connectPlatformMcp({
-            signal,
-            url: platformMcpUrl(origin, orgId),
-            headers: {
-              Authorization: `Bearer ${mintMcpLoopbackToken({
-                userId: user.id,
-                email: user.email,
-                name: user.name,
-                orgId,
-                orgRole,
-                permissions: [...callerPermissions],
-                viewAs: persona,
-              })}`,
-              "x-org-id": orgId,
-            },
-            fetch: platformFetch,
-          }),
-      }).finally(() => {
-        phaseBMs = Date.now() - phaseBStart;
-      }),
+    .then(
+      ({ skills, permissions, capabilities, spaces, originSpace, restricted, callerPermissions }) =>
+        buildCallerContextBlock(c, {
+          spaces,
+          origin: originSpace,
+          restricted,
+          user,
+          // UI language forwarded by the client; validated/defaulted in the builder.
+          locale: c.req.header("X-Chat-Locale"),
+          capabilities,
+          permissions,
+          skills,
+          enforced: enforcedSkills,
+          // The turn's skills are read before the claim naming them exists, so
+          // over a connection of their own: the caller's permissions, not narrowed by
+          // `turnPermissions`, and no claim — what the caller reads.
+          // One in-process `initialize` plus the reads, only on a turn that lists
+          // (`auto` with `skills:read`) or injects skills; closed before the turn's
+          // connection opens.
+          openSkillsClient: (signal) =>
+            connectPlatformMcp({
+              signal,
+              url: platformMcpUrl(origin, orgId),
+              headers: {
+                Authorization: `Bearer ${mintMcpLoopbackToken({
+                  userId: user.id,
+                  email: user.email,
+                  name: user.name,
+                  orgId,
+                  orgRole,
+                  permissions: [...callerPermissions],
+                  viewAs: persona,
+                })}`,
+                "x-org-id": orgId,
+              },
+              fetch: platformFetch,
+            }),
+        }).finally(() => {
+          phaseBMs = Date.now() - phaseBStart;
+        }),
     )
     .then(
       ({ text, injected }) => ({ ok: true as const, block: text, injectedSkills: injected }),
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, listsSkills }] = await Promise.all([
+  const [
+    models,
+    { permissions, capabilities, listsSkills, spaces, originSpace, restricted, organization },
+  ] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
     enforcedSkills,
@@ -536,11 +568,11 @@ export async function handleChatStream(
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
     // The spaces an attachment may resolve in, each under the caller's set there: the
-    // acting set. The container ACL reads as wide as
+    // turn's spaces. The container ACL reads as wide as
     // the caller does: an `appfile://` the user picked from the gallery — which
     // `runs:read-all` widens to the whole space's run outputs — must still resolve when
     // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces = acting.map((space) => ({
+    const attachmentSpaces = spaces.map((space) => ({
       id: space.id,
       permissions: new Set(space.permissions),
     }));
@@ -733,11 +765,12 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`, or the endpoint
+  // pinned to the origin space of a limited conversation), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
-  // permissions (the union over the caller's acting set, narrowed by `turnPermissions`) and
+  // permissions (the union over the turn's spaces, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
   const mcpToken = mintMcpLoopbackToken(
     {
@@ -759,7 +792,9 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  const mcpUrl = platformMcpUrl(origin, orgId);
+  // A limited conversation is confined by the server: its endpoint is pinned to the origin space.
+  const pinnedSpaceId = restricted ? originSpace?.id : undefined;
+  const mcpUrl = platformMcpUrl(origin, orgId, pinnedSpaceId);
   try {
     const response = await finalize(
       runEngine({
@@ -781,6 +816,7 @@ export async function handleChatStream(
           url: mcpUrl,
           headers: mcpHeaders,
           organization,
+          pinnedSpaceId,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on

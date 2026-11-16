@@ -12,14 +12,17 @@
  */
 
 /**
- * URL of the platform's organization MCP endpoint (`/api/mcp/o/:org`, where every
- * space-acting tool names its `space_id`), tagged `?context=injected`.
+ * URL of the platform's MCP endpoint, tagged `?context=injected`: the organization's own
+ * (`/api/mcp/o/:org`, where every space-acting tool names its `space_id`), or, for a
+ * limited conversation (`spaceId`), the endpoint pinned to its origin space
+ * (`/api/mcp/o/:org/s/:space`, the endpoint's one client-side pin).
  *
  * The chat injects the caller's identity, role and spaces into its own system
  * prompt, so the server's get_me tool would only re-fetch what the model
  * already has. The tag tells the server to drop that redundant tool (and its
  * "call get_me first" instruction).
  */
-export function platformMcpUrl(origin: string, orgId: string): string {
-  return `${origin}/api/mcp/o/${encodeURIComponent(orgId)}?context=injected`;
+export function platformMcpUrl(origin: string, orgId: string, spaceId?: string): string {
+  const organization = `${origin}/api/mcp/o/${encodeURIComponent(orgId)}`;
+  return `${spaceId === undefined ? organization : `${organization}/s/${encodeURIComponent(spaceId)}`}?context=injected`;
 }

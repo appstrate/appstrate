@@ -68,7 +68,8 @@ async function strictTurn(
   const block = await buildCallerContextBlock(
     { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
-      reachable: [
+      restricted: false,
+      spaces: [
         {
           id: owner.defaultSpaceId,
           name: "Default",

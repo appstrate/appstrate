@@ -35,7 +35,6 @@ import {
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
-import { actingSpaces } from "./platform-services.ts";
 import {
   injectedSkills,
   injectsSkills,
@@ -89,8 +88,8 @@ export type ChatEnv = {
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
-const SKILLS_ENFORCED_LEAD =
-  "The spaces this conversation can act in require these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.";
+const enforcedLead = (origin: { id: string; name: string }) =>
+  `This space — ${origin.name} (\`${origin.id}\`), where this conversation was started — requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.`;
 // The turn's MCP bearer names every injected definition, so `resources/read`
 // serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
@@ -105,7 +104,7 @@ const SKILLS_INJECTED_LEAD =
 const SKILLS_MANUAL_NOTE =
   "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
 const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those the spaces this conversation can act in require and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; their requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills shown here — those this conversation's origin space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; their requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -282,6 +281,8 @@ function formatSkillsSection(opts: {
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
   enforced: readonly EnforcedChatSkill[];
+  /** The origin space, which owns the enforced skills. */
+  origin?: { id: string; name: string };
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
@@ -296,9 +297,9 @@ function formatSkillsSection(opts: {
   if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
     groups.push([SKILLS_MANUAL_NOTE]);
   }
-  if (skills.enforced.length) {
+  if (skills.enforced.length && opts.origin) {
     groups.push([
-      `${SKILLS_ENFORCED_LEAD} ${files}`,
+      `${enforcedLead(opts.origin)} ${files}`,
       ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
@@ -322,10 +323,12 @@ type CallerContextOpts = {
   now?: Date;
   capabilities: TurnCapabilities;
   rolePreview: boolean;
-  /** The spaces the conversation can act in: its calls name them. */
+  /** The spaces the turn can act in: its calls name them (the origin space alone when limited). */
   spaces: readonly ReachableSpaceGrant[];
-  /** The space the user is looking at, when one is selected: the default of a request naming none. */
-  defaultSpace?: { id: string; name: string };
+  /** The conversation's origin space, when it can act there: the default of a request naming none. */
+  origin?: { id: string; name: string };
+  /** Limited to the origin space: the pinned endpoint serves it alone and its tools take no `space_id`. */
+  restricted: boolean;
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
@@ -348,6 +351,7 @@ export function formatCallerContext(
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
     enforced: opts.enforced,
+    origin: opts.origin,
   });
   const skillSection = skills.text;
   const name = identity.user.name?.trim();
@@ -364,23 +368,37 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // The spaces the conversation acts in, then which one the user is looking at: a default for
-  // a request naming no space, never a pin (the overview has none, and the model asks).
-  lines.push(
-    `Spaces you can act in${opts.rolePreview ? " (role preview active)" : ""}; every tool that acts in a space takes the \`space_id\` of one of them:`,
-    ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
-    opts.defaultSpace
-      ? `The user is looking at ${opts.defaultSpace.name} (\`${opts.defaultSpace.id}\`): use it when a request names no space; never move a refused action into another space.`
-      : "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
-  );
-  // The set is the union over the spaces listed above: it bounds what the turn may attempt,
-  // while each call is decided by the role held in the space it names. Permissions are in the
-  // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
-  lines.push(
-    `Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): ${
-      opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
-    }`,
-  );
+  // The spaces the turn acts in, then its origin space: a default for a request naming no
+  // space, never a pin (a conversation without one has none, and the model asks). A limited
+  // conversation acts in its origin alone, through the space-pinned endpoint.
+  const preview = opts.rolePreview ? " (role preview active)" : "";
+  if (opts.restricted && opts.origin) {
+    const role = opts.spaces.find((space) => space.id === opts.origin?.id)?.role;
+    lines.push(
+      `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`${role ? `, role ${role}` : ""})${preview}: every tool acts in that space alone, takes no \`space_id\`, and no other space can be reached. The user lifts the limit in the composer; never move a refused action elsewhere.`,
+    );
+    lines.push(
+      `Permissions this turn (your role in that space): ${
+        opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
+      }`,
+    );
+  } else {
+    lines.push(
+      `Spaces you can act in${preview}; every tool that acts in a space takes the \`space_id\` of one of them:`,
+      ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
+      opts.origin
+        ? `This conversation was started in ${opts.origin.name} (\`${opts.origin.id}\`): use it when a request names no space; never move a refused action into another space.`
+        : "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
+    );
+    // The set is the union over the spaces listed above: it bounds what the turn may attempt,
+    // while each call is decided by the role held in the space it names. Permissions are in the
+    // vocabulary of `required_permissions` and the 403 hint, so the model joins the two.
+    lines.push(
+      `Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): ${
+        opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
+      }`,
+    );
+  }
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
   //
@@ -590,23 +608,24 @@ function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served
 }
 
 /**
- * Build the caller-context system-prompt block: the identity, the spaces the
- * conversation can act in (its acting set) with the one the user is looking at,
- * when there is one, and the turn's permissions. Built from the already-authenticated
- * request context, with no read of the platform: the integrations and the agents differ
- * per space, so the model looks them up with its tools. The skills are those of
- * every space of the acting set, read over the organization endpoint, one per
- * package (the first space in reach order), each bound in the claim to the space its
- * URI names. A rejected `enforced` rejects the block: the turn is refused rather
- * than run without them.
+ * Build the caller-context system-prompt block: the identity, the spaces the turn can
+ * act in (its acting set, the origin space alone when the conversation is limited) with the
+ * origin space as the default, when there is one, and the turn's permissions. Built from the
+ * already-authenticated request context, with no read of the platform: the integrations and
+ * the agents differ per space, so the model looks them up with its tools. The skills are
+ * those of the turn's spaces, one per package (the first in reach order), each bound in the
+ * claim to the space its URI names; the enforced ones are the origin space's. A rejected
+ * `enforced` rejects the block: the turn is refused rather than run without them.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
-    /** The spaces the caller reaches; the acting set is the part the turn may act in. */
-    reachable: readonly ReachableSpaceGrant[];
-    /** The space the user is looking at, when it is one of the acting set. */
-    defaultSpaceId?: string;
+    /** The spaces the turn can act in: the acting set, or the origin space alone when limited. */
+    spaces: readonly ReachableSpaceGrant[];
+    /** The conversation's origin space, when it is one of `spaces`. */
+    origin?: { id: string; name: string };
+    /** Limited to the origin space. */
+    restricted: boolean;
     user: { id: string; name?: string | null; email?: string | null };
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
@@ -631,13 +650,11 @@ export async function buildCallerContextBlock(
       slug: c.get("orgSlug") ?? null,
     },
   };
-  // The acting set alone: a skill of a space the turn cannot act in is neither listed nor injected.
-  const acting = actingSpaces(args.reachable);
   const injects = injectsSkills(skills.skillMode);
   const [turnSkills, enforced] = await Promise.all([
     readChatSkills(
       args.openSkillsClient,
-      acting.map((space) => space.id),
+      args.spaces.map((space) => space.id),
       {
         catalogue: capabilities.readsSkills && !injects,
         // The drafts the caller reads are the turn's only while the turn keeps the
@@ -648,14 +665,14 @@ export async function buildCallerContextBlock(
     ),
     args.enforced,
   ]);
-  const defaultSpace = acting.find((space) => space.id === args.defaultSpaceId);
   const { text, injected } = formatCallerContext(identity, {
     locale,
     capabilities,
     rolePreview: persona !== undefined,
     permissions: args.permissions,
-    spaces: acting,
-    defaultSpace,
+    spaces: args.spaces,
+    origin: args.origin,
+    restricted: args.restricted,
     skills,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
