@@ -3,11 +3,14 @@
 /** Host-provided chat inputs, shared by the sidebar list and the page thread. Must not import `@appstrate/module-chat/ui` (entry chunk). */
 
 import { useCallback, useMemo } from "react";
+import type { ChatScope } from "@appstrate/module-chat/ui";
 import { useTranslation } from "react-i18next";
-import { fetchOrThrow } from "../../api/client";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { chatTransport } from "./chat-transport";
 
 /**
  * Scoping headers + the UI language (server defaults to fr without it), read at
@@ -25,27 +28,42 @@ function useChatGetHeaders() {
 }
 
 /**
- * The chat's `ChatTransport` over `getHeaders`: its REST calls go through {@link fetchOrThrow}, so
- * a refusal carries the server's code and reaches the shell's global error handling.
+ * What the chat serves: the organization in « Vue d'ensemble » (the chat holds the mode), else the
+ * working space. `known` once the space listing has answered: before, the mode cannot be told, and a
+ * chat page would ask the wrong routes.
  */
-function chatTransport(getHeaders: () => Record<string, string>) {
-  return {
-    getHeaders,
-    request: (path: string, init?: RequestInit) => {
-      const headers = new Headers(getHeaders());
-      new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-      return fetchOrThrow(path, { ...init, headers });
-    },
-  };
+export function useChatScope(): { scope: ChatScope; known: boolean } {
+  const { on, known } = useOverviewMode();
+  const orgId = useCurrentOrgId();
+  return useMemo(
+    () => ({
+      scope: on && orgId ? { kind: "organization", orgId } : { kind: "space" },
+      known,
+    }),
+    [on, orgId, known],
+  );
 }
 
-/** The shell's own transport (nav badge, outside a chat page): scoping headers only, no chat locale. */
-export const SHELL_CHAT_TRANSPORT = chatTransport(buildScopingHeaders);
+const SPACE_SCOPE: ChatScope = { kind: "space" };
 
-/** {@link chatTransport} over the page's headers; its identity moves with them. */
+/** The shell's own transport (nav badge, outside a chat page) in a space: scoping headers only, no chat locale. */
+const SHELL_CHAT_TRANSPORT = chatTransport(buildScopingHeaders, SPACE_SCOPE);
+
+/** {@link SHELL_CHAT_TRANSPORT} of the scope the chat serves: the organization's in the mode. */
+export function useShellChatTransport() {
+  const { scope } = useChatScope();
+  return useMemo(
+    () =>
+      scope.kind === "space" ? SHELL_CHAT_TRANSPORT : chatTransport(buildScopingHeaders, scope),
+    [scope],
+  );
+}
+
+/** {@link chatTransport} over the page's headers and scope; its identity moves with them. */
 export function useChatTransport() {
   const getHeaders = useChatGetHeaders();
-  return useMemo(() => chatTransport(getHeaders), [getHeaders]);
+  const { scope } = useChatScope();
+  return useMemo(() => chatTransport(getHeaders, scope), [getHeaders, scope]);
 }
 
 /** The `chat` namespace's `t`, in the shape the module takes. */

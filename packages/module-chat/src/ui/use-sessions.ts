@@ -19,9 +19,9 @@ import {
   flattenSessions,
   sessionsQueryKey,
   sessionsSearchQueryKey,
-  spaceIdFromHeaders,
   type SessionsCache,
 } from "./sessions.ts";
+import { chatScopeKey } from "./scope.ts";
 
 // Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
 // `chat_session_update` frames (the live keys carry the space id after it), and
@@ -58,16 +58,16 @@ export function sessionsRefetchInterval(query: {
 
 /** The session-list query, shared by the list and the nav badge (one key, one request). */
 function sessionsQuery(transport: ChatTransport | null | undefined, enabled: boolean, q = "") {
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const scopeKey = chatScopeKey(transport);
   return infiniteQueryOptions({
-    queryKey: q ? sessionsSearchQueryKey(spaceId, q) : sessionsQueryKey(spaceId),
-    queryFn: ({ pageParam }) => fetchSessionsPage(transport!.request, pageParam, q || undefined),
+    queryKey: q ? sessionsSearchQueryKey(scopeKey, q) : sessionsQueryKey(scopeKey),
+    queryFn: ({ pageParam }) => fetchSessionsPage(transport!, pageParam, q || undefined),
     ...keysetPaging,
     select: flattenSessions,
-    // The route requires `X-Space-Id`. Firing before the host's space store
+    // The space route requires `X-Space-Id`. Firing before the host's space store
     // resolves (first login, org switch) would be a guaranteed 400; the key
-    // carries the space, so it refetches the moment one arrives.
-    enabled: enabled && !!spaceId && !!transport,
+    // carries the scope, so it refetches the moment one arrives.
+    enabled: enabled && !!scopeKey && !!transport,
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });

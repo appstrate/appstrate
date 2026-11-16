@@ -12,7 +12,7 @@ import {
   togglePinned,
 } from "../src/ui/chat-skills.ts";
 import { MAX_PINNED_SKILLS } from "../src/skills.ts";
-import { requestAnswering } from "./fake-request.ts";
+import { requestAnswering, transportOver } from "./fake-request.ts";
 
 describe("fetchSkills", () => {
   it("GETs the space listing and parses its rows", async () => {
@@ -22,7 +22,7 @@ describe("fetchSkills", () => {
       }),
     );
 
-    const got = await fetchSkills(request);
+    const got = await fetchSkills(transportOver(request));
 
     expect(request.calls.map((c) => c.path)).toEqual(["/api/packages/skills"]);
     expect(got).toEqual([
@@ -32,7 +32,7 @@ describe("fetchSkills", () => {
 
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
-    await expect(fetchSkills(request)).rejects.toMatchObject({ status: 403 });
+    await expect(fetchSkills(transportOver(request))).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -48,7 +48,7 @@ describe("fetchEnforcedSkills", () => {
       }),
     );
 
-    const got = await fetchEnforcedSkills(request);
+    const got = await fetchEnforcedSkills(transportOver(request));
 
     expect(request.calls.map((c) => c.path)).toEqual(["/api/chat/enforced-skills"]);
     expect(got).toEqual([
@@ -59,7 +59,9 @@ describe("fetchEnforcedSkills", () => {
 
   it("throws on a refusal", async () => {
     const request = requestAnswering(() => new Response(null, { status: 503 }));
-    await expect(fetchEnforcedSkills(request)).rejects.toMatchObject({ status: 503 });
+    await expect(fetchEnforcedSkills(transportOver(request))).rejects.toMatchObject({
+      status: 503,
+    });
   });
 
   // Fail closed: a drifted policy read is an error, never "nothing imposed".
@@ -70,7 +72,7 @@ describe("fetchEnforcedSkills", () => {
   ] as const) {
     it(`throws on ${label}`, async () => {
       const request = requestAnswering(() => Response.json(body));
-      await expect(fetchEnforcedSkills(request)).rejects.toThrow("Unexpected");
+      await expect(fetchEnforcedSkills(transportOver(request))).rejects.toThrow("Unexpected");
     });
   }
 });

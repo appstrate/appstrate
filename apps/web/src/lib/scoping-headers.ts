@@ -22,17 +22,26 @@ export function buildScopingHeaders(
   return headers;
 }
 
+/** An org route (`/api/orgs/{orgId}/…`) names the organization in its path and no space. */
+const isOrgRoute = (url: string) => new URL(url, "http://local").pathname.startsWith("/api/orgs/");
+
 /**
  * The scoping headers a request still lacks. One that names another org (a reader
  * link) leaves the previewed context, so it carries no persona: the server judges
- * the persona per org, so another space of the same org keeps it.
+ * the persona per org, so another space of the same org keeps it. An org route carries
+ * no `X-Space-Id` (the organization's chat refuses it); `url` is the request's.
  */
 export function missingScopingHeaders(
   present: Headers,
   scoping: Record<string, string> = buildScopingHeaders(),
+  url?: string,
 ): Record<string, string> {
   const otherOrg = present.has("X-Org-Id") && present.get("X-Org-Id") !== scoping["X-Org-Id"];
+  const noSpace = url !== undefined && isOrgRoute(url);
   return Object.fromEntries(
-    Object.entries(scoping).filter(([k]) => !present.has(k) && !(otherOrg && k === VIEW_AS_HEADER)),
+    Object.entries(scoping).filter(
+      ([k]) =>
+        !present.has(k) && !(otherOrg && k === VIEW_AS_HEADER) && !(noSpace && k === "X-Space-Id"),
+    ),
   );
 }

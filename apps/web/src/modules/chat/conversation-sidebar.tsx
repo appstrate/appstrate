@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { relativeAge } from "@appstrate/core/format";
-import { canReadRuns } from "@appstrate/core/permissions";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
@@ -29,7 +28,7 @@ import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
 import { useOrgScope } from "../../hooks/use-org-scope";
-import { usePermissions } from "../../hooks/use-permissions";
+import { useSpacesFor } from "../../hooks/use-space-action";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
@@ -41,6 +40,7 @@ import type {
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
+import { useChatScope } from "./use-chat-runtime";
 import { usePanelWidth } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
@@ -52,12 +52,11 @@ const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
  */
 function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
-  const { can } = usePermissions();
-  const readable: Record<ConversationSidebarTab, boolean> = {
-    runs: canReadRuns(can),
-    files: can("files:read"),
-    info: true,
-  };
+  // The working space's grants, or in « Vue d'ensemble » those of any space: an organization
+  // conversation lists the runs and files of every space it acted in.
+  const runs = useSpacesFor({ route: "/runs" }).offered;
+  const files = useSpacesFor({ route: "/files" }).offered;
+  const readable: Record<ConversationSidebarTab, boolean> = { runs, files, info: true };
   const tabs = (
     [
       { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
@@ -156,21 +155,32 @@ function ConversationRuns({
 }) {
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
-  const { can } = usePermissions();
+  const chatScope = useChatScope().scope;
+  const canRead = useSpacesFor({ route: "/runs" }).offered;
   const agentName = useRunAgentName();
   const { data: agents } = useAgents();
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
-  const query = $api.useQuery(
+  const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
+  const ready = canRead && active && !!conversationId;
+  const inSpace = $api.useQuery(
     "get",
     "/api/runs",
+    { params: { query: filters, header: scope.header } },
+    { enabled: chatScope.kind === "space" && scope.enabled && ready },
+  );
+  // An organization conversation: the runs it launched, in every space.
+  const inOrg = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/runs",
     {
       params: {
-        query: { chat_session_id: conversationId ?? undefined, limit: 100 },
-        header: scope.header,
+        path: { orgId: chatScope.kind === "organization" ? chatScope.orgId : "" },
+        query: filters,
       },
     },
-    { enabled: canReadRuns(can) && scope.enabled && active && !!conversationId },
+    { enabled: chatScope.kind === "organization" && ready },
   );
+  const query = chatScope.kind === "organization" ? inOrg : inSpace;
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
   if (query.isLoading) return <TextSkeleton className="p-4" />;
@@ -205,6 +215,7 @@ function ConversationFiles({
 }) {
   const { t } = useTranslation("chat");
   const query = useFiles({
+    spanning: useChatScope().scope.kind === "organization",
     contextChatSessionId: conversationId ?? undefined,
     limit: 100,
     enabled: active && !!conversationId,
@@ -293,12 +304,29 @@ function ConversationDetails({
 }) {
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
-  const query = $api.useQuery(
+  const chatScope = useChatScope().scope;
+  const wanted = active && !!conversationId;
+  const inSpace = $api.useQuery(
     "get",
     "/api/chat/sessions/{id}",
     { params: { path: { id: conversationId ?? "" }, header: scope.header } },
-    { enabled: scope.enabled && active && !!conversationId },
+    { enabled: chatScope.kind === "space" && scope.enabled && wanted },
   );
+  // An organization conversation is read from the organization's routes, which name no space.
+  const inOrg = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/chat/sessions/{id}",
+    {
+      params: {
+        path: {
+          orgId: chatScope.kind === "organization" ? chatScope.orgId : "",
+          id: conversationId ?? "",
+        },
+      },
+    },
+    { enabled: chatScope.kind === "organization" && wanted },
+  );
+  const query = chatScope.kind === "organization" ? inOrg : inSpace;
 
   if (!conversationId) {
     return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;

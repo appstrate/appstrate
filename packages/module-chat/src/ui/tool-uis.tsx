@@ -38,7 +38,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
-import { useChatHost } from "./runtime-context.ts";
+import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
@@ -166,6 +166,18 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
   );
 }
 
+/** The space a call of an organization session acted in, named by the host; nothing in a space. */
+function CallSpace({ args }: { args: unknown }) {
+  const { renderSpaces } = useChatHost();
+  const spaceId = callSpaceId(args);
+  if (useChatTransport()?.scope.kind !== "organization" || !renderSpaces || !spaceId) return null;
+  return (
+    <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
+      {renderSpaces([spaceId])}
+    </span>
+  );
+}
+
 /**
  * Compact clickable tool row. Inline: phase icon, verb icon, label, id, and
  * HTTP/duration meta (+ an inline error banner on failure). Click opens a modal
@@ -232,6 +244,7 @@ export function ToolCallCard({
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
+        <CallSpace args={args} />
         <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
       {errorMsg ? (
@@ -335,13 +348,17 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
+  // An organization session's call names the space the run ran in: the card reads and links there.
+  const spaceId =
+    useChatTransport()?.scope.kind === "organization" ? callSpaceId(props.args) : undefined;
   return (
     <ChatRunProgressCard
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
-      runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
+      runHref={runId ? buildRunPageHref(packageId, runId, spaceId) : undefined}
       initialPackageId={packageId}
+      spaceId={spaceId}
       initialFiles={initialFiles}
       phase={phase}
       errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
@@ -480,6 +497,11 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
 function stringArg(args: Record<string, unknown> | undefined, key: string): string | undefined {
   const v = args?.[key];
   return typeof v === "string" && v ? v : undefined;
+}
+
+/** The space a tool call named (`space_id`): where it acted, in an organization session. */
+function callSpaceId(args: unknown): string | undefined {
+  return stringArg(asRecordOrNull(args) ?? undefined, "space_id");
 }
 
 export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({

@@ -56,10 +56,12 @@ import type {
 export type {
   ChatCan,
   ChatRequest,
+  ChatScope,
   ChatTranslate,
   ChatTransport,
   GetHeaders,
   OpenFile,
+  RenderSpaces,
   SelectConversation,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
@@ -73,13 +75,13 @@ import {
   patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
-  spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
+import { chatHeaders, chatPath, chatScopeKey } from "./scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -180,6 +182,8 @@ export interface ChatPageProps {
   onPackagesChanged: ChatHost["onPackagesChanged"];
   /** The user's first name, greeted on a new conversation (see `ChatHost`). */
   firstName?: ChatHost["firstName"];
+  /** Names spaces in an organization scope (see `ChatHost`). Pass a stable function. */
+  renderSpaces?: ChatHost["renderSpaces"];
 }
 
 export function ChatPage({
@@ -199,6 +203,7 @@ export function ChatPage({
   formatBytes,
   onPackagesChanged,
   firstName,
+  renderSpaces,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -256,9 +261,9 @@ export function ChatPage({
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
   const sessions = useSessions(transport);
-  // The host's current space, off the same headers every request carries. Every
-  // chat query is keyed by it (see `sessions.ts`).
-  const pageSpaceId = spaceIdFromHeaders(transport?.getHeaders);
+  // What the page serves (a space, or the organization): every chat query is keyed by it
+  // (see `sessions.ts`).
+  const pageScopeKey = chatScopeKey(transport);
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, getVisible, getVisible);
 
@@ -277,13 +282,13 @@ export function ChatPage({
     if (!visible || !canWrite || !transport) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageScopeKey), (prev) =>
       patchSessionsCache(prev, (rows) =>
         rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
       ),
     );
-    void markSessionRead(transport.request, activeId).catch(() => {});
-  }, [sessions.data, activeId, transport, pageSpaceId, queryClient, visible, canWrite]);
+    void markSessionRead(transport, activeId).catch(() => {});
+  }, [sessions.data, activeId, transport, pageScopeKey, queryClient, visible, canWrite]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -300,6 +305,7 @@ export function ChatPage({
       formatBytes,
       onPackagesChanged,
       firstName,
+      renderSpaces,
     }),
     [
       onOpenFile,
@@ -312,6 +318,7 @@ export function ChatPage({
       formatBytes,
       onPackagesChanged,
       firstName,
+      renderSpaces,
     ],
   );
 
@@ -441,13 +448,13 @@ const Conversation = memo(function Conversation({
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
   const { t } = useChatHost();
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const scopeKey = chatScopeKey(transport);
   const history = useQuery({
-    queryKey: sessionQueryKey(spaceId, id),
-    queryFn: () => loadHistory(transport!.request, id),
+    queryKey: sessionQueryKey(scopeKey, id),
+    queryFn: () => loadHistory(transport!, id),
     // `GET /api/chat/sessions/:id` requires `X-Space-Id`; without one the
     // request is a guaranteed 400, so wait for the host's space instead.
-    enabled: persistedAtMount && !!spaceId && !!transport,
+    enabled: persistedAtMount && !!scopeKey && !!transport,
     staleTime: Infinity,
     gcTime: 0,
   });
@@ -555,7 +562,7 @@ function ConversationInner({
   getChosenSkills: () => ChatSkillSelection | undefined;
 }) {
   const queryClient = useQueryClient();
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const scopeKey = chatScopeKey(transport);
 
   // Pre-select the model of this conversation's newest turn. A layout effect,
   // so the composer never paints one frame of the stored default first.
@@ -575,15 +582,18 @@ function ConversationInner({
   const buildHeaders = useCallback((): Record<string, string> => {
     const model = getSelectedModel();
     return {
-      ...transport?.getHeaders(),
+      // The chat's own routes: an organization scope's refuse `X-Space-Id`.
+      ...(transport ? chatHeaders(transport) : {}),
       ...(model ? { "X-Model-Id": model } : {}),
     };
   }, [transport]);
 
+  const turnApi = transport ? chatPath(transport) : "/api/chat";
+
   const turnTransport = useMemo(
     () =>
       new DefaultChatTransport<UIMessage>({
-        api: "/api/chat",
+        api: turnApi,
         credentials: "include",
         headers: buildHeaders,
         prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
@@ -606,10 +616,10 @@ function ConversationInner({
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({
-          api: `/api/chat/sessions/${chatId}/stream`,
+          api: `${turnApi}/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders, getChosenSkills],
+    [buildHeaders, getChosenSkills, turnApi],
   );
 
   const chat = useChat({
@@ -626,7 +636,7 @@ function ConversationInner({
     // moment the composer is trying to become usable.
     // …and on the space being known: the resume GET is space-scoped like every
     // other session read, so without one it would 400 rather than 204.
-    resume: isPersisted && !!spaceId,
+    resume: isPersisted && !!scopeKey,
     // One React commit per animation frame (16 ms) instead of one per stream
     // chunk. The SDK applies this to the `messages` subscription only
     // (`useChat` passes it to `~registerMessagesCallback`); `status` is a
@@ -671,8 +681,8 @@ function ConversationInner({
     let cancelled = false;
     void queryClient
       .fetchQuery({
-        queryKey: sessionQueryKey(spaceId, id),
-        queryFn: () => loadHistory(transport.request, id),
+        queryKey: sessionQueryKey(scopeKey, id),
+        queryFn: () => loadHistory(transport, id),
         // The mounted history query pins `staleTime: Infinity`; force the GET.
         staleTime: 0,
       })
@@ -694,7 +704,7 @@ function ConversationInner({
     setMessages,
     queryClient,
     transport,
-    spaceId,
+    scopeKey,
     id,
   ]);
 
@@ -716,10 +726,17 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(scopeKey), (prev) => {
         const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
-          ...(existing ?? { id, title: null, unread: false }),
+          ...(existing ?? {
+            id,
+            title: null,
+            unread: false,
+            // A session minted here: its space is the page's, or none for an organization session.
+            spaceId: transport?.scope.kind === "organization" ? null : scopeKey,
+            space_ids: [],
+          }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
@@ -730,7 +747,7 @@ function ConversationInner({
         );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) =>
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(scopeKey), (prev) =>
         patchSessionsCache(prev, (rows) =>
           rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
         ),
@@ -738,7 +755,7 @@ function ConversationInner({
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }
     wasGenerating.current = generating;
-  }, [generating, id, spaceId, queryClient]);
+  }, [generating, id, scopeKey, transport, queryClient]);
 
   // On the first message of a brand-new conversation, lazily adopt its id into
   // the URL (the server creates the session on that same POST). `id` is stable
@@ -764,7 +781,7 @@ function ConversationInner({
   const [messageQueue] = useState(createMessageQueue);
   const stop = useCallback(() => {
     messageQueue.markStopped();
-    if (transport) void stopSession(transport.request, id).catch(() => {});
+    if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
   const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);

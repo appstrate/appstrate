@@ -28,8 +28,24 @@ function render(granted: string[], hasMore = false): string {
     pages: [
       {
         data: [
-          { id: "chs_1", title: "Budget", unread: false, generating: false, updatedAt: "" },
-          { id: "chs_2", title: null, unread: false, generating: false, updatedAt: "" },
+          {
+            id: "chs_1",
+            title: "Budget",
+            unread: false,
+            generating: false,
+            updatedAt: "",
+            spaceId: "spc_a",
+            space_ids: [],
+          },
+          {
+            id: "chs_2",
+            title: null,
+            unread: false,
+            generating: false,
+            updatedAt: "",
+            spaceId: "spc_a",
+            space_ids: [],
+          },
         ],
         hasMore,
       },

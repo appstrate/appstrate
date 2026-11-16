@@ -79,7 +79,9 @@ function encodeSegment(segment: string): string {
 
 const orgContext: Middleware = {
   onRequest({ request }) {
-    for (const [k, v] of Object.entries(missingScopingHeaders(request.headers))) {
+    for (const [k, v] of Object.entries(
+      missingScopingHeaders(request.headers, undefined, request.url),
+    )) {
       request.headers.set(k, v);
     }
     return request;
@@ -146,7 +148,9 @@ const problemDetailErrors: Middleware = {
  */
 export async function fetchOrThrow(path: string, init?: RequestInit): Promise<Response> {
   const request = new Request(path, { credentials: "include", ...init });
-  for (const [k, v] of Object.entries(missingScopingHeaders(request.headers))) {
+  for (const [k, v] of Object.entries(
+    missingScopingHeaders(request.headers, undefined, request.url),
+  )) {
     request.headers.set(k, v);
   }
   return rejectProblem(request, await fetch(request));

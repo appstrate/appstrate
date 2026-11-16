@@ -54,7 +54,7 @@ describe("the products toggle", () => {
   });
 
   it("draws the Chat tab in « Vue d'ensemble » where a space opens the chat", () => {
-    const tabs = (overview: boolean, workingPermissions: string[]) => {
+    const tabs = (overview: boolean, workingPermissions: string[], seedUnread = false) => {
       const stubs = [
         spyOn(orgStore, "getInitialState").mockReturnValue({
           ...orgStore.getInitialState(),
@@ -99,6 +99,20 @@ describe("the products toggle", () => {
           ],
         },
       );
+      if (seedUnread) {
+        // The working space has one unread reply, the organization's list three.
+        const list = (unread: number) => ({
+          pages: [
+            {
+              data: Array.from({ length: unread }, (_, i) => ({ id: `chs_${i}`, unread: true })),
+              hasMore: false,
+            },
+          ],
+          pageParams: [undefined],
+        });
+        queryClient.setQueryData(["chat", "sessions", "spc_a"], list(1));
+        queryClient.setQueryData(["chat", "sessions", "org:org_1"], list(3));
+      }
       try {
         return render(<ProductTabs />, { queryClient });
       } finally {
@@ -112,5 +126,12 @@ describe("the products toggle", () => {
     // The working space opens no chat: offered in the mode (another space does), not out of it.
     expect(tabs(true, ["runs:read"])).toContain('href="/chat"');
     expect(tabs(false, ["runs:read"])).toBe("");
+
+    // In the mode the chat opens as it is (no space to ask), and its badge counts the
+    // organization's list: three unread, which the working space's reading never sees.
+    const inMode = tabs(true, chatter, true);
+    expect(inMode).toContain('href="/chat"');
+    expect(inMode).toContain('aria-label="3 conversations non lues"');
+    expect(tabs(false, chatter, true)).not.toContain("3 conversations non lues");
   });
 });

@@ -74,7 +74,7 @@ describe("grantedInSomeSpace", () => {
 });
 
 describe("holdsOverview", () => {
-  it("holds on the lists and their rows, the dashboard, the routes of no space, an undeclared address", () => {
+  it("holds on the lists and their rows, the chat (it serves the organization there), the dashboard, the routes of no space, an undeclared address", () => {
     for (const path of [
       "/",
       "/runs",
@@ -91,6 +91,8 @@ describe("holdsOverview", () => {
       "/skills/:scope/:name/:version",
       "/integrations",
       "/integrations/:scope/:name",
+      "/chat",
+      "/chat/:conversationId",
       "/org-settings",
       "/org-settings/members",
       "/org-settings/billing",
@@ -101,13 +103,11 @@ describe("holdsOverview", () => {
     expect(holdsOverview(undefined)).toBe(true);
   });
 
-  it("is left by any route of one space: the catalogue (it acts « here »), the chat, a creation, the workspace settings", () => {
+  it("is left by any route of one space: the catalogue (it acts « here »), a creation, the workspace settings", () => {
     for (const path of [
       "/catalogue",
       "/catalogue/:type",
       "/integrations/new/mcp",
-      "/chat",
-      "/chat/:conversationId",
       "/workspace-settings",
       "/workspace-settings/general",
       "/workspace-settings/webhooks",

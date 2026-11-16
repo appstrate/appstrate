@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { loadHistory, stopSession } from "../src/ui/sessions.ts";
-import { requestAnswering } from "./fake-request.ts";
+import { requestAnswering, transportOver } from "./fake-request.ts";
 
 const json = (body: unknown) => () => Response.json(body);
 
@@ -20,7 +20,7 @@ describe("loadHistory decode", () => {
       }),
     );
 
-    const loaded = await loadHistory(request, "chs_1");
+    const loaded = await loadHistory(transportOver(request), "chs_1");
     expect(loaded?.messages).toEqual([
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
       { id: "m2", role: "assistant", parts: [{ type: "text", text: "yo" }] },
@@ -37,7 +37,7 @@ describe("loadHistory decode", () => {
       }),
     );
 
-    const loaded = await loadHistory(request, "chs_1");
+    const loaded = await loadHistory(transportOver(request), "chs_1");
     expect(loaded?.skills).toEqual({
       skillMode: "manual",
       pinnedSkills: ["@scope/a", "@scope/b"],
@@ -46,12 +46,14 @@ describe("loadHistory decode", () => {
 
   it("reports a conversation the caller does not have (404) as null, not as an empty one", async () => {
     const request = requestAnswering(() => new Response(null, { status: 404 }));
-    expect(await loadHistory(request, "chs_gone")).toBeNull();
+    expect(await loadHistory(transportOver(request), "chs_gone")).toBeNull();
   });
 
   it("rethrows other refusals as the host raised them", async () => {
     const request = requestAnswering(() => new Response(null, { status: 500 }));
-    await expect(loadHistory(request, "chs_x")).rejects.toMatchObject({ status: 500 });
+    await expect(loadHistory(transportOver(request), "chs_x")).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });
 
@@ -59,7 +61,7 @@ describe("stopSession", () => {
   it("posts an explicit stop to the active conversation", async () => {
     const request = requestAnswering(() => new Response(null, { status: 204 }));
 
-    await stopSession(request, "chs_1");
+    await stopSession(transportOver(request), "chs_1");
 
     expect(request.calls).toHaveLength(1);
     expect(request.calls[0]?.path).toBe("/api/chat/sessions/chs_1/stop");
@@ -68,6 +70,8 @@ describe("stopSession", () => {
 
   it("throws when the server refuses the stop", async () => {
     const request = requestAnswering(() => new Response(null, { status: 500 }));
-    await expect(stopSession(request, "chs_1")).rejects.toMatchObject({ status: 500 });
+    await expect(stopSession(transportOver(request), "chs_1")).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });

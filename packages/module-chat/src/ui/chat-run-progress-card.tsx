@@ -100,6 +100,7 @@ export function ChatRunProgressCard({
   agentLabel,
   runHref,
   initialPackageId,
+  spaceId,
   initialFiles,
   phase,
   errorText,
@@ -111,6 +112,8 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
+  /** The space the run ran in when it is not the working space (an organization session's call). */
+  spaceId?: string;
   /**
    * Files from the persisted tool result — survive reload; merged with the live
    * and authoritative lists. MUST be referentially stable across renders: a
@@ -139,7 +142,7 @@ export function ChatRunProgressCard({
     producedFilesTruncated,
     sweepDone,
     runDenied,
-  } = useRunLogStream(runId, initialStatus, initialPackageId);
+  } = useRunLogStream(runId, initialStatus, initialPackageId, spaceId);
 
   // Files: the persisted tool-result list (reload-safe), the frames that arrive
   // live over the log stream (`file.published` — chips appear the moment an
@@ -171,7 +174,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { openFile, t } = useChatHost();
+  const { openFile, t, renderSpaces } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -222,7 +225,7 @@ export function ChatRunProgressCard({
         : current;
   const effectiveRunHref = runDenied
     ? undefined
-    : (runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined));
+    : (runHref ?? (runId ? buildRunPageHref(packageId, runId, spaceId) : undefined));
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -248,6 +251,11 @@ export function ChatRunProgressCard({
               {agentLabel ?? t("run.fallbackLabel")}
             </span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
+              {spaceId && renderSpaces ? (
+                <span className="text-muted-foreground flex max-w-40 min-w-0 items-center text-xs">
+                  {renderSpaces([spaceId])}
+                </span>
+              ) : null}
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
                   {formatDuration(elapsedMs)}

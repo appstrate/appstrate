@@ -32,7 +32,8 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
-import { useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import { useChatScope, useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import { renderSpaces } from "./render-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSettings } from "../../hooks/use-org-settings";
@@ -87,6 +88,8 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
+  // The mode decides which sessions the page serves: wait for the listing that tells it.
+  const { known } = useChatScope();
   const { can } = usePermissions();
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
@@ -139,6 +142,7 @@ export function ChatModulePage() {
   // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
+  if (!known) return null;
   return (
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={onConversationChange}>
@@ -169,6 +173,7 @@ export function ChatModulePage() {
               formatBytes={formatBytes}
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
+              renderSpaces={renderSpaces}
             />
           </div>
           <ConversationSidebar

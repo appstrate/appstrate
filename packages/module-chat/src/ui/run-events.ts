@@ -19,6 +19,7 @@
  */
 
 import { z } from "zod";
+import type { ChatRequest } from "./runtime-context.ts";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
@@ -687,7 +688,32 @@ export function extractRunPackageId(result: unknown): string | undefined {
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
  * slashes literal to match the route; only the run id is encoded.
  */
-export function buildRunPageHref(packageId: string | undefined, runId: string): string | undefined {
+export function buildRunPageHref(
+  packageId: string | undefined,
+  runId: string,
+  spaceId?: string,
+): string | undefined {
   if (!packageId) return undefined;
-  return `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
+  const href = `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
+  return spaceId ? `${href}?${ENTER_SPACE_PARAM}=${encodeURIComponent(spaceId)}` : href;
+}
+
+/**
+ * The host's query parameter that enters a space when a link opens (`lib/across-spaces.ts` in
+ * the web app, which resolves it): a run an organization session launched lives in the space its
+ * call named, so its link enters that space.
+ */
+const ENTER_SPACE_PARAM = "enterSpace";
+
+/**
+ * `request` asking in `spaceId`: the run an organization session launched is read in the space
+ * its call named, not in the working space the host's headers carry. Unchanged without a space.
+ */
+export function requestInSpace(request: ChatRequest, spaceId: string | undefined): ChatRequest {
+  if (!spaceId) return request;
+  return (path, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Space-Id", spaceId);
+    return request(path, { ...init, headers });
+  };
 }

@@ -19,7 +19,15 @@ import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/
 import { render } from "../../test/render.tsx";
 
 function conversation(id: string, title: string, unread: boolean): SessionSummary {
-  return { id, title, unread, generating: false, updatedAt: "2026-09-05T10:00:00Z" };
+  return {
+    id,
+    title,
+    unread,
+    generating: false,
+    updatedAt: "2026-09-05T10:00:00Z",
+    spaceId: "spc_a",
+    space_ids: [],
+  };
 }
 
 /** One loaded page, as the session-list infinite query caches it. */
@@ -30,6 +38,7 @@ function cache(data: SessionSummary[]): SessionsCache {
 /** Scoped to one space; a static render reads the cache and never requests. */
 const TRANSPORT: ChatTransport = {
   getHeaders: () => ({ "X-Space-Id": "spc_a" }),
+  scope: { kind: "space" },
   request: () => Promise.reject(new Error("no request in a static render")),
 };
 

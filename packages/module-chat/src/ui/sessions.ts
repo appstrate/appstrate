@@ -11,7 +11,8 @@ import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
-import { errorStatus, jsonInit, type ChatRequest, type GetHeaders } from "./runtime-context.ts";
+import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
+import { chatPath } from "./scope.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
 export { mintSessionId } from "../session-id.ts";
@@ -25,6 +26,10 @@ export interface SessionSummary {
   unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */
   updatedAt: string;
+  /** The space of a space session; `null` for an organization session. */
+  spaceId: string | null;
+  /** The spaces an organization session touched; empty for a space session. */
+  space_ids: string[];
 }
 
 /**
@@ -35,14 +40,13 @@ export interface SessionSummary {
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 /**
- * The session list of ONE space. Sessions are space-scoped rows
- * (`chat_sessions.space_id`) and `GET /api/chat/sessions` REQUIRES `X-Space-Id`,
- * so the space belongs in the key twice over: a key without it would serve
- * another space's list from cache, and would stay disabled forever instead of
- * refetching when the space store resolves.
+ * The session list of ONE scope (`chatScopeKey`: a space, or the organization). Sessions are
+ * space-scoped rows and `GET /api/chat/sessions` REQUIRES `X-Space-Id`, so the scope belongs in
+ * the key twice over: a key without it would serve another space's list from cache, and would stay
+ * disabled forever instead of refetching when the space store resolves.
  */
-export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
-  return [...SESSIONS_QUERY_KEY, spaceId];
+export function sessionsQueryKey(scopeKey: string | null): readonly unknown[] {
+  return [...SESSIONS_QUERY_KEY, scopeKey];
 }
 
 /**
@@ -51,22 +55,13 @@ export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
  * filtered lists too. The default list's key shape is unchanged — the
  * local-first patch in `index.tsx` addresses it exactly.
  */
-export function sessionsSearchQueryKey(spaceId: string | null, q: string): readonly unknown[] {
-  return [...sessionsQueryKey(spaceId), "search", q];
+export function sessionsSearchQueryKey(scopeKey: string | null, q: string): readonly unknown[] {
+  return [...sessionsQueryKey(scopeKey), "search", q];
 }
 
-/** One conversation's stored history, in one space. */
-export function sessionQueryKey(spaceId: string | null, id: string): readonly unknown[] {
-  return ["chat", "session", id, spaceId];
-}
-
-/**
- * The space the host is scoped to, read off the injected scoping headers —
- * the same value they put in `X-Space-Id`. The module has no space store of its
- * own and must not grow one: the host owns that state and publishes it here.
- */
-export function spaceIdFromHeaders(getHeaders: GetHeaders | null | undefined): string | null {
-  return getHeaders?.()["X-Space-Id"] ?? null;
+/** One conversation's stored history, in one scope. */
+export function sessionQueryKey(scopeKey: string | null, id: string): readonly unknown[] {
+  return ["chat", "session", id, scopeKey];
 }
 
 export interface SessionsPage {
@@ -77,7 +72,7 @@ export interface SessionsPage {
 export type SessionsCache = InfiniteData<SessionsPage, string | undefined>;
 
 export async function fetchSessionsPage(
-  request: ChatRequest,
+  transport: ChatTransport,
   startingAfter: string | undefined,
   q?: string,
 ): Promise<SessionsPage> {
@@ -85,7 +80,7 @@ export async function fetchSessionsPage(
   if (q) params.set("q", q);
   if (startingAfter) params.set("startingAfter", startingAfter);
   const query = params.size > 0 ? `?${params}` : "";
-  const res = await request(`/api/chat/sessions${query}`);
+  const res = await transport.request(chatPath(transport, `/sessions${query}`));
   const body = (await res.json()) as Partial<SessionsPage>;
   return { data: body.data ?? [], hasMore: body.hasMore ?? false };
 }
@@ -108,25 +103,25 @@ export function flattenSessions(cache: SessionsCache): SessionSummary[] {
 }
 
 export async function renameSession(
-  request: ChatRequest,
+  transport: ChatTransport,
   id: string,
   title: string,
 ): Promise<void> {
-  await request(`/api/chat/sessions/${id}`, jsonInit("PATCH", { title }));
+  await transport.request(chatPath(transport, `/sessions/${id}`), jsonInit("PATCH", { title }));
 }
 
-export async function deleteSession(request: ChatRequest, id: string): Promise<void> {
-  await request(`/api/chat/sessions/${id}`, { method: "DELETE" });
+export async function deleteSession(transport: ChatTransport, id: string): Promise<void> {
+  await transport.request(chatPath(transport, `/sessions/${id}`), { method: "DELETE" });
 }
 
 /** Mark the session read server-side (clears `unread`). Idempotent. */
-export async function markSessionRead(request: ChatRequest, id: string): Promise<void> {
-  await request(`/api/chat/sessions/${id}/read`, { method: "PUT" });
+export async function markSessionRead(transport: ChatTransport, id: string): Promise<void> {
+  await transport.request(chatPath(transport, `/sessions/${id}/read`), { method: "PUT" });
 }
 
 /** Explicitly stop the server-side producer for an active conversation. */
-export async function stopSession(request: ChatRequest, id: string): Promise<void> {
-  await request(`/api/chat/sessions/${id}/stop`, { method: "POST" });
+export async function stopSession(transport: ChatTransport, id: string): Promise<void> {
+  await transport.request(chatPath(transport, `/sessions/${id}/stop`), { method: "POST" });
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */
@@ -147,12 +142,12 @@ interface SessionHistory {
  * such conversation (the route's 404).
  */
 export async function loadHistory(
-  request: ChatRequest,
+  transport: ChatTransport,
   id: string,
 ): Promise<SessionHistory | null> {
   let res: Response;
   try {
-    res = await request(`/api/chat/sessions/${id}`);
+    res = await transport.request(chatPath(transport, `/sessions/${id}`));
   } catch (error) {
     if (errorStatus(error) === 404) return null;
     throw error;

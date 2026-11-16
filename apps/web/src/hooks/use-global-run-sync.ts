@@ -52,10 +52,10 @@ export function matchesChatSessionQuery(
   const [method, path, init] = queryKey;
   if (method === CHAT_SESSIONS_QUERY_KEY[0] && path === CHAT_SESSIONS_QUERY_KEY[1]) return true;
   if (method !== "get") return false;
-  if (path === "/api/chat/sessions/{id}") {
+  if (path === "/api/chat/sessions/{id}" || path === "/api/orgs/{orgId}/chat/sessions/{id}") {
     return sessionId === undefined || readPathId(init) === sessionId;
   }
-  if (path === "/api/files") {
+  if (path === "/api/files" || path === "/api/orgs/{orgId}/files") {
     return sessionId === undefined || readContextChatSessionId(init) === sessionId;
   }
   return false;

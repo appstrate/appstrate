@@ -162,13 +162,18 @@ function belongsToSpace(path: RoutePath): boolean {
   return access.anyOf?.some((permission) => !isOrgLevel(permission)) ?? false;
 }
 
+/** A route that serves the organization in the mode (`spansSpaces`: the chat). */
+const spansSpaces = (path: RoutePath) =>
+  "spansSpaces" in ROUTE_ACCESS[path] && ROUTE_ACCESS[path].spansSpaces === true;
+
 /**
- * Whether rendering `path` keeps the mode: the lists and their rows, any route of no space (the
- * dashboard, `/`, is one), and an address no route declares. Any other route leaves it, into the
- * working space (the one an action asking « Dans quel espace ? » entered).
+ * Whether rendering `path` keeps the mode: the lists and their rows, the routes serving the
+ * organization (`spansSpaces`), any route of no space (the dashboard, `/`, is one), and an
+ * address no route declares. Any other route leaves it, into the working space (the one an action
+ * asking « Dans quel espace ? » entered).
  */
 export function holdsOverview(path: RoutePath | undefined): boolean {
-  return path === undefined || ofList(path) || !belongsToSpace(path);
+  return path === undefined || ofList(path) || spansSpaces(path) || !belongsToSpace(path);
 }
 
 /** In the mode, a list's route opens where a space admits the list, whatever the working space grants. */

@@ -13,10 +13,10 @@ import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CountBadge } from "@/components/count-badge";
-import { useSpaceAction, useSpacesFor } from "@/hooks/use-space-action";
+import { useSpacesFor } from "@/hooks/use-space-action";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
-import { SHELL_CHAT_TRANSPORT } from "@/modules/chat/use-chat-runtime";
+import { useShellChatTransport } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
@@ -29,25 +29,22 @@ interface Product {
   enabled: boolean;
   /** Unread conversations, on the tab that leads to them. */
   unread?: number;
-  /** Replaces the plain navigation (« Vue d'ensemble » asks which space first). */
-  onSelect?: () => void;
 }
 
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  // The chat belongs to one space: in « Vue d'ensemble » it is offered where some space opens
-  // it, and opened in the space the reader picks.
-  const chat = useSpaceAction({ route: "/chat" });
-  const { on: overview, offered: canWrite } = useSpacesFor({ permission: "chat:write" });
+  // In « Vue d'ensemble » the chat opens as it is (its sessions act across spaces, no space to
+  // ask): it is offered where some space opens it and some space lets the reader write.
+  const { offered: chatReachable } = useSpacesFor({ route: "/chat" });
+  const { offered: canWrite } = useSpacesFor({ permission: "chat:write" });
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
-  const chatReachable = chat.offered;
-  const chatLink = chat.link("/chat");
-  // The chat has no entry in the Studio's navigation: its unread count rides on this tab. It is
-  // the working space's, so « Vue d'ensemble » does not show it.
-  const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, chatReachable);
-  const hasChatSessions = useHasChatSessions(SHELL_CHAT_TRANSPORT, chatReachable);
+  // The chat has no entry in the Studio's navigation: its unread count rides on this tab, the
+  // working space's, or in « Vue d'ensemble » the organization's.
+  const chatTransport = useShellChatTransport();
+  const chatUnread = useChatUnreadCount(chatTransport, chatReachable);
+  const hasChatSessions = useHasChatSessions(chatTransport, chatReachable);
   const chatShown = isChatTabShown({
     reachable: chatReachable,
     canWrite,
@@ -78,8 +75,7 @@ export function ProductTabs() {
       to: "/chat",
       active: inChat,
       enabled: chatShown,
-      unread: overview ? undefined : chatUnread,
-      onSelect: "onSelect" in chatLink ? chatLink.onSelect : undefined,
+      unread: chatUnread,
     },
   ].filter((p) => p.enabled);
 
@@ -97,13 +93,6 @@ export function ProductTabs() {
             key={p.id}
             to={p.to}
             aria-current={p.active ? "page" : undefined}
-            onClick={
-              p.onSelect &&
-              ((event) => {
-                event.preventDefault();
-                p.onSelect?.();
-              })
-            }
             className={cn(
               "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
               p.active
@@ -124,7 +113,6 @@ export function ProductTabs() {
         ))}
         {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
       </nav>
-      {chat.picker}
     </div>
   );
 }

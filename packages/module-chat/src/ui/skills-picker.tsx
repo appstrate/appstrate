@@ -29,7 +29,7 @@ import {
 } from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
-import { spaceIdFromHeaders } from "./sessions.ts";
+import { chatScopeKey } from "./scope.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
 const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
@@ -107,14 +107,14 @@ export function SkillsPicker({
   children,
 }: SkillsPickerProps) {
   const { t, can } = useChatHost();
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
-  const readable = !!spaceId && !!transport && can("skills:read");
+  const scopeKey = chatScopeKey(transport);
+  const readable = !!scopeKey && !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
-    // (a different projection of the same route), and the space scopes it.
-    queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
-    queryFn: () => fetchSkills(transport!.request),
+    // (a different projection of the same route), and the scope (a space, or the organization) keys it.
+    queryKey: ["packages", "skills", { consumer: "chat" }, scopeKey],
+    queryFn: () => fetchSkills(transport!),
     enabled: readable,
     staleTime: 60_000,
   });
@@ -124,7 +124,7 @@ export function SkillsPicker({
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".
   // Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
-  const loading = (readable && catalogue.isPending) || (!!spaceId && enforcedQuery.isPending);
+  const loading = (readable && catalogue.isPending) || (!!scopeKey && enforcedQuery.isPending);
 
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);

@@ -30,6 +30,8 @@ export type FileDto =
   paths["/api/files"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
 
 export interface FileListFilters {
+  /** Every space the reader reaches (`GET /api/orgs/{orgId}/files`) instead of the current one. */
+  spanning?: boolean;
   search?: string;
   purpose?: "user_upload" | "agent_output";
   runId?: string;
@@ -38,28 +40,36 @@ export interface FileListFilters {
   enabled?: boolean;
 }
 
-/** List files (gallery + run tab); scope headers ride in the query key. */
+/**
+ * List files (gallery + run tab); scope headers ride in the query key. `spanning`: every space's
+ * the reader reaches, each row granted by its own space (a conversation of « Vue d'ensemble »).
+ */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();
   // A run or a conversation shows its files incidentally; neither implies `files:read`.
   const { can } = usePermissions();
-  return $api.useQuery(
+  const spanning = !!filters.spanning;
+  const across = useListScope(spanning, can("files:read"));
+  const query = {
+    purpose: filters.purpose,
+    runId: filters.runId,
+    context_chat_session_id: filters.contextChatSessionId,
+    q: filters.search,
+    limit: filters.limit,
+  };
+  const inSpace = $api.useQuery(
     "get",
     "/api/files",
-    {
-      params: {
-        query: {
-          purpose: filters.purpose,
-          runId: filters.runId,
-          context_chat_session_id: filters.contextChatSessionId,
-          q: filters.search,
-          limit: filters.limit,
-        },
-        header: scope.header,
-      },
-    },
-    { enabled: can("files:read") && scope.enabled && filters.enabled !== false },
+    { params: { query, header: scope.header } },
+    { enabled: !spanning && can("files:read") && scope.enabled && filters.enabled !== false },
   );
+  const inOrg = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/files",
+    { params: { path: { orgId: across.orgId ?? "" }, query } },
+    { enabled: spanning && across.enabled && filters.enabled !== false },
+  );
+  return spanning ? inOrg : inSpace;
 }
 
 /** The gallery's (or one run's) files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */

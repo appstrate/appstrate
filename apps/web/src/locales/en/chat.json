@@ -147,6 +147,7 @@
   "threads.delete.title": "Delete this conversation?",
   "threads.delete.description": "“{{title}}”, its messages and its files will be permanently deleted. A file a run still uses is kept.",
   "threads.delete.error": "The conversation could not be deleted. Try again.",
+  "threads.overview": "Overview",
   "threads.title": "Conversations",
   "threads.showMore": "Show more",
   "threads.generating": "In progress",

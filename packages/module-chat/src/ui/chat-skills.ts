@@ -5,12 +5,25 @@
 import { z } from "zod";
 import { parseScopedName } from "@appstrate/core/naming";
 import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
-import type { ChatRequest } from "./runtime-context.ts";
+import type { ChatTransport } from "./runtime-context.ts";
+import { chatPath } from "./scope.ts";
 
-/** The space's active skills, the ones the picker chooses from. */
-export async function fetchSkills(request: ChatRequest): Promise<SkillHint[]> {
-  const res = await request("/api/packages/skills");
-  return parseSkillList(await res.json());
+/**
+ * The active skills the picker chooses from: the space's, or, in an organization scope, every
+ * reachable space's (one per package).
+ */
+export async function fetchSkills(transport: ChatTransport): Promise<SkillHint[]> {
+  const { scope } = transport;
+  const res = await transport.request(
+    scope.kind === "organization"
+      ? `/api/orgs/${scope.orgId}/packages/skills`
+      : "/api/packages/skills",
+  );
+  // An organization index lists a package once per space it is active in: one row each.
+  const seen = new Set<string>();
+  return parseSkillList(await res.json()).filter(
+    (skill) => !seen.has(skill.packageId) && seen.add(skill.packageId),
+  );
 }
 
 const enforcedSkillsSchema = z.object({
@@ -19,8 +32,8 @@ const enforcedSkillsSchema = z.object({
 });
 
 /** Through the chat module (`chat:write`): a member without `skills:read` sees them too. */
-export async function fetchEnforcedSkills(request: ChatRequest): Promise<SkillHint[]> {
-  const res = await request("/api/chat/enforced-skills");
+export async function fetchEnforcedSkills(transport: ChatTransport): Promise<SkillHint[]> {
+  const res = await transport.request(chatPath(transport, "/enforced-skills"));
   // Strict: a policy read that drifted must fail loudly, never read as "nothing imposed".
   const parsed = enforcedSkillsSchema.safeParse(await res.json());
   if (!parsed.success) throw new Error("Unexpected enforced skills response");

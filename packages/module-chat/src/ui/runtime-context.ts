@@ -29,7 +29,7 @@
  * hop for a value that never leaves the file would be pure ceremony.
  */
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 
 export type GetHeaders = () => Record<string, string>;
@@ -42,10 +42,25 @@ export type GetHeaders = () => Record<string, string>;
  */
 export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
+/**
+ * What the chat page serves: one space (its sessions, `/api/chat/*`, the `X-Space-Id` the headers
+ * carry) or the organization (« Vue d'ensemble »: sessions acting across spaces,
+ * `/api/orgs/{orgId}/chat/*`, which refuse `X-Space-Id`). The host decides; `scope.ts` derives from
+ * it the route base, the headers and the cache key of every chat call.
+ */
+export type ChatScope = { kind: "space" } | { kind: "organization"; orgId: string };
+
 export interface ChatTransport {
   getHeaders: GetHeaders;
   request: ChatRequest;
+  scope: ChatScope;
 }
+
+/**
+ * The host's rendering of spaces by id (its tile and name, « +2 » for the others). The module
+ * names the space of a session or of a tool call through it, in an organization scope only.
+ */
+export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
 const ChatTransportContext = createContext<ChatTransport | null>(null);
 
@@ -71,8 +86,12 @@ export function jsonInit(method: string, body: unknown): RequestInit {
  * The list (`thread-list.tsx`) calls this on click; the host navigates and the
  * keyed `<Conversation>` remounts on the new id. `null` means "new conversation"
  * (`/chat`). Carried through context so module-chat never imports a router.
+ *
+ * `spaceId` is the picked session's space (`null`: an organization session). The list of an
+ * organization scope holds the sessions of every space: the host leaves « Vue d'ensemble » for
+ * the space of a space session, and opens an organization session in place.
  */
-export type SelectConversation = (id: string | null) => void;
+export type SelectConversation = (id: string | null, spaceId?: string | null) => void;
 
 const SelectConversationContext = createContext<SelectConversation | null>(null);
 
@@ -171,6 +190,8 @@ export interface ChatHost {
   onPackagesChanged: () => void;
   /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
+  /** Names spaces in an organization scope; absent in a mount that has no space listing. */
+  renderSpaces?: RenderSpaces;
 }
 
 /**

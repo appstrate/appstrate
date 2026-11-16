@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchEnforcedSkills } from "./chat-skills.ts";
 import type { ChatTransport } from "./runtime-context.ts";
-import { spaceIdFromHeaders } from "./sessions.ts";
+import { chatScopeKey } from "./scope.ts";
 
 /**
  * Shared by the picker and the read-only indicator. Default staleness (30 s):
@@ -11,10 +11,10 @@ import { spaceIdFromHeaders } from "./sessions.ts";
  * invalidation.
  */
 export function useEnforcedSkills(transport: ChatTransport | undefined) {
-  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const scopeKey = chatScopeKey(transport);
   return useQuery({
-    queryKey: ["chat", "enforced-skills", spaceId],
-    queryFn: () => fetchEnforcedSkills(transport!.request),
-    enabled: !!spaceId && !!transport,
+    queryKey: ["chat", "enforced-skills", scopeKey],
+    queryFn: () => fetchEnforcedSkills(transport!),
+    enabled: !!scopeKey && !!transport,
   });
 }

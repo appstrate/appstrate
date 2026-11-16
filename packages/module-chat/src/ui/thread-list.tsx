@@ -31,7 +31,9 @@ import {
   XIcon,
 } from "lucide-react";
 import { relativeAge } from "@appstrate/core/format";
+import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -66,17 +68,18 @@ import {
   useSelectConversation,
   type ChatCan,
   type ChatTranslate,
+  type RenderSpaces,
 } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
   patchSessionsCache,
   sessionsQueryKey,
-  spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
+import { chatScopeKey } from "./scope.ts";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
 
@@ -157,12 +160,17 @@ export function ChatConversationList({
   activeId,
   t,
   can,
+  renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  /** Names spaces: given, the list of an organization scope shows each session's space. */
+  renderSpaces?: RenderSpaces;
 }) {
   const select = useSelectConversation();
+  // The space line exists in an organization scope only: a space's list is all one space.
+  const spaceLine = useChatTransport()?.scope.kind === "organization" && !!renderSpaces;
   const [input, setInput] = useState("");
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
   const searching = term !== "";
@@ -196,6 +204,7 @@ export function ChatConversationList({
       now={now}
       t={t}
       canWrite={canWrite}
+      spaceLine={spaceLine ? (renderSpaces ?? null) : null}
     />
   );
   return (
@@ -258,7 +267,7 @@ export function ChatConversationList({
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                <SidebarMenuSkeleton />
+                {spaceLine ? <ConversationRowSkeleton /> : <SidebarMenuSkeleton />}
               </SidebarMenuItem>
             ))}
           {searching
@@ -313,6 +322,28 @@ export function ChatConversationList({
   );
 }
 
+/**
+ * A row's place while the list loads, with the space line's: the same height and the same two
+ * 16px lines as `ConversationRow` in an organization scope, so the list does not shift on load.
+ */
+function ConversationRowSkeleton() {
+  return (
+    <div
+      data-sidebar="menu-skeleton"
+      className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+    >
+      <Skeleton className="h-4 w-3/5" />
+      <Skeleton className="h-4 w-2/5" />
+    </div>
+  );
+}
+
+/** The space a session acted in, named by the host: its space, or the ones it touched. */
+function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
+  if (session.spaceId !== null) return renderSpaces([session.spaceId]);
+  return session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("threads.overview");
+}
+
 function ConversationRow({
   session,
   active,
@@ -320,6 +351,7 @@ function ConversationRow({
   now,
   t,
   canWrite,
+  spaceLine,
 }: {
   session: SessionSummary;
   active: boolean;
@@ -327,6 +359,8 @@ function ConversationRow({
   now: number;
   t: ChatTranslate;
   canWrite: boolean;
+  /** The host's space rendering when the list names each session's space; null otherwise. */
+  spaceLine: RenderSpaces | null;
 }) {
   const transport = useChatTransport();
   const select = useSelectConversation();
@@ -343,7 +377,7 @@ function ConversationRow({
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await deleteSession(transport.request, session.id);
+      await deleteSession(transport, session.id);
     } catch {
       // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
       setDeleteFailed(true);
@@ -359,7 +393,7 @@ function ConversationRow({
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
     // The prefix reaches the filtered (search) lists as well as the plain one.
     queryClient.setQueriesData<SessionsCache>(
-      { queryKey: sessionsQueryKey(spaceIdFromHeaders(transport.getHeaders)) },
+      { queryKey: sessionsQueryKey(chatScopeKey(transport)) },
       (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);
@@ -369,14 +403,26 @@ function ConversationRow({
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={active}
-        onClick={() => select?.(session.id)}
+        onClick={() => select?.(session.id, session.spaceId)}
+        size={spaceLine ? "lg" : "default"}
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title.
         className="pr-16"
       >
-        <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
-          {session.title ?? t("threads.new")}
-        </span>
+        {spaceLine ? (
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className={cn("block truncate text-left leading-4", unread && "font-semibold")}>
+              {session.title ?? t("threads.new")}
+            </span>
+            <span className="text-sidebar-foreground/70 flex h-4 min-w-0 items-center text-xs">
+              {sessionSpaces(session, spaceLine, t)}
+            </span>
+          </span>
+        ) : (
+          <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
+            {session.title ?? t("threads.new")}
+          </span>
+        )}
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
@@ -548,7 +594,7 @@ function ConversationSettingsDialog({
     setSaving(true);
     setFailed(false);
     try {
-      await renameSession(transport.request, session.id, next);
+      await renameSession(transport, session.id, next);
       await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
       onClose();
     } catch {
