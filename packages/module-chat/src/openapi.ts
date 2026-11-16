@@ -36,6 +36,8 @@ export const chatComponentSchemas = {
       "unread",
       "skill_mode",
       "pinned_skills",
+      "spaceId",
+      "space_ids",
       "createdAt",
       "updatedAt",
     ],
@@ -63,6 +65,17 @@ export const chatComponentSchemas = {
         items: { type: "string" },
         description:
           "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
+      },
+      spaceId: {
+        type: ["string", "null"],
+        description:
+          "The space the session belongs to, fixed at creation. `null` for an organization session (opened from the overview, acting across spaces).",
+      },
+      space_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The spaces an organization session touched (tool calls naming a `space_id`, attachments); always empty for a space session. An organization session is listed and opened only while the caller reaches every one of them with `chat:read`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -93,14 +106,14 @@ export const chatComponentSchemas = {
   },
 } as const;
 
-export const chatPaths = {
+const spaceChatPaths = {
   "/api/chat/sessions": {
     get: {
       operationId: "listChatSessions",
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
+        "List the caller's chat sessions in the current space (`X-Space-Id`), most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -496,3 +509,66 @@ export const chatPaths = {
     },
   },
 } as const;
+
+type OperationObject = {
+  operationId: string;
+  description?: string;
+  parameters?: readonly { $ref?: string }[];
+  [key: string]: unknown;
+};
+
+/**
+ * The session operations the organization mount serves — the same handlers as
+ * the space mount, under `/api/orgs/{orgId}/chat`, each with its own operation id.
+ * The turn and the enforced skills are not served there yet.
+ */
+const ORG_MOUNT_OPERATION_IDS: Readonly<Record<string, string>> = {
+  listChatSessions: "listOrgChatSessions",
+  createChatSession: "createOrgChatSession",
+  getChatSession: "getOrgChatSession",
+  renameChatSession: "renameOrgChatSession",
+  deleteChatSession: "deleteOrgChatSession",
+  markChatSessionRead: "markOrgChatSessionRead",
+  resumeChatStream: "resumeOrgChatStream",
+  stopChatStream: "stopOrgChatStream",
+};
+
+const ORG_MOUNT_LIST_DESCRIPTION =
+  "List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Reads no `X-Space-Id`; admitted when some reachable space grants `chat:read`. Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.";
+
+function orgMountOperation(operation: OperationObject): OperationObject {
+  const operationId = ORG_MOUNT_OPERATION_IDS[operation.operationId]!;
+  const parameters = (operation.parameters ?? []).flatMap((parameter) =>
+    parameter.$ref === "#/components/parameters/XOrgId"
+      ? [{ $ref: "#/components/parameters/OrgIdPath" }]
+      : parameter.$ref === "#/components/parameters/XSpaceId"
+        ? []
+        : [parameter],
+  );
+  const description =
+    operationId === "listOrgChatSessions" ? ORG_MOUNT_LIST_DESCRIPTION : operation.description;
+  return { ...operation, operationId, parameters, ...(description ? { description } : {}) };
+}
+
+const orgChatPaths = Object.fromEntries(
+  Object.entries(spaceChatPaths).flatMap(([path, item]) => {
+    const operations = Object.entries(item).filter(
+      ([, operation]) => (operation as OperationObject).operationId in ORG_MOUNT_OPERATION_IDS,
+    );
+    return operations.length === 0
+      ? []
+      : [
+          [
+            path.replace("/api/chat/", "/api/orgs/{orgId}/chat/"),
+            Object.fromEntries(
+              operations.map(([method, operation]) => [
+                method,
+                orgMountOperation(operation as OperationObject),
+              ]),
+            ),
+          ],
+        ];
+  }),
+);
+
+export const chatPaths = { ...spaceChatPaths, ...orgChatPaths };

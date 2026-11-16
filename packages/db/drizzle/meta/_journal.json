@@ -750,6 +750,13 @@
       "when": 1794773354130,
       "tag": "0106_package_type_without_mcp_server",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0107_chat_org_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -23,7 +23,7 @@
  *     never a module-to-module import.
  */
 
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { db } from "@appstrate/db/client";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
 import { ApiError } from "@appstrate/core/api-errors";
@@ -39,6 +39,9 @@ import type {
   EnforcedChatSkill,
   EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
+
+/** The permissions the chat's session routes ask. */
+export type ChatPermission = "chat:read" | "chat:write";
 
 export interface ChatPlatformDeps {
   /**
@@ -105,6 +108,12 @@ export interface ChatPlatformDeps {
    * turn is refused rather than run without them.
    */
   loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
+  /**
+   * The ids of the spaces the caller reaches with `permission`, for the routes
+   * that serve the organization as a whole (no space entered). A 403 for an
+   * end-user.
+   */
+  reachableSpaceIds(c: Context, orgId: string, permission: ChatPermission): Promise<string[]>;
   /** Their names only, from the database (no archive read); same 503 on failure. */
   listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
 }
@@ -150,6 +159,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
+    reachableSpaceIds: (c, orgId, permission) =>
+      ctx.services.reachableSpaceIds(c, orgId, permission),
     loadEnforcedSkills: (orgId, spaceId) =>
       enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
     listEnforcedSkills: (orgId, spaceId) =>

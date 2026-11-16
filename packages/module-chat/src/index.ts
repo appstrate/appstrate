@@ -144,20 +144,20 @@ const chatModule: AppstrateModule = {
   },
 
   openApiSchemas() {
-    return [
+    return ["/api/chat", "/api/orgs/{orgId}/chat"].flatMap((base) => [
       {
-        method: "POST",
-        path: "/api/chat/sessions",
+        method: "POST" as const,
+        path: `${base}/sessions`,
         jsonSchema: z.toJSONSchema(createSessionSchema) as Record<string, unknown>,
         description: "Create chat session",
       },
       {
-        method: "PATCH",
-        path: "/api/chat/sessions/{id}",
+        method: "PATCH" as const,
+        path: `${base}/sessions/{id}`,
         jsonSchema: z.toJSONSchema(renameSessionSchema) as Record<string, unknown>,
         description: "Rename chat session",
       },
-    ];
+    ]);
   },
 
   // A run launched from a chat turn can outlive it (the audited `report.html`

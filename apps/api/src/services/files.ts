@@ -1412,7 +1412,10 @@ async function chatContextFileFilter(
       ),
     )
     .limit(1);
-  if (!session) return sql`false`;
+  // `inArray` never matches an organization session (NULL space), so it resolves
+  // nothing here either; the check narrows the type for the run reads below.
+  if (!session?.spaceId) return sql`false`;
+  const sessionSpaceId = session.spaceId;
 
   return or(
     eq(files.chatSessionId, chatSessionId),
@@ -1424,7 +1427,7 @@ async function chatContextFileFilter(
           and(
             eq(files.runId, runs.id),
             eq(runs.orgId, orgId),
-            eq(runs.spaceId, session.spaceId),
+            eq(runs.spaceId, sessionSpaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1439,7 +1442,7 @@ async function chatContextFileFilter(
             eq(fileLinks.fileId, files.id),
             eq(fileLinks.orgId, orgId),
             eq(runs.orgId, orgId),
-            eq(runs.spaceId, session.spaceId),
+            eq(runs.spaceId, sessionSpaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),

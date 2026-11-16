@@ -1080,7 +1080,7 @@ export interface paths {
         };
         /**
          * List chat sessions
-         * @description List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
+         * @description List the caller's chat sessions in the current space (`X-Space-Id`), most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
          */
         get: operations["listChatSessions"];
         put?: never;
@@ -3191,6 +3191,106 @@ export interface paths {
          * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` is withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List chat sessions
+         * @description List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Reads no `X-Space-Id`; admitted when some reachable space grants `chat:read`. Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.
+         */
+        get: operations["listOrgChatSessions"];
+        put?: never;
+        /** Create a chat session */
+        post: operations["createOrgChatSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a chat session with its messages */
+        get: operations["getOrgChatSession"];
+        put?: never;
+        post?: never;
+        /** Delete a chat session */
+        delete: operations["deleteOrgChatSession"];
+        options?: never;
+        head?: never;
+        /** Rename a chat session */
+        patch: operations["renameOrgChatSession"];
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a chat session read
+         * @description Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.
+         */
+        put: operations["markOrgChatSessionRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop an in-progress chat generation
+         * @description Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.
+         */
+        post: operations["stopOrgChatStream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resume an in-flight chat turn
+         * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
+         */
+        get: operations["resumeOrgChatStream"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6027,6 +6127,10 @@ export interface components {
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
+            /** @description The space the session belongs to, fixed at creation. `null` for an organization session (opened from the overview, acting across spaces). */
+            spaceId: string | null;
+            /** @description The spaces an organization session touched (tool calls naming a `space_id`, attachments); always empty for a space session. An organization session is listed and opened only while the caller reaches every one of them with `chat:read`. */
+            space_ids: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -20639,6 +20743,255 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listOrgChatSessions: {
+        parameters: {
+            query?: {
+                /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
+                limit?: number;
+                /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
+                q?: string;
+                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
+                startingAfter?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions page */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["ChatSession"][];
+                        /** @description True when older sessions follow this page. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createOrgChatSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (30/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getOrgChatSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session with full message tree */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"] & {
+                        messages: components["schemas"]["ChatMessage"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteOrgChatSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session deleted (messages cascade) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    renameOrgChatSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session renamed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    markOrgChatSessionRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session marked read */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    stopOrgChatStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stop signal accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    resumeOrgChatStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI SDK UIMessage stream (text/event-stream) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description No active stream to resume */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
         };
     };
     listOrgCliSessions: {

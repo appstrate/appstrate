@@ -75,9 +75,11 @@ export type ChatEnv = {
     principalKind: PrincipalKind;
     /**
      * Space the router entered (`enterSpaceContext`, mounted on every
-     * `/api/chat/*` route). Always set: entering is what makes the space-level
-     * `chat:*` guards satisfiable, and a caller that names no space is refused
-     * there before any handler runs.
+     * `/api/chat/*` route): entering is what makes the space-level `chat:*`
+     * guards satisfiable, and a caller that names no space is refused there
+     * before any handler runs. NOT set on the organization mount
+     * (`/api/orgs/:orgId/chat/*`), which enters none: only the handlers
+     * registered on `/api/chat` read it.
      */
     space: { id: string };
     orgRole?: string;

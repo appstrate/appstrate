@@ -42,6 +42,9 @@ column chat_messages.created_at timestamp with time zone not null default now()
 column chat_messages.message_id text not null
 column chat_messages.seq bigint not null default nextval('chat_messages_seq_seq'::regclass)
 column chat_messages.session_id text not null
+column chat_session_spaces.created_at timestamp with time zone not null default now()
+column chat_session_spaces.session_id text not null
+column chat_session_spaces.space_id text not null
 column chat_sessions.active_stream_id text
 column chat_sessions.created_at timestamp with time zone not null default now()
 column chat_sessions.id text not null
@@ -50,7 +53,7 @@ column chat_sessions.last_read_seq bigint
 column chat_sessions.org_id uuid not null
 column chat_sessions.pinned_skills text[] not null default '{}'::text[]
 column chat_sessions.skill_mode chat_skill_mode not null default 'auto'::chat_skill_mode
-column chat_sessions.space_id text not null
+column chat_sessions.space_id text
 column chat_sessions.title text
 column chat_sessions.updated_at timestamp with time zone not null default now()
 column chat_sessions.user_id text not null
@@ -703,6 +706,9 @@ constraint audit_events audit_events_pkey PRIMARY KEY (id)
 constraint chat_messages chat_messages_pkey PRIMARY KEY (seq)
 constraint chat_messages chat_messages_session_id_chat_sessions_id_fk FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 constraint chat_messages uq_chat_messages_session_message UNIQUE (session_id, message_id)
+constraint chat_session_spaces chat_session_spaces_session_id_chat_sessions_id_fk FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+constraint chat_session_spaces chat_session_spaces_session_id_space_id_pk PRIMARY KEY (session_id, space_id)
+constraint chat_session_spaces chat_session_spaces_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_pkey PRIMARY KEY (id)
 constraint chat_sessions chat_sessions_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
@@ -1002,6 +1008,7 @@ index CREATE INDEX idx_audit_events_actor ON public.audit_events USING btree (ac
 index CREATE INDEX idx_audit_events_org_created ON public.audit_events USING btree (org_id, created_at)
 index CREATE INDEX idx_audit_events_resource ON public.audit_events USING btree (resource_type, resource_id)
 index CREATE INDEX idx_chat_messages_session_seq ON public.chat_messages USING btree (session_id, seq)
+index CREATE INDEX idx_chat_session_spaces_space ON public.chat_session_spaces USING btree (space_id)
 index CREATE INDEX idx_chat_sessions_org_user ON public.chat_sessions USING btree (org_id, user_id)
 index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING btree (space_id, user_id)
 index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
@@ -1131,6 +1138,7 @@ index CREATE UNIQUE INDEX account_pkey ON public.account USING btree (id)
 index CREATE UNIQUE INDEX api_keys_pkey ON public.api_keys USING btree (id)
 index CREATE UNIQUE INDEX audit_events_pkey ON public.audit_events USING btree (id)
 index CREATE UNIQUE INDEX chat_messages_pkey ON public.chat_messages USING btree (seq)
+index CREATE UNIQUE INDEX chat_session_spaces_session_id_space_id_pk ON public.chat_session_spaces USING btree (session_id, space_id)
 index CREATE UNIQUE INDEX chat_sessions_pkey ON public.chat_sessions USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_pkey ON public.cli_refresh_tokens USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_token_hash_unique ON public.cli_refresh_tokens USING btree (token_hash)

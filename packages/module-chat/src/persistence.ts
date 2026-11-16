@@ -55,7 +55,8 @@ export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
-  spaceId: string,
+  /** The session's space, or null for an organization session. A session never changes kind. */
+  spaceId: string | null,
   selection?: ChatSkillSelection,
 ): Promise<ChatSkillSelection> {
   // The id is client-minted, so a caller could send an id that already belongs
@@ -87,7 +88,7 @@ export async function ensureSession(
       setWhere: and(
         eq(chatSessions.orgId, orgId),
         eq(chatSessions.userId, userId),
-        eq(chatSessions.spaceId, spaceId),
+        spaceId === null ? isNull(chatSessions.spaceId) : eq(chatSessions.spaceId, spaceId),
       ),
     })
     .returning({

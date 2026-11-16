@@ -12,6 +12,7 @@ import {
   bigint,
   unique,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -41,10 +42,13 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /** Space the session belongs to (RBAC spec §5): sessions are space-scoped. */
-    spaceId: text("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+    /**
+     * Space the session belongs to (RBAC spec §5), or NULL for an organization
+     * session (opened from the overview, acting across spaces). Fixed at
+     * creation: a session never changes kind. The spaces an organization
+     * session touched are recorded in `chat_session_spaces`.
+     */
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
     // turn is generating. Set when a `POST /api/chat` turn starts, cleared when
@@ -79,6 +83,30 @@ export const chatSessions = pgTable(
     // covering exactly these columns for the FK to attach. Trivially valid —
     // `id` alone is the PK, so `(id, org_id)` can never collide.
     uniqueIndex("uq_chat_sessions_id_org_id").on(table.id, table.orgId),
+  ],
+);
+
+/**
+ * The spaces an organization session (`chat_sessions.space_id IS NULL`) touched:
+ * tool calls naming a `space_id`, attachments. The session is opened only while
+ * its reader reaches every one of them with `chat:read`; a deleted space drops
+ * out of the record by cascade.
+ */
+export const chatSessionSpaces = pgTable(
+  "chat_session_spaces",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    spaceId: text("space_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.spaceId] }),
+    // Scanned by the space FK's cascade.
+    index("idx_chat_session_spaces_space").on(table.spaceId),
   ],
 );
 
