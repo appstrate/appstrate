@@ -8,6 +8,7 @@ import {
   journalGroupElapsedMs,
   journalIntegrationIds,
   journalLevel,
+  expandedJournalGroups,
   journalRows,
   journalSearchText,
   toolLabel,
@@ -891,5 +892,42 @@ describe("journalRows — runner lines fold into one row", () => {
     if (group?.kind !== "group" || undated?.kind !== "group") throw new Error("not grouped");
     expect(journalGroupElapsedMs(group)).toBe(2500);
     expect(journalGroupElapsedMs(undated)).toBe(0);
+  });
+});
+
+describe("expandedJournalGroups — a group is open while its lines arrive", () => {
+  const system = (id: string): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level: "info",
+    message: id,
+    sourceType: "progress",
+  });
+  const say = (id: string): ExecutionEntry => ({ id, kind: "agent", level: "debug", message: id });
+  const none = { levels: [], types: [], query: "" };
+  const boot = [system("a"), system("b")];
+  const later = [...boot, say("m"), system("c"), system("d")];
+  const open = (entries: ExecutionEntry[], state: Parameters<typeof expandedJournalGroups>[1]) => [
+    ...expandedJournalGroups(journalRows(entries, none), state),
+  ];
+
+  it("opens a live run's last group, then folds it once another event follows", () => {
+    expect(open(boot, { open: {}, live: true })).toEqual(["group:a"]);
+    expect(open([...boot, say("m")], { open: {}, live: true })).toEqual([]);
+  });
+
+  it("does the same for a group later in the run, and folds every group when the run ends", () => {
+    expect(open(later, { open: {}, live: true })).toEqual(["group:c"]);
+    expect(open(later, { open: {}, live: false })).toEqual([]);
+  });
+
+  it("keeps a group as the reader set it", () => {
+    expect(open(later, { open: { "group:a": true, "group:c": false }, live: true })).toEqual([
+      "group:a",
+    ]);
+  });
+
+  it("keeps the group holding the open row open", () => {
+    expect(open(later, { open: {}, live: false, selectedEntryId: "b" })).toEqual(["group:a"]);
   });
 });

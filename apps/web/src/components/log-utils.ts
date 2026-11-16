@@ -527,6 +527,32 @@ export function journalRows(
   return rows;
 }
 
+/**
+ * The groups drawn open. A group is as the reader set it (`open`); left alone, it is open while
+ * it is a live run's last row (its lines are still arriving) and folds once another event
+ * follows it or the run ends. One holding the open row (a reload, a shared link) stays open.
+ */
+export function expandedJournalGroups(
+  rows: readonly JournalRow[],
+  state: {
+    open: Readonly<Record<string, boolean>>;
+    live: boolean;
+    selectedEntryId?: string | null;
+  },
+): Set<string> {
+  const tail = rows[rows.length - 1];
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== "group") continue;
+    const open =
+      state.open[row.id] ??
+      ((state.live && row === tail) ||
+        row.entries.some((entry) => entry.id === state.selectedEntryId));
+    if (open) ids.add(row.id);
+  }
+  return ids;
+}
+
 function timeOf(value: Date | string | null | undefined): number {
   return value ? new Date(value).getTime() : Number.NaN;
 }

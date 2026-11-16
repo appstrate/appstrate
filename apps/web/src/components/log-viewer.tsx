@@ -33,6 +33,7 @@ import { formatDuration } from "../lib/format-duration";
 import {
   formatTimestamp,
   journalLevel,
+  expandedJournalGroups,
   filterJournal,
   journalGroupElapsedMs,
   journalIntegrationIds,
@@ -559,29 +560,18 @@ export function LogViewer({
       }),
     [levelFilters, normalizedQuery, typeFilters, visibleEntries],
   );
-  // A group is folded until opened. A live run's last group is still booting: it opens as its
-  // lines arrive and stays as the reader left it, so no row ever folds under them.
+  // The reader's own folds and openings, by group id.
   const [groupOpen, setGroupOpen] = useState<Readonly<Record<string, boolean>>>({});
-  const tail = rows[rows.length - 1];
-  if (live && tail?.kind === "group" && groupOpen[tail.id] === undefined) {
-    setGroupOpen({ ...groupOpen, [tail.id]: true });
-  }
-  // A folded group holding the open row (a reload, a shared link) opens to show it.
-  const selectedGroupId =
-    rows.find(
-      (row) =>
-        row.kind === "group" &&
-        !groupOpen[row.id] &&
-        row.entries.some((entry) => entry.id === selectedEntryId),
-    )?.id ?? null;
+  const expandedGroups = useMemo(
+    () => expandedJournalGroups(rows, { open: groupOpen, live, selectedEntryId }),
+    [groupOpen, live, rows, selectedEntryId],
+  );
   const drawnRows = useMemo(
     () =>
       rows.flatMap((row): JournalRow[] =>
-        row.kind === "group" && (groupOpen[row.id] || row.id === selectedGroupId)
-          ? [row, ...row.entries]
-          : [row],
+        row.kind === "group" && expandedGroups.has(row.id) ? [row, ...row.entries] : [row],
       ),
-    [groupOpen, rows, selectedGroupId],
+    [expandedGroups, rows],
   );
   const toggleGroup = (group: JournalGroup, expanded: boolean) => {
     setGroupOpen((open) => ({ ...open, [group.id]: !expanded }));
@@ -811,7 +801,7 @@ export function LogViewer({
                 {virtualizer.getVirtualItems().map((virtualRow) => {
                   const row = drawnRows[virtualRow.index]!;
                   const open = selectedEntryId === row.id;
-                  const expanded = !!groupOpen[row.id] || row.id === selectedGroupId;
+                  const expanded = expandedGroups.has(row.id);
                   return (
                     <div
                       key={row.id}
