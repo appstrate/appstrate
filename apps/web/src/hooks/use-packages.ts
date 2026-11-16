@@ -196,11 +196,7 @@ function usePackageList<T extends PackageType>(
   });
 }
 
-/**
- * The current space's index, or every space's of `acrossOrgId`. The agent index across spaces
- * is `fetchAgents`'s: asked here, it throws rather than answer the current space's. Exported for
- * its test.
- */
+/** The current space's index, or every space's of `acrossOrgId`. Exported for its test. */
 export async function fetchPackageIndex<T extends PackageType>(
   type: T,
   acrossOrgId: string | null,
@@ -208,13 +204,11 @@ export async function fetchPackageIndex<T extends PackageType>(
   const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const rows = !acrossOrgId
     ? (await client.GET(`/api/packages/${segment}`)).data!.data
-    : segment === "agents"
-      ? unreachable("The agent index across spaces is fetchAgents's")
-      : (
-          await client.GET(`/api/orgs/{orgId}/packages/${segment}`, {
-            params: { path: { orgId: acrossOrgId } },
-          })
-        ).data!.data;
+    : (
+        await client.GET(`/api/orgs/{orgId}/packages/${segment as Exclude<Segment, "agents">}`, {
+          params: { path: { orgId: acrossOrgId } },
+        })
+      ).data!.data;
   // Normalize the optional spec fields; `scope` is not returned by list endpoints. The spread
   // carries an integration row's own fields; `segment` is a union, so the cast ties them to `T`.
   return rows.map((item) => ({
@@ -232,10 +226,6 @@ export async function fetchPackageIndex<T extends PackageType>(
     used_by_agents: item.used_by_agents,
     auto_installed: item.auto_installed,
   })) as PackageIndexItem<T>[];
-}
-
-function unreachable(reason: string): never {
-  throw new Error(reason);
 }
 
 /** {@link usePackageDetail}'s query, for an imperative `fetchQuery` that shares its cache entry. */
@@ -344,7 +334,7 @@ export {
  * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), each agent once with its spaces and its counters added up (`onePerPackage`), polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
  * `enabled: false` asks nothing (a surface that does not show it).
  */
-export function useAgents(spanning = false, enabled = true) {
+export function useAgents({ spanning = false, enabled = true } = {}) {
   const scope = useListScope(spanning, useCanSeePackage("agent"));
   return useQuery({
     queryKey: spanning

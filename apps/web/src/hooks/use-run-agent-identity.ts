@@ -27,9 +27,9 @@ export function resolveRunAgentIdentity(
   return byPackageId.get(run.packageId) ?? NO_AGENT_IDENTITY;
 }
 
-/** Same `useAgents(spanning)` query key as `useRunAgentName`: served from cache, not an extra request. */
+/** Same `useAgents({ spanning })` query key as `useRunAgentName`: served from cache, not an extra request. */
 export function useRunAgentIdentity(spanning = false): (run: EnrichedRun) => RunAgentIdentity {
-  const { data: agents } = useAgents(spanning);
+  const { data: agents } = useAgents({ spanning });
 
   const byPackageId = new Map<string, RunAgentIdentity>();
   for (const agent of agents ?? []) {

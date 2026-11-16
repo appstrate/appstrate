@@ -107,25 +107,14 @@ describe("PackageSpaces", () => {
 });
 
 describe("PackageSharedFrom", () => {
-  it("names the home on a card of another space's package", () => {
-    const html = renderInSpaces(
-      <PackageSharedFrom homeSpaceId="spc_b" system={false} variant="text" />,
-    );
-    expect(html).toContain("Partagé depuis Studio");
-  });
-
-  it("is an icon with the text as its label in a table", () => {
-    const html = renderInSpaces(
-      <PackageSharedFrom homeSpaceId="spc_b" system={false} variant="icon" />,
-    );
+  it("is an icon naming the home of another space's package as its label", () => {
+    const html = renderInSpaces(<PackageSharedFrom homeSpaceId="spc_b" system={false} />);
     expect(html).toContain('aria-label="Partagé depuis Studio"');
   });
 
   it("stays generic when the home is withheld", () => {
-    const html = renderInSpaces(
-      <PackageSharedFrom homeSpaceId={null} system={false} variant="text" />,
-    );
-    expect(html).toContain("Partagé depuis un autre espace");
+    const html = renderInSpaces(<PackageSharedFrom homeSpaceId={null} system={false} />);
+    expect(html).toContain('aria-label="Partagé depuis un autre espace"');
   });
 
   it.each([
@@ -133,8 +122,6 @@ describe("PackageSharedFrom", () => {
     ["a system package", "spc_b", true],
     ["a row off an index", undefined, false],
   ] as const)("shows nothing for %s", (_label, home, system) => {
-    expect(
-      renderInSpaces(<PackageSharedFrom homeSpaceId={home} system={system} variant="text" />),
-    ).toBe("");
+    expect(renderInSpaces(<PackageSharedFrom homeSpaceId={home} system={system} />)).toBe("");
   });
 });

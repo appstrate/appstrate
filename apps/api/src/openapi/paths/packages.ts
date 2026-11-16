@@ -5,6 +5,7 @@ import {
   STD_RESPONSE_HEADERS,
   REQUEST_ID_ONLY_HEADERS,
 } from "../headers.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 /** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
 const SCOPE_RESERVED_RULE =
@@ -324,7 +325,7 @@ function orgPackageIndexDescription(noun: string, single: string, permission: st
   return (
     `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. ` +
     "Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. " +
-    "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. " +
+    `${ORG_READ_REACH} ` +
     "No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`."
   );
 }

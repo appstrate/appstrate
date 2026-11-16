@@ -22,7 +22,7 @@ import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
-import { grantedInSomeSpace } from "../lib/space-lists";
+import { admittingSpaces } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { useSpaces } from "../hooks/use-spaces";
@@ -305,11 +305,8 @@ function dashboardMetrics(
       )
     : "—";
   const activeSchedules = data.schedules.filter((schedule) => schedule.enabled);
-  // In « Vue d'ensemble » an agent is a row per space it runs in: the figures count agents.
-  const agentCount = new Set(data.agents.map((agent) => agent.id)).size;
-  const runningAgentCount = new Set(
-    data.agents.filter((agent) => agent.running_runs).map((agent) => agent.id),
-  ).size;
+  const agentCount = data.agents.length;
+  const runningAgentCount = data.agents.filter((agent) => agent.running_runs).length;
   // The five that fire soonest; an active schedule with no next run is counted, not listed.
   const upcomingSchedules = data.schedules
     .flatMap((schedule) => {
@@ -365,7 +362,9 @@ export function DashboardContent(data: DashboardData) {
   // section answers to the guard of the query that feeds it — in « Vue
   // d'ensemble », granted in some space (the org route lists those).
   const sections = dashboardSections(
-    data.spanning ? (permission) => grantedInSomeSpace(spaces, permission) : can,
+    data.spanning
+      ? (permission) => admittingSpaces(spaces, (held) => held.includes(permission)).length > 0
+      : can,
   );
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));

@@ -11,7 +11,7 @@
  */
 
 import { eq, and, exists, inArray, sql } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import type { AnyPgColumn, PgSelect } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -376,6 +376,24 @@ export function activePackagesFilter(scope: OrgScope, type: PackageType) {
 }
 
 /**
+ * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
+ * `type` active in each of `spaceIds` ({@link activePackagesFilter}), one row
+ * per (package, space): each space is joined to its own placement row, so one
+ * statement serves any number of spaces. `spaces.id` names the row's space.
+ */
+export function activeInSpaces<Q extends PgSelect>(
+  query: Q,
+  orgId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+) {
+  return query
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+    .where(activePackagesFilter({ orgId }, type));
+}
+
+/**
  * ORDER BY for the TWO reads below — {@link listActivePackages}, which the
  * agent index and the served skills draw from, and `listActivePackageHints`,
  * the capped caller-context list: system first, then by id. One function so an index and
@@ -409,7 +427,7 @@ export async function listActivePackages(
   type: PackageType,
 ) {
   if (spaceIds.length === 0) return [];
-  return db
+  const query = db
     .select({
       id: packages.id,
       spaceId: spaces.id,
@@ -420,11 +438,9 @@ export async function listActivePackages(
       latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
-    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
-    .where(activePackagesFilter({ orgId }, type))
-    .orderBy(...packageListingOrder(), spaces.id);
+    .$dynamic();
+  return activeInSpaces(query, orgId, spaceIds, type).orderBy(...packageListingOrder(), spaces.id);
 }
 
 // ---------------------------------------------------------------------------

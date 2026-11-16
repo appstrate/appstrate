@@ -33,7 +33,7 @@ export function RunsPage() {
   const runSpaces = useAdmittingSpaces("runs");
   // « Tout marquer comme lu » marks what the list spans: the working space, or each space
   // admitting the list.
-  const unreadCount = useUnreadRunCount(true, spanning);
+  const unreadCount = useUnreadRunCount({ spanning });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));

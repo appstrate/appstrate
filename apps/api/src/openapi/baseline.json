@@ -3021,7 +3021,7 @@
             }
           },
           "400": {
-            "description": "Invalid query parameter (unknown `user` value, malformed date, …)",
+            "description": "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3166,7 +3166,7 @@
             }
           },
           "400": {
-            "description": "Invalid query parameter (unknown `user` value, malformed date, …)",
+            "description": "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
             "content": {
               "application/problem+json": {
                 "schema": {

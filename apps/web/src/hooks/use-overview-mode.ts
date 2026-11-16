@@ -39,7 +39,7 @@ function useChoiceKey(): string | null {
 export function useOverviewMode() {
   const userId = useStore(authStore, (s) => s.user?.id);
   const orgId = useStore(orgStore, (s) => s.id);
-  const key = userId && orgId ? rememberedSpaceKey(userId, orgId) : null;
+  const key = useChoiceKey();
   const chosen = useStore(overviewStore, (s) => !!key && !!s.chosen[key]);
   const { data: spaces, isError } = useSpaces();
 
@@ -50,10 +50,9 @@ export function useOverviewMode() {
     [userId, orgId],
   );
 
-  const offered = overviewOffered(spaces);
-  const on = chosen && offered;
+  const on = chosen && overviewOffered(spaces);
   const known = spaces !== undefined || isError;
-  return { on, known, offered, choose };
+  return { on, known, choose };
 }
 
 /**

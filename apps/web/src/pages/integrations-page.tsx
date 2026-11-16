@@ -8,10 +8,8 @@
  */
 
 import { useMemo, useState } from "react";
-import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Boxes, LibraryBig, Plus, Upload } from "lucide-react";
-import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
+import { Boxes } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
 import { PackageCard, PackageCardSkeleton } from "../components/package-card";
@@ -22,13 +20,10 @@ import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
-import { PageActionsMenu } from "../components/page-actions-menu";
-import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { CreatePackageModal } from "../components/create-package-modal";
-import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_SOURCES,
@@ -38,18 +33,16 @@ import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
-import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
   const { on: spanning } = useOverviewMode();
   // The server answers the active set of this space (or of each, spanning): the
@@ -60,23 +53,9 @@ export function IntegrationsPage() {
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "source"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const [importing, setImporting] = useState(false);
-  // The same grants as every other package index (`PackageIndexPage`): creating,
-  // by import too, is a write on the type. Offered where a space grants it; the
-  // dialogs open in the working space, which the action entered when it asked for one.
-  const write = packagePermission("integration", "write");
-  const create = useSpaceAction({ permission: write });
-  const browse = useSpaceAction({ permission: spacePackagePermission("integration", "activate") });
-  const canCreate = can(write);
-  const creation = useCreationHandoff("integration", canCreate);
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu, pickers } =
+    usePackageIndexActions("integration", t("integrations.create"));
   const [creating, setCreating] = useState(false);
-  const createAction: MenuAction = {
-    id: "create",
-    label: t("integrations.create"),
-    icon: Plus,
-    onSelect: () => create.run(creation.open),
-    hidden: !create.offered,
-  };
 
   const origins = list.values("origin", INTEGRATION_ORIGINS);
   const sources = list.values("source", INTEGRATION_SOURCES);
@@ -110,30 +89,7 @@ export function IntegrationsPage() {
         variant="collection"
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
-        actions={
-          // A reader has no deed here: no menu, rather than an empty one.
-          (browse.offered || create.offered) && (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse"),
-                  icon: LibraryBig,
-                  ...browse.link(catalogueHref("integration")),
-                  hidden: !browse.offered,
-                },
-                {
-                  id: "import",
-                  label: t("nav.import", { ns: "common" }),
-                  icon: Upload,
-                  onSelect: () => create.run(() => setImporting(true)),
-                  hidden: !create.offered,
-                },
-                createAction,
-              ]}
-            />
-          )
-        }
+        actions={actionsMenu}
       />
 
       <ListToolbar
@@ -238,6 +194,7 @@ export function IntegrationsPage() {
       {creating && canCreate && (
         <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
+      {pickers}
     </div>
   );
 }

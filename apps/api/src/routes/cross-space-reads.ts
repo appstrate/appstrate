@@ -26,9 +26,9 @@ import { readableSpacesAcross } from "../lib/reachable-spaces.ts";
 import { fileLifecycleCeiling, type Permission, type SpaceGrant } from "../lib/permissions.ts";
 import { getActor } from "../lib/actor.ts";
 import { listResponse } from "@appstrate/core/list-query";
-import { assertKnownQuery } from "../lib/list-query.ts";
+import { parseEmptyQuery } from "../lib/list-query.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseGlobalRunListQuery, RUN_LIST_QUERY_PARAMETERS } from "../lib/run-list-query.ts";
+import { parseGlobalRunListQuery } from "../lib/run-list-query.ts";
 import { parseListFilesQuery } from "../lib/file-list-query.ts";
 import { packageAccessSpaces } from "../lib/package-access.ts";
 
@@ -51,14 +51,13 @@ const INDEXED_PACKAGE_TYPES = [
  * instead of answering it an empty page, and the reach keeps the spaces whose
  * effective set grants one. No space is entered here, so a space-level guard
  * could never pass: the authorization IS that per-space grant list. The spaces
- * are resolved before any parameter is read, so a refused end-user is a 403
- * whatever its query; then a query parameter outside `query` is a 400 (`null`:
- * the list's own parser is strict).
+ * are resolved before `parseQuery` reads the query (strict: an unknown
+ * parameter is a 400), so a refused end-user is a 403 whatever its query.
  */
-function readAcrossSpaces(
+function readAcrossSpaces<Q>(
   permissions: readonly Permission[],
-  query: readonly string[] | null,
-  list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) => Promise<Response>,
+  parseQuery: (c: Context<AppEnv>) => Q,
+  list: (c: Context<AppEnv>, orgId: string, grants: SpaceGrant[], query: Q) => Promise<Response>,
 ) {
   return [
     requireOrgPathMembership,
@@ -66,8 +65,7 @@ function readAcrossSpaces(
     async (c: Context<AppEnv>) => {
       const orgId = c.req.param("orgId")!;
       const grants = await readableSpacesAcross(c, orgId, permissions);
-      if (query) assertKnownQuery(c, query);
-      return list(c, orgId, grants);
+      return list(c, orgId, grants, parseQuery(c));
     },
   ] as const;
 }
@@ -79,9 +77,8 @@ export function createCrossSpaceReadsRouter() {
     "/:orgId/runs",
     ...readAcrossSpaces(
       RUNS_READ_PERMISSIONS,
-      RUN_LIST_QUERY_PARAMETERS,
-      async (c, orgId, grants) => {
-        const filters = parseGlobalRunListQuery(c);
+      parseGlobalRunListQuery,
+      async (c, orgId, grants, filters) => {
         const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
         setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
         return c.json(result);
@@ -91,7 +88,7 @@ export function createCrossSpaceReadsRouter() {
 
   router.get(
     "/:orgId/schedules",
-    ...readAcrossSpaces(["schedules:read"], [], async (c, orgId, grants) =>
+    ...readAcrossSpaces(["schedules:read"], parseEmptyQuery, async (c, orgId, grants) =>
       c.json(listResponse(await listSchedules(orgId, grants, getActor(c)))),
     ),
   );
@@ -99,44 +96,42 @@ export function createCrossSpaceReadsRouter() {
   router.get(
     "/:orgId/files",
     rateLimit(120),
-    ...readAcrossSpaces(["files:read"], null, async (c, orgId, grants) =>
-      c.json(
-        await listFilesForActor(
-          orgId,
-          grants,
-          getActor(c),
-          parseListFilesQuery(c),
-          fileLifecycleCeiling(c),
-        ),
-      ),
+    ...readAcrossSpaces(["files:read"], parseListFilesQuery, async (c, orgId, grants, filters) =>
+      c.json(await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c))),
     ),
   );
 
   router.get(
     "/:orgId/agents",
-    ...readAcrossSpaces(packageSightPermissions("agent"), [], async (c, orgId, grants) =>
-      c.json(
-        listResponse(
-          await listAgentIndex(orgId, grants, getActor(c), await packageAccessSpaces(c)),
+    ...readAcrossSpaces(
+      packageSightPermissions("agent"),
+      parseEmptyQuery,
+      async (c, orgId, grants) =>
+        c.json(
+          listResponse(
+            await listAgentIndex(orgId, grants, getActor(c), await packageAccessSpaces(c)),
+          ),
         ),
-      ),
     ),
   );
 
   for (const { type, segment } of INDEXED_PACKAGE_TYPES) {
     router.get(
       `/:orgId/packages/${segment}`,
-      ...readAcrossSpaces([packagePermission(type, "read")], [], async (c, orgId, grants) =>
-        c.json(
-          listResponse(
-            await listPackageIndex(
-              type,
-              orgId,
-              grants.map((g) => g.spaceId),
-              await packageAccessSpaces(c),
+      ...readAcrossSpaces(
+        [packagePermission(type, "read")],
+        parseEmptyQuery,
+        async (c, orgId, grants) =>
+          c.json(
+            listResponse(
+              await listPackageIndex(
+                type,
+                orgId,
+                grants.map((g) => g.spaceId),
+                await packageAccessSpaces(c),
+              ),
             ),
           ),
-        ),
       ),
     );
   }

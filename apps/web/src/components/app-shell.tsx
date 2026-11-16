@@ -18,6 +18,7 @@ import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
 import { useSpaceAction } from "@/hooks/use-space-action";
 import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
+import { replacingNavigation } from "@/lib/menu-action";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
 import { cn } from "@appstrate/ui/cn";
@@ -105,17 +106,7 @@ function OverlayEntry({
         {active ? (
           <span aria-current="page">{content}</span>
         ) : (
-          <Link
-            to={to}
-            {...overlayIntent(to)}
-            onClick={
-              onSelect &&
-              ((event) => {
-                event.preventDefault();
-                onSelect();
-              })
-            }
-          >
+          <Link to={to} {...overlayIntent(to)} onClick={replacingNavigation(onSelect)}>
             {content}
           </Link>
         )}
@@ -139,7 +130,6 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   // d'ensemble », where some space admits it, opened in the space the reader picks.
   const canReach = useCanReach();
   const catalogue = useSpaceAction({ route: "/catalogue" });
-  const catalogueLink = catalogue.link(catalogueHref("agent"));
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
   const settingsActive = isSettingsPath(overlayPath);
@@ -189,11 +179,10 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
       <SidebarFooter className="gap-0 p-0">
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <OverlayEntry
-            to={catalogueHref("agent")}
+            {...catalogue.link(catalogueHref("agent"))}
             active={catalogueActive}
             icon={LibraryBig}
             label={t("nav.catalogue")}
-            onSelect={"onSelect" in catalogueLink ? catalogueLink.onSelect : undefined}
           />
         </SidebarMenu>
         {catalogue.picker}
@@ -217,7 +206,7 @@ export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
   // The working space's badge: « Vue d'ensemble » neither shows nor asks it.
   const { on: overview } = useOverviewMode();
-  const unreadRuns = useUnreadRunCount(!overview);
+  const unreadRuns = useUnreadRunCount({ enabled: !overview });
   const collapsed = !isMobile && state === "collapsed";
 
   return (

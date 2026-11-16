@@ -46,7 +46,7 @@ describe("polling a list spanning spaces", () => {
   });
 
   it("polls the agent index across spaces, not the current space's", () => {
-    expect(intervalOf(() => useAgents(true), "agents")).toBe(ACROSS_SPACES_POLL_MS);
+    expect(intervalOf(() => useAgents({ spanning: true }), "agents")).toBe(ACROSS_SPACES_POLL_MS);
     expect(intervalOf(() => useAgents(), "agents")).toBeUndefined();
   });
 

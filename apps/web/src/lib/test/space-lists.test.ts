@@ -8,8 +8,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
-  grantedInSomeSpace,
-  grantsInRowSpace,
+  admittingSpaces,
   holdsOverview,
   listAdmits,
   overviewLapsed,
@@ -63,13 +62,15 @@ describe("listAdmits", () => {
   });
 });
 
-describe("grantedInSomeSpace", () => {
+describe("admittingSpaces", () => {
   it("asks every space with a role, none without one", () => {
-    expect(grantedInSomeSpace(TWO, "files:read")).toBe(true);
-    expect(grantedInSomeSpace(TWO, "schedules:read")).toBe(false);
-    expect(grantedInSomeSpace([space("spc_c", ["schedules:read"], "none")], "schedules:read")).toBe(
-      false,
-    );
+    const reads = (permission: string) => (permissions: readonly string[]) =>
+      permissions.includes(permission);
+    expect(admittingSpaces(TWO, reads("files:read")).map((s) => s.id)).toEqual(["spc_b"]);
+    expect(admittingSpaces(TWO, reads("schedules:read"))).toEqual([]);
+    expect(
+      admittingSpaces([space("spc_c", ["schedules:read"], "none")], reads("schedules:read")),
+    ).toEqual([]);
   });
 });
 
@@ -159,34 +160,5 @@ describe("spaceChoice", () => {
     expect(spaceChoice([])).toEqual({ kind: "none" });
     expect(spaceChoice([space("spc_a", [])])).toEqual({ kind: "one", spaceId: "spc_a" });
     expect(spaceChoice(TWO)).toEqual({ kind: "ask" });
-  });
-});
-
-describe("grantsInRowSpace", () => {
-  const spaces = [
-    space("spc_a", ["files:read"]),
-    space("spc_b", ["agents:run"]),
-    space("spc_closed", ["agents:run"], "none"),
-  ];
-  const working = (permission: string) => permission === "files:read";
-  const grants = (rowSpaceId: string | undefined, orgPermissions: string[] = []) =>
-    grantsInRowSpace(rowSpaceId, "spc_a", working, spaces, orgPermissions, "agents:run");
-
-  it("judges a row of another space by that space's grants, not the working space's", () => {
-    expect(grants("spc_b")).toBe(true);
-  });
-
-  it("judges a row of the working space, or of no space, by the working space's gate", () => {
-    expect(grants("spc_a")).toBe(false);
-    expect(grants(undefined)).toBe(false);
-  });
-
-  it("grants nothing in a space held without a role, or not listed", () => {
-    expect(grants("spc_closed")).toBe(false);
-    expect(grants("spc_gone")).toBe(false);
-  });
-
-  it("counts the org-level grants in the row's space", () => {
-    expect(grantsInRowSpace("spc_b", "spc_a", working, spaces, ["x:y"], "x:y")).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "lucide-react";
+import { Share2, ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Card } from "@appstrate/ui/components/card";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -16,7 +16,7 @@ import { useSpaceLink } from "../hooks/use-current-space";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
-import { PackageSharedFrom, PackageSpaces } from "./package-spaces";
+import { PackageSpaces } from "./package-spaces";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
 
 /**
@@ -164,11 +164,12 @@ export function PackageCard({
                 />
               ) : (
                 sharedFrom && (
-                  <PackageSharedFrom
-                    homeSpaceId={homeSpaceId}
-                    system={source === "system"}
-                    variant="text"
-                  />
+                  <span className="flex min-w-0 items-center gap-1">
+                    <Share2 className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate" title={sharedFrom}>
+                      {sharedFrom}
+                    </span>
+                  </span>
                 )
               )}
               {(showSpace || sharedFrom) && meta && <span aria-hidden>·</span>}

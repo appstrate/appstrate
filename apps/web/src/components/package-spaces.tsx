@@ -65,28 +65,16 @@ export function PackageSpaces({
   );
 }
 
-/** {@link useSharedFromText} as a card's text line (`text`) or a table's icon with a tooltip (`icon`). */
+/** {@link useSharedFromText} as a table's icon, the text in a tooltip. */
 export function PackageSharedFrom({
   homeSpaceId,
   system,
-  variant,
 }: {
   homeSpaceId: string | null | undefined;
   system: boolean;
-  variant: "text" | "icon";
 }) {
   const text = useSharedFromText(homeSpaceId, system);
   if (!text) return null;
-  if (variant === "text") {
-    return (
-      <span className="flex min-w-0 items-center gap-1">
-        <Share2 className="size-3 shrink-0" aria-hidden />
-        <span className="truncate" title={text}>
-          {text}
-        </span>
-      </span>
-    );
-  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>

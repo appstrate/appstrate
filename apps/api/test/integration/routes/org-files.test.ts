@@ -25,17 +25,12 @@
  * | member session                               | `runId` of a run in Fermé whose input names an own file | that file is NOT added: the run is looked up in the listed spaces only |
  * | member session                               | `context_chat_session_id` of own session (Deux) | its attachment                                           |
  * | member session                               | `startingAfter` + `limit`                      | one keyset order across spaces                            |
- * | member session                               | `spaceId` (not a filter of this list)          | 400, as any unknown query key                             |
  * | owner session                                | every team space (preset `admin`)              | every row                                                 |
- * | guest session                                | no row anywhere                                | empty page, 200                                           |
- * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)      | the owner's own rows of Default                           |
  * | API key pinned to Un, scopes `files:read` + `runs:read-all` | Un only, ceiling applied        | every Un row, `capabilities.delete` false                 |
- * | API key without `files:read` in scopes       | —                                              | 403 (ceiling guard)                                       |
- * | API key + `Appstrate-User` (end-user)        | —                                              | 403, malformed query included                             |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling     | ceiling `files:read` → own rows only                      |
- * | any                                          | another organization                           | never; its path → 403                                     |
  *
- * The MCP door is covered in `modules/mcp/test/integration/org-reads.test.ts`.
+ * The reach every list shares is in `cross-space-reads.test.ts`; the MCP door
+ * in `modules/mcp/test/integration/org-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -46,19 +41,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
   createTestContext,
-  createTestUser,
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedApiKey,
-  seedEndUser,
-  seedPackage,
-  seedRun,
-  seedSpace,
-  seedSpaceMember,
-  seedSpaceRole,
-} from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedRun, seedSpace, seedSpaceGrant } from "../../helpers/seed.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
@@ -86,7 +72,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
   let ownerChatSession: string;
   let memberChatSession: string;
   let fermeRunNamingOwnFile: string;
-  let foreignOrgId: string;
   let clock: number;
 
   async function seedSpaceRun(spaceId: string, userId: string, input?: Record<string, unknown>) {
@@ -141,16 +126,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
     return id;
   }
 
-  async function join(spaceId: string, permissions: string[]) {
-    const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
-    await seedSpaceMember({
-      spaceId,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: role.id,
-    });
-  }
-
   beforeEach(async () => {
     await truncateAll();
     clock = 1_700_000_000;
@@ -166,6 +141,8 @@ describe("GET /api/orgs/{orgId}/files", () => {
       ferme: await space("Fermé"),
       prive: await space("Privé", "private"),
     };
+    const join = (spaceId: string, permissions: string[]) =>
+      seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
     await join(s.un, ["files:read", "runs:read-all", "files:delete"]);
     await join(s.deux, ["files:read"]);
     await join(s.trois, ["files:read", "runs:read-all"]);
@@ -210,12 +187,11 @@ describe("GET /api/orgs/{orgId}/files", () => {
     });
 
     const foreign = await createTestContext({ orgSlug: "orgfiles-foreign" });
-    foreignOrgId = foreign.orgId;
     await addOrgMember(foreign.orgId, member.user.id, "member");
     await seedFile(foreign.defaultSpaceId, member.user.id, {}, "agent_output", foreign.orgId);
   });
 
-  const path = (query = "", orgId = owner.orgId) => `/api/orgs/${orgId}/files${query}`;
+  const path = (query = "") => `/api/orgs/${owner.orgId}/files${query}`;
   const session = (ctx: TestContext, extra: Record<string, string> = {}) => ({
     Cookie: ctx.cookie,
     ...extra,
@@ -281,7 +257,7 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(seen).toEqual([...seen].sort((a, b) => order.indexOf(b) - order.indexOf(a)));
   });
 
-  it("composes the filters of GET /api/files and takes no space filter", async () => {
+  it("composes the filters of GET /api/files", async () => {
     expect(ids(await list(session(member), "?purpose=user_upload"))).toEqual(pick("unOwnerUpload"));
     expect(
       ids(await list(session(member), `?context_chat_session_id=${memberChatSession}`)),
@@ -289,8 +265,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(
       ids(await list(session(member), `?context_chat_session_id=${ownerChatSession}`)),
     ).toEqual([]);
-    const strict = await app.request(path(`?spaceId=${s.deux}`), { headers: session(member) });
-    expect(strict.status).toBe(400);
   });
 
   it("looks a runId up in the listed spaces only", async () => {
@@ -309,18 +283,7 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(ids(page)).toEqual(pick(...everyRow));
   });
 
-  it("serves a guest with no role an empty page", async () => {
-    const guestUser = await createTestUser();
-    await addOrgMember(owner.orgId, guestUser.id, "guest");
-    expect(await list({ Cookie: guestUser.cookie })).toMatchObject({ data: [], hasMore: false });
-  });
-
-  it("answers the persona of a role preview, not the previewer", async () => {
-    const page = await list(session(owner, { "X-View-As": "org_role=member" }));
-    expect(ids(page)).toEqual(pick("defaultOwnerOutput"));
-  });
-
-  it("bounds a space-pinned API key to its space and its scopes", async () => {
+  it("caps a space-pinned API key's rows and capabilities with its scopes", async () => {
     const key = await seedApiKey({
       orgId: owner.orgId,
       spaceId: s.un,
@@ -334,32 +297,6 @@ describe("GET /api/orgs/{orgId}/files", () => {
     );
     // No `files:delete` in its scopes: no lifecycle, not even on the creator's rows.
     expect(page.data.every((file) => !file.capabilities.delete)).toBe(true);
-    const otherOrg = await app.request(path("", foreignOrgId), { headers });
-    expect(otherOrg.status).toBe(403);
-  });
-
-  it("refuses an API key whose scopes hold no files:read", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["agents:read"],
-    });
-    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses an end-user", async () => {
-    const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.un });
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["files:read"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
-    expect((await app.request(path(), { headers })).status).toBe(403);
-    expect((await app.request(path("?bogus=1"), { headers })).status).toBe(403);
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
@@ -381,17 +318,5 @@ describe("GET /api/orgs/{orgId}/files", () => {
     expect(ids(capped)).toEqual(
       pick("unMemberOutput", "deuxMemberOutput", "deuxMemberChat", "defaultMemberOutput"),
     );
-  });
-
-  it("refuses an organization the caller is not a member of", async () => {
-    const res = await app.request(path("", foreignOrgId), { headers: session(owner) });
-    expect(res.status).toBe(403);
-  });
-
-  it("leaves GET /api/files requiring X-Space-Id", async () => {
-    const res = await app.request("/api/files", {
-      headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId },
-    });
-    expect(res.status).toBe(400);
   });
 });

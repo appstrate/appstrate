@@ -21241,7 +21241,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid query parameter (unknown `user` value, malformed date, …) */
+            /** @description Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, … */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24583,7 +24583,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid query parameter (unknown `user` value, malformed date, …) */
+            /** @description Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, … */
             400: {
                 headers: {
                     [name: string]: unknown;

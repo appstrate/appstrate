@@ -66,7 +66,7 @@ export function RunList({
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
-  const agentName = useRunAgentName(fixedAgentName, spanning);
+  const agentName = useRunAgentName({ fixed: fixedAgentName, spanning });
   const agentIdentity = useRunAgentIdentity(spanning);
   // Inside one agent (its tab, a schedule's history) the « Run » column leads
   // with the number: the agent is the page's title.

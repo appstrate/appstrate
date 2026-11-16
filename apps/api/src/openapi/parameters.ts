@@ -6,6 +6,10 @@ import { runStatusValues } from "@appstrate/core/run-status";
 /**
  * Reusable OpenAPI parameter definitions.
  */
+/** The reach of every list spanning the spaces of an organization (`/api/orgs/{orgId}/…`). */
+export const ORG_READ_REACH =
+  "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only.";
+
 export const parameters = {
   Offset: {
     name: "offset",

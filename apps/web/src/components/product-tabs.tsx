@@ -18,6 +18,7 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { SHELL_CHAT_TRANSPORT } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
+import { replacingNavigation } from "@/lib/menu-action";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
 interface Product {
@@ -43,7 +44,6 @@ export function ProductTabs() {
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   const chatReachable = chat.offered;
-  const chatLink = chat.link("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides on this tab. It is
   // the working space's, so « Vue d'ensemble » does not show it.
   const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, chatReachable);
@@ -75,11 +75,10 @@ export function ProductTabs() {
       id: "chat",
       label: t("products.chat"),
       icon: <MessageSquare className="size-4" />,
-      to: "/chat",
+      ...chat.link("/chat"),
       active: inChat,
       enabled: chatShown,
       unread: overview ? undefined : chatUnread,
-      onSelect: "onSelect" in chatLink ? chatLink.onSelect : undefined,
     },
   ].filter((p) => p.enabled);
 
@@ -97,13 +96,7 @@ export function ProductTabs() {
             key={p.id}
             to={p.to}
             aria-current={p.active ? "page" : undefined}
-            onClick={
-              p.onSelect &&
-              ((event) => {
-                event.preventDefault();
-                p.onSelect?.();
-              })
-            }
+            onClick={replacingNavigation(p.onSelect)}
             className={cn(
               "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
               p.active

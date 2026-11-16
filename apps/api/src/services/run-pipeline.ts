@@ -68,25 +68,16 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
   name: string | null;
 } {
   const parsed = parseScopedName(pkg.id);
+  const manifestName =
+    typeof pkg.manifest.display_name === "string"
+      ? pkg.manifest.display_name
+      : typeof pkg.manifest.name === "string"
+        ? pkg.manifest.name
+        : null;
   return {
     scope: parsed?.scope ?? null,
-    name: agentDisplayName(pkg.manifest),
+    name: manifestName,
   };
-}
-
-/**
- * The agent name a run freezes (`runs.agent_name`): the executed manifest's
- * `display_name`, else its `name`. Read off the manifest alone, because the
- * snapshot outlives the package row; a surface naming a live package row reads
- * `getPackageDisplayName` instead.
- */
-function agentDisplayName(
-  manifest: { display_name?: unknown; name?: unknown } | null,
-): string | null {
-  if (!manifest) return null;
-  if (typeof manifest.display_name === "string") return manifest.display_name;
-  if (typeof manifest.name === "string") return manifest.name;
-  return null;
 }
 
 // ---------------------------------------------------------------------------
