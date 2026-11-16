@@ -54,7 +54,12 @@ import {
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
-import { enforcedSkillsOf, spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
+import {
+  actingSpaces,
+  enforcedSkillsOf,
+  spacesHolding,
+  type ChatPlatformDeps,
+} from "./platform-services.ts";
 import type { OrganizationSpaces, PlatformMcpSpaces } from "./pi-chat/mcp-tools.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
@@ -251,16 +256,17 @@ export async function handleChatStream(
   const requestId = c.get("requestId");
   // What the mount entered: the session's one space (the scope of every space-scoped
   // read this turn makes), or, for an organization session, the spaces its author
-  // reaches — each call of the turn is then decided in the space it names.
+  // reaches — of which the acting set is the part the turn may act in; each call of the
+  // turn is decided in the space it names.
   const scope = c.get("chatScope");
   const spaceId = scope.kind === "space" ? scope.spaceId : null;
   // The caller's grants this turn starts from: their set in the entered space, or the
-  // union over their reach. It is a CEILING on the bearer (each space entry recomputes
+  // union over their acting set. It is a CEILING on the bearer (each space entry recomputes
   // `(org ∪ role) ∩ ceiling`, `lib/auth-pipeline.ts`), so no space's grants reach another.
   const callerPermissions: ReadonlySet<string> =
     scope.kind === "space"
       ? c.get("permissions")
-      : new Set(scope.reachable.flatMap((space) => space.permissions));
+      : new Set(actingSpaces(scope.reachable).flatMap((space) => space.permissions));
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
@@ -285,21 +291,24 @@ export async function handleChatStream(
 
   const turnStart = Date.now();
 
-  // An organization session records every space it acts in, before the act (see
-  // `touchSessionSpace`). Only a space the caller reaches is recorded; one where they lack
-  // `chat:read` would hide the session from them, so the act is refused instead.
+  // An organization session acts in the spaces of its acting set alone (`actingSpaces`) and
+  // records each one it acts in before the act (see `touchSessionSpace`). A space outside the
+  // set — unknown, unreachable, or reached without one of the grants — is refused: nothing is
+  // recorded and the call is not made. Skills are procedures, not data: injecting one touches
+  // no space; only a call or a `read_resource` naming a space does.
+  const acting = scope.kind === "organization" ? actingSpaces(scope.reachable) : [];
   const organization: OrganizationSpaces | undefined =
     scope.kind === "organization"
       ? {
-          spaces: spacesHolding(scope.reachable, "mcp:read"),
+          spaces: acting,
           touch: async (touchedSpaceId) => {
-            const space = scope.reachable.find((candidate) => candidate.id === touchedSpaceId);
-            if (!space || !sessionId || !lastMessage?.id) return;
-            if (!space.permissions.includes("chat:read")) {
+            const space = acting.find((candidate) => candidate.id === touchedSpaceId);
+            if (!space) {
               throw new Error(
-                `This conversation cannot act in ${space.name} (\`${space.id}\`): you hold no chat:read there, so it would no longer open for you.`,
+                `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${acting.map((s) => `\`${s.id}\``).join(", ")}).`,
               );
             }
+            if (!sessionId || !lastMessage?.id) return;
             await touchSessionSpace({ id: sessionId, orgId, userId: user.id }, space.id);
           },
           spaceOfUri: async (uri) => {
@@ -389,11 +398,11 @@ export async function handleChatStream(
   };
 
   // ── Preamble phase A ─────────────────────────────────────────────────────
-  // `listModels` resolves the row the turn binds to. The space is NOT looked
-  // up: the router entered it before this handler ran (`enterSpaceContext`),
-  // so `c.get("space")` is the one the caller's `chat:write` was checked
-  // against — reading it again from `/api/spaces` would be a second, divergent
-  // answer (it also ignored an API key's pinned space).
+  // `listModels` resolves the row the turn binds to. The space is NOT looked up:
+  // the mount's middleware entered it (a space session) or read the reach (an
+  // organization session) before this handler ran, and `chatScope` is that answer —
+  // reading `/api/spaces` again would be a second, divergent one (it also ignored an
+  // API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
   // Flipping a switch changes the system prompt and, through the narrowed token, the
@@ -444,8 +453,7 @@ export async function handleChatStream(
   const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<
-    | { ok: true; block: string; injectedSkills: InjectedSkills | undefined }
-    | { ok: false; error: unknown }
+    { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
   > = turn
     .then(({ skills, permissions, capabilities }) =>
       buildCallerContextBlock(c, {
@@ -537,17 +545,14 @@ export async function handleChatStream(
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
     // The spaces an attachment may resolve in, each under the caller's set there: the
-    // session's own, or every space they may chat in. The container ACL reads as wide as
+    // session's own, or the acting set. The container ACL reads as wide as
     // the caller does: an `appfile://` the user picked from the gallery — which
     // `runs:read-all` widens to the whole space's run outputs — must still resolve when
     // they attach it. Picker and attach answer the same set.
     const attachmentSpaces =
       scope.kind === "space"
         ? [{ id: scope.spaceId, permissions: c.get("permissions") }]
-        : spacesHolding(scope.reachable, "chat:write").map((space) => ({
-            id: space.id,
-            permissions: new Set(space.permissions),
-          }));
+        : acting.map((space) => ({ id: space.id, permissions: new Set(space.permissions) }));
     lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
       const resolved = await deps.resolveChatAttachment({
         orgId,
@@ -555,9 +560,10 @@ export async function handleChatStream(
         chatSessionId: sessionId,
         uri,
         spaces: attachmentSpaces,
+        // The space the file belongs to is touched by the session that comes to hold it,
+        // before anything is materialized there.
+        beforeResolve: organization?.touch,
       });
-      // The file's space is touched by the session that now holds it.
-      await organization?.touch(resolved.spaceId);
       return resolved;
     });
     messages[messages.length - 1] = lastMessage;
@@ -618,7 +624,7 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt(capabilities);
+  let system = buildSystemPrompt(capabilities, scope.kind);
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.

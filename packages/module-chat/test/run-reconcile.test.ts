@@ -47,12 +47,14 @@ describe("orphaned chat run reconciliation", () => {
     packageId = pkg.id;
   });
 
-  async function createSession(overrides: { activeStreamId?: string | null } = {}) {
+  async function createSession(
+    overrides: { activeStreamId?: string | null; organization?: boolean } = {},
+  ) {
     const id = `chs_${crypto.randomUUID().replace(/-/g, "")}`;
     await db.insert(chatSessions).values({
       id,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
+      spaceId: overrides.organization ? null : ctx.defaultSpaceId,
       userId: ctx.user.id,
       title: null,
       activeStreamId: overrides.activeStreamId ?? null,
@@ -130,6 +132,25 @@ describe("orphaned chat run reconciliation", () => {
       .limit(1);
     expect(row?.chatSessionId).toBe(sessionId);
     expect(row?.metadata).toEqual({ degraded_integrations: ["@acme/gmail"] });
+  });
+
+  it("links an organization session's notice into the run's space, a space session's not", async () => {
+    const orgSession = await createSession({ organization: true });
+    const orgRun = await createRun(orgSession);
+    await publishFile(orgRun, "report.html");
+    await reconcileChatRun({ runId: orgRun, orgId: ctx.orgId });
+    const [orgNotice] = await messages(orgSession);
+    expect(JSON.stringify(orgNotice!.content)).toContain(
+      `/agents/${packageId}/runs/${orgRun}?enterSpace=${ctx.defaultSpaceId}`,
+    );
+
+    const spaceSession = await createSession();
+    const spaceRun = await createRun(spaceSession);
+    await publishFile(spaceRun, "report.html");
+    await reconcileChatRun({ runId: spaceRun, orgId: ctx.orgId });
+    const [spaceNotice] = await messages(spaceSession);
+    expect(JSON.stringify(spaceNotice!.content)).toContain(`/runs/${spaceRun})`);
+    expect(JSON.stringify(spaceNotice!.content)).not.toContain("enterSpace");
   });
 
   it("detaches the relationship when its conversation is deleted", async () => {

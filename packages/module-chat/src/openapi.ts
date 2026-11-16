@@ -512,8 +512,10 @@ const spaceChatPaths = {
 
 type OperationObject = {
   operationId: string;
+  summary?: string;
   description?: string;
-  parameters?: readonly { $ref?: string }[];
+  parameters?: readonly { $ref?: string; name?: string; description?: string }[];
+  responses?: Readonly<Record<string, { description?: string }>>;
   [key: string]: unknown;
 };
 
@@ -535,15 +537,34 @@ const ORG_MOUNT_OPERATION_IDS: Readonly<Record<string, string>> = {
 };
 
 const ORG_MOUNT_LIST_DESCRIPTION =
-  "List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Reads no `X-Space-Id`; admitted when some reachable space grants `chat:read`. Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.";
+  "List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.";
 
 const ORG_MOUNT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   listOrgChatSessions: ORG_MOUNT_LIST_DESCRIPTION,
   listOrgChatEnforcedSkills:
-    "The skills the spaces where the caller holds `chat:write` impose on their chat conversations, one entry per package (the union over those spaces). Names only — the content is never returned here. Sorted by id. Reads no `X-Space-Id`; admitted when some reachable space grants `chat:write`.",
+    "The skills the spaces an organization session may act in impose on its conversations, one entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).",
   streamOrgChat:
-    "Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`. A session id that belongs to a space session is a 404. Reads no `X-Space-Id` (a 400 when sent); admitted when some reachable space grants `chat:write`. Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+    "Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A session id that belongs to a space session is a 404. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
 };
+
+const ORG_MOUNT_SUMMARIES: Readonly<Record<string, string>> = {
+  listOrgChatEnforcedSkills:
+    "List the skills the spaces of an organization session enforce in chat",
+};
+
+const ORG_MOUNT_STARTING_AFTER =
+  "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's listed sessions is a 400.";
+
+/** A 503 naming "the space's enforced skills": on this mount they are those of the acting set. */
+function orgMountUnavailableResponse(response: { description?: string }) {
+  const spaces = "the enforced skills of the spaces the session may act in";
+  return {
+    ...response,
+    description: response.description
+      ?.replace("the space's enforced skills", spaces)
+      .replace("the skills the space enforces", spaces),
+  };
+}
 
 function orgMountOperation(operation: OperationObject): OperationObject {
   const operationId = ORG_MOUNT_OPERATION_IDS[operation.operationId]!;
@@ -552,10 +573,28 @@ function orgMountOperation(operation: OperationObject): OperationObject {
       ? [{ $ref: "#/components/parameters/OrgIdPath" }]
       : parameter.$ref === "#/components/parameters/XSpaceId"
         ? []
-        : [parameter],
+        : parameter.name === "startingAfter"
+          ? [{ ...parameter, description: ORG_MOUNT_STARTING_AFTER }]
+          : [parameter],
   );
   const description = ORG_MOUNT_DESCRIPTIONS[operationId] ?? operation.description;
-  return { ...operation, operationId, parameters, ...(description ? { description } : {}) };
+  const summary = ORG_MOUNT_SUMMARIES[operationId] ?? operation.summary;
+  const responses = operation.responses
+    ? {
+        ...operation.responses,
+        ...(operation.responses["503"]
+          ? { "503": orgMountUnavailableResponse(operation.responses["503"]) }
+          : {}),
+      }
+    : undefined;
+  return {
+    ...operation,
+    operationId,
+    parameters,
+    ...(summary ? { summary } : {}),
+    ...(description ? { description } : {}),
+    ...(responses ? { responses } : {}),
+  };
 }
 
 const orgChatPaths = Object.fromEntries(

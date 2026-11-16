@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ToolIntegration`** (`@appstrate/core/integration`, #2233): `{ id, tool, title? }`, the
   integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
   `data.integration`.
-- **`ReachableSpaceGrant`** (`@appstrate/core/module`, #1886): a space the caller reaches, with their role
-  and effective permissions there, as `PlatformServices.reachableSpaces` lists it.
+- **`ReachableSpaceGrant`, `ReachedSpaces`** (`@appstrate/core/module`, #1886): a space the caller reaches, with
+  their role and effective permissions there, and whether the credential pins the reach, as
+  `PlatformServices.reachableSpaces` answers.
 - **`spaceIdRefusal`, `describeSpace`, `NamedSpace`, `SpaceIdRefusal`**
   (`@appstrate/core/mcp-result`, #1886): the refusal of a missing or unknown `space_id` on an
   organization-wide MCP connection, shared by the MCP server and the chat's local tools.

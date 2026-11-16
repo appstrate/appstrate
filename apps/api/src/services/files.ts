@@ -1351,6 +1351,9 @@ export async function resolveChatAttachment(
     throw notFound(fileId ? `File '${fileId}' not found` : `Upload '${uploadId}' not found`);
   }
   const scope: SpaceScope = { orgId: request.orgId, spaceId: space.id };
+  // Before the ACL read and above all before an upload is materialized: a caller the chat
+  // refuses in this space leaves no file behind.
+  await request.beforeResolve?.(space.id);
 
   if (fileId) {
     const resolved = await getFileForActor(scope, actor, fileId, space.permissions);

@@ -28,6 +28,7 @@ import type { db } from "@appstrate/db/client";
 import type {
   ModuleInitContext,
   ReachableSpaceGrant,
+  ReachedSpaces,
   UsageRejection,
 } from "@appstrate/core/module";
 import { ApiError } from "@appstrate/core/api-errors";
@@ -56,24 +57,41 @@ export function spacesHolding(
   return spaces.filter((space) => space.permissions.includes(permission));
 }
 
+/** What an organization session's turn needs in a space to act in it (see {@link actingSpaces}). */
+const ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+
+/**
+ * The spaces an organization session's turn may act in: those of the caller's reach where
+ * they hold `chat:write` (the turn is theirs to run), `chat:read` (the session must stay
+ * openable for them once the space is touched) and `mcp:read` (the tools can name it). The
+ * one set behind the spaces the prompt and the tools advertise, the spaces a call may touch,
+ * the bearer's ceiling, the enforced skills, the attachments and the skills read; a space
+ * outside it is neither listed nor acted in. Visibility of a session stays `chat:read`.
+ */
+export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
+  return spaces.filter((space) => ACTING_PERMISSIONS.every((p) => space.permissions.includes(p)));
+}
+
 /**
  * The skills a scope's conversations require, read with `load` per space. A space
- * scope reads its own. An organization scope reads every reachable space where the
- * caller holds `chat:write` (the turn that injects them is gated the same), one
- * entry per package — the first space in reach order — sorted by package id; a
- * space whose read fails fails the whole read.
+ * scope reads its own. An organization scope reads every space of its acting set (the
+ * turn that injects them is gated the same), one entry per package — the first space in
+ * reach order that has a published version of it, else the first — sorted by package id;
+ * a space whose read fails fails the whole read.
  */
-export async function enforcedSkillsOf<T extends { packageId: string }>(
+export async function enforcedSkillsOf<T extends { packageId: string; version: string | null }>(
   scope: ChatScope,
   load: (spaceId: string) => Promise<T[]>,
 ): Promise<T[]> {
   if (scope.kind === "space") return load(scope.spaceId);
-  const perSpace = await Promise.all(
-    spacesHolding(scope.reachable, "chat:write").map((space) => load(space.id)),
-  );
+  const perSpace = await Promise.all(actingSpaces(scope.reachable).map((space) => load(space.id)));
   const byPackage = new Map<string, T>();
   for (const skill of perSpace.flat()) {
-    if (!byPackage.has(skill.packageId)) byPackage.set(skill.packageId, skill);
+    const kept = byPackage.get(skill.packageId);
+    // An entry without a version has no content to inject: a later space's published one wins.
+    if (!kept || (kept.version === null && skill.version !== null)) {
+      byPackage.set(skill.packageId, skill);
+    }
   }
   return [...byPackage.values()].sort((a, b) => a.packageId.localeCompare(b.packageId));
 }
@@ -148,7 +166,7 @@ export interface ChatPlatformDeps {
    * there, for the routes that serve the organization as a whole (no space
    * entered). A 403 for an end-user.
    */
-  reachableSpaces(c: Context, orgId: string): Promise<ReachableSpaceGrant[]>;
+  reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
   /** Their names only, from the database (no archive read); same 503 on failure. */
   listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
 }

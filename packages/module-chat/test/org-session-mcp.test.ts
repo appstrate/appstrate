@@ -20,7 +20,13 @@ import {
   memberContext,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
+import {
+  seedPackage,
+  seedRun,
+  seedSpace,
+  seedSpaceMember,
+  seedSpacePackage,
+} from "../../../apps/api/test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { orgPermissions, presetPermissions } from "../../../apps/api/src/lib/permissions.ts";
@@ -82,10 +88,16 @@ async function invoke(
   spaceId: string,
   operationId: string,
   body?: unknown,
+  pathParams?: Record<string, string>,
 ): Promise<{ isError: boolean; data: Record<string, unknown> }> {
   const envelope = await rpc(headers, "tools/call", {
     name: "invoke_operation",
-    arguments: { operation_id: operationId, space_id: spaceId, ...(body ? { body } : {}) },
+    arguments: {
+      operation_id: operationId,
+      space_id: spaceId,
+      ...(body ? { body } : {}),
+      ...(pathParams ? { path_params: pathParams } : {}),
+    },
   });
   const content = (envelope.result?.content as Array<{ text: string }>) ?? [];
   return {
@@ -155,6 +167,43 @@ describe("an organization session's loopback bearer on /api/mcp/o/:org", () => {
     const refused = await invoke(bearer(caller, narrowed), gestion.id, "createAgent", {});
     expect(refused.isError).toBe(true);
     expect(refused.data.code).toBe("not_granted");
+  });
+
+  it("reads the space an org-wide list names, never the spaces it does not (the chat records the named one only)", async () => {
+    // One run of the caller's in the default space and one in Gestion: both readable by the caller.
+    const runIn = async (spaceId: string) => {
+      const pkg = await seedPackage({
+        id: `@chatorg/agent-${crypto.randomUUID().slice(0, 8)}`,
+        orgId: owner.orgId,
+        homeSpaceId: spaceId,
+        createdBy: owner.user.id,
+      });
+      await seedSpacePackage(spaceId, pkg.id);
+      return seedRun({
+        packageId: pkg.id,
+        orgId: owner.orgId,
+        spaceId,
+        userId: caller.user.id,
+        status: "success",
+        startedAt: new Date(),
+      });
+    };
+    const inDefault = await runIn(owner.defaultSpaceId);
+    const inGestion = await runIn(gestion.id);
+
+    const listed = await invoke(
+      bearer(caller, ceiling),
+      owner.defaultSpaceId,
+      "listOrgRuns",
+      undefined,
+      {
+        orgId: owner.orgId,
+      },
+    );
+    expect(listed.data.status).toBe(200);
+    const ids = (listed.data.body as { data: Array<{ id: string }> }).data.map((row) => row.id);
+    expect(ids).toContain(inDefault.id);
+    expect(ids).not.toContain(inGestion.id);
   });
 
   it("lists the caller's own spaces in every tool, so a surface is never another caller's", async () => {

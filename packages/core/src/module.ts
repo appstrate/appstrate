@@ -1385,6 +1385,13 @@ export interface ReachableSpaceGrant {
   permissions: string[];
 }
 
+/** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential pins it. */
+export interface ReachedSpaces {
+  spaces: ReachableSpaceGrant[];
+  /** The credential itself is pinned to one space (a space API key, a space-bound token): `spaces` holds that one. */
+  pinned: boolean;
+}
+
 export interface PlatformServices {
   /**
    * Structured JSON logger — the platform's OWN pino instance, so module output
@@ -1602,9 +1609,10 @@ export interface PlatformServices {
    * names it) and their effective permission set there, for a route that
    * serves the organization as a whole and so enters no space. The same reach
    * every cross-space list reads, persona and credential ceiling included; an
-   * end-user is refused with a 403. Memoized per request.
+   * end-user is refused with a 403. Memoized per request. `pinned` tells a route that
+   * must not serve a space-pinned credential to refuse it itself.
    */
-  reachableSpaces(c: Context, orgId: string): Promise<ReachableSpaceGrant[]>;
+  reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
   /**
    * Append one `audit_events` row for a module route's state change; org, space,
    * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;

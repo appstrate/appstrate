@@ -18,7 +18,7 @@
  * and `list_skills` lists the space's skills through `skills/list`.
  */
 
-import { spaceIdRefusal } from "@appstrate/core/mcp-result";
+import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-result";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
 import {
@@ -156,13 +156,6 @@ export interface PiTurnBudget {
   now?: () => number;
 }
 
-/** A space an organization connection may name, with the caller's role there. */
-interface NamedSpace {
-  id: string;
-  name: string;
-  role: string;
-}
-
 /**
  * What an organization connection (`/api/mcp/o/:org`, whose space-acting tools
  * each take a `space_id`) needs from its session: the spaces a call may name,
@@ -171,9 +164,9 @@ interface NamedSpace {
 export interface OrganizationSpaces {
   spaces: readonly NamedSpace[];
   /**
-   * Record `spaceId` on the session BEFORE the call naming it is dispatched. Quiet on a
-   * space the caller does not reach (the server refuses that call itself); throws when
-   * the space cannot be recorded, and the call is not made.
+   * Record `spaceId` on the session BEFORE the call naming it is dispatched. Throws, and
+   * the call is not made, for a space outside `spaces` (unknown or unreachable ones
+   * included, none recorded) and when the space cannot be recorded.
    */
   touch(spaceId: string): Promise<void>;
   /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */

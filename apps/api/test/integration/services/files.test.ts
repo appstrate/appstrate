@@ -1441,6 +1441,53 @@ describe("files service + routes", () => {
     expect(row).toEqual({ spaceId: other.id, chatSessionId });
   });
 
+  it("a chat attachment announces its space before anything is materialized there", async () => {
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: chatSessionId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      userId: ctx.user.id,
+    });
+    const upload = await stageUpload(
+      scope,
+      ctx.user.id,
+      "refusee.txt",
+      new TextEncoder().encode("contenu"),
+    );
+    const request = (beforeResolve: (spaceId: string) => Promise<void>) => ({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      chatSessionId,
+      uri: `upload://${upload}`,
+      spaces: [{ id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN }],
+      beforeResolve,
+    });
+    const filesOfSession = () =>
+      db.select({ id: files.id }).from(files).where(eq(files.chatSessionId, chatSessionId));
+
+    // A refusal leaves no file behind: the upload stays staged.
+    await expect(
+      resolveChatAttachment(
+        request(async () => {
+          throw new Error("refused");
+        }),
+      ),
+    ).rejects.toThrow("refused");
+    expect(await filesOfSession()).toEqual([]);
+
+    // Told the space it resolves in, the same upload then materializes.
+    const announced: string[] = [];
+    const resolved = await resolveChatAttachment(
+      request(async (spaceId) => {
+        announced.push(spaceId);
+      }),
+    );
+    expect(announced).toEqual([ctx.defaultSpaceId]);
+    expect(await filesOfSession()).toHaveLength(1);
+    expect(resolved.spaceId).toBe(ctx.defaultSpaceId);
+  });
+
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {
     const creator = await memberContext(ctx, "member");
     const creatorActor: Actor = { type: "user", id: creator.user.id };

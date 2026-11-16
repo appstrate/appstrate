@@ -33,11 +33,13 @@ const resolve = (
   selection: ChatSkillSelection,
   contents: SkillContent[] = [],
   enforced: EnforcedChatSkill[] = [],
+  organization = false,
 ) =>
   resolveChatSkills(
     selection,
     new Map(contents.map((skill) => [skill.packageId, skill])),
     enforced,
+    organization,
   );
 
 describe("resolveChatSkills", () => {
@@ -240,11 +242,24 @@ describe("injectedSkills", () => {
     });
   });
 
+  it('names no "space" in an organization session\'s notices about a required skill', () => {
+    const result = resolve(
+      { skillMode: "auto", pinnedSkills: [] },
+      [],
+      [enforcedSkill("@a/house", null)],
+      true,
+    );
+    expect(result.notices).toEqual([
+      "The skill `@a/house` is required by a space this conversation can act in but has no published version to follow.",
+    ]);
+  });
+
   it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
     const result = resolveChatSkills(
       { skillMode: "manual", pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
       [],
+      false,
     );
     expect(result.notices).toEqual([
       "The skill `@a/odd` was chosen for this conversation but could not be read.",

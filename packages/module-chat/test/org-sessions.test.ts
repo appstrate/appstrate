@@ -245,14 +245,13 @@ describe("organization chat sessions", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("refuses X-Space-Id with a 400 and another organization's path with a 403", async () => {
+  it("ignores X-Space-Id like every organization route, and refuses another organization's path with a 403", async () => {
+    // The MCP router sets `x-space-id` on every dispatched hop: a route that refused it would
+    // be unreachable through `invoke_operation`.
     const withHeader = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       headers: authHeaders(ctx),
     });
-    expect(withHeader.status).toBe(400);
-    const body = (await withHeader.json()) as { param?: string; detail: string };
-    expect(body.param).toBe("X-Space-Id");
-    expect(body.detail).toContain("/api/chat");
+    expect(withHeader.status).toBe(200);
 
     const otherOrg = await createTestContext({ orgSlug: "otherchat" });
     const foreign = await app.request(`/api/orgs/${otherOrg.orgId}/chat/sessions`, {
@@ -272,15 +271,18 @@ describe("organization chat sessions", () => {
         }),
       });
 
-    it("is admitted by chat:write in some space only, reads no X-Space-Id, refuses another organization", async () => {
+    it("is admitted by an acting space only, and refuses another organization", async () => {
       // A caller whose one space grants chat:read alone holds chat:write nowhere.
       const readerOrg = await createTestContext({ orgSlug: "readerorg" });
       const reader = await memberHolding(readerOrg, ["chat:read"]);
       expect((await turn(reader)).status).toBe(403);
 
-      const withHeader = await turn(ctx, authHeaders(ctx));
-      expect(withHeader.status).toBe(400);
-      expect(((await withHeader.json()) as { param?: string }).param).toBe("X-Space-Id");
+      // chat:write and chat:read without mcp:read: the turn could name no space, so none acts.
+      const noToolsOrg = await createTestContext({ orgSlug: "notoolsorg" });
+      const noTools = await memberHolding(noToolsOrg, ["chat:read", "chat:write"]);
+      const refused = await turn(noTools);
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { detail: string }).detail).toContain("mcp:read");
 
       const otherOrg = await createTestContext({ orgSlug: "otherturn" });
       const foreign = await app.request(`/api/orgs/${otherOrg.orgId}/chat`, {
@@ -290,6 +292,20 @@ describe("organization chat sessions", () => {
       });
       expect(foreign.status).toBe(403);
     });
+  });
+
+  it("refuses a credential pinned to a space, whatever it grants", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["chat:read", "chat:write", "mcp:read"],
+    });
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { detail: string }).detail).toContain("pinned");
   });
 
   it("refuses an API key", async () => {

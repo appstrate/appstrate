@@ -100,13 +100,15 @@ function buildPlatformServices(): PlatformServices {
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
-    reachableSpaces: async (c, orgId) =>
-      (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
+    reachableSpaces: async (c, orgId) => ({
+      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
         id: space.id,
         name: space.name,
         role: toSpaceRoleWire(space.role)!.name,
         permissions: [...space.permissions],
       })),
+      pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
+    }),
     // Module routes run behind the platform middleware chain, so the context
     // carries the same org / actor / request variables a core route audits from.
     audit: {

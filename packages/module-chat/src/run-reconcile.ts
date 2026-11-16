@@ -49,7 +49,7 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { files, runs } from "@appstrate/db/schema";
+import { chatSessions, files, runs } from "@appstrate/db/schema";
 import { fileUri } from "@appstrate/core/file-uri";
 import { persistNotice } from "./persistence.ts";
 import { buildRunPageHref, UNNAMED_FILE } from "./ui/run-events.ts";
@@ -110,8 +110,10 @@ export function runNoticeText(input: {
   packageId: string | null;
   status: string;
   files: readonly NoticedFile[];
+  /** The run's space, for an organization session: the link enters it. A space session's stays in its own. */
+  enterSpaceId?: string;
 }): string {
-  const href = buildRunPageHref(input.packageId ?? undefined, input.runId);
+  const href = buildRunPageHref(input.packageId ?? undefined, input.runId, input.enterSpaceId);
   const lines = input.files.map(
     (file) => `- ${renderNoticeName(file.name)} (${file.size} o) — \`${fileUri(file.id)}\``,
   );
@@ -167,8 +169,12 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
       chatSessionId: runs.chatSessionId,
       packageId: runs.packageId,
       status: runs.status,
+      spaceId: runs.spaceId,
+      // NULL for an organization session, whose runs live in the space their call named.
+      sessionSpaceId: chatSessions.spaceId,
     })
     .from(runs)
+    .leftJoin(chatSessions, eq(chatSessions.id, runs.chatSessionId))
     .where(and(eq(runs.id, input.runId), eq(runs.orgId, input.orgId)))
     .limit(1);
   const chatSessionId = run?.chatSessionId;
@@ -196,6 +202,7 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
       packageId: run.packageId,
       status: run.status,
       files: published,
+      enterSpaceId: run.sessionSpaceId === null ? run.spaceId : undefined,
     }),
   });
   if (posted) {

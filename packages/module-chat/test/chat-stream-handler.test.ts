@@ -1100,7 +1100,12 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(buildSystemPrompt(turnCapabilities(() => false)).slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt(
+        turnCapabilities(() => false),
+        "space",
+      ).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -1497,11 +1502,14 @@ describe("handleChatStream", () => {
 
   describe("an organization session turn", () => {
     let spaceB: string;
+    /** Reached for reading the chat and the tools, but never chatted in: outside the acting set. */
+    let spaceC: string;
     let reach: ReachableSpaceGrant[];
     let orgScope: ChatScope;
 
     beforeEach(async () => {
       spaceB = (await seedSpace({ orgId: ctx.orgId, name: "Beta" })).id;
+      spaceC = (await seedSpace({ orgId: ctx.orgId, name: "Gamma" })).id;
       reach = [
         {
           id: ctx.defaultSpaceId,
@@ -1513,7 +1521,20 @@ describe("handleChatStream", () => {
           id: spaceB,
           name: "Beta",
           role: "builder",
-          permissions: ["chat:read", "mcp:read", "mcp:invoke", "agents:write", "skills:write"],
+          permissions: [
+            "chat:read",
+            "chat:write",
+            "mcp:read",
+            "mcp:invoke",
+            "agents:write",
+            "skills:write",
+          ],
+        },
+        {
+          id: spaceC,
+          name: "Gamma",
+          role: "viewer",
+          permissions: ["chat:read", "mcp:read", "runs:read-all"],
         },
       ];
       orgScope = { kind: "organization", reachable: reach };
@@ -1530,7 +1551,7 @@ describe("handleChatStream", () => {
       return { res, calls };
     }
 
-    it("hands the engine the organization endpoint and a ceiling over the whole reach", async () => {
+    it("hands the engine the organization endpoint and a ceiling over the acting set, not the whole reach", async () => {
       const sessionId = mintSessionId();
       const { res, calls } = await orgTurn(sessionId);
       expect(res.status).toBe(200);
@@ -1543,7 +1564,8 @@ describe("handleChatStream", () => {
       expect(url.searchParams.get("context")).toBe("injected");
       expect(input.platformMcp.spaceId).toBeNull();
       // A permission held in Beta alone is in the ceiling: each call is decided in the space it
-      // names, which recomputes `(org ∪ role) ∩ ceiling` there.
+      // names, which recomputes `(org ∪ role) ∩ ceiling` there. Gamma is outside the acting set:
+      // its `runs:read-all` is not lent to the others.
       expect(await tokenPermissions(input)).toEqual(
         [
           "agents:run",
@@ -1582,6 +1604,9 @@ describe("handleChatStream", () => {
       expect(system).not.toContain("Role in this space");
       expect(system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
       expect(system).toContain(`- \`${spaceB}\` — Beta (role builder)`);
+      // Reached but outside the acting set: neither listed nor acted in.
+      expect(system).not.toContain(spaceC);
+      expect(system).not.toContain("Gamma");
       expect(system).toContain("takes the `space_id` of one of them");
       expect(system).toContain("Ask the user which space when the request does not say");
       expect(system).toContain("never moved to another space");
@@ -1684,19 +1709,21 @@ describe("handleChatStream", () => {
         expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
       });
 
-      it("does not record a space the caller does not reach, and refuses one it cannot read", async () => {
+      it("refuses, recording nothing, a space outside the acting set: unknown, reached without the grants, or unreadable", async () => {
         const sessionId = mintSessionId();
         const organization = await organizationOf(sessionId);
-        await organization.touch("spc_not_reached");
+        await expect(organization.touch("spc_not_reached")).rejects.toThrow(/cannot act in/);
+        // Gamma is reached with `chat:read` and `mcp:read` but cannot chat in it.
+        await expect(organization.touch(spaceC)).rejects.toThrow(/cannot act in/);
         expect(await touched(sessionId)).toEqual([]);
 
         // Reached with `mcp:read` alone: recording it would hide the session from its author.
         const unreadableId = mintSessionId();
         const unreadable = await organizationOf(unreadableId, {
           kind: "organization",
-          reachable: [reach[0]!, { ...reach[1]!, permissions: ["mcp:read"] }],
+          reachable: [reach[0]!, { ...reach[1]!, permissions: ["mcp:read", "chat:write"] }],
         });
-        await expect(unreadable.touch(spaceB)).rejects.toThrow(/no chat:read there/);
+        await expect(unreadable.touch(spaceB)).rejects.toThrow(/cannot act in/);
         expect(await touched(unreadableId)).toEqual([]);
       });
 
@@ -1808,7 +1835,7 @@ describe("handleChatStream", () => {
                 [ctx.defaultSpaceId, TONE],
               ]),
             },
-            reachWith([ctx.defaultSpaceId]),
+            reachWith([ctx.defaultSpaceId, spaceB]),
           );
           expect(res.status).toBe(200);
           await collectUiChunks(res);
@@ -1819,6 +1846,59 @@ describe("handleChatStream", () => {
           );
           expect(system).not.toContain(uriIn(spaceB, TONE));
           expect(system).not.toContain("<skill id=");
+        });
+
+        it("reads no skill of a space outside the acting set, listed or chosen", async () => {
+          const read: string[] = [];
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+            },
+            // Beta is reached with `skills:read` but never chatted in.
+            reachWith([ctx.defaultSpaceId]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(calls[0]!.system).toContain(`\`${TONE}\``);
+          expect(calls[0]!.system).not.toContain(ONLY_B);
+
+          const pinned = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
+              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId]),
+          );
+          await collectUiChunks(pinned.res);
+          expect(read).toEqual([]);
+          expect(pinned.calls[0]!.system).toContain("is not available here");
+        });
+
+        it("keeps the enforced entry that has a published version when the first space's has none", async () => {
+          const { res, calls } = await orgTurn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch([]),
+              loadEnforcedChatSkills: async (_orgId, space) => [
+                space === ctx.defaultSpaceId
+                  ? { packageId: TONE, name: TONE, version: null, uri: null, content: null }
+                  : enforced(space, TONE),
+              ],
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          expect(calls[0]!.system).toContain(`<skill id="${TONE}" uri="${uriIn(spaceB, TONE)}"`);
+          expect(calls[0]!.system).not.toContain("has no published version");
         });
 
         it("injects a pinned skill of another space and binds its claim to that space", async () => {
@@ -1835,7 +1915,7 @@ describe("handleChatStream", () => {
               ),
               body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
             },
-            reachWith([ctx.defaultSpaceId]),
+            reachWith([ctx.defaultSpaceId, spaceB]),
           );
           expect(res.status).toBe(200);
           await collectUiChunks(res);
@@ -1941,36 +2021,26 @@ describe("handleChatStream", () => {
         });
       });
 
-      it("hands an attachment the spaces the caller may chat in and records the space it resolved in", async () => {
+      it("hands an attachment the acting set, and records the space it resolves in before materializing", async () => {
         const sessionId = mintSessionId();
         const requests: ChatAttachmentRequest[] = [];
-        const both: ChatScope = {
-          kind: "organization",
-          reachable: reach.map((space) => ({
-            ...space,
-            permissions: [...new Set([...space.permissions, "chat:read", "chat:write"])],
-          })),
-        };
-        const { res } = await orgTurn(
-          sessionId,
-          {
-            parts: [
-              { type: "text", text: "lis ceci" },
-              { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
-            ],
-            resolveChatAttachment: async (request) => {
-              requests.push(request);
-              return {
-                uri: "appfile://file_abcdefgh",
-                name: "b.txt",
-                mime: "text/plain",
-                size: 3,
-                spaceId: spaceB,
-              };
-            },
+        const { res } = await orgTurn(sessionId, {
+          parts: [
+            { type: "text", text: "lis ceci" },
+            { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
+          ],
+          resolveChatAttachment: async (request) => {
+            requests.push(request);
+            await request.beforeResolve?.(spaceB);
+            return {
+              uri: "appfile://file_abcdefgh",
+              name: "b.txt",
+              mime: "text/plain",
+              size: 3,
+              spaceId: spaceB,
+            };
           },
-          both,
-        );
+        });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);

@@ -130,10 +130,10 @@ describe("GET /api/chat/enforced-skills", () => {
       expect(await ids(await listOrg(caller))).toEqual([SKILL_ID]);
     });
 
-    it("refuses a caller who writes the chat in no space, X-Space-Id, and another organization", async () => {
+    it("refuses a caller who writes the chat in no space, ignores X-Space-Id, and refuses another organization", async () => {
       const viewer = await memberContext(ctx, "member", "viewer");
       expect((await listOrg(viewer)).status).toBe(403);
-      expect((await listOrg(ctx, authHeaders(ctx))).status).toBe(400);
+      expect((await listOrg(ctx, authHeaders(ctx))).status).toBe(200);
       const foreign = await createTestContext({ orgSlug: "foreignenforced" });
       expect((await listOrg({ ...ctx, orgId: foreign.orgId }, orgOnlyHeaders(ctx))).status).toBe(
         403,

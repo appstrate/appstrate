@@ -11,7 +11,7 @@ import {
   type InjectedSkill,
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
-import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-uri";
 
 export interface SkillHint {
   packageId: string;
@@ -41,11 +41,6 @@ export function parseSkillList(body: unknown): SkillHint[] {
     const { id, name, description, version } = parsed.data;
     return [{ packageId: id, display_name: name, description, version }];
   });
-}
-
-/** The space a `skill://<spaceId>/…` URI names: the one its claim entry binds the skill to. */
-export function skillUriSpaceId(uri: string): string {
-  return uri.slice(SKILL_URI_PREFIX.length).split("/")[0]!;
 }
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
@@ -88,7 +83,8 @@ interface ResolvedChatSkills {
 /**
  * The skills to inject: the required ones first, in the platform's id order, then the
  * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
- * one budget. A pin naming an injected enforced skill is dropped silently; one
+ * one budget. `organization`: the required ones come from several spaces, which the
+ * notices then do not call "this space". A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
  * the chosen skills active here and read (`null`: answered malformed); any
  * other becomes a notice.
@@ -97,19 +93,23 @@ export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
   enforced: readonly EnforcedChatSkill[],
+  organization: boolean,
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
+  const requiredBy = organization ? "a space this conversation can act in" : "this space";
   for (const { packageId, version, uri, content } of enforced) {
-    if (content === null || uri === null) {
+    // The space its URI names is the one its claim entry binds the skill to.
+    const spaceId = uri === null ? undefined : parseSkillUri(uri)?.spaceId;
+    if (content === null || uri === null || spaceId === undefined) {
       resolved.notices.push(
-        `The skill \`${packageId}\` is required by this space but has no published version to follow.`,
+        `The skill \`${packageId}\` is required by ${requiredBy} but has no published version to follow.`,
       );
     } else if (content.length > left) {
       resolved.notices.push(
-        `The skill \`${packageId}\` is required by this space but does not fit ${tooLong(content.length)}`,
+        `The skill \`${packageId}\` is required by ${requiredBy} but does not fit ${tooLong(content.length)}`,
       );
     } else {
       left -= content.length;
@@ -118,7 +118,7 @@ export function resolveChatSkills(
         version,
         uri,
         content,
-        served: { definition: "published", version, spaceId: skillUriSpaceId(uri) },
+        served: { definition: "published", version, spaceId },
       });
     }
   }

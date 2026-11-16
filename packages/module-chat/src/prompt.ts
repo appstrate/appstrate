@@ -21,6 +21,7 @@ import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
+  parseSkillUri,
   parseSkillUriPackage,
   skillFileDigest,
 } from "@appstrate/core/skill-uri";
@@ -34,12 +35,11 @@ import {
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
-import { spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
+import { actingSpaces, type ChatPlatformDeps } from "./platform-services.ts";
 import {
   injectedSkills,
   injectsSkills,
   resolveChatSkills,
-  skillUriSpaceId,
   type ChatSkillSelection,
   type SkillContent,
 } from "./skills.ts";
@@ -140,7 +140,11 @@ const skillsStrictNote = (organization: boolean) => {
  * contradicted, so the persona agrees with the tools the turn's token is shown;
  * the platform, not this text, refuses the act.
  */
-export function buildSystemPrompt(capabilities: TurnCapabilities): string {
+export function buildSystemPrompt(
+  capabilities: TurnCapabilities,
+  sessionKind: ChatScope["kind"],
+): string {
+  const organization = sessionKind === "organization";
   const { invokes, authors, authorsPackages, readsSkills } = capabilities;
   const mayRun = reaches(capabilities.runLevel, "run");
   const mayRead = reaches(capabilities.runLevel, "read");
@@ -232,13 +236,17 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
   "\n",
 )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call named — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call named — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` ${organization ? "the `space_id` of the failed call" : "the current space from your context block"} and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
 ${runs(`Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
+`)}${
+    organization
+      ? `Your context block below is DATA — the user's identity and role, the current date, the spaces they can act in${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run: both differ per space, so look them up with the tools for the space concerned, passing its \`space_id\`, wherever the instructions here point at them in your context. How to act on it:`
+      : `Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:`
+  }
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
 `)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
@@ -383,7 +391,7 @@ function formatSkillsSection(opts: {
   /** An organization session: the skills are those of every space it reaches. */
   organization: boolean;
 }): RenderedContext {
-  const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced);
+  const skills = resolveChatSkills(opts.selection, opts.contents, opts.enforced, opts.organization);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
   const injected = new Set(skills.enforced.map((skill) => skill.packageId));
   // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
@@ -497,8 +505,10 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
       "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
     );
   }
+  // An organization session's set is the union over the spaces listed above: it bounds
+  // what the turn may attempt, while each call is decided by the role held in the space it names.
   lines.push(
-    `Permissions this turn: ${
+    `Permissions this turn${opts.spaces ? " (the union over the spaces listed above; each call is decided in the space it names, by your role there)" : ""}: ${
       opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
     }`,
   );
@@ -600,7 +610,8 @@ function entriesByPackage(
 ): Map<string, ListedSkillEntry> {
   const byPackage = new Map<string, { entry: ListedSkillEntry; rank: number }>();
   for (const entry of entries) {
-    const rank = spaces.indexOf(skillUriSpaceId(entry.uri));
+    const spaceId = parseSkillUri(entry.uri)?.spaceId;
+    const rank = spaceId === undefined ? -1 : spaces.indexOf(spaceId);
     const pkg = parseSkillUriPackage(entry.uri);
     if (rank === -1 || !pkg) continue;
     const kept = byPackage.get(pkg.packageId);
@@ -742,7 +753,8 @@ function isListedSkillMd(entry: ListedSkillEntry, text: string): boolean {
  * draft entry without one.
  */
 function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served"] | null {
-  const spaceId = skillUriSpaceId(entry.uri);
+  const spaceId = parseSkillUri(entry.uri)?.spaceId;
+  if (spaceId === undefined) return null;
   if (draft) {
     const lockVersion = entry._meta?.[SKILL_LOCK_VERSION_META_KEY];
     return Number.isSafeInteger(lockVersion)
@@ -823,7 +835,7 @@ export async function buildCallerContextBlock(
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
-): Promise<{ text: string; injected: InjectedSkills | undefined }> {
+): Promise<{ text: string; injected: InjectedSkills }> {
   const { origin, headers, scope, user, deps, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
@@ -860,15 +872,17 @@ export async function buildCallerContextBlock(
     injected: { skills: injected },
   });
   if (scope.kind === "organization") {
+    // The acting set alone: a skill of a space the turn cannot act in is neither listed nor injected.
+    const acting = actingSpaces(scope.reachable);
     const [turnSkills, enforced] = await Promise.all([
-      readSkills(scope.reachable.map((space) => space.id)),
+      readSkills(acting.map((space) => space.id)),
       args.enforced,
     ]);
     return claimed(
       formatCallerContext(identity, {
         ...common,
         spaceRole: null,
-        spaces: spacesHolding(scope.reachable, "mcp:read"),
+        spaces: acting,
         skills,
         skillContents: turnSkills.contents,
         skillCatalogue: turnSkills.catalogue,

@@ -25,8 +25,11 @@ function caps(permissions: readonly string[]) {
 }
 
 /** Build a persona from a permission set, so every one below is reachable. */
-function promptFor(permissions: readonly string[]): string {
-  return buildSystemPrompt(caps(permissions));
+function promptFor(
+  permissions: readonly string[],
+  kind: Parameters<typeof buildSystemPrompt>[1] = "space",
+): string {
+  return buildSystemPrompt(caps(permissions), kind);
 }
 
 /** The transport floor plus the dispatching tool — nothing acts without both. */
@@ -648,5 +651,43 @@ describe("the persona and package authoring", () => {
     const prompt = promptFor(["mcp:read", "agents:write"]);
     expect(prompt).not.toContain(CREATES);
     expect(prompt).not.toContain(FORBIDS);
+  });
+});
+
+describe("the persona per session kind", () => {
+  const ORG = promptFor(BUILDER, "organization");
+
+  it("tells a space session the context lists its integrations and agents, and its current space", () => {
+    expect(FULL).toContain(
+      "the integrations they have connected, the agents they can run, and the skills available",
+    );
+    expect(FULL).toContain("with `spaceId` the current space from your context block");
+  });
+
+  it("tells an organization session to activate in the space the failed call named", () => {
+    expect(ORG).toContain("with `spaceId` the `space_id` of the failed call");
+    expect(ORG).not.toContain("the current space from your context block");
+    expect(ORG).toMatch(/the space the failed call named/);
+  });
+
+  it("does not claim an organization context lists integrations or agents it does not", () => {
+    expect(ORG).not.toContain("the integrations they have connected, the agents they can run");
+    expect(ORG).toContain(
+      "It lists neither the integrations they have connected nor the agents they can run",
+    );
+    expect(ORG).toContain("passing its `space_id`");
+  });
+
+  it("words the permissions of an organization context as the union, each call decided where it is named", () => {
+    const spaces = [{ id: "spc_a", name: "Alpha", role: "operator", permissions: [] }];
+    const org = contextText(
+      { user: { name: "Ada" } },
+      { ...CONTEXT_OPTS, spaceRole: null, spaces },
+    );
+    expect(org).toContain(
+      "Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): agents:read, mcp:invoke",
+    );
+    const space = contextText({ user: { name: "Ada" } }, { ...CONTEXT_OPTS, spaceId: "spc_a" });
+    expect(space).toContain("Permissions this turn: agents:read, mcp:invoke");
   });
 });

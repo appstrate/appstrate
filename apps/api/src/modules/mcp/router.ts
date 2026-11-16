@@ -79,6 +79,7 @@ import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
+import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { ceilingAllows } from "../../lib/permissions.ts";
 import { followRunLogs } from "../../services/realtime-access.ts";
@@ -591,9 +592,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
     // Dispatched calls re-enter the space this request entered — and, on the
     // endpoint pinned to it, stay confined to it whatever the credential pins:
-    // a list spanning spaces then reaches that space only.
+    // a list spanning spaces then reaches that space only. On the organization-wide
+    // endpoint an external client's org-wide read keeps spanning the spaces it reaches;
+    // a chat turn's is confined too, because the chat records a space as touched only
+    // when a call names it: its read must reach that space alone.
     authHeaders.set("x-space-id", scope.spaceId);
-    const dispatch: Dispatch = orgSpaces
+    const spansSpaces =
+      orgSpaces !== undefined && c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD;
+    const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
       : (request) => dispatchInProcess(request, scope.spaceId);
     // The caller identity + space scope for tools that call a service directly (the

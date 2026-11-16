@@ -43,9 +43,9 @@ export interface SkillReadSpace extends SpaceScope {
 
 /**
  * The skills this request's chat turn injected, or `null`. The claim is a
- * chat-turn grant: it lapses with the caller's LIVE `chat:write` in the space
- * the request entered — revoking chat access revokes it — and each skill of it
- * holds in its own space only (see `resolveSkillReadAccess`). A malformed claim
+ * chat-turn grant: each skill of it holds in its own space only, the space of its
+ * URI (the one the read enters), and lapses with the caller's LIVE `chat:write`
+ * there — revoking chat access revokes it (see `resolveSkillReadAccess`). A malformed claim
  * is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in

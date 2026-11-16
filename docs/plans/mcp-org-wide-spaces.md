@@ -47,7 +47,7 @@ is readable in any client's configuration and usable by a client that sends no
 custom header (a claude.ai connector), which a header pin is not. The endpoint
 therefore reads no `X-Space-Id`: a request carrying one is a `400` naming the
 URL form, never a header silently ignored (`docs/NO_TRANSITIONAL_CODE.md`). The
-in-process chat pins by URL. The CLI's Claude Code plugin pinned by URL too
+in-process chat of a space session pins by URL; an organization session uses the organization endpoint (#1886). The CLI's Claude Code plugin pinned by URL too
 until #1972 moved it to the organization URL.
 
 It is its own OAuth resource, `<APP_URL>/api/mcp/o/:org/s/:space`, with its own
@@ -180,7 +180,7 @@ admission read, the same one a pinned URL costs. No new table, no cache.
 - Unpinned clients that relied on the default space pass `space_id` on every
   call. The refusal lists the spaces, so a model recovers in one turn. No flag
   and no compatibility branch (`docs/NO_TRANSITIONAL_CODE.md`).
-- The in-process chat stays pinned, by URL.
+- The in-process chat of a space session stays pinned, by URL; an organization session (#1886) uses the organization endpoint.
 
 ## Open questions
 

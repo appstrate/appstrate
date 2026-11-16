@@ -58,6 +58,7 @@ import { organizationSessionVisible } from "./persistence.ts";
 import {
   enforcedSkillsOf,
   spacesHolding,
+  actingSpaces,
   type ChatPermission,
   type ChatPlatformDeps,
 } from "./platform-services.ts";
@@ -269,16 +270,15 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     if (c.get("orgId") !== orgId) {
       throw forbidden("Not a member of this organization");
     }
-    if (c.req.header("X-Space-Id") !== undefined) {
-      throw invalidRequest(
-        "X-Space-Id is not read by the organization chat endpoint: use /api/chat to act in one space, or this endpoint without it.",
-        "X-Space-Id",
-      );
+    // Like every `/api/orgs/:orgId/*` route, this reads no `X-Space-Id`: a request that
+    // carries one (the MCP router adds it to every dispatched hop) is served all the same.
+    const { spaces, pinned } = await deps.reachableSpaces(c, orgId);
+    // A credential pinned to one space cannot hold an organization session: the session's
+    // spaces are the caller's, whichever the credential would let a call name.
+    if (pinned) {
+      throw forbidden("A credential pinned to a space cannot use the organization chat endpoint.");
     }
-    c.set("chatScope", {
-      kind: "organization",
-      reachable: await deps.reachableSpaces(c, orgId),
-    });
+    c.set("chatScope", { kind: "organization", reachable: spaces });
     return next();
   });
 
@@ -286,11 +286,19 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     const guard: PermissionGuard = async (c, next) => {
       // The guard type sees the context through its `get` alone; it is the router's own.
       const scope = (c as Context<ChatEnv>).get("chatScope");
-      if (
-        scope.kind !== "organization" ||
-        spacesHolding(scope.reachable, permission).length === 0
-      ) {
-        throw forbidden(`You hold ${permission} in no space of this organization.`);
+      // Writing is acting: it needs a space the turn may act in, not just any `chat:write`.
+      const holders =
+        scope.kind !== "organization"
+          ? []
+          : permission === "chat:write"
+            ? actingSpaces(scope.reachable)
+            : spacesHolding(scope.reachable, permission);
+      if (holders.length === 0) {
+        throw forbidden(
+          permission === "chat:write"
+            ? "You hold chat:write, chat:read and mcp:read together in no space of this organization."
+            : `You hold ${permission} in no space of this organization.`,
+        );
       }
       return next();
     };

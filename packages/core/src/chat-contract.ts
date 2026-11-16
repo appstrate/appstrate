@@ -103,6 +103,13 @@ export interface ChatAttachmentRequest {
    * without it only the session owner's own runs.
    */
   spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
+  /**
+   * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
+   * anything is created or read in it: a rejection refuses the attachment, so an upload is
+   * never materialized into a space the caller was refused. An organization session records
+   * the space as touched here.
+   */
+  beforeResolve?: (spaceId: string) => Promise<void>;
 }
 
 /**
