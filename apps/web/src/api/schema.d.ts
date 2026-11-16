@@ -6318,6 +6318,8 @@ export interface components {
                 /** @description Path of the server entry point inside the integration archive. */
                 entry_point: string;
             } | null;
+            /** @description Whether the integration declares `auths`. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection. */
+            authenticated: boolean;
         };
         IntegrationPin: {
             agent_package_id: string;

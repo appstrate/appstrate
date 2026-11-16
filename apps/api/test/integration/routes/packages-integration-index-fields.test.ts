@@ -3,8 +3,9 @@
 /**
  * `GET /api/packages/integrations` carries the two facts of `source` the
  * integration index splits and labels its list by — `source_kind` and the
- * local `server` (runtime + entry point) — so the page draws itself from the index alone. Other types'
- * index rows carry neither.
+ * local `server` (runtime + entry point) — so the page draws itself from the index alone, and
+ * `authenticated`, false for an integration declaring no `auths` (it binds no connection). Other
+ * types' index rows carry none of them.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -24,6 +25,7 @@ const LOCAL = "@testorg/local-integration";
 const REMOTE = "@testorg/remote-integration";
 const API = "@testorg/api-integration";
 const SWITCHED_OFF = "@testorg/switched-off-integration";
+const UNAUTHENTICATED = "@testorg/unauthenticated-integration";
 const auths = { api: { type: "api_key" as const } };
 
 let ctx: TestContext;
@@ -61,6 +63,12 @@ beforeEach(async () => {
   await seedActive(REMOTE, remoteIntegrationManifest({ name: REMOTE, auths }));
   await seedActive(API, apiIntegrationManifest({ name: API, auths }));
   await seedActive(SWITCHED_OFF, remoteIntegrationManifest({ name: SWITCHED_OFF, auths }), false);
+  // AFPS §7.2: an unauthenticated integration omits `auths` altogether.
+  const { auths: _omitted, ...unauthenticated } = remoteIntegrationManifest({
+    name: UNAUTHENTICATED,
+    auths: {},
+  }) as unknown as Record<string, unknown>;
+  await seedActive(UNAUTHENTICATED, unauthenticated);
 });
 
 describe("GET /api/packages/integrations — source facts", () => {
@@ -82,12 +90,19 @@ describe("GET /api/packages/integrations — source facts", () => {
     expect(rows[API]).toMatchObject({ source_kind: "none", server: null });
   });
 
+  it("says an integration declaring `auths` is authenticated, one omitting them is not", async () => {
+    const rows = await listIntegrations();
+    expect(rows[REMOTE]).toMatchObject({ authenticated: true });
+    expect(rows[LOCAL]).toMatchObject({ authenticated: true });
+    expect(rows[UNAUTHENTICATED]).toMatchObject({ authenticated: false });
+  });
+
   it("leaves out an integration switched off in this space", async () => {
     const rows = await listIntegrations();
     expect(rows[SWITCHED_OFF]).toBeUndefined();
   });
 
-  it("adds neither field to another type's index row", async () => {
+  it("adds none of these fields to another type's index row", async () => {
     await seedPackage({
       id: "@testorg/some-skill",
       orgId: ctx.orgId,
@@ -102,5 +117,6 @@ describe("GET /api/packages/integrations — source facts", () => {
     expect(skill).toBeDefined();
     expect(skill).not.toHaveProperty("source_kind");
     expect(skill).not.toHaveProperty("server");
+    expect(skill).not.toHaveProperty("authenticated");
   });
 });

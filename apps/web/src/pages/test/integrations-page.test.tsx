@@ -33,6 +33,7 @@ function integration(
   id: string,
   name: string,
   sourceKind: IntegrationIndexItem["source_kind"] = "remote",
+  authenticated = true,
 ): IntegrationIndexItem {
   return {
     id,
@@ -55,13 +56,14 @@ function integration(
     home_shareable: false,
     source_kind: sourceKind,
     server: sourceKind === "local" ? { type: "node", entry_point: "server/index.js" } : null,
+    authenticated,
   };
 }
 
 function page(
   permissions: string[],
   integrations: IntegrationIndexItem[],
-  { url = "/integrations" } = {},
+  { url = "/integrations", connectionsLoaded = false } = {},
 ): string {
   const qc = new QueryClient();
   // No org is selected here: every scoped query is disabled and serves the cache as seeded.
@@ -94,6 +96,14 @@ function page(
       ],
     },
   );
+  // The caller's account-wide connections: none, so every count here is 0.
+  if (connectionsLoaded) {
+    qc.setQueryData($api.queryOptions("get", "/api/me/connections", {}).queryKey, {
+      object: "list",
+      hasMore: false,
+      data: [],
+    });
+  }
   // The index of this space, as the server answers it: the active set only.
   qc.setQueryData(packageKeys.list("integrations", null, SPACE_ID), integrations);
   const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
@@ -142,6 +152,16 @@ describe("the integration index", () => {
     const html = page(READER, [integration("@acme/remote", "Zéphyr")]);
     expect(html).toContain('href="/integrations/@acme/remote"');
     expect(html).not.toContain("0 connexion");
+  });
+
+  it("counts the connections of an integration that binds them, and of no other", () => {
+    const html = page(
+      READER,
+      [integration("@acme/remote", "Zéphyr"), integration("@acme/open", "Libre", "remote", false)],
+      { connectionsLoaded: true },
+    );
+    expect(html).toContain("Libre");
+    expect(html.match(/0 connexion/g)).toHaveLength(1);
   });
 
   it("points at the space library when nothing is active here", () => {

@@ -33,10 +33,7 @@ export function SidebarCredits() {
 
   return (
     <SidebarGroup className="mt-auto">
-      <Link
-        to="/org-settings/billing"
-        className="hover:bg-sidebar-accent block rounded-md px-2 py-2 transition-colors"
-      >
+      <Link to="/org-settings/billing" className="block rounded-md px-2 py-2">
         <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
           <span className="text-sidebar-foreground/70 flex items-center gap-1.5">
             <Coins className="size-3.5" />
