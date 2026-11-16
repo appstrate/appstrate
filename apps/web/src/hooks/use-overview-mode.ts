@@ -13,7 +13,6 @@ import {
   holdsOverview,
   listAdmits,
   overviewLapsed,
-  overviewModeOn,
   overviewOffered,
   type SpaceList,
 } from "../lib/space-lists";
@@ -28,15 +27,21 @@ function useChoiceKey(): string | null {
 
 /**
  * « Vue d'ensemble »: a mode of the shell chosen in the switcher, laid over the working space
- * (which stays a real space). The one answer to "is it on" — nothing re-derives it. `choose`
- * writes the reader's choice in an org, the current one by default.
+ * (which stays a real space). The one answer to "is it on" — nothing re-derives it: on while the
+ * reader chose it AND it is offered. `known` once the space listing has answered (or failed):
+ * before, `on` reads false, so a surface that offers writes out of the mode offers none while
+ * `readOnly`. `choose` writes the reader's choice in an org, the current one by default.
+ *
+ * A list PAGE reads `on` and passes it to its hooks as `spanning` (read-only: a write acts in one
+ * space, which a spanning list does not name); a shared hook never reads it, since a detail page
+ * runs in one space while the mode is on.
  */
 export function useOverviewMode() {
   const userId = useStore(authStore, (s) => s.user?.id);
   const orgId = useStore(orgStore, (s) => s.id);
-  const key = useChoiceKey();
+  const key = userId && orgId ? rememberedSpaceKey(userId, orgId) : null;
   const chosen = useStore(overviewStore, (s) => !!key && !!s.chosen[key]);
-  const { data: spaces } = useSpaces();
+  const { data: spaces, isError } = useSpaces();
 
   const choose = useCallback(
     (on: boolean, inOrgId = orgId) => {
@@ -45,21 +50,19 @@ export function useOverviewMode() {
     [userId, orgId],
   );
 
-  return { on: overviewModeOn(chosen, spaces), offered: overviewOffered(spaces), choose };
+  const offered = overviewOffered(spaces);
+  const on = chosen && offered;
+  const known = spaces !== undefined || isError;
+  return { on, known, readOnly: on || !known, offered, choose };
 }
 
 /**
- * Whether `list` spans spaces (the mode is on), and the spaces admitting it. Outside the mode it
- * is the current space's own. A spanning list is read-only: a write acts in one space, which it
- * does not name. Asked by the PAGE, never by a shared hook: a detail page runs in one space while
- * the mode is on.
+ * The spaces that admit `list`: where a list spanning spaces finds its rows, judged by each
+ * row's space rather than the working one.
  */
-export function useOverviewList(list: SpaceList) {
-  const { on } = useOverviewMode();
+export function useAdmittingSpaces(list: SpaceList) {
   const { data: spaces } = useSpaces();
-  return on
-    ? { spanning: true, spaces: admittingSpaces(spaces, listAdmits(list)) }
-    : { spanning: false, spaces: [] };
+  return admittingSpaces(spaces, listAdmits(list));
 }
 
 function withdraw(key: string): void {

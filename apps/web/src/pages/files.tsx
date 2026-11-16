@@ -23,10 +23,8 @@ import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { listAdmits } from "../lib/space-lists";
-import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
-import { useOverviewList } from "../hooks/use-overview-mode";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
@@ -41,8 +39,8 @@ function DocumentsPageContent() {
   const list = useListParams(["purpose"]);
   const purposes = list.values("purpose", PURPOSES);
   const search = list.search;
-  const { spanning, spaces } = useOverviewList("files");
-  const canReach = useCanReach();
+  const { on: spanning } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
@@ -55,13 +53,8 @@ function DocumentsPageContent() {
   });
   const files = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
 
-  // A row's run opens in the row's space: judged by that space's grants when the list spans spaces.
-  const readsRunsHere = canReach("/agents/:scope/:name/runs/:runId");
-  const showRunLink = (doc: FileDto) => {
-    if (!spanning) return readsRunsHere;
-    const space = spaces.find((s) => s.id === doc.spaceId);
-    return !!space && listAdmits("runs")(space.permissions);
-  };
+  // A row's run opens in the row's space: judged by that space's grants.
+  const showRunLink = (doc: FileDto) => runSpaces.some((space) => space.id === doc.spaceId);
 
   const filtering = purposes.length > 0 || query.trim() !== "";
   const countLabel = hasNextPage

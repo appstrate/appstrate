@@ -4,8 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Download, ExternalLink, Eye, Pin, Trash2 } from "lucide-react";
 import type { FileDto } from "../hooks/use-files";
 import { fileRunHref } from "../lib/files";
-import { linkedSpacePath } from "../lib/across-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
 import { TableRowActions } from "./table-row-actions";
 
 /**
@@ -31,10 +30,10 @@ export function DocumentRowActions({
   onDelete: (doc: FileDto) => void;
 }) {
   const { t } = useTranslation(["files", "common"]);
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
   const runPath = showRunLink ? fileRunHref(doc) : undefined;
   // A run of another space (a list spanning several) names it: the run detail enters it.
-  const runHref = runPath && linkedSpacePath(runPath, doc.spaceId, currentSpaceId);
+  const runHref = runPath && linkInSpace(runPath, doc.spaceId);
 
   return (
     <TableRowActions

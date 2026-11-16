@@ -5,11 +5,11 @@ import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { useOverviewList } from "../hooks/use-overview-mode";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
-import { scheduleAgentName, useScheduleColumns } from "../components/schedule-columns";
+import { useScheduleColumns } from "../components/schedule-columns";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
@@ -26,7 +26,7 @@ export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
-  const { spanning } = useOverviewList("schedules");
+  const { on: spanning } = useOverviewMode();
   const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
   // A schedule is created in one space, which a list spanning spaces does not name.
@@ -58,24 +58,22 @@ export function SchedulesListPage() {
       const enabled = schedule.enabled ?? true;
       const key = enabled ? "enabled" : "disabled";
       if (states.length > 0 && !states.includes(key)) return false;
-      return matchesSearch(query, [schedule.name, scheduleAgentName(schedule)]);
+      return matchesSearch(query, [schedule.name, schedule.agent_name]);
     });
   }, [schedules, query, states]);
 
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} />
-  ) : !spanning ? (
+  ) : (
     <EmptyState
-      message={t("schedules.empty")}
-      hint={t("schedules.emptyHint")}
+      message={spanning ? t("schedules.emptyAcross") : t("schedules.empty")}
+      hint={spanning ? undefined : t("schedules.emptyHint")}
       icon={Calendar}
       compact
     >
       <EmptyStateAction action={createAction} />
     </EmptyState>
-  ) : (
-    <EmptyState message={t("schedules.empty")} icon={Calendar} compact />
   );
 
   return (

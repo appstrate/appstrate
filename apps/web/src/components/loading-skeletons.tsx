@@ -234,19 +234,28 @@ export function ListPageSkeleton({ list }: { list?: string }) {
 
 function ViewedCollectionBlocks({ list }: { list: string }) {
   const [view] = useListView(list);
-  // « Vue d'ensemble » offers no run: a run acts in one space.
-  const { on: overview } = useOverviewMode();
-  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent" && !overview} />;
+  // « Vue d'ensemble » offers no run (a run acts in one space) and names each card's space.
+  const { on, readOnly } = useOverviewMode();
+  return (
+    <CollectionBlocks
+      cards={view === "cards"}
+      runnable={list === "agent" && !readOnly}
+      spaceName={on}
+    />
+  );
 }
 
 /** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
 function CollectionBlocks({
   cards = false,
   runnable = false,
+  spaceName = false,
 }: {
   cards?: boolean;
   /** The cards carry a run button (agents). */
   runnable?: boolean;
+  /** The cards name their space (a list spanning spaces). */
+  spaceName?: boolean;
 }) {
   return (
     <>
@@ -256,7 +265,9 @@ function CollectionBlocks({
         <Skeleton className="h-8 w-20" />
       </div>
       {cards ? (
-        <CardGridSkeleton placeholder={<PackageCardSkeleton runnable={runnable} />} />
+        <CardGridSkeleton
+          placeholder={<PackageCardSkeleton runnable={runnable} spaceName={spaceName} />}
+        />
       ) : (
         <Card className="overflow-hidden">
           <div className="border-border flex h-10 items-center border-b px-3">
@@ -425,9 +436,11 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
- * `spanning` (« Vue d'ensemble »): the agent cards carry no run button.
+ * In « Vue d'ensemble », or while it is not known, the agent cards carry no run button; in it,
+ * they name their space.
  */
-export function DashboardBodySkeleton({ spanning }: { spanning: boolean }) {
+export function DashboardBodySkeleton() {
+  const { on, readOnly } = useOverviewMode();
   return (
     <Waiting className="flex flex-col gap-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -440,7 +453,7 @@ export function DashboardBodySkeleton({ spanning }: { spanning: boolean }) {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable={!spanning} />
+              <PackageCardSkeleton runnable={!readOnly} spaceName={on} />
             </div>
           ))}
         </div>

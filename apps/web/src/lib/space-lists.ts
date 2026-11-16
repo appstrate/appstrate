@@ -44,11 +44,17 @@ interface ListedSpace {
   permissions: readonly string[];
 }
 
+/** A space admits what `admits` asks when it is held with a role and its permissions answer. */
+const admittedIn =
+  (admits: Admits) =>
+  (space: ListedSpace): boolean =>
+    isSpaceEnterable(space) && admits(space.permissions);
+
 export function admittingSpaces<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
   admits: Admits,
 ): S[] {
-  return (spaces ?? []).filter((space) => isSpaceEnterable(space) && admits(space.permissions));
+  return (spaces ?? []).filter(admittedIn(admits));
 }
 
 /** Whether some space grants `permission`: in the mode, what opens a section drawn across spaces. */
@@ -56,18 +62,13 @@ export function grantedInSomeSpace(
   spaces: readonly ListedSpace[] | undefined,
   permission: string,
 ): boolean {
-  return admittingSpaces(spaces, (permissions) => permissions.includes(permission)).length > 0;
+  return (spaces ?? []).some(admittedIn((permissions) => permissions.includes(permission)));
 }
 
 /** The « Vue d'ensemble » is offered from two spaces admitting at least one of the lists. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
   const admits: Admits = (permissions) => SPACE_LISTS.some((list) => listAdmits(list)(permissions));
   return admittingSpaces(spaces, admits).length >= 2;
-}
-
-/** The mode is on while the reader chose it AND it is offered. */
-export function overviewModeOn(chosen: boolean, spaces: readonly ListedSpace[] | undefined) {
-  return chosen && overviewOffered(spaces);
 }
 
 /** The listing proves the mode no longer offered (a space lost): the choice is withdrawn. */
@@ -116,11 +117,6 @@ export function holdsOverview(path: RoutePath | undefined): boolean {
   return path === undefined || ofList(path) || !belongsToSpace(path);
 }
 
-/** Where choosing the mode on `path` goes: nowhere when the page holds it, else its home (`/`). */
-export function overviewEntry(path: RoutePath | undefined): RoutePath | null {
-  return holdsOverview(path) ? null : "/";
-}
-
 /** In the mode, a list's route opens where a space admits the list, whatever the working space grants. */
 export function overviewListVerdict(
   path: RoutePath,
@@ -128,5 +124,5 @@ export function overviewListVerdict(
 ): "granted" | "denied" | undefined {
   const list = listOf(path);
   if (!list) return undefined;
-  return admittingSpaces(spaces, listAdmits(list)).length > 0 ? "granted" : "denied";
+  return (spaces ?? []).some(admittedIn(listAdmits(list))) ? "granted" : "denied";
 }

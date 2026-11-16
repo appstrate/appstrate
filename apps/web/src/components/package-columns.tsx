@@ -144,7 +144,9 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
     ),
   ];
 
+  const showsState = runnable;
+  const offersRun = runnable && !spanning;
   return columns.filter(
-    (c) => (runnable || c.id !== "state") && ((runnable && !spanning) || c.id !== "actions"),
+    (c) => (showsState || c.id !== "state") && (offersRun || c.id !== "actions"),
   );
 }

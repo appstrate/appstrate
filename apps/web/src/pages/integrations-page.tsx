@@ -17,7 +17,8 @@ import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
 import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
-import { cardItemKey, cardItemPath, packageCardItem } from "../lib/package-card-item";
+import { cardItemKey, packageCardItem } from "../lib/package-card-item";
+import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -44,22 +45,22 @@ import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { useOverviewList } from "../hooks/use-overview-mode";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const orgName = useOrg().currentOrg?.name ?? "";
-  const { spanning } = useOverviewList("integrations");
+  const { on: spanning } = useOverviewMode();
   // The server answers the active set of this space (or of each, spanning): the
   // index route every type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration", spanning);
   const connectionCount = useConnectionCounts();
   const spaceLabelOf = useSpaceLabelOf();
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
@@ -104,8 +105,12 @@ export function IntegrationsPage() {
     [active, query, origins, execution, protocols],
   );
   const filtering = query.trim() !== "" || origins.length > 0 || protocols.length > 0;
+  // An integration placed in several spaces is a row per space when the list spans them: the
+  // counts name integrations.
+  const integrationCount = (rows: readonly { id: string }[]) =>
+    new Set(rows.map((row) => row.id)).size;
   const countOf = (value: IntegrationExecution) =>
-    active.filter((row) => integrationExecution(row.source_kind) === value).length;
+    integrationCount(active.filter((row) => integrationExecution(row.source_kind) === value));
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning).filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
@@ -113,14 +118,12 @@ export function IntegrationsPage() {
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
   const empty = filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} />
-  ) : spanning ? (
-    <EmptyState icon={Boxes} compact message={t("integrations.empty.across")} />
   ) : (
     <EmptyState
       icon={Boxes}
       compact
-      message={t("integrations.empty.space")}
-      hint={<SpaceLibraryHint type="integration" />}
+      message={spanning ? t("integrations.empty.across") : t("integrations.empty.space")}
+      hint={spanning ? undefined : <SpaceLibraryHint type="integration" />}
     >
       <EmptyStateAction action={createAction} />
     </EmptyState>
@@ -216,7 +219,7 @@ export function IntegrationsPage() {
           rows={shown}
           rowKey={cardItemKey}
           rowHref={(integration) =>
-            cardItemPath({ ...integration, type: "integration" }, currentSpaceId)
+            linkInSpace(packageDetailPath("integration", integration.id), integration.spaceId)
           }
           rowLabel={(integration) => integration.name}
           isLoading={isLoading}
@@ -230,26 +233,27 @@ export function IntegrationsPage() {
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
-              // A card names its space where the table has a column for it.
-              meta={[
-                spanning && spaceLabelOf(integration.spaceId),
+              spaceName={spanning ? spaceLabelOf(integration.spaceId) : undefined}
+              meta={
                 connectionCount &&
-                  t("connections.connectionCount", {
-                    count: connectionCount(integration.id, integration.spaceId),
-                  }),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+                t("connections.connectionCount", {
+                  count: connectionCount(integration.id, integration.spaceId),
+                })
+              }
             />
           )}
           isLoading={isLoading}
           failure={error}
           empty={empty}
-          placeholder={<PackageCardSkeleton />}
+          placeholder={<PackageCardSkeleton spaceName={spanning} />}
         />
       )}
       <ListFooter
-        count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
+        count={
+          isLoading || error
+            ? undefined
+            : t("integrations.count", { count: integrationCount(shown) })
+        }
       />
 
       {importing && canCreate && (

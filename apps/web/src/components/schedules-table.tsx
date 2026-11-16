@@ -6,8 +6,7 @@ import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { EmptyState } from "./page-states";
 import { scheduleDetailPath } from "../lib/package-paths";
-import { linkedSpacePath } from "../lib/across-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
 
 export function SchedulesTable({
   schedules,
@@ -30,7 +29,7 @@ export function SchedulesTable({
   surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
 
   return (
     <DataTable
@@ -45,9 +44,7 @@ export function SchedulesTable({
       empty={empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />}
       rowKey={(schedule) => schedule.id}
       // A schedule of another space (a list spanning several) names it: the detail enters it.
-      rowHref={(schedule) =>
-        linkedSpacePath(scheduleDetailPath(schedule.id), schedule.spaceId, currentSpaceId)
-      }
+      rowHref={(schedule) => linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       rowLabel={(schedule) => schedule.name || t("schedule.unnamed", { ns: "agents" })}
     />
   );

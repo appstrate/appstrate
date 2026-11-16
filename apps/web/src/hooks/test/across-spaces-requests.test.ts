@@ -5,7 +5,8 @@
  * `GET /api/orgs/{orgId}/schedules`, naming no space: the server lists every one the reader
  * reaches. The files list asks `GET /api/orgs/{orgId}/files` the same way, keyset-paged like the
  * space's own; the agent index `GET /api/orgs/{orgId}/agents`, a package index
- * `GET /api/orgs/{orgId}/packages/{type}`.
+ * `GET /api/orgs/{orgId}/packages/{type}`. Each fetcher takes `acrossOrgId`: null for the current
+ * space.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
@@ -15,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { client } = await import("../../api/client.ts");
 const { fetchSchedules } = await import("../use-schedules.ts");
-const { fetchFilesAcrossSpaces } = await import("../use-files.ts");
+const { fetchFilePage } = await import("../use-files.ts");
 const { fetchAgents, fetchPackageIndex } = await import("../use-packages.ts");
 
 let get: ReturnType<typeof spyOn>;
@@ -26,41 +27,40 @@ afterEach(() => get.mockRestore());
 
 describe("fetchSchedules", () => {
   it("asks the current space unless it spans spaces", async () => {
-    await fetchSchedules("org_1", false);
+    await fetchSchedules(null);
     expect(get.mock.calls).toEqual([["/api/schedules"]]);
   });
 
   it("asks the org route, naming no space", async () => {
-    await fetchSchedules("org_1", true);
+    await fetchSchedules("org_1");
     expect(get.mock.calls).toEqual([
       ["/api/orgs/{orgId}/schedules", { params: { path: { orgId: "org_1" } } }],
     ]);
   });
 });
 
-describe("fetchFilesAcrossSpaces", () => {
+describe("fetchFilePage", () => {
+  const query = {
+    purpose: "agent_output" as const,
+    q: "rapport",
+    limit: 25,
+    startingAfter: "file_9",
+  };
+  const header = { "X-Org-Id": "org_1", "X-Space-Id": "spc_1" };
+
+  it("asks the current space with its scope unless it spans spaces", async () => {
+    await fetchFilePage(null, query, header);
+    expect(get.mock.calls).toEqual([
+      ["/api/files", { params: { query, header }, signal: undefined }],
+    ]);
+  });
+
   it("asks the org route with the page's query and its cursor, naming no space", async () => {
-    await fetchFilesAcrossSpaces("org_1", {
-      purpose: "agent_output",
-      q: "rapport",
-      limit: 25,
-      startingAfter: "file_9",
-    });
+    await fetchFilePage("org_1", query, header);
     expect(get.mock.calls).toEqual([
       [
         "/api/orgs/{orgId}/files",
-        {
-          params: {
-            path: { orgId: "org_1" },
-            query: {
-              purpose: "agent_output",
-              q: "rapport",
-              limit: 25,
-              startingAfter: "file_9",
-            },
-          },
-          signal: undefined,
-        },
+        { params: { path: { orgId: "org_1" }, query }, signal: undefined },
       ],
     ]);
   });
@@ -96,5 +96,10 @@ describe("fetchPackageIndex", () => {
         { params: { path: { orgId: "org_1" } } },
       ]),
     );
+  });
+
+  it("refuses the agent index across spaces, which is fetchAgents's, rather than answer the current space's", async () => {
+    await expect(fetchPackageIndex("agent", "org_1")).rejects.toThrow();
+    expect(get).not.toHaveBeenCalled();
   });
 });

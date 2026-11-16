@@ -11,7 +11,6 @@ import {
 } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
 import { keysetPaging } from "../lib/keyset-paging";
-import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { downloadOrToast } from "../lib/blob-download";
 import {
   fileBlobKeys,
@@ -19,10 +18,10 @@ import {
   invalidatePaths,
   invalidateRunDetails,
 } from "../lib/query-keys";
-import { useOrgScope } from "./use-org-scope";
+import { useListScope, useOrgScope } from "./use-org-scope";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
-import { fileContextHeader, type FileContext } from "../lib/file-link";
+import { fileContextHeader, otherSpaceFileContext, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -63,54 +62,46 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/** The gallery's files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+/** The gallery's files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
 export function useFilesPaged(
   filters: Pick<FileListFilters, "search" | "purpose"> & { spanning?: boolean } = {},
 ) {
-  const scope = useOrgScope();
-  const orgId = useCurrentOrgId();
-  const { can } = usePermissions();
-  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
   const spanning = !!filters.spanning;
-  const across = useInfiniteQuery({
-    queryKey: ["get", "/api/orgs/{orgId}/files", "paged", { path: { orgId }, query }] as const,
+  const header = useOrgScope().header;
+  const scope = useListScope(spanning, usePermissions().can("files:read"));
+  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
+  return useInfiniteQuery({
+    queryKey: spanning
+      ? ([
+          "get",
+          "/api/orgs/{orgId}/files",
+          "paged",
+          { path: { orgId: scope.orgId }, query },
+        ] as const)
+      : (["get", "/api/files", "paged", { header, query }] as const),
     queryFn: ({ pageParam, signal }) =>
-      fetchFilesAcrossSpaces(orgId!, { ...query, startingAfter: pageParam }, signal),
+      fetchFilePage(scope.acrossOrgId, { ...query, startingAfter: pageParam }, header, signal),
     ...keysetPaging,
-    // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: spanning && !!orgId,
-    placeholderData: keepPreviousData,
-    // Other spaces' new files reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
-    refetchInterval: ACROSS_SPACES_POLL_MS,
-  });
-  const inSpace = useInfiniteQuery({
-    queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
-    queryFn: async ({ pageParam, signal }) => {
-      const { data } = await client.GET("/api/files", {
-        params: { query: { ...query, startingAfter: pageParam }, header: scope.header },
-        signal,
-      });
-      if (!data) throw new Error("empty response");
-      return data;
-    },
-    ...keysetPaging,
-    enabled: !spanning && can("files:read") && scope.enabled,
+    enabled: scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
     placeholderData: keepPreviousData,
+    refetchInterval: scope.refetchInterval,
   });
-  return spanning ? across : inSpace;
 }
 
-/** One page of `GET /api/orgs/{orgId}/files`: every space the reader reaches. Exported for its test. */
-export async function fetchFilesAcrossSpaces(
-  orgId: string,
-  query: NonNullable<paths["/api/orgs/{orgId}/files"]["get"]["parameters"]["query"]>,
+/** One page of the current space's files, or of every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchFilePage(
+  acrossOrgId: string | null,
+  query: NonNullable<paths["/api/files"]["get"]["parameters"]["query"]>,
+  header: ReturnType<typeof useOrgScope>["header"],
   signal?: AbortSignal,
 ) {
-  const { data } = await client.GET("/api/orgs/{orgId}/files", {
-    params: { path: { orgId }, query },
-    signal,
-  });
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/files", {
+        params: { path: { orgId: acrossOrgId }, query },
+        signal,
+      })
+    : await client.GET("/api/files", { params: { query, header }, signal });
   if (!data) throw new Error("empty response");
   return data;
 }
@@ -217,7 +208,7 @@ export function useFileImageSrc(id: string, spaceId?: string): string | null | u
   const currentSpaceId = useCurrentSpaceId();
   const readsFiles = usePermissions().can("files:read");
   // A file of another space (a list spanning spaces) is read in its own, which the server judges.
-  const elsewhere = spaceId && orgId && spaceId !== currentSpaceId ? { orgId, spaceId } : undefined;
+  const elsewhere = otherSpaceFileContext(spaceId, orgId, currentSpaceId);
   const header = fileContextHeader(elsewhere) ?? scope.header;
   const query = useQuery({
     queryKey: fileBlobKeys.detail(id, header),

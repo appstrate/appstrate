@@ -4,7 +4,7 @@ import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { ENTER_SPACE_PARAM, linkedSpaceStep } from "../lib/across-spaces";
+import { ENTER_SPACE_PARAM, linkedSpacePath, linkedSpaceStep } from "../lib/across-spaces";
 import {
   agentModelKeys,
   agentProxyKeys,
@@ -25,6 +25,18 @@ import { useSpaces } from "./use-spaces";
 /** Reactive hook — re-renders when the current space changes; null until one is resolved. */
 export function useCurrentSpaceId(): string | null {
   return useStore(spaceStore, (s) => s.id);
+}
+
+/**
+ * Where a row opens: `path` in the row's own space (`linkedSpacePath`), naming it with
+ * `?enterSpace=` when it is not the current one. Every list spanning spaces links its rows so.
+ */
+export function useSpaceLink(): (path: string, spaceId: string | undefined) => string {
+  const currentSpaceId = useCurrentSpaceId();
+  return useCallback(
+    (path, spaceId) => linkedSpacePath(path, spaceId, currentSpaceId),
+    [currentSpaceId],
+  );
 }
 
 // Flat, space-less query-key prefixes dropped on space switch. A key that embeds

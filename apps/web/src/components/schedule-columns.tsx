@@ -27,14 +27,6 @@ import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
 import { useSpaceColumn } from "./space-column";
 
-/**
- * What to call the agent a schedule fires: the name the schedule row carries,
- * which also names an agent the working space does not place.
- */
-export function scheduleAgentName(schedule: EnrichedSchedule): string {
-  return schedule.agent_name ?? schedule.packageId;
-}
-
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
   showAgentName = true,
@@ -68,7 +60,7 @@ export function useScheduleColumns({
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
               did not say it at all. */}
-          {showAgentName && <CellText>{scheduleAgentName(schedule)}</CellText>}
+          {showAgentName && <CellText>{schedule.agent_name}</CellText>}
         </div>
       ),
     },

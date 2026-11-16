@@ -4,11 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
+import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
 
@@ -60,18 +58,17 @@ export function usePaginatedRuns({
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
   const { can } = usePermissions();
   // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
   const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
+  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
+  const acrossSpaces = !scheduleId && !packageId && !!spanning;
+  const scope = useListScope(acrossSpaces, canRead);
+  const { orgId, spaceId } = scope;
 
   // One value in the key: an array keys on identity, so a fresh `["failed"]` each render is a new entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
-
-  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
-  const acrossSpaces = !scheduleId && !packageId && !!spanning;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -106,22 +103,20 @@ export function usePaginatedRuns({
         status: statusQuery,
         search,
         unread,
-        acrossOrgId: acrossSpaces && orgId ? orgId : undefined,
+        acrossOrgId: scope.acrossOrgId,
         limit,
         offset,
       }),
     placeholderData: (prev, prevQuery) =>
       prevQuery && keepsRunRows(prevQuery.queryKey, currentKey) ? prev : undefined,
-    // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: enabled && (acrossSpaces ? !!orgId : canRead && !!spaceId),
-    // Other spaces' runs, new ones included, reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
-    refetchInterval: acrossSpaces ? ACROSS_SPACES_POLL_MS : undefined,
+    enabled: enabled && scope.enabled,
+    refetchInterval: scope.refetchInterval,
   });
 }
 
 /** One page's question: the hook's filters, and the org when it spans its spaces. */
 type RunPageRequest = Omit<UsePaginatedRunsOptions, "spanning" | "enabled"> & {
-  acrossOrgId?: string;
+  acrossOrgId: string | null;
 };
 
 /**

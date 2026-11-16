@@ -54,9 +54,10 @@ describe("polling a list spanning spaces", () => {
     expect(intervalOf(() => usePackageList("skill", true), "packages")).toBeUndefined();
   });
 
-  it("polls the files list across spaces", () => {
+  it("polls the files list across spaces, not the current space's", () => {
     expect(
       intervalOf(() => useFilesPaged({ spanning: true }), "get", "/api/orgs/{orgId}/files"),
     ).toBe(ACROSS_SPACES_POLL_MS);
+    expect(intervalOf(() => useFilesPaged(), "get", "/api/files")).toBeUndefined();
   });
 });

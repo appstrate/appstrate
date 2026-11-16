@@ -7,8 +7,8 @@
  * count keeps the rows the server's `connectionInSpace` lets reach THAT space
  * (`connection-reach.ts`): in the space's org, and either org-scoped or scoped to that space. Every
  * row of that list is the caller's own, so a colleague's shared connection is never counted. One
- * rule of `usableInSpace` is not mirrored: an integration whose `block_user_connections` is on here
- * keeps only the rows shared into the space or made in it, and the account list does not carry the
+ * rule of `usableInSpace` is not mirrored: an integration whose `block_user_connections` is on in
+ * the row's space keeps only the rows shared into the space or made in it, and the account list does not carry the
  * flag. For such an integration the count can exceed what the connection picker offers.
  */
 

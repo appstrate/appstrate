@@ -213,6 +213,7 @@
   "schedules.count_one": "{{count}} schedule",
   "schedules.count_other": "{{count}} schedules",
   "schedules.empty": "No schedules.",
+  "schedules.emptyAcross": "No schedules in your spaces.",
   "schedules.create": "New schedule",
   "schedules.emptyHint": "Add a schedule to run an agent automatically.",
   "preferences.sectionAccount": "Account",

@@ -12,10 +12,10 @@ import { client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { keepPreviousWithin, versionKeyPackage } from "../lib/query-state";
-import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { useListScope } from "./use-org-scope";
 import { invalidateLibraries } from "./use-library";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
@@ -149,51 +149,47 @@ type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
   : OrgPackageItem;
 
-type IndexType = Exclude<PackageType, "agent">;
 type Segment = (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType];
 
 /**
  * One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`).
- * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), one row per placement — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
+ * `spanning` (any type but the agent, whose index is `useAgents`): every space the reader reaches instead (`GET /api/orgs/{orgId}/packages/…`), one row per placement — asked by an index PAGE in « Vue d'ensemble », never by a surface of one space.
  */
-function usePackageList<T extends IndexType>(
+function usePackageList<T extends PackageType>(
   type: T,
-  spanning: boolean,
-): ReturnType<typeof usePackageIndex<T>>;
-function usePackageList<T extends PackageType>(type: T): ReturnType<typeof usePackageIndex<T>>;
-function usePackageList<T extends PackageType>(type: T, spanning = false) {
-  return usePackageIndex(type, spanning);
-}
-
-function usePackageIndex<T extends PackageType>(type: T, spanning: boolean) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  ...[spanning = false]: T extends "agent" ? [] : [spanning?: boolean]
+) {
   const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
-  const canRead = useCanReadPackages(type);
+  const scope = useListScope(spanning, useCanReadPackages(type));
   return useQuery({
     queryKey: spanning
-      ? packageKeys.acrossSpaces(segment, orgId)
-      : packageKeys.list(segment, orgId, spaceId),
-    queryFn: () => fetchPackageIndex(type, spanning ? orgId : null),
-    // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: spanning ? !!orgId : canRead && !!orgId && !!spaceId,
+      ? packageKeys.acrossSpaces(segment, scope.orgId)
+      : packageKeys.list(segment, scope.orgId, scope.spaceId),
+    queryFn: () => fetchPackageIndex(type, scope.acrossOrgId),
+    enabled: scope.enabled,
+    // No poll: an index carries nothing a run moves, and the writes that move it invalidate it.
   });
 }
 
-/** The current space's index, or every space's of `acrossOrgId`. Exported for its test. */
+/**
+ * The current space's index, or every space's of `acrossOrgId`. The agent index across spaces
+ * is `fetchAgents`'s: asked here, it throws rather than answer the current space's. Exported for
+ * its test.
+ */
 export async function fetchPackageIndex<T extends PackageType>(
   type: T,
   acrossOrgId: string | null,
 ): Promise<PackageIndexItem<T>[]> {
   const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
-  const rows =
-    acrossOrgId && segment !== "agents"
-      ? (
+  const rows = !acrossOrgId
+    ? (await client.GET(`/api/packages/${segment}`)).data!.data
+    : segment === "agents"
+      ? unreachable("The agent index across spaces is fetchAgents's")
+      : (
           await client.GET(`/api/orgs/{orgId}/packages/${segment}`, {
             params: { path: { orgId: acrossOrgId } },
           })
-        ).data!.data
-      : (await client.GET(`/api/packages/${segment}`)).data!.data;
+        ).data!.data;
   // Normalize the optional spec fields; `scope` is not returned by list endpoints. The spread
   // carries an integration row's own fields; `segment` is a union, so the cast ties them to `T`.
   return rows.map((item) => ({
@@ -211,6 +207,10 @@ export async function fetchPackageIndex<T extends PackageType>(
     used_by_agents: item.used_by_agents,
     auto_installed: item.auto_installed,
   })) as PackageIndexItem<T>[];
+}
+
+function unreachable(reason: string): never {
+  throw new Error(reason);
 }
 
 /** {@link usePackageDetail}'s query, for an imperative `fetchQuery` that shares its cache entry. */
@@ -315,18 +315,18 @@ export {
 /**
  * The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one.
  * `spanning`: every space the reader reaches instead (`GET /api/orgs/{orgId}/agents`), one row per placement, polled — asked by the agent index and the dashboard in « Vue d'ensemble », never by a surface of one space.
+ * `enabled: false` asks nothing (a surface that does not show it).
  */
-export function useAgents(spanning = false) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const canSee = useCanSeePackage("agent");
+export function useAgents(spanning = false, enabled = true) {
+  const scope = useListScope(spanning, useCanSeePackage("agent"));
   return useQuery({
-    queryKey: spanning ? agentsKeys.acrossSpaces(orgId) : agentsKeys.list(orgId, spaceId),
-    queryFn: () => fetchAgents(spanning ? orgId : null),
-    // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: spanning ? !!orgId : canSee && !!orgId && !!spaceId,
+    queryKey: spanning
+      ? agentsKeys.acrossSpaces(scope.orgId)
+      : agentsKeys.list(scope.orgId, scope.spaceId),
+    queryFn: () => fetchAgents(scope.acrossOrgId),
+    enabled: enabled && scope.enabled,
     // The running and unread counts of other spaces' agents reach no SSE stream here.
-    refetchInterval: spanning ? ACROSS_SPACES_POLL_MS : undefined,
+    refetchInterval: scope.refetchInterval,
   });
 }
 

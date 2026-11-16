@@ -17,15 +17,14 @@ import { ChoiceCard } from "../components/choice-card";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
-import { scheduleAgentName } from "../components/schedule-columns";
 import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem, cardItemKey } from "../lib/package-card-item";
-import { linkedSpacePath } from "../lib/across-spaces";
 import { grantedInSomeSpace } from "../lib/space-lists";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
@@ -67,18 +66,20 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
   );
 }
 
-/** The greeting: drawn at once, its running count a placeholder until the runs answer. */
+/**
+ * The greeting: drawn at once, its running count a placeholder until the runs answer. The
+ * assistant acts in one space, which « Vue d'ensemble » does not name: not offered there, nor
+ * while the mode is not known yet.
+ */
 export function DashboardHeader({
   firstName,
   runningCount,
-  spanning,
 }: {
   firstName: string;
   runningCount?: number;
-  /** The assistant acts in one space, which « Vue d'ensemble » does not name: not offered there. */
-  spanning: boolean;
 }) {
   const { t, i18n } = useTranslation("agents");
+  const { readOnly } = useOverviewMode();
   const canChat = useCanReach()("/chat");
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
@@ -109,7 +110,7 @@ export function DashboardHeader({
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("common:nav.dashboard") }]}
         actions={
-          spanning ? undefined : (
+          readOnly ? undefined : (
             <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
               <Sparkles />
               {t("dashboard.askAi.title")}
@@ -195,7 +196,7 @@ function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning:
           <div key={cardItemKey(item)} className="w-[19rem] shrink-0">
             <PackageCard
               {...item}
-              meta={spanning ? spaceLabelOf(agent.spaceId) : undefined}
+              spaceName={spanning ? spaceLabelOf(agent.spaceId) : undefined}
               showRun={!spanning}
               headingLevel={3}
             />
@@ -239,12 +240,12 @@ function DashboardScheduleRow({
   agent?: AgentListItem;
 }) {
   const { t } = useTranslation("agents");
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
     // A schedule of another space (« Vue d'ensemble ») names it: the detail enters it.
     <Link
-      to={linkedSpacePath(scheduleDetailPath(schedule.id), schedule.spaceId, currentSpaceId)}
+      to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
@@ -257,9 +258,7 @@ function DashboardScheduleRow({
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>
-        <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {scheduleAgentName(schedule)}
-        </p>
+        <p className="text-muted-foreground mt-0.5 truncate text-xs">{schedule.agent_name}</p>
       </div>
       <div className="shrink-0 text-right">
         <ScheduleStateBadges schedule={schedule} />
@@ -306,6 +305,11 @@ function dashboardMetrics(
       )
     : "—";
   const activeSchedules = data.schedules.filter((schedule) => schedule.enabled);
+  // In « Vue d'ensemble » an agent is a row per space it runs in: the figures count agents.
+  const agentCount = new Set(data.agents.map((agent) => agent.id)).size;
+  const runningAgentCount = new Set(
+    data.agents.filter((agent) => agent.running_runs).map((agent) => agent.id),
+  ).size;
   // The five that fire soonest; an active schedule with no next run is counted, not listed.
   const upcomingSchedules = data.schedules
     .flatMap((schedule) => {
@@ -328,10 +332,8 @@ function dashboardMetrics(
       },
       sections.recentAgents && {
         label: t("dashboard.metric.agents"),
-        value: data.agents.length,
-        detail: t("dashboard.metric.agentsDetail", {
-          count: data.agents.filter((agent) => agent.running_runs).length,
-        }),
+        value: agentCount,
+        detail: t("dashboard.metric.agentsDetail", { count: runningAgentCount }),
       },
       sections.recentRuns && {
         label: t("dashboard.metric.success"),
@@ -378,11 +380,7 @@ export function DashboardContent(data: DashboardData) {
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
     return (
       <div>
-        <DashboardHeader
-          firstName={data.firstName}
-          runningCount={metrics.running}
-          spanning={data.spanning}
-        />
+        <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
         <EmptyState
           message={t("dashboard.empty")}
           hint={t("dashboard.emptyHint")}
@@ -394,11 +392,7 @@ export function DashboardContent(data: DashboardData) {
 
   return (
     <>
-      <DashboardHeader
-        firstName={data.firstName}
-        runningCount={metrics.running}
-        spanning={data.spanning}
-      />
+      <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
       <div className="flex flex-col gap-8">
         {metrics.cards.length > 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

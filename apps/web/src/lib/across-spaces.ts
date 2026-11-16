@@ -12,14 +12,14 @@
 
 export const ENTER_SPACE_PARAM = "enterSpace";
 
-/** `path` as it was within the current space; naming the row's space otherwise. */
+/** `path` as it was within the current space (or for a row of no space); naming the row's space otherwise. */
 export function linkedSpacePath(
   path: string,
-  spaceId: string,
+  spaceId: string | undefined,
   currentSpaceId: string | null,
 ): string {
   // No current space yet: nothing to move from.
-  if (!currentSpaceId || spaceId === currentSpaceId) return path;
+  if (!spaceId || !currentSpaceId || spaceId === currentSpaceId) return path;
   return `${path}?${new URLSearchParams({ [ENTER_SPACE_PARAM]: spaceId }).toString()}`;
 }
 
@@ -27,7 +27,7 @@ export function linkedSpacePath(
  * What `useEnterLinkedSpace` does next: wait while the resolver enters the linked space, drop the
  * param once it has. `enterable` is `undefined` while the space listing has not answered; a
  * listing that failed answers `false`, so the page renders its own state instead of waiting for
- * good. Exported for its test.
+ * good.
  */
 export function linkedSpaceStep(
   linked: string | null,
@@ -42,7 +42,6 @@ export function linkedSpaceStep(
 /**
  * The SSE stream is scoped to the current space: a run, schedule, file or agent list spanning
  * spaces polls while mounted, or it would never see a new row (or an agent's run counts) of another
- * space. React Query pauses it in a hidden tab. Same period as the stream's reconnect
- * reconciliation.
+ * space. React Query pauses it in a hidden tab.
  */
 export const ACROSS_SPACES_POLL_MS = 10_000;

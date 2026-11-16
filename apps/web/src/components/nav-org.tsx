@@ -33,6 +33,26 @@ import {
 } from "@appstrate/ui/components/sidebar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
+/**
+ * Whether a run is in flight in the working space, asked only while `enabled`. Inline runs live
+ * on ephemeral shadow packages that are not in `agents`, so they do not count in `running_runs`:
+ * they are asked separately.
+ */
+function useWorkingSpaceRunning(enabled: boolean): boolean {
+  const { data: agents } = useAgents(false, enabled);
+  const { data: runningInline } = usePaginatedRuns({
+    kind: "inline",
+    status: ["running"],
+    limit: 1,
+    offset: 0,
+    enabled,
+  });
+  return (
+    enabled &&
+    ((agents?.some((agent) => agent.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0)
+  );
+}
+
 type NavItem = {
   path: RoutePath;
   label: string;
@@ -45,25 +65,16 @@ export function NavOrg() {
   // cold settings link is not where the user is.
   const { pathname } = useLocation();
   const visiblePathname = useOverlayPath() ?? pathname;
-  // The badges are the working space's: « Vue d'ensemble » neither shows nor asks them.
+  // The badge and the running spinner are the working space's: « Vue d'ensemble » neither
+  // shows nor asks what feeds them.
   const { on: overview } = useOverviewMode();
   const unread = useUnreadRunCount(!overview);
-  const { data: agents } = useAgents();
+  const hasRunning = useWorkingSpaceRunning(!overview);
   const canReach = useShellReach();
   const ready = useReachReady();
-
-  // Inline runs live on ephemeral shadow packages that are not in `agents`,
-  // so they don't contribute to `runningRuns`. Check them separately.
-  const { data: runningInline } = usePaginatedRuns({
-    kind: "inline",
-    status: ["running"],
-    limit: 1,
-    offset: 0,
-    enabled: !overview,
-  });
-  const hasRunning =
-    !overview &&
-    ((agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0);
+  // In « Vue d'ensemble » a run's detail was opened from Runs: Runs is the active entry, not Agents.
+  const openedFromRuns =
+    overview && routeOf(visiblePathname) === "/agents/:scope/:name/runs/:runId";
 
   // Two groups, split by what you are DOING rather than by object type:
   // Activité is what happened (dashboard, runs, files), Construire is what you
@@ -96,7 +107,11 @@ export function NavOrg() {
       <SidebarMenuItem key={path}>
         <SidebarMenuButton
           asChild
-          isActive={path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(path)}
+          isActive={
+            path === "/"
+              ? visiblePathname === "/"
+              : !openedFromRuns && visiblePathname.startsWith(path)
+          }
           tooltip={label}
         >
           <Link to={path}>
@@ -146,11 +161,7 @@ export function NavOrg() {
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
                   asChild
-                  // In « Vue d'ensemble » a run's detail was opened from this list.
-                  isActive={
-                    visiblePathname.startsWith("/runs") ||
-                    (overview && routeOf(visiblePathname) === "/agents/:scope/:name/runs/:runId")
-                  }
+                  isActive={visiblePathname.startsWith("/runs") || openedFromRuns}
                   tooltip={t("nav.runs")}
                 >
                   <Link to="/runs">

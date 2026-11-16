@@ -104,6 +104,22 @@ describe("droppedOnSpaceSwitch", () => {
     expect(droppedOnSpaceSwitch(packageKeys.list("skills", "org_1", "spc_a"))).toBe(true);
   });
 
+  it("drops a run list of the current space whatever its search says", () => {
+    const searched = paginatedRunsKeys.list(
+      "org_1",
+      "spc_a",
+      "/runs",
+      null,
+      null,
+      null,
+      false,
+      "across-spaces",
+      15,
+      0,
+    );
+    expect(droppedOnSpaceSwitch(searched)).toBe(true);
+  });
+
   it("keeps the lists across spaces, which key no space", () => {
     expect(droppedOnSpaceSwitch(runs(true))).toBe(false);
     expect(droppedOnSpaceSwitch(scheduleKeys.acrossSpaces("org_1"))).toBe(false);

@@ -23,7 +23,13 @@ afterEach(() => get.mockRestore());
 
 describe("fetchRunPage", () => {
   it("asks the current space unless it spans spaces", async () => {
-    await fetchRunPage({ status: ["failed"], search: "rap", limit: 15, offset: 0 });
+    await fetchRunPage({
+      status: ["failed"],
+      search: "rap",
+      acrossOrgId: null,
+      limit: 15,
+      offset: 0,
+    });
     expect(get.mock.calls).toEqual([
       [
         "/api/runs",

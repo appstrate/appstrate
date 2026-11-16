@@ -192,7 +192,7 @@ function ScheduleParams({
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
-  const agentDisplayName = schedule.agent_name ?? schedule.packageId;
+  const agentDisplayName = schedule.agent_name;
   const input = schedule.input;
   const navigate = useNavigate();
   const open = (section: ScheduleSettingsSection) => ({
@@ -297,7 +297,7 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const agentName = schedule.agent_name ?? schedule.packageId;
+  const agentName = schedule.agent_name;
 
   const isActive = schedule.enabled;
 

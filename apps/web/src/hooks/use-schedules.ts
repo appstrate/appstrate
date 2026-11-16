@@ -8,6 +8,7 @@ import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageDetail } from "./use-packages";
@@ -15,7 +16,6 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
-import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
@@ -29,32 +29,23 @@ function useCanReadSchedules(): boolean {
 
 /** The current space's schedules, or, `spanning`, every space's the reader reaches (`GET /api/orgs/{orgId}/schedules`). */
 export function useAllSchedules(spanning = false) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const canRead = useCanReadSchedules();
+  const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
-    queryKey: spanning ? scheduleKeys.acrossSpaces(orgId) : scheduleKeys.list(orgId, spaceId),
-    queryFn: () => fetchSchedules(orgId, spanning),
-    // Each row's space grants it server-side; the current space's gate does not apply.
-    enabled: spanning ? !!orgId : canRead && !!orgId && !!spaceId,
-    // Other spaces' schedules reach no SSE stream here (`ACROSS_SPACES_POLL_MS`).
-    refetchInterval: spanning ? ACROSS_SPACES_POLL_MS : undefined,
+    queryKey: spanning
+      ? scheduleKeys.acrossSpaces(scope.orgId)
+      : scheduleKeys.list(scope.orgId, scope.spaceId),
+    queryFn: () => fetchSchedules(scope.acrossOrgId),
+    enabled: scope.enabled,
+    refetchInterval: scope.refetchInterval,
   });
 }
 
-/** The list from the current space's door, or the org's when `spanning`. Exported for its test. */
-export async function fetchSchedules(
-  orgId: string | null,
-  spanning: boolean,
-): Promise<EnrichedSchedule[]> {
-  if (spanning) {
-    const { data } = await client.GET("/api/orgs/{orgId}/schedules", {
-      params: { path: { orgId: orgId! } },
-    });
-    return data?.data ?? [];
-  }
-  const { data } = await client.GET("/api/schedules");
+/** The current space's list, or every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchSchedules(acrossOrgId: string | null): Promise<EnrichedSchedule[]> {
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/schedules", { params: { path: { orgId: acrossOrgId } } })
+    : await client.GET("/api/schedules");
   return data?.data ?? [];
 }
 

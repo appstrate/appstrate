@@ -26,8 +26,8 @@ function navFor(
   spaces: unknown[] = [],
   overview = false,
   url = "/",
+  queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } }),
 ): string {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
     id: "org_nav",
     name: "Nav",
@@ -146,9 +146,25 @@ describe("the navigation in « Vue d'ensemble »", () => {
     expect(html).not.toContain("<span>Runs</span>");
   });
 
-  it("reads a run's detail as opened from Runs", () => {
+  it("reads a run's detail as opened from Runs, the one active entry", () => {
     const html = navFor(working, spaces, true, "/agents/@acme/reporter/runs/run_1");
     const active = [...html.matchAll(/<a[^>]*data-active="true"[^>]*>/g)].map((m) => m[0]);
-    expect(active.some((tag) => tag.includes('href="/runs"'))).toBe(true);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toContain('href="/runs"');
+  });
+
+  it("asks nothing the working space's spinner reads, which it asks out of the mode", () => {
+    const asked = (overview: boolean) => {
+      const queryClient = new QueryClient();
+      navFor(working, spaces, overview, "/", queryClient);
+      return queryClient
+        .getQueryCache()
+        .findAll()
+        .filter((query) => (query.options as { enabled?: unknown }).enabled !== false)
+        .map((query) => query.queryKey[0]);
+    };
+    expect(asked(true)).not.toContain("agents");
+    expect(asked(true)).not.toContain("paginated-runs");
+    expect(asked(false)).toContain("agents");
   });
 });

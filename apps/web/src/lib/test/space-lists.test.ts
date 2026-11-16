@@ -11,10 +11,8 @@ const {
   grantedInSomeSpace,
   holdsOverview,
   listAdmits,
-  overviewEntry,
   overviewLapsed,
   overviewListVerdict,
-  overviewModeOn,
   overviewOffered,
 } = await import("../space-lists.ts");
 
@@ -40,15 +38,6 @@ describe("overviewOffered", () => {
       ]),
     ).toBe(false);
     expect(overviewOffered(undefined)).toBe(false);
-  });
-});
-
-describe("overviewModeOn", () => {
-  it("is on only while chosen AND offered", () => {
-    expect(overviewModeOn(true, TWO)).toBe(true);
-    expect(overviewModeOn(false, TWO)).toBe(false);
-    // A reader who falls below two spaces: off, whatever was chosen.
-    expect(overviewModeOn(true, [space("spc_a", ["runs:read"])])).toBe(false);
   });
 });
 
@@ -126,22 +115,6 @@ describe("holdsOverview", () => {
     ] as const) {
       expect({ path, holds: holdsOverview(path) }).toEqual({ path, holds: false });
     }
-  });
-});
-
-describe("overviewEntry", () => {
-  it("stays on a page that holds the mode, and leaves the others for the dashboard", () => {
-    expect(overviewEntry("/")).toBeNull();
-    expect(overviewEntry("/files")).toBeNull();
-    expect(overviewEntry("/agents")).toBeNull();
-    expect(overviewEntry("/org-settings/members")).toBeNull();
-    // A row's detail opened in the mode keeps it.
-    expect(overviewEntry("/schedules/:id")).toBeNull();
-    expect(overviewEntry("/skills/:scope/:name")).toBeNull();
-    expect(overviewEntry(undefined)).toBeNull();
-    expect(overviewEntry("/chat")).toBe("/");
-    expect(overviewEntry("/catalogue/:type")).toBe("/");
-    expect(overviewEntry("/workspace-settings/general")).toBe("/");
   });
 });
 

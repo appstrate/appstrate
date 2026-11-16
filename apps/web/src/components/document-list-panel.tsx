@@ -30,7 +30,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
-import { fileReaderPath, type FileContext } from "../lib/file-link";
+import { fileReaderPath, otherSpaceFileContext } from "../lib/file-link";
 
 export function DocumentListPanel({
   documents,
@@ -76,10 +76,7 @@ export function DocumentListPanel({
   // A file of another space is read in its own, through the reader's `?org=…&space=…`, without
   // switching. A list spanning spaces offers no write (keep, delete), the working space's rows
   // included: the reader's « Ouvrir dans l'espace » leads to them.
-  const contextOf = (doc: FileDto): FileContext | undefined =>
-    orgId && currentSpaceId && doc.spaceId !== currentSpaceId
-      ? { orgId, spaceId: doc.spaceId }
-      : undefined;
+  const contextOf = (doc: FileDto) => otherSpaceFileContext(doc.spaceId, orgId, currentSpaceId);
   const rows = spanning
     ? documents.map((doc) => ({
         ...doc,

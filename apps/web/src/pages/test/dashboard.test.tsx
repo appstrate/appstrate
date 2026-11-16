@@ -92,7 +92,7 @@ function makeSchedule(i: number, overrides: Partial<EnrichedSchedule> = {}): Enr
     next_run_at: `2026-10-${String(15 + i).padStart(2, "0")}T09:00:00.000Z`,
     createdAt: "2026-10-01T00:00:00.000Z",
     updatedAt: "2026-10-01T00:00:00.000Z",
-    agent_name: null,
+    agent_name: `@acme/agent-${i}`,
     actor_name: null,
     actor_type: "user",
     running_runs: 0,

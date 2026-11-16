@@ -12,12 +12,17 @@ export function useSpaceColumn<T extends { spaceId?: string }>(spanning: boolean
   return [
     {
       id: "space",
-      header: t("toolbar.space"),
+      header: t("table.column.space"),
       width: 120,
       elastic: true,
-      cell: (row) => (
-        <span className="text-muted-foreground truncate text-xs">{spaceLabelOf(row.spaceId)}</span>
-      ),
+      cell: (row) => {
+        const name = spaceLabelOf(row.spaceId);
+        return (
+          <span className="text-muted-foreground truncate text-xs" title={name}>
+            {name}
+          </span>
+        );
+      },
     },
   ];
 }

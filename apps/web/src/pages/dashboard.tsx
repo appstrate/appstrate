@@ -5,8 +5,7 @@ import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { useOverviewList } from "../hooks/use-overview-mode";
-import { useSpaces } from "../hooks/use-spaces";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { ErrorState } from "../components/page-states";
 import { DashboardBodySkeleton } from "../components/loading-skeletons";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
@@ -21,31 +20,18 @@ export function DashboardPage() {
   const { profile, user } = useAuth();
   // Every query gates itself on its guard; `DashboardContent` draws a section only when its read is open and non-empty.
   const { ready } = usePermissions();
-  // The mode is known once the listing is: the body waits for it.
-  const { data: spaces, isError: spacesFailed } = useSpaces();
-  const runsList = useOverviewList("runs");
-  const agentsList = useOverviewList("agents");
-  const schedulesList = useOverviewList("schedules");
-  const spanning = runsList.spanning;
-  const known = !!spaces || spacesFailed;
+  // The mode is known once the space listing is: the body waits for it.
+  const { on: spanning, known } = useOverviewMode();
   const {
     data: runsData,
     isLoading: runsLoading,
     error: runsError,
-  } = usePaginatedRuns({
-    limit: 15,
-    offset: 0,
-    spanning: runsList.spanning,
-  });
-  const {
-    data: agents,
-    isLoading: agentsLoading,
-    error: agentsError,
-  } = useAgents(agentsList.spanning);
+  } = usePaginatedRuns({ limit: 15, offset: 0, spanning });
+  const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents(spanning);
   // The same query as the agents above: no second request.
-  const agentName = useRunAgentName(undefined, agentsList.spanning);
+  const agentName = useRunAgentName(undefined, spanning);
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
-  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules(schedulesList.spanning);
+  const { data: schedules, isLoading: schedulesLoading } = useAllSchedules(spanning);
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
   // A disabled query is not loading, so an unresolved permission set (or listing) must be.
@@ -56,8 +42,8 @@ export function DashboardPage() {
   if (isLoading)
     return (
       <div>
-        <DashboardHeader firstName={firstName} spanning={spanning} />
-        <DashboardBodySkeleton spanning={spanning} />
+        <DashboardHeader firstName={firstName} />
+        <DashboardBodySkeleton />
       </div>
     );
   if (error) return <ErrorState error={error} />;

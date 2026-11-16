@@ -13,7 +13,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
-import { useOverviewList } from "../hooks/use-overview-mode";
+import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -29,7 +29,8 @@ const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { spanning, spaces } = useOverviewList("runs");
+  const { on: spanning } = useOverviewMode();
+  const runSpaces = useAdmittingSpaces("runs");
   // « Tout marquer comme lu » marks the CURRENT space's runs only: a list spanning spaces offers it not.
   const unreadCount = useUnreadRunCount(!spanning);
   const markAllRead = useMarkAllRunsRead();
@@ -39,7 +40,7 @@ export function RunsPage() {
   // Without `runs:read-all` the list is already "mine": no scope filter. Across spaces, each
   // row follows its own space: "mine" narrows as soon as one of them shows others' runs.
   const canSeeEveryRun = spanning
-    ? spaces.some((space) => space.permissions.includes("runs:read-all"))
+    ? runSpaces.some((space) => space.permissions.includes("runs:read-all"))
     : can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);

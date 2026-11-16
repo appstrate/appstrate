@@ -6,8 +6,7 @@ import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
 import { runDetailPath } from "../lib/package-paths";
-import { linkedSpacePath } from "../lib/across-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
 
 /**
  * A run as a dense list row, wherever runs are listed outside a table (the
@@ -30,7 +29,7 @@ export function RunRow({
   dense?: boolean;
   className?: string;
 }) {
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
@@ -44,7 +43,7 @@ export function RunRow({
   // A run of another space (the dashboard in « Vue d'ensemble ») names it: the detail enters it.
   return run.packageId ? (
     <Link
-      to={linkedSpacePath(runDetailPath(run.packageId, run.id), run.spaceId, currentSpaceId)}
+      to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}
       state={{ runNumber: run.runNumber }}
       className={cn(rowClass, "hover:bg-muted/40 transition-colors")}
     >

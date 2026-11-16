@@ -5,8 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { runDetailPath } from "../lib/package-paths";
-import { linkedSpacePath } from "../lib/across-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSpaceLink } from "../hooks/use-current-space";
 
 export function RunsTable({
   runs,
@@ -35,7 +34,7 @@ export function RunsTable({
   surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["agents"]);
-  const currentSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
 
   return (
     <DataTable
@@ -59,7 +58,7 @@ export function RunsTable({
       rowHref={(run) =>
         run.packageId == null
           ? undefined
-          : linkedSpacePath(runDetailPath(run.packageId, run.id), run.spaceId, currentSpaceId)
+          : linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)
       }
       rowLabel={(run) =>
         t("runs.rowLabel", { number: run.runNumber ?? "?", agent: agentName(run) })

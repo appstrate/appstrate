@@ -37,8 +37,7 @@ import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
-import { useOverviewList } from "../hooks/use-overview-mode";
-import { useSpaceLabelOf } from "../hooks/use-spaces";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 
 type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
 
@@ -65,11 +64,9 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
   return type === "agent" ? <AgentIndex /> : <PackageIndex type={type} />;
 }
 
-const LIST_OF = { agent: "agents", skill: "skills", "mcp-server": "mcp-servers" } as const;
-
 /** Agents also carry their unread runs. */
 function AgentIndex() {
-  const { spanning } = useOverviewList("agents");
+  const { on: spanning } = useOverviewMode();
   const { data: agents, isLoading, error } = useAgents(spanning);
   const items = agents?.map((agent) => agentCardItem(agent));
   return (
@@ -84,7 +81,7 @@ function AgentIndex() {
 }
 
 function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
-  const { spanning } = useOverviewList(LIST_OF[type]);
+  const { on: spanning } = useOverviewMode();
   // What works in THIS space (or, spanning, in each); the rest of the org is one action away.
   const { data: rows, isLoading, error } = usePackageList(type, spanning);
   const items = rows?.map((row) => packageCardItem(row, type));
@@ -131,11 +128,6 @@ function PackageIndexBody({
   // an archive of another one.
   const canCreate = !spanning && can(packagePermission(type, "write"));
   const canActivate = !spanning && can(spacePackagePermission(type, "activate"));
-  const spaceLabelOf = useSpaceLabelOf();
-  // A card names its space where the table has a column for it.
-  const shownItems = spanning
-    ? items?.map((item) => ({ ...item, meta: spaceLabelOf(item.spaceId) }))
-    : items;
   const creation = useCreationHandoff(type, canCreate);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
@@ -191,7 +183,7 @@ function PackageIndexBody({
         columns={columns}
         columnMenu={menu}
         tableId={`packages-${type}`}
-        items={shownItems}
+        items={items}
         isLoading={isLoading}
         error={error}
         holds={type}
@@ -199,6 +191,7 @@ function PackageIndexBody({
         emptyMessage={spanning ? words.emptyAcross : words.empty}
         emptyHint={spanning ? undefined : <SpaceLibraryHint type={type} />}
         cardRun={!spanning}
+        spanning={spanning}
         emptyIcon={PACKAGE_TYPE_ICON[type]}
         emptyAction={<EmptyStateAction action={createAction} />}
         list={list}

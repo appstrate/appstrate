@@ -6,9 +6,13 @@ import { persistedJson } from "./local-storage";
 
 const STORAGE_KEY = "appstrate_overview";
 
-/** Keyed like the remembered space (`rememberedSpaceKey`): per account and org. */
+/** Keyed like the remembered space (`rememberedSpaceKey`): per account and org. Only a stored `true` is a choice. */
 const persisted = persistedJson<Record<string, true>>(STORAGE_KEY, (value) =>
-  isPlainObject(value) ? (value as Record<string, true>) : {},
+  isPlainObject(value)
+    ? Object.fromEntries(
+        Object.entries(value).flatMap(([key, on]) => (on === true ? [[key, true as const]] : [])),
+      )
+    : {},
 );
 
 interface OverviewState {

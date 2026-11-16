@@ -102,7 +102,9 @@ export function FileTile({
           {spaceName && (
             <>
               <span aria-hidden>·</span>
-              <span className="truncate">{spaceName}</span>
+              <span className="truncate" title={spaceName}>
+                {spaceName}
+              </span>
             </>
           )}
         </CardDescription>

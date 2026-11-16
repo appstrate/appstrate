@@ -26,7 +26,7 @@ import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { routeOf } from "../lib/route-match";
-import { overviewEntry } from "../lib/space-lists";
+import { holdsOverview } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -188,8 +188,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const chooseOverview = () =>
     requestScopeChange(() => {
       overview.choose(true);
-      const landing = overviewEntry(routeOf(pathname));
-      if (landing) navigate(landing);
+      if (!holdsOverview(routeOf(pathname))) navigate("/");
       closeSwitcherAndSidebar();
     });
   const overviewLabel = t("overview.title");
@@ -212,7 +211,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         {...spaceTile(currentSpace, viewer)}
         className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
       />
-      {currentContextLabel}
+      {spaceLabel(currentSpace, t)}
     </span>
   ) : (
     spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
