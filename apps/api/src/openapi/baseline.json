@@ -35834,7 +35834,8 @@
           "home_shareable",
           "spaceId",
           "source_kind",
-          "server"
+          "server",
+          "authenticated"
         ],
         "properties": {
           "id": {
@@ -35933,6 +35934,10 @@
               }
             },
             "description": "`source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source."
+          },
+          "authenticated": {
+            "type": "boolean",
+            "description": "Whether the integration declares `auths`. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection."
           }
         }
       },

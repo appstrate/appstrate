@@ -799,6 +799,7 @@
   "integrations.col.name": "Nom",
   "integrations.col.version": "Version",
   "integrations.col.connections": "Connexions",
+  "integrations.connectionNotRequired": "Aucune connexion requise",
   "integrations.filter.origin": "Origine",
   "integrations.empty.space": "Aucune intégration active dans cet espace.",
   "integrations.empty.across": "Aucune intégration active dans vos espaces.",

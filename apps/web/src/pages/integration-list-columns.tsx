@@ -16,8 +16,10 @@ type IntegrationRow = InSpaces<IntegrationIndexItem>;
 
 /**
  * One comparable integration fact per column. `connectionCount` is the caller's own connections
- * of an integration in a row's spaces (`useConnectionCounts`); `undefined` while unknown, drawn as
- * « — ». `spanning`: an index across spaces, each row naming its spaces.
+ * of an integration in a row's spaces (`useConnectionCounts`); `undefined` while unknown, when the
+ * cell stays empty. An integration that binds no connection (`authenticated: false`) has no count
+ * at all, drawn « — » like every other fact that does not apply. `spanning`: an index across
+ * spaces, each row naming its spaces.
  */
 export function useIntegrationListColumns(
   connectionCount: ((sourceId: string, spaceIds: readonly string[]) => number) | undefined,
@@ -50,10 +52,19 @@ export function useIntegrationListColumns(
       width: 112,
       align: "end",
       cell: (integration) => {
-        const count = connectionCount?.(integration.id, integration.spaceIds);
+        if (!integration.authenticated) {
+          return (
+            <span className="text-muted-foreground" title={t("integrations.connectionNotRequired")}>
+              <span aria-hidden>—</span>
+              <span className="sr-only">{t("integrations.connectionNotRequired")}</span>
+            </span>
+          );
+        }
+        if (!connectionCount) return null;
+        const count = connectionCount(integration.id, integration.spaceIds);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
-            {count ?? "—"}
+            {count}
           </span>
         );
       },

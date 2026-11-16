@@ -815,6 +815,8 @@ export interface IntegrationIndexItem extends OrgPackageItem {
   source_kind: "local" | "remote" | "none";
   /** `source.server` of a `local` integration — its runtime type and entry point. `null` otherwise. */
   server: { type: string; entry_point: string } | null;
+  /** `false` for an integration that declares no `auths` (AFPS §7.2): it binds no connection. */
+  authenticated: boolean;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
