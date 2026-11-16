@@ -251,7 +251,8 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   await expect(dialog).toHaveCount(0);
   await expect(trail).toContainText("Rename A");
 
-  await page.getByRole("button", { name: "Rename B", exact: true }).click();
+  // A row reads its title, then the spaces it touched.
+  await page.getByRole("button", { name: /^Rename B\b/ }).click();
   await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
   await openSettings();
   await expect(name).toHaveValue("Rename B");
