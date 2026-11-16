@@ -1435,11 +1435,10 @@ async function chatContextFileFilter(
 
   // The owner is part of ownership: someone else's session resolves nothing
   // rather than erroring, so this can never become a probe for which session ids
-  // exist. A space session (RBAC spec §5) resolves only when its space is listed,
-  // and its runs are read in ITS space; an organization session (NULL space)
-  // belongs to its author alone, and its runs are read in the listed spaces.
+  // exist. A conversation belongs to its author alone, and its runs are read in the
+  // listed spaces.
   const [session] = await db
-    .select({ spaceId: chatSessions.spaceId })
+    .select({ id: chatSessions.id })
     .from(chatSessions)
     .where(
       and(
@@ -1450,9 +1449,7 @@ async function chatContextFileFilter(
     )
     .limit(1);
   if (!session) return sql`false`;
-  if (session.spaceId !== null && !spaceIds.includes(session.spaceId)) return sql`false`;
-  const runSpaces =
-    session.spaceId === null ? inArray(runs.spaceId, spaceIds) : eq(runs.spaceId, session.spaceId);
+  const runSpaces = inArray(runs.spaceId, spaceIds);
 
   return or(
     eq(files.chatSessionId, chatSessionId),

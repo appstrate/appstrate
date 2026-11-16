@@ -39,7 +39,7 @@ async function openStream(ctx: TestContext): Promise<Response> {
 }
 
 async function createSession(ctx: TestContext): Promise<{ id: string; userId: string }> {
-  const res = await app.request("/api/chat/sessions", {
+  const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({}),

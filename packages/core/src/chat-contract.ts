@@ -106,8 +106,8 @@ export interface ChatAttachmentRequest {
   /**
    * Called with the space the attachment belongs to, once it is one of `spaces` and BEFORE
    * anything is created or read in it: a rejection refuses the attachment, so an upload is
-   * never materialized into a space the caller was refused. An organization session records
-   * the space as touched here.
+   * never materialized into a space the caller was refused. The conversation records the
+   * space as touched here.
    */
   beforeResolve?: (spaceId: string) => Promise<void>;
 }
@@ -192,8 +192,8 @@ export interface EnforcedChatSkillRef {
 }
 
 /**
- * What an organization session's turn needs in a space to act in it: the turn is the caller's to
- * run (`chat:write`), the session stays openable once the space is touched (`chat:read`), and the
+ * What a conversation's turn needs in a space to act in it: the turn is the caller's to
+ * run (`chat:write`), the conversation stays openable once the space is touched (`chat:read`), and the
  * tools can name the space (`mcp:read`). The one definition behind the chat's acting set
  * (`actingSpaces`), the MCP server's reach for a chat's bearer and the web shell's judgement.
  */

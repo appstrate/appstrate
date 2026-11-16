@@ -44,7 +44,7 @@ describe("chat transcript ordering", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -54,7 +54,9 @@ describe("chat transcript ordering", () => {
   }
 
   async function history(id: string): Promise<Record<string, unknown>[]> {
-    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${id}`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(200);
     return ((await res.json()) as { messages: Record<string, unknown>[] }).messages;
   }

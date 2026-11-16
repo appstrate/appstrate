@@ -36,7 +36,7 @@ describe("chat persistence of Postgres-refused characters", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),

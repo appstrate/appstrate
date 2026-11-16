@@ -1,13 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
-
 /**
- * Organization chat sessions (`chat_sessions.space_id IS NULL`), served by the
- * same handlers as the space sessions at `/api/orgs/:orgId/chat/*`.
+ * Chat sessions, served at `/api/orgs/:orgId/chat/*`: the one kind of conversation.
  *
- * A space session is opened by its space's mount only; an organization session
- * by the organization mount only, and only while its author reaches every space
- * it touched (`chat_session_spaces`) with `chat:read`. The organization list
- * adds the space sessions of every space the reader reaches.
+ * A conversation belongs to the organization and its author, with no owning space. The
+ * spaces it touched (`chat_session_spaces`) filter it (`?spaceId=`), and its author
+ * opens it only while they reach every one of them with `chat:read`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -33,7 +29,6 @@ const JSON_HEADERS = { "Content-Type": "application/json" };
 
 interface SessionDto {
   id: string;
-  spaceId: string | null;
   space_ids: string[];
   title: string | null;
 }
@@ -45,41 +40,16 @@ function orgCall(ctx: TestContext, path: string, init: RequestInit = {}): Promis
   });
 }
 
-function spaceCall(
+async function createSession(
   ctx: TestContext,
-  spaceId: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  return app.request(`/api/chat${path}`, {
-    ...init,
-    headers: { ...authHeaders(ctx, { "X-Space-Id": spaceId }), ...JSON_HEADERS },
-  });
-}
-
-async function createOrgSession(ctx: TestContext, title?: string): Promise<SessionDto> {
-  const res = await orgCall(ctx, "/sessions", {
-    method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
-  });
-  expect(res.status).toBe(201);
-  return (await res.json()) as SessionDto;
-}
-
-async function createSpaceSession(
-  ctx: TestContext,
-  spaceId: string,
-  title?: string,
+  body: { title?: string; spaceId?: string } = {},
 ): Promise<SessionDto> {
-  const res = await spaceCall(ctx, spaceId, "/sessions", {
-    method: "POST",
-    body: JSON.stringify(title ? { title } : {}),
-  });
+  const res = await orgCall(ctx, "/sessions", { method: "POST", body: JSON.stringify(body) });
   expect(res.status).toBe(201);
   return (await res.json()) as SessionDto;
 }
 
-async function listOrgSessionIds(ctx: TestContext, query = ""): Promise<string[]> {
+async function listSessionIds(ctx: TestContext, query = ""): Promise<string[]> {
   const res = await orgCall(ctx, `/sessions${query}`);
   expect(res.status).toBe(200);
   return ((await res.json()) as { data: SessionDto[] }).data.map((s) => s.id);
@@ -88,7 +58,17 @@ async function listOrgSessionIds(ctx: TestContext, query = ""): Promise<string[]
 const touch = (sessionId: string, spaceId: string) =>
   db.insert(chatSessionSpaces).values({ sessionId, spaceId });
 
-describe("organization chat sessions", () => {
+const touchedBy = async (sessionId: string): Promise<string[]> =>
+  (
+    await db
+      .select({ spaceId: chatSessionSpaces.spaceId })
+      .from(chatSessionSpaces)
+      .where(eq(chatSessionSpaces.sessionId, sessionId))
+  )
+    .map((row) => row.spaceId)
+    .sort();
+
+describe("chat sessions", () => {
   let ctx: TestContext;
   let spaceB: string;
 
@@ -98,15 +78,14 @@ describe("organization chat sessions", () => {
     spaceB = (await seedSpace({ orgId: ctx.orgId, name: "Space B" })).id;
   });
 
-  it("creates, reads, renames, marks read and deletes an organization session", async () => {
-    const created = await createOrgSession(ctx, "Overview");
-    expect(created.spaceId).toBeNull();
+  it("creates, reads, renames, marks read and deletes a conversation", async () => {
+    const created = await createSession(ctx, { title: "Overview" });
+    expect(created).not.toHaveProperty("spaceId");
     expect(created.space_ids).toEqual([]);
 
     const got = await orgCall(ctx, `/sessions/${created.id}`);
     expect(got.status).toBe(200);
     const body = (await got.json()) as SessionDto & { messages: unknown[] };
-    expect(body.spaceId).toBeNull();
     expect(body.messages).toEqual([]);
 
     const renamed = await orgCall(ctx, `/sessions/${created.id}`, {
@@ -116,7 +95,6 @@ describe("organization chat sessions", () => {
     expect(renamed.status).toBe(204);
     const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, created.id));
     expect(row!.title).toBe("Renamed");
-    expect(row!.spaceId).toBeNull();
 
     expect((await orgCall(ctx, `/sessions/${created.id}/read`, { method: "PUT" })).status).toBe(
       204,
@@ -130,75 +108,116 @@ describe("organization chat sessions", () => {
     expect((await orgCall(ctx, `/sessions/${created.id}`)).status).toBe(404);
   });
 
-  it("serves a space session on its own mount only, and an organization session on the other", async () => {
-    const inSpace = await createSpaceSession(ctx, ctx.defaultSpaceId);
-    expect(inSpace.spaceId).toBe(ctx.defaultSpaceId);
-    expect(inSpace.space_ids).toEqual([]);
-    const org = await createOrgSession(ctx);
-
-    expect((await orgCall(ctx, `/sessions/${inSpace.id}`)).status).toBe(404);
-    expect(
-      (
-        await orgCall(ctx, `/sessions/${inSpace.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ title: "x" }),
-        })
-      ).status,
-    ).toBe(404);
-    expect((await orgCall(ctx, `/sessions/${inSpace.id}`, { method: "DELETE" })).status).toBe(404);
-
-    expect((await spaceCall(ctx, ctx.defaultSpaceId, `/sessions/${org.id}`)).status).toBe(404);
-    expect(
-      (await spaceCall(ctx, ctx.defaultSpaceId, `/sessions/${org.id}`, { method: "DELETE" }))
-        .status,
-    ).toBe(404);
-    // The space list never carries an organization session.
-    const fromSpace = (await (await spaceCall(ctx, ctx.defaultSpaceId, "/sessions")).json()) as {
-      data: SessionDto[];
-    };
-    expect(fromSpace.data.map((s) => s.id)).toEqual([inSpace.id]);
+  it("keeps a conversation personal to its author", async () => {
+    const mine = await createSession(ctx);
+    const other = await memberContext(ctx, "member", "operator");
+    expect((await orgCall(other, `/sessions/${mine.id}`)).status).toBe(404);
+    expect(await listSessionIds(other)).not.toContain(mine.id);
+    expect((await orgCall(other, `/sessions/${mine.id}`, { method: "DELETE" })).status).toBe(404);
   });
 
-  it("lists the organization sessions and the space sessions of every readable space", async () => {
-    const a = await createSpaceSession(ctx, ctx.defaultSpaceId);
-    const b = await createSpaceSession(ctx, spaceB);
-    const org = await createOrgSession(ctx);
-    expect(new Set(await listOrgSessionIds(ctx))).toEqual(new Set([a.id, b.id, org.id]));
-  });
-
-  it("excludes the spaces the reader cannot read: closed and not joined, or a role without chat:read", async () => {
-    const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" })).id;
-    const owned = await createSpaceSession(ctx, ctx.defaultSpaceId);
-    const inClosed = await createSpaceSession(ctx, closed);
-
-    // A member reaches neither the closed space they never joined...
-    const member = await memberContext(ctx, "member", "operator");
-    const viaMember = await createSpaceSession(member, ctx.defaultSpaceId);
-    expect(new Set(await listOrgSessionIds(member))).toEqual(new Set([viaMember.id]));
-    expect(await listOrgSessionIds(member)).not.toContain(inClosed.id);
-    expect(await listOrgSessionIds(member)).not.toContain(owned.id);
-
-    // ...nor a space where their role lacks chat:read: their own row there is not listed.
-    const noChat = await memberHolding(ctx, ["agents:read"]);
-    await db.insert(chatSessions).values({
-      id: "chs_hidden_by_role",
-      orgId: ctx.orgId,
-      userId: noChat.user.id,
-      spaceId: ctx.defaultSpaceId,
+  describe("creating with the space the user is looking at", () => {
+    it("touches it at creation, so the conversation is listed in that space before anything else", async () => {
+      const created = await createSession(ctx, { spaceId: spaceB });
+      expect(created.space_ids).toEqual([spaceB]);
+      expect(await touchedBy(created.id)).toEqual([spaceB]);
+      expect(await listSessionIds(ctx, `?spaceId=${spaceB}`)).toEqual([created.id]);
+      expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([]);
     });
-    const reachable = await createSpaceSession(noChat, spaceB);
-    expect(await listOrgSessionIds(noChat)).toEqual([reachable.id]);
+
+    it("touches nothing from the overview", async () => {
+      const created = await createSession(ctx);
+      expect(created.space_ids).toEqual([]);
+      expect(await touchedBy(created.id)).toEqual([]);
+      expect(await listSessionIds(ctx)).toEqual([created.id]);
+    });
+
+    it("refuses a space outside the acting set with a 400 naming spaceId, and creates nothing", async () => {
+      const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+        .id;
+      const member = await memberContext(ctx, "member", "operator");
+      const unknown = await orgCall(member, "/sessions", {
+        method: "POST",
+        body: JSON.stringify({ spaceId: "spc_00000000-0000-4000-8000-000000000000" }),
+      });
+      expect(unknown.status).toBe(400);
+      const refused = await orgCall(member, "/sessions", {
+        method: "POST",
+        body: JSON.stringify({ spaceId: closed }),
+      });
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(await refused.json())).toContain("spaceId");
+      expect(await db.select().from(chatSessions)).toEqual([]);
+    });
   });
 
-  it("opens an organization session only while every touched space is readable", async () => {
+  describe("GET …/sessions?spaceId=", () => {
+    it("lists the conversations that touched the space, whatever else they touched", async () => {
+      const a = await createSession(ctx, { spaceId: ctx.defaultSpaceId });
+      const b = await createSession(ctx, { spaceId: spaceB });
+      const both = await createSession(ctx, { spaceId: spaceB });
+      await touch(both.id, ctx.defaultSpaceId);
+      const overview = await createSession(ctx);
+
+      expect(new Set(await listSessionIds(ctx))).toEqual(
+        new Set([a.id, b.id, both.id, overview.id]),
+      );
+      expect(new Set(await listSessionIds(ctx, `?spaceId=${spaceB}`))).toEqual(
+        new Set([b.id, both.id]),
+      );
+      expect(new Set(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`))).toEqual(
+        new Set([a.id, both.id]),
+      );
+      const dto = (await (await orgCall(ctx, `/sessions/${both.id}`)).json()) as SessionDto;
+      expect([...dto.space_ids].sort()).toEqual([ctx.defaultSpaceId, spaceB].sort());
+    });
+
+    it("pages within the filtered set: the cursor is valid there only", async () => {
+      const inB = [
+        await createSession(ctx, { title: "one", spaceId: spaceB }),
+        await createSession(ctx, { title: "two", spaceId: spaceB }),
+        await createSession(ctx, { title: "three", spaceId: spaceB }),
+      ];
+      const elsewhere = await createSession(ctx, { title: "four", spaceId: ctx.defaultSpaceId });
+      const base = Date.now();
+      for (const [i, s] of [...inB, elsewhere].entries()) {
+        await db
+          .update(chatSessions)
+          .set({ updatedAt: new Date(base + i * 1000) })
+          .where(eq(chatSessions.id, s.id));
+      }
+      const newestFirst = inB.map((s) => s.id).reverse();
+      const filter = `spaceId=${spaceB}`;
+
+      expect(await listSessionIds(ctx, `?${filter}&limit=2`)).toEqual(newestFirst.slice(0, 2));
+      expect(
+        await listSessionIds(ctx, `?${filter}&limit=2&startingAfter=${newestFirst[1]}`),
+      ).toEqual([newestFirst[2]!]);
+      expect(await listSessionIds(ctx, `?${filter}&q=tw`)).toEqual([inB[1]!.id]);
+      // A session of the unfiltered list that did not touch the space is not a cursor there.
+      const bad = await orgCall(ctx, `/sessions?${filter}&startingAfter=${elsewhere.id}`);
+      expect(bad.status).toBe(400);
+      expect(await listSessionIds(ctx, `?startingAfter=${elsewhere.id}&limit=1`)).toHaveLength(1);
+    });
+
+    it("refuses a space the caller cannot read chats in, like any bad filter value", async () => {
+      const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+        .id;
+      const member = await memberContext(ctx, "member", "operator");
+      const res = await orgCall(member, `/sessions?spaceId=${closed}`);
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("spaceId");
+      expect((await orgCall(member, "/sessions?spaceId=spc_nope")).status).toBe(400);
+    });
+  });
+
+  it("lists a conversation by what it touched: a space the reader cannot read hides it everywhere", async () => {
     const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" })).id;
-    // The owner reaches the closed space as an admin; a demoted view of the same
-    // author is modelled with a member who holds a role there and then loses it.
     const member = await memberContext(ctx, "member", "operator");
-    const session = await createOrgSession(member, "Cross");
+    const session = await createSession(member, { title: "Cross" });
     await touch(session.id, ctx.defaultSpaceId);
     expect((await orgCall(member, `/sessions/${session.id}`)).status).toBe(200);
-    expect(await listOrgSessionIds(member)).toContain(session.id);
+    expect(await listSessionIds(member)).toContain(session.id);
     const dto = (await (await orgCall(member, `/sessions/${session.id}`)).json()) as SessionDto;
     expect(dto.space_ids).toEqual([ctx.defaultSpaceId]);
 
@@ -209,19 +228,31 @@ describe("organization chat sessions", () => {
       404,
     );
     expect((await orgCall(member, `/sessions/${session.id}/stream`)).status).toBe(204);
-    expect(await listOrgSessionIds(member)).not.toContain(session.id);
+    expect(await listSessionIds(member)).not.toContain(session.id);
 
     // The space going away drops it from the record (cascade): visible again.
     await db.delete(spaces).where(eq(spaces.id, closed));
     expect((await orgCall(member, `/sessions/${session.id}`)).status).toBe(200);
-    expect(await listOrgSessionIds(member)).toContain(session.id);
+    expect(await listSessionIds(member)).toContain(session.id);
   });
 
-  it("pages across both kinds with a cursor that must be a listed session", async () => {
+  it("excludes a conversation whose touched space the role cannot read chats in", async () => {
+    const noChat = await memberHolding(ctx, ["agents:read"]);
+    await db.insert(chatSessions).values({
+      id: "chs_hidden_by_role",
+      orgId: ctx.orgId,
+      userId: noChat.user.id,
+    });
+    await touch("chs_hidden_by_role", ctx.defaultSpaceId);
+    const reachable = await createSession(noChat, { spaceId: spaceB });
+    expect(await listSessionIds(noChat)).toEqual([reachable.id]);
+  });
+
+  it("pages with a cursor that must be a listed session", async () => {
     const sessions = [
-      await createSpaceSession(ctx, ctx.defaultSpaceId, "one"),
-      await createOrgSession(ctx, "two"),
-      await createSpaceSession(ctx, spaceB, "three"),
+      await createSession(ctx, { title: "one" }),
+      await createSession(ctx, { title: "two" }),
+      await createSession(ctx, { title: "three" }),
     ];
     const base = Date.now();
     for (const [i, s] of sessions.entries()) {
@@ -232,15 +263,15 @@ describe("organization chat sessions", () => {
     }
     const newestFirst = sessions.map((s) => s.id).reverse();
 
-    expect(await listOrgSessionIds(ctx, "?limit=2")).toEqual(newestFirst.slice(0, 2));
-    expect(await listOrgSessionIds(ctx, `?limit=2&startingAfter=${newestFirst[1]}`)).toEqual([
+    expect(await listSessionIds(ctx, "?limit=2")).toEqual(newestFirst.slice(0, 2));
+    expect(await listSessionIds(ctx, `?limit=2&startingAfter=${newestFirst[1]}`)).toEqual([
       newestFirst[2]!,
     ]);
-    expect(await listOrgSessionIds(ctx, "?q=tw")).toEqual([sessions[1]!.id]);
+    expect(await listSessionIds(ctx, "?q=tw")).toEqual([sessions[1]!.id]);
 
     // Someone else's session is not a cursor.
     const other = await memberContext(ctx, "member", "operator");
-    const theirs = await createOrgSession(other);
+    const theirs = await createSession(other);
     const bad = await orgCall(ctx, `/sessions?startingAfter=${theirs.id}`);
     expect(bad.status).toBe(400);
   });
@@ -336,39 +367,53 @@ describe("organization chat sessions", () => {
   });
 });
 
-describe("ensureSession keeps a session's kind", () => {
-  it("opens an existing organization session only while every touched space is readable", async () => {
+describe("ensureSession", () => {
+  it("opens an existing conversation only while every touched space is readable", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "ensurevisible" });
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
-    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, []);
     await touch("chs_org_visible", other);
 
     await expect(
-      ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, {
-        spaceId: null,
-        readable: [ctx.defaultSpaceId],
-      }),
+      ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]),
     ).rejects.toMatchObject({ status: 404 });
-    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, {
-      spaceId: null,
-      readable: [ctx.defaultSpaceId, other],
-    });
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, other]);
   });
 
-  it("refuses an organization session id in a space, and a space session id as organization", async () => {
+  it("refuses a session id that belongs to another author, and touches nothing for them", async () => {
     await truncateAll();
-    const ctx = await createTestContext({ orgSlug: "ensurekind" });
-
-    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
-    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+    const ctx = await createTestContext({ orgSlug: "ensureowner" });
+    const stranger = await memberContext(ctx, "member", "operator");
+    await ensureSession("chs_owned", ctx.orgId, ctx.user.id, []);
     await expect(
-      ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: ctx.defaultSpaceId }),
+      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], undefined, ctx.defaultSpaceId),
     ).rejects.toMatchObject({ status: 404 });
+    expect(await touchedBy("chs_owned")).toEqual([]);
+  });
 
-    await ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, { spaceId: ctx.defaultSpaceId });
-    await expect(
-      ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] }),
-    ).rejects.toMatchObject({ status: 404 });
+  it("touches the space the user is looking at: at creation, and on an existing conversation", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "ensuretouch" });
+    const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    const readable = [ctx.defaultSpaceId, other];
+
+    // A new conversation touches it in the same transaction as its insert.
+    await ensureSession("chs_touch", ctx.orgId, ctx.user.id, readable, undefined, other);
+    expect(await touchedBy("chs_touch")).toEqual([other]);
+    // The same space again is idempotent; a space it never touched is brought in.
+    await ensureSession("chs_touch", ctx.orgId, ctx.user.id, readable, undefined, other);
+    await ensureSession(
+      "chs_touch",
+      ctx.orgId,
+      ctx.user.id,
+      readable,
+      undefined,
+      ctx.defaultSpaceId,
+    );
+    expect(await touchedBy("chs_touch")).toEqual([ctx.defaultSpaceId, other].sort());
+    // Without a space (the overview) nothing is touched.
+    await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable);
+    expect(await touchedBy("chs_overview")).toEqual([]);
   });
 });

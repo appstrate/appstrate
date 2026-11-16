@@ -42,17 +42,10 @@ export const chatSessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /**
-     * Space the session belongs to (RBAC spec §5), or NULL for an organization
-     * session (opened from the overview, acting across spaces). Fixed at
-     * creation: a session never changes kind. The spaces an organization
-     * session touched are recorded in `chat_session_spaces`.
-     */
-    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     title: text("title"),
     // Id of the in-flight resumable stream for this session, or null when no
-    // turn is generating. Set when a `POST /api/chat` turn starts, cleared when
-    // it finalizes. The resume endpoint (`GET /sessions/:id/stream`) reconnects
+    // turn is generating. Set when a `POST /api/orgs/:orgId/chat` turn starts, cleared when
+    // it finalizes. The resume endpoint (`GET …/sessions/:id/stream`) reconnects
     // a reloaded client to the live stream by this id; a stale/orphaned id (no
     // live producer in the store) is treated as "no active stream" (204).
     activeStreamId: text("active_stream_id"),
@@ -77,7 +70,6 @@ export const chatSessions = pgTable(
   },
   (table) => [
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
-    index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
     // covering exactly these columns for the FK to attach. Trivially valid —
@@ -87,10 +79,11 @@ export const chatSessions = pgTable(
 );
 
 /**
- * The spaces an organization session (`chat_sessions.space_id IS NULL`) touched:
- * tool calls naming a `space_id`, attachments. The session is opened only while
- * its reader reaches every one of them with `chat:read`; a deleted space drops
- * out of the record by cascade.
+ * The spaces a conversation touched: the space selected when it started or when a turn
+ * was sent, tool calls naming a `space_id`, attachments. A conversation belongs to the
+ * organization and its author, with no owning space; spaces are filters over this record.
+ * It is opened only while its reader reaches every one of them with `chat:read`; a deleted
+ * space drops out of the record by cascade.
  */
 export const chatSessionSpaces = pgTable(
   "chat_session_spaces",

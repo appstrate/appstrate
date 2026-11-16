@@ -31,9 +31,8 @@ import type {
   ReachedSpaces,
   UsageRejection,
 } from "@appstrate/core/module";
-import { ApiError } from "@appstrate/core/api-errors";
+import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
-import type { ChatScope } from "./prompt.ts";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -59,12 +58,12 @@ export function spacesHolding(
 }
 
 /**
- * The spaces an organization session's turn may act in: those of the caller's reach where
- * they hold `chat:write` (the turn is theirs to run), `chat:read` (the session must stay
+ * The spaces a conversation's turn may act in: those of the caller's reach where
+ * they hold `chat:write` (the turn is theirs to run), `chat:read` (the conversation must stay
  * openable for them once the space is touched) and `mcp:read` (the tools can name it). The
  * one set behind the spaces the prompt and the tools advertise, the spaces a call may touch,
  * the bearer's ceiling, the enforced skills, the attachments and the skills read; a space
- * outside it is neither listed nor acted in. Visibility of a session stays `chat:read`.
+ * outside it is neither listed nor acted in. Visibility of a conversation stays `chat:read`.
  */
 export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
   return spaces.filter((space) =>
@@ -73,18 +72,30 @@ export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableS
 }
 
 /**
- * The skills a scope's conversations require, read with `load` per space. A space
- * scope reads its own. An organization scope reads every space of its acting set (the
+ * The space the user is looking at (`spaceId` of a conversation's creation or turn), which
+ * must be one of the acting set: a 400 naming the field otherwise.
+ */
+export function actingSpace(
+  reachable: readonly ReachableSpaceGrant[],
+  spaceId: string,
+): ReachableSpaceGrant {
+  const space = actingSpaces(reachable).find((candidate) => candidate.id === spaceId);
+  if (!space)
+    throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+  return space;
+}
+
+/**
+ * The skills the conversations require, read with `load` per space of the acting set (the
  * turn that injects them is gated the same), one entry per package — the first space in
  * reach order that has a published version of it, else the first — sorted by package id;
  * a space whose read fails fails the whole read.
  */
 export async function enforcedSkillsOf<T extends { packageId: string; version: string | null }>(
-  scope: ChatScope,
+  reachable: readonly ReachableSpaceGrant[],
   load: (spaceId: string) => Promise<T[]>,
 ): Promise<T[]> {
-  if (scope.kind === "space") return load(scope.spaceId);
-  const perSpace = await Promise.all(actingSpaces(scope.reachable).map((space) => load(space.id)));
+  const perSpace = await Promise.all(actingSpaces(reachable).map((space) => load(space.id)));
   const byPackage = new Map<string, T>();
   for (const skill of perSpace.flat()) {
     const kept = byPackage.get(skill.packageId);
@@ -156,7 +167,7 @@ export interface ChatPlatformDeps {
     userId: string;
   }): Promise<UsageRejection | null>;
   /**
-   * The space's enforced skills, read with the platform's authority: a member
+   * A space's enforced skills, read with the platform's authority: a member
    * without `skills:read` still gets them. A failure rejects with a 503 so the
    * turn is refused rather than run without them.
    */
@@ -172,7 +183,7 @@ export interface ChatPlatformDeps {
 }
 
 /**
- * A failed read of the space's enforced skills, as a 503. An `ApiError` cause
+ * A failed read of a space's enforced skills, as a 503. An `ApiError` cause
  * (a lost archive) names the skill, so its detail is kept: that fault does not
  * pass with a retry, and an admin must know which skill to release.
  */
@@ -184,7 +195,7 @@ function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string)
       status: 503,
       code: "enforced_skills_unavailable",
       title: "Service Unavailable",
-      detail: `The skills this space requires in its conversations could not be loaded. ${why}`,
+      detail: `The skills the spaces this conversation can act in require could not be loaded. ${why}`,
       cause,
     });
   });

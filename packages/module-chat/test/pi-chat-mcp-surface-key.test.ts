@@ -4,19 +4,20 @@
  * The invariant `mcp-surface-cache.ts` rests on, enforced against the REAL
  * platform MCP server: what the chat's handshake learns — the server
  * `instructions` and every tool descriptor — is a function of
- * `platformMcpSurfaceKey` alone. Callers that differ in everything else (org,
- * user, org role, space, injected skills, a role preview) but carry the same
- * permission list get byte-identical answers, so one caller's cached surface is
- * exactly what the server would have told the next.
+ * `platformMcpSurfaceKey` alone. Callers that differ in everything else (user,
+ * injected skills) but reach the same spaces with the same permission list get
+ * byte-identical answers, so one caller's cached surface is exactly what the server
+ * would have told the next.
  *
- * If the server ever starts writing per-request content (an id, a space name,
- * the injected skills) into a descriptor or the instructions, the equality
- * below fails, and the key has to grow before the cache may serve it. The
- * control at the end proves the comparison can fail at all.
+ * If the server ever starts writing per-request content (an id, the injected
+ * skills) into a descriptor or the instructions beyond what the key names, the
+ * equality below fails, and the key has to grow before the cache may serve it.
+ * The controls prove the comparison can fail at all.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import type { ReachableSpaceGrant } from "@appstrate/core/module";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
@@ -25,7 +26,6 @@ import {
   memberContext,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { orgPermissions, presetPermissions } from "../../../apps/api/src/lib/permissions.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
@@ -44,14 +44,30 @@ const platformFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
 interface Caller {
   ctx: TestContext;
   orgRole: "owner" | "member";
-  spaceId: string;
+  /** The spaces the caller reaches, as the router's middleware reads them. */
+  spaces: ReachableSpaceGrant[];
   viewAs?: unknown;
   injectedSkills?: InjectedSkills;
 }
 
+/** The caller's one space, with the permissions it holds there. */
+const reachOf = (
+  ctx: TestContext,
+  role: string,
+  permissions: readonly string[],
+): ReachableSpaceGrant[] => [
+  {
+    id: ctx.defaultSpaceId,
+    name: "Default",
+    role,
+    permissions: [...permissions],
+    credentialProxyOpen: false,
+  },
+];
+
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
 async function handshake(caller: Caller, permissions: readonly string[]) {
-  const url = platformMcpUrl(ORIGIN, caller.ctx.orgId, caller.spaceId);
+  const url = platformMcpUrl(ORIGIN, caller.ctx.orgId);
   const token = mintMcpLoopbackToken({
     userId: caller.ctx.user.id,
     email: caller.ctx.user.email,
@@ -68,7 +84,11 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
       Authorization: `Bearer ${token}`,
       "x-org-id": caller.ctx.orgId,
     },
-    spaceId: caller.spaceId,
+    organization: {
+      spaces: caller.spaces,
+      touch: async () => {},
+      spaceOfUri: async () => undefined,
+    },
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
@@ -82,7 +102,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     } as unknown as ExtensionAPI;
     for (const factory of built.extensionFactories) factory(pi);
     return {
-      key: platformMcpSurfaceKey(url, permissions),
+      key: platformMcpSurfaceKey(url, permissions, caller.spaces),
       instructions: built.instructions ?? "",
       tools: JSON.stringify(tools),
     };
@@ -104,36 +124,22 @@ beforeEach(async () => {
 });
 
 describe("platform MCP surface key purity", () => {
-  it("answers every caller with the same key byte-identically", async () => {
-    const otherSpaceA = await seedSpace({ orgId: ownerA.orgId, name: "Elsewhere" });
+  it("answers callers with the same key byte-identically", async () => {
     const callers: Caller[] = [
-      { ctx: ownerA, orgRole: "owner", spaceId: ownerA.defaultSpaceId },
-      // Another space of the same org, a skill injected into the turn.
+      { ctx: ownerA, orgRole: "owner", spaces: reachOf(ownerA, "owner", grant) },
+      // The same reach, a skill injected into the turn.
       {
         ctx: ownerA,
         orgRole: "owner",
-        spaceId: otherSpaceA.id,
+        spaces: reachOf(ownerA, "owner", grant),
         injectedSkills: {
           skills: {
             "@purity/tone": {
               definition: "published",
               version: "1.0.0",
-              spaceId: otherSpaceA.id,
+              spaceId: ownerA.defaultSpaceId,
             },
           },
-        },
-      },
-      // Another org, another user, another org role.
-      { ctx: builderB, orgRole: "member", spaceId: builderB.defaultSpaceId },
-      // The owner previewing the builder role.
-      {
-        ctx: ownerA,
-        orgRole: "member",
-        spaceId: ownerA.defaultSpaceId,
-        viewAs: {
-          orgId: ownerA.orgId,
-          orgRole: "member",
-          space: { spaceId: ownerA.defaultSpaceId, role: { kind: "preset", preset: "builder" } },
         },
       },
     ];
@@ -150,7 +156,11 @@ describe("platform MCP surface key purity", () => {
   });
 
   it("answers a different permission list differently, under a different key", async () => {
-    const caller: Caller = { ctx: ownerA, orgRole: "owner", spaceId: ownerA.defaultSpaceId };
+    const caller: Caller = {
+      ctx: ownerA,
+      orgRole: "owner",
+      spaces: reachOf(ownerA, "owner", grant),
+    };
     const withAuthoring = await handshake(caller, grant);
     const withoutAuthoring = await handshake(
       caller,
@@ -158,5 +168,19 @@ describe("platform MCP surface key purity", () => {
     );
     expect(withoutAuthoring.key).not.toBe(withAuthoring.key);
     expect(withoutAuthoring.instructions).not.toBe(withAuthoring.instructions);
+  });
+
+  it("answers callers reaching other spaces differently, under a different key", async () => {
+    const mine = await handshake(
+      { ctx: ownerA, orgRole: "owner", spaces: reachOf(ownerA, "owner", grant) },
+      grant,
+    );
+    const theirs = await handshake(
+      { ctx: builderB, orgRole: "member", spaces: reachOf(builderB, "builder", grant) },
+      grant,
+    );
+    expect(theirs.key).not.toBe(mine.key);
+    // Every space-acting tool lists the spaces in its `space_id`.
+    expect(theirs.tools).not.toBe(mine.tools);
   });
 });

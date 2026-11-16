@@ -4,7 +4,7 @@
  * Explicit-stop registry: maps an in-flight stream id to the AbortController that
  * cancels its generation. Disconnect ≠ stop — a client disconnect must NOT abort
  * generation (that was the data-loss bug), so only an explicit stop request
- * (`POST /api/chat/sessions/:id/stop`) reaches here.
+ * (`POST /api/orgs/:orgId/chat/sessions/:id/stop`) reaches here.
  *
  * In-process only. Multi-instance stop (broadcasting an abort to whichever node
  * owns the producer) would ride the platform's existing cancel Pub/Sub — a

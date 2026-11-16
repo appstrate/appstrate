@@ -1031,146 +1031,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
-         */
-        post: operations["streamChat"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/enforced-skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the skills the space enforces in chat
-         * @description The skills the current space imposes on every chat conversation, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. Names only — the content is never returned here. Sorted by id.
-         */
-        get: operations["listChatEnforcedSkills"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List chat sessions
-         * @description List the caller's chat sessions in the current space (`X-Space-Id`), most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
-         */
-        get: operations["listChatSessions"];
-        put?: never;
-        /** Create a chat session */
-        post: operations["createChatSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/sessions/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a chat session with its messages */
-        get: operations["getChatSession"];
-        put?: never;
-        post?: never;
-        /** Delete a chat session */
-        delete: operations["deleteChatSession"];
-        options?: never;
-        head?: never;
-        /** Rename a chat session */
-        patch: operations["renameChatSession"];
-        trace?: never;
-    };
-    "/api/chat/sessions/{id}/read": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Mark a chat session read
-         * @description Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.
-         */
-        put: operations["markChatSessionRead"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/sessions/{id}/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stop an in-progress chat generation
-         * @description Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.
-         */
-        post: operations["stopChatStream"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/sessions/{id}/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Resume an in-flight chat turn
-         * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
-         */
-        get: operations["resumeChatStream"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/credential-proxy/connections": {
         parameters: {
             query?: never;
@@ -3210,9 +3070,9 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A session id that belongs to a space session is a 404. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). `spaceId` is the space the user is looking at: the default of a request that names none (never a pin), which an existing conversation touches before the turn acts; absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
-        post: operations["streamOrgChat"];
+        post: operations["streamChat"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3227,10 +3087,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the skills the spaces of an organization session enforce in chat
-         * @description The skills the spaces an organization session may act in impose on its conversations, one entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
+         * List the skills the spaces enforce in chat
+         * @description The skills the spaces a conversation can act in impose on its turns, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. One entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
          */
-        get: operations["listOrgChatEnforcedSkills"];
+        get: operations["listChatEnforcedSkills"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3248,12 +3108,15 @@ export interface paths {
         };
         /**
          * List chat sessions
-         * @description List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.
+         * @description List every conversation the caller can open in the organization, most recent activity (`updatedAt`) first: their own whose touched spaces they all reach with `chat:read`; with `?spaceId=`, those that touched that space. Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
          */
-        get: operations["listOrgChatSessions"];
+        get: operations["listChatSessions"];
         put?: never;
-        /** Create a chat session */
-        post: operations["createOrgChatSession"];
+        /**
+         * Create a chat session
+         * @description Starts a conversation of the organization and its author. With `spaceId` — the space the user is looking at, which must be one of the spaces the conversation can act in (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together; else a 400 naming the field) — the conversation touches it at creation, so it is listed in that space before anything else. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
+         */
+        post: operations["createChatSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3268,15 +3131,15 @@ export interface paths {
             cookie?: never;
         };
         /** Get a chat session with its messages */
-        get: operations["getOrgChatSession"];
+        get: operations["getChatSession"];
         put?: never;
         post?: never;
         /** Delete a chat session */
-        delete: operations["deleteOrgChatSession"];
+        delete: operations["deleteChatSession"];
         options?: never;
         head?: never;
         /** Rename a chat session */
-        patch: operations["renameOrgChatSession"];
+        patch: operations["renameChatSession"];
         trace?: never;
     };
     "/api/orgs/{orgId}/chat/sessions/{id}/read": {
@@ -3291,7 +3154,7 @@ export interface paths {
          * Mark a chat session read
          * @description Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.
          */
-        put: operations["markOrgChatSessionRead"];
+        put: operations["markChatSessionRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3312,7 +3175,7 @@ export interface paths {
          * Stop an in-progress chat generation
          * @description Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.
          */
-        post: operations["stopOrgChatStream"];
+        post: operations["stopChatStream"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3330,7 +3193,7 @@ export interface paths {
          * Resume an in-flight chat turn
          * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
          */
-        get: operations["resumeOrgChatStream"];
+        get: operations["resumeChatStream"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4460,7 +4323,7 @@ export interface paths {
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
          *
-         *     Channel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the caller's own rows — those of the stream's space, and the org-scoped ones of its org (`spaceId: null`) — a session always receives it, an API key needs `integrations:read`. A channel the caller may not receive is dropped from the subscription; the stream is refused with 403 only when none of the requested channels (every channel, when `channels` is omitted) remains.
+         *     Channel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, as every chat route does; an API key never holds it. `connection_update` carries only the caller's own rows — those of the stream's space, and the org-scoped ones of its org (`spaceId: null`) — a session always receives it, an API key needs `integrations:read`. A channel the caller may not receive is dropped from the subscription; the stream is refused with 403 only when none of the requested channels (every channel, when `channels` is omitted) remains.
          *
          *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
@@ -6158,18 +6021,16 @@ export interface components {
             title?: string | null;
             /** @description Whether a turn is currently generating in this conversation. */
             generating: boolean;
-            /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
+            /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read. */
             unread: boolean;
             /**
-             * @description How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the space enforces (GET /api/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/chat).
+             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the spaces enforce (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
              * @enum {string}
              */
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
-            /** @description The space the session belongs to, fixed at creation. `null` for an organization session (opened from the overview, acting across spaces). */
-            spaceId: string | null;
-            /** @description The spaces an organization session touched (tool calls naming a `space_id`, attachments); always empty for a space session. An organization session is listed and opened only while the caller reaches every one of them with `chat:read`. */
+            /** @description The spaces the conversation touched: the space selected when it started or when a turn was sent, tool calls naming a `space_id`, attachments. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`. */
             space_ids: string[];
             /** Format: date-time */
             createdAt: string;
@@ -11223,408 +11084,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-        };
-    };
-    streamChat: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Org model (preset id) override; defaults to the org default model. */
-                "X-Model-Id"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    messages: Record<string, never>[];
-                    modelId?: string;
-                    generation?: components["schemas"]["ModelGenerationSettings"];
-                    /** @description Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them. */
-                    package_authoring?: boolean;
-                    /**
-                     * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
-                     * @enum {string}
-                     */
-                    skill_mode?: "auto" | "manual" | "strict";
-                    /** @description The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent. */
-                    pinned_skills?: string[];
-                    /** @description Session id (the assistant-ui thread id) */
-                    id?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description AI SDK UIMessage stream (text/event-stream) */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
-            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
-            400: components["responses"]["ValidationError"];
-            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
-            402: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
-            429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    listChatEnforcedSkills: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Enforced skills */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: {
-                            /** @description `@scope/name` package id */
-                            id: string;
-                            /** @description Display name, else the id */
-                            name: string;
-                            /** @description Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable). */
-                            version: string | null;
-                        }[];
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (120/min per caller) */
-            429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the space's enforced skills could not be loaded. RFC 9457 problem+json. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    listChatSessions: {
-        parameters: {
-            query?: {
-                /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
-                limit?: number;
-                /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
-                q?: string;
-                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
-                startingAfter?: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sessions page */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    Link: components["headers"]["Link"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["ChatSession"][];
-                        /** @description True when older sessions follow this page. */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createChatSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    title?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Session created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChatSession"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (30/min per caller) */
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    getChatSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Session with full message tree */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChatSession"] & {
-                        messages: components["schemas"]["ChatMessage"][];
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteChatSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Session deleted (messages cascade) */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    renameChatSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    title: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Session renamed */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    markChatSessionRead: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Session marked read */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Rate limited (120/min per caller) */
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    stopChatStream: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Stop signal accepted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Rate limited (60/min per caller) */
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    resumeChatStream: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description AI SDK UIMessage stream (text/event-stream) */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
-            /** @description No active stream to resume */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (120/min per caller) */
-            429: components["responses"]["RateLimited"];
         };
     };
     listCredentialProxyConnections: {
@@ -20785,7 +20244,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    streamOrgChat: {
+    streamChat: {
         parameters: {
             query?: never;
             header?: {
@@ -20803,6 +20262,8 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
+                    /** @description The space the user is looking at, one of the spaces the conversation can act in (else a 400 naming the field): the default of a request naming no space, touched by the conversation before the turn acts. Absent from the overview. */
+                    spaceId?: string;
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them. */
                     package_authoring?: boolean;
@@ -20854,7 +20315,7 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the session may act in could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the skills the acting spaces enforce could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20865,7 +20326,7 @@ export interface operations {
             };
         };
     };
-    listOrgChatEnforcedSkills: {
+    listChatEnforcedSkills: {
         parameters: {
             query?: never;
             header?: never;
@@ -20902,7 +20363,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the session may act in could not be loaded. RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the conversation may act in could not be loaded. RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20913,14 +20374,16 @@ export interface operations {
             };
         };
     };
-    listOrgChatSessions: {
+    listChatSessions: {
         parameters: {
             query?: {
                 /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
                 limit?: number;
+                /** @description Keep the conversations that touched this space, which the caller must read with `chat:read` (else a 400 naming `spaceId`). The cursor and the page size apply within the filtered list. */
+                spaceId?: string;
                 /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
                 q?: string;
-                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's listed sessions is a 400. */
+                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this (filtered) list is a 400. */
                 startingAfter?: string;
             };
             header?: never;
@@ -20954,7 +20417,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    createOrgChatSession: {
+    createChatSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -20968,6 +20431,8 @@ export interface operations {
             content: {
                 "application/json": {
                     title?: string;
+                    /** @description The space the user is looking at: the conversation touches it at creation. Absent from the overview. */
+                    spaceId?: string;
                 };
             };
         };
@@ -20989,7 +20454,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    getOrgChatSession: {
+    getChatSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -21019,7 +20484,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    deleteOrgChatSession: {
+    deleteChatSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -21043,7 +20508,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    renameOrgChatSession: {
+    renameChatSession: {
         parameters: {
             query?: never;
             header?: never;
@@ -21074,7 +20539,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    markOrgChatSessionRead: {
+    markChatSessionRead: {
         parameters: {
             query?: never;
             header?: never;
@@ -21100,7 +20565,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    stopOrgChatStream: {
+    stopChatStream: {
         parameters: {
             query?: never;
             header?: never;
@@ -21126,7 +20591,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    resumeOrgChatStream: {
+    resumeChatStream: {
         parameters: {
             query?: never;
             header?: never;

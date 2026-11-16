@@ -61,7 +61,7 @@ const PROMPTS = [
   "Summarize in one sentence why automated tests are worth having.",
 ];
 
-/** `/api/chat` allows 20 turns a minute per user. */
+/** The chat turn route allows 20 turns a minute per user. */
 const CHAT_RATE_LIMIT_INTERVAL_MS = 60_000 / 20;
 
 // ─── arguments ──────────────────────────────────────────────────────────────

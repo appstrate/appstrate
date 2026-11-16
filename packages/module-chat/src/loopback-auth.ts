@@ -11,7 +11,7 @@
  *   - the signing secret is generated in-memory at module init and never
  *     leaves the process (no persistence, no transmission);
  *   - tokens are short-lived and carry exactly the caller's identity
- *     (already authenticated by the platform pipeline on the /api/chat
+ *     (already authenticated by the platform pipeline on the chat turn
  *     request) — no privilege amplification; the strategy therefore declares
  *     `principalKind: "user"`, so personal spaces and per-principal grants reach
  *     the engine's turn exactly as they reach the caller's own request;
@@ -157,10 +157,10 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own `/api/mcp/o/:org/s/:space` connection.
+ * its own `/api/mcp/o/:org` connection.
  *
- * `permissions` MUST be the caller's already-resolved permission set (from
- * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process
+ * `permissions` MUST be the caller's already-resolved permission set (the union over
+ * the conversation's acting set): the MCP meta-tools re-enter the platform in-process
  * and re-authorize each underlying operation against exactly this set, so
  * carrying the caller's own permissions (narrowed by `turnPermissions` when the
  * turn may not author agents) never amplifies beyond what the caller could

@@ -50,7 +50,6 @@ async function createSession(): Promise<string> {
   await db.insert(chatSessions).values({
     id,
     orgId: ctx.orgId,
-    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     title: null,
     activeStreamId: null,

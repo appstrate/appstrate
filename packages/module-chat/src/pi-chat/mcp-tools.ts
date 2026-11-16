@@ -15,7 +15,7 @@
  * run progresses) while the tool result stays blocked on completion — the same
  * behaviour the live run card needs. `read_resource` reads a resource of the
  * platform server (a skill's files, by `skill://` URI) through `resources/read`,
- * and `list_skills` lists the space's skills through `skills/list`.
+ * and `list_skills` lists the acting spaces' skills through `skills/list`.
  */
 
 import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-result";
@@ -157,9 +157,9 @@ export interface PiTurnBudget {
 }
 
 /**
- * What an organization connection (`/api/mcp/o/:org`, whose space-acting tools
- * each take a `space_id`) needs from its session: the spaces a call may name,
- * and the record of the spaces a session touched.
+ * What the organization connection (`/api/mcp/o/:org`, whose space-acting tools
+ * each take a `space_id`) needs from its conversation: the spaces a call may name,
+ * and the record of the spaces the conversation touched.
  */
 export interface OrganizationSpaces {
   spaces: readonly NamedSpace[];
@@ -173,16 +173,11 @@ export interface OrganizationSpaces {
   spaceOfUri(uri: string): Promise<string | undefined>;
 }
 
-/**
- * How the connection names its space: pinned by its URL (`run_and_wait`'s REST hops
- * carry it in `X-Space-Id`), or per call on the organization endpoint.
- */
-export type PlatformMcpSpaces =
-  { spaceId: string } | { spaceId: null; organization: OrganizationSpaces };
-
-type BuildPlatformMcpToolsOptions = PlatformMcpSpaces & {
-  /** Platform MCP endpoint (`/api/mcp/o/:org[/s/:space]?context=injected`). */
+type BuildPlatformMcpToolsOptions = {
+  /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
   url: string;
+  /** The spaces a call may name: each space-acting call takes its `space_id`. */
+  organization: OrganizationSpaces;
   /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
@@ -334,13 +329,13 @@ export async function buildPlatformMcpTools(
   };
 
   const runOrigin = new URL(opts.url).origin;
-  const organization = opts.spaceId === null ? opts.organization : undefined;
+  const { organization } = opts;
   const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
           headers: opts.headers,
-          space: opts.spaceId === null ? opts.organization : { spaceId: opts.spaceId },
+          organization,
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,
@@ -390,7 +385,7 @@ function makeForwardExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
-  organization?: OrganizationSpaces,
+  organization: OrganizationSpaces,
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -404,8 +399,8 @@ function makeForwardExtension(
       async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        // On the organization endpoint the call names its space: recorded before it is made.
-        if (organization && typeof args.space_id === "string") {
+        // The call names its space: recorded before it is made.
+        if (typeof args.space_id === "string") {
           await organization.touch(args.space_id);
         }
         const client = await untilAborted(getClient(), callSignal);
@@ -431,7 +426,7 @@ function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
-  organization?: OrganizationSpaces,
+  organization: OrganizationSpaces,
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -457,9 +452,9 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        // A resource of a space the organization session reads from touches it.
-        const resourceSpace = organization ? await organization.spaceOfUri(uri) : undefined;
-        if (organization && resourceSpace) await organization.touch(resourceSpace);
+        // A resource of a space the conversation reads from touches it.
+        const resourceSpace = await organization.spaceOfUri(uri);
+        if (resourceSpace) await organization.touch(resourceSpace);
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
         const content = result.contents.map((c) => ({
@@ -489,7 +484,7 @@ function makeListSkillsExtension(
       name: LIST_SKILLS_TOOL,
       label: LIST_SKILLS_TOOL,
       description:
-        'List the skills this conversation can read: those of the current space, or in an organization conversation those of every space it can act in. Each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
+        'List the skills this conversation can read: those of every space it can act in. Each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
       parameters: unsafeSchema<{ definition?: "published" | "draft" }>({
         type: "object",
         properties: {
@@ -573,7 +568,7 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
 }
 
 /**
- * The space an organization `run_and_wait` names, with the other arguments, after
+ * The space a `run_and_wait` names, with the other arguments, after
  * recording it on the session; or the refusal the server gives any space-acting tool
  * (`spaceIdRefusal`): the space is never defaulted.
  */
@@ -601,10 +596,10 @@ function makeRunAndWaitExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   ctx: {
     origin: string;
-    /** Auth + org headers; the space rides in `X-Space-Id`, set per call from `space`. */
+    /** Auth + org headers; the space rides in `X-Space-Id`, set per call from the space it names. */
     headers: Record<string, string>;
-    /** The pinned space, or the organization's spaces, one of which each call names. */
-    space: { spaceId: string } | OrganizationSpaces;
+    /** The spaces one of which each call names. */
+    organization: OrganizationSpaces;
     /** Transport for the launch POST and the poll loop — see the option above. */
     fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
@@ -619,13 +614,9 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
-        // Pinned: the URL's space. Organization: the one the call names, taken out of the
-        // arguments (the shared launch refuses an argument it does not declare) and recorded
-        // before anything is launched.
-        const target =
-          "spaceId" in ctx.space
-            ? { spaceId: ctx.space.spaceId, args: params }
-            : await namedSpace(params, ctx.space);
+        // The space the call names, taken out of the arguments (the shared launch refuses an
+        // argument it does not declare) and recorded before anything is launched.
+        const target = await namedSpace(params, ctx.organization);
         if ("refusal" in target) {
           return withTurnBudgetNote(toPiToolResult(target.refusal), ctx.turnBudget);
         }

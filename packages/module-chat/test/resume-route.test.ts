@@ -46,7 +46,7 @@ const DEAD_REDIS = "redis://127.0.0.1:1";
 
 const STALE_MARKER_LOG = "chat resume: cleared stale active stream marker";
 
-describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
+describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () => {
   let ctx: TestContext;
   let infoSpy: ReturnType<typeof mock>;
   const originalInfo = logger.info;
@@ -63,7 +63,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
   });
 
   async function createSession(): Promise<string> {
-    const res = await app.request("/api/chat/sessions", {
+    const res = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -82,7 +82,7 @@ describe("GET /api/chat/sessions/:id/stream — stale marker", () => {
   }
 
   function resume(sessionId: string) {
-    return app.request(`/api/chat/sessions/${sessionId}/stream`, {
+    return app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${sessionId}/stream`, {
       method: "GET",
       headers: authHeaders(ctx),
     });

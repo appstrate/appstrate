@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `GET /api/chat/enforced-skills` — the names the composer shows for the skills
- * the space imposes. Gated like the turn that injects them (`chat:write`), and
+ * `GET /api/orgs/:orgId/chat/enforced-skills` — the names the composer shows for the skills
+ * the spaces a conversation can act in impose. Gated like the turn that injects them (`chat:write`), and
  * never the content, which a member without `skills:read` may not otherwise see.
  */
 
@@ -32,7 +32,7 @@ const app = getTestApp();
 const SKILL_ID = "@chatenforced/house";
 const BODY_MARKER = "HOUSE-BODY-NEVER-ON-THE-WIRE";
 
-describe("GET /api/chat/enforced-skills", () => {
+describe("GET /api/orgs/:orgId/chat/enforced-skills", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -64,9 +64,10 @@ describe("GET /api/chat/enforced-skills", () => {
     await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID, { chatEnforced: true });
   }
 
-  function list(caller: TestContext): Promise<Response> {
-    return app.request("/api/chat/enforced-skills", { headers: authHeaders(caller) });
-  }
+  const list = (caller: TestContext, headers = orgOnlyHeaders(caller)): Promise<Response> =>
+    app.request(`/api/orgs/${caller.orgId}/chat/enforced-skills`, { headers });
+  const ids = async (res: Response) =>
+    ((await res.json()) as { data: { id: string }[] }).data.map((skill) => skill.id);
 
   it("answers an empty list when the space enforces nothing", async () => {
     const res = await list(ctx);
@@ -102,43 +103,32 @@ describe("GET /api/chat/enforced-skills", () => {
     expect((await list(viewer)).status).toBe(403);
   });
 
-  describe("on the organization mount", () => {
-    const listOrg = (caller: TestContext, headers = orgOnlyHeaders(caller)): Promise<Response> =>
-      app.request(`/api/orgs/${caller.orgId}/chat/enforced-skills`, { headers });
-    const ids = async (res: Response) =>
-      ((await res.json()) as { data: { id: string }[] }).data.map((skill) => skill.id);
+  it("answers the union over the spaces where the caller writes the chat, one entry per package", async () => {
+    await seedEnforcedSkill();
+    const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    await seedSpacePackage(other, SKILL_ID, { chatEnforced: true });
+    const res = await list(ctx);
+    expect(res.status).toBe(200);
+    expect(await ids(res)).toEqual([SKILL_ID]);
+  });
 
-    it("answers the union over the spaces where the caller writes the chat, one entry per package", async () => {
-      await seedEnforcedSkill();
-      const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
-      await seedSpacePackage(other, SKILL_ID, { chatEnforced: true });
-      const res = await listOrg(ctx);
-      expect(res.status).toBe(200);
-      expect(await ids(res)).toEqual([SKILL_ID]);
-    });
+  it("leaves out a space where the caller only reads the chat", async () => {
+    await seedEnforcedSkill();
+    // A viewer in the space that enforces it, a runner in another that enforces nothing.
+    const caller = await memberContext(ctx, "member", "viewer");
+    const quiet = (await seedSpace({ orgId: ctx.orgId, name: "Quiet", visibility: "closed" })).id;
+    await seedSpaceMember({ spaceId: quiet, userId: caller.user.id, presetRole: "runner" });
+    expect(await ids(await list(caller))).toEqual([]);
 
-    it("leaves out a space where the caller only reads the chat", async () => {
-      await seedEnforcedSkill();
-      // A viewer in the space that enforces it, a runner in another that enforces nothing.
-      const caller = await memberContext(ctx, "member", "viewer");
-      const quiet = (await seedSpace({ orgId: ctx.orgId, name: "Quiet", visibility: "closed" })).id;
-      await seedSpaceMember({ spaceId: quiet, userId: caller.user.id, presetRole: "runner" });
-      expect(await ids(await listOrg(caller))).toEqual([]);
+    // The runner's own space enforcing it too brings it in.
+    await seedSpacePackage(quiet, SKILL_ID, { chatEnforced: true });
+    expect(await ids(await list(caller))).toEqual([SKILL_ID]);
+  });
 
-      // The runner's own space enforcing it too brings it in.
-      await seedSpacePackage(quiet, SKILL_ID, { chatEnforced: true });
-      expect(await ids(await listOrg(caller))).toEqual([SKILL_ID]);
-    });
-
-    it("refuses a caller who writes the chat in no space, ignores X-Space-Id, and refuses another organization", async () => {
-      const viewer = await memberContext(ctx, "member", "viewer");
-      expect((await listOrg(viewer)).status).toBe(403);
-      expect((await listOrg(ctx, authHeaders(ctx))).status).toBe(200);
-      const foreign = await createTestContext({ orgSlug: "foreignenforced" });
-      expect((await listOrg({ ...ctx, orgId: foreign.orgId }, orgOnlyHeaders(ctx))).status).toBe(
-        403,
-      );
-    });
+  it("ignores X-Space-Id, and refuses another organization", async () => {
+    expect((await list(ctx, authHeaders(ctx))).status).toBe(200);
+    const foreign = await createTestContext({ orgSlug: "foreignenforced" });
+    expect((await list({ ...ctx, orgId: foreign.orgId }, orgOnlyHeaders(ctx))).status).toBe(403);
   });
 
   it("answers a 503 `enforced_skills_unavailable` when the names cannot be read", async () => {
@@ -158,7 +148,9 @@ describe("GET /api/chat/enforced-skills", () => {
         mod.manifest.id === "chat" ? { ...mod, createRouter: () => createChatRouter(deps) } : mod,
       ),
     });
-    const res = await failing.request("/api/chat/enforced-skills", { headers: authHeaders(ctx) });
+    const res = await failing.request(`/api/orgs/${ctx.orgId}/chat/enforced-skills`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(503);
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
     expect(((await res.json()) as { code?: string }).code).toBe("enforced_skills_unavailable");

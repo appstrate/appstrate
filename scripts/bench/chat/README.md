@@ -1,6 +1,6 @@
 # Chat latency benchmark
 
-Measures a chat turn the way a user lives it — from `POST /api/chat` (or the
+Measures a chat turn the way a user lives it — from `POST /api/orgs/:orgId/chat` (or the
 composer's Enter key, in a real Chromium) to the first word on screen and the
 end of the answer — and splits the time into platform overhead and model time.
 
@@ -41,7 +41,7 @@ logs joined to it, what the upstream received, and per-scenario summaries
 Default: `cold,warm-new,follow-up`. `--runs` measured turns per scenario (8),
 `--warmup` discarded turns first (2). A setup boot before the first scenario
 applies the migrations and signs the bench user up, so no measured boot or turn
-pays for either. `/api/chat` allows 20 turns a minute per user, so turns are
+pays for either. The turn route allows 20 turns a minute per user, so turns are
 paced `--min-interval` ms apart (3500; 3000 at least).
 
 ## Making it production-like

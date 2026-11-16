@@ -36,7 +36,7 @@ const readsRuns = (caller: RealtimeCaller) => canReadRuns((p) => caller.permissi
 
 /**
  * Who may receive each channel: who may read its rows over HTTP — a run read
- * (RBAC spec §3.4), the `chat:read` grant of `/api/chat/*`, the ceiling alone of
+ * (RBAC spec §3.4), the `chat:read` grant of `/api/orgs/:orgId/chat/*`, the ceiling alone of
  * `GET /api/me/connections` (§7.1). Total, so no channel ships without a rule.
  */
 const CHANNEL_REQUIREMENTS: Record<RealtimeChannel, (caller: RealtimeCaller) => boolean> = {

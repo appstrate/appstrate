@@ -476,7 +476,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const upA = await stageUpload(scope, ctx.user.id, "in.txt", new TextEncoder().encode("input"));
@@ -510,7 +509,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const upA = await stageUpload(scope, ctx.user.id, "n.txt", new TextEncoder().encode("nested"));
@@ -564,7 +562,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
 
@@ -617,7 +614,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const upload = await stageUpload(
@@ -650,7 +646,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: other.id,
     });
     const runId = await seedRunRow(scope, { chatSessionId: sessionId });
@@ -1023,7 +1018,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: memberB.id,
     });
     const upChat = await stageUpload(
@@ -1313,7 +1307,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: chatSessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const attach = (fileId: string, permissions: ReadonlySet<string>) =>
@@ -1336,15 +1329,14 @@ describe("files service + routes", () => {
     expect((await attach(ownOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${ownOutput.id}`);
   });
 
-  it("an organization session's conversation resolves the files of its runs across the listed spaces", async () => {
+  it("a conversation resolves the files of its runs across the listed spaces", async () => {
     const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
     const otherScope = { orgId: ctx.orgId, spaceId: other.id };
-    // No `space_id`: an organization session belongs to its author alone.
+    // A conversation has no owning space: it belongs to its author alone.
     const sessionId = `chs_${crypto.randomUUID()}`;
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: null,
       userId: ctx.user.id,
     });
     const inDefault = await seedRunRow(scope, { chatSessionId: sessionId });
@@ -1396,7 +1388,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: chatSessionId,
       orgId: ctx.orgId,
-      spaceId: null,
       userId: ctx.user.id,
     });
     const attach = (uri: string, spaces: Array<{ id: string; permissions: ReadonlySet<string> }>) =>
@@ -1446,7 +1437,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: chatSessionId,
       orgId: ctx.orgId,
-      spaceId: null,
       userId: ctx.user.id,
     });
     const upload = await stageUpload(
@@ -1937,7 +1927,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const up = await stageUpload(scope, ctx.user.id, "att.txt", new TextEncoder().encode("attach"));
@@ -1979,7 +1968,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const up = await stageUpload(scope, ctx.user.id, "solo.txt", new TextEncoder().encode("solo"));
@@ -1998,7 +1986,6 @@ describe("files service + routes", () => {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     await expect(

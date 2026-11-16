@@ -83,8 +83,7 @@ interface ResolvedChatSkills {
 /**
  * The skills to inject: the required ones first, in the platform's id order, then the
  * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
- * one budget. `organization`: the required ones come from several spaces, which the
- * notices then do not call "this space". A pin naming an injected enforced skill is dropped silently; one
+ * one budget. A pin naming an injected enforced skill is dropped silently; one
  * whose enforced copy was left out stands as an ordinary pin. `contents` holds
  * the chosen skills active here and read (`null`: answered malformed); any
  * other becomes a notice.
@@ -93,13 +92,12 @@ export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
   enforced: readonly EnforcedChatSkill[],
-  organization: boolean,
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  const requiredBy = organization ? "a space this conversation can act in" : "this space";
+  const requiredBy = "a space this conversation can act in";
   for (const { packageId, version, uri, content } of enforced) {
     // The space its URI names is the one its claim entry binds the skill to.
     const spaceId = uri === null ? undefined : parseSkillUri(uri)?.spaceId;

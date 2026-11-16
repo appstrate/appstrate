@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `POST /api/chat` — the conversational loop, ported from the appstrate-chat
+ * `POST /api/orgs/:orgId/chat` — the conversational loop, ported from the appstrate-chat
  * satellite (routes/chat.ts) with two changes:
  *
  *   1. Identity: the satellite carried two audience-bound OAuth tokens; the
@@ -31,7 +31,7 @@ import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
-import { selfOrigin, forwardedHeaders } from "./self.ts";
+import { selfOrigin } from "./self.ts";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
@@ -55,12 +55,13 @@ import {
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import {
+  actingSpace,
   actingSpaces,
   enforcedSkillsOf,
   spacesHolding,
   type ChatPlatformDeps,
 } from "./platform-services.ts";
-import type { OrganizationSpaces, PlatformMcpSpaces } from "./pi-chat/mcp-tools.ts";
+import type { OrganizationSpaces } from "./pi-chat/mcp-tools.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
@@ -164,6 +165,11 @@ export const chatStreamSchema = z
         withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
       }),
     modelId: z.string().optional(),
+    /**
+     * The space the user is looking at: the default of a request naming no space, which the
+     * conversation touches before the turn acts. Absent in the overview (no default).
+     */
+    spaceId: z.string().min(1).optional(),
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
     package_authoring: z.boolean().optional(),
@@ -254,19 +260,16 @@ export async function handleChatStream(
   const orgId = c.get("orgId");
   const user = c.get("user");
   const requestId = c.get("requestId");
-  // What the mount entered: the session's one space (the scope of every space-scoped
-  // read this turn makes), or, for an organization session, the spaces its author
-  // reaches — of which the acting set is the part the turn may act in; each call of the
-  // turn is decided in the space it names.
-  const scope = c.get("chatScope");
-  const spaceId = scope.kind === "space" ? scope.spaceId : null;
-  // The caller's grants this turn starts from: their set in the entered space, or the
-  // union over their acting set. It is a CEILING on the bearer (each space entry recomputes
-  // `(org ∪ role) ∩ ceiling`, `lib/auth-pipeline.ts`), so no space's grants reach another.
-  const callerPermissions: ReadonlySet<string> =
-    scope.kind === "space"
-      ? c.get("permissions")
-      : new Set(actingSpaces(scope.reachable).flatMap((space) => space.permissions));
+  // The spaces the caller reaches, of which the acting set is the part the turn may act in;
+  // each call of the turn is decided in the space it names.
+  const reachable = c.get("reachable");
+  const acting = actingSpaces(reachable);
+  // The caller's grants this turn starts from: the union over their acting set. It is a
+  // CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
+  // `lib/auth-pipeline.ts`), so no space's grants reach another.
+  const callerPermissions: ReadonlySet<string> = new Set(
+    acting.flatMap((space) => space.permissions),
+  );
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
@@ -278,6 +281,9 @@ export async function handleChatStream(
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
   const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
+  // A space outside the acting set is refused before anything is written.
+  const defaultSpace =
+    body.spaceId === undefined ? undefined : actingSpace(reachable, body.spaceId);
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;
@@ -291,32 +297,28 @@ export async function handleChatStream(
 
   const turnStart = Date.now();
 
-  // An organization session acts in the spaces of its acting set alone (`actingSpaces`) and
-  // records each one it acts in before the act (see `touchSessionSpace`). A space outside the
+  // A conversation acts in the spaces of its acting set alone (`actingSpaces`) and records
+  // each one it acts in before the act (see `touchSessionSpace`). A space outside the
   // set — unknown, unreachable, or reached without one of the grants — is refused: nothing is
   // recorded and the call is not made. Skills are procedures, not data: injecting one touches
   // no space; only a call or a `read_resource` naming a space does.
-  const acting = scope.kind === "organization" ? actingSpaces(scope.reachable) : [];
-  const organization: OrganizationSpaces | undefined =
-    scope.kind === "organization"
-      ? {
-          spaces: acting,
-          touch: async (touchedSpaceId) => {
-            const space = acting.find((candidate) => candidate.id === touchedSpaceId);
-            if (!space) {
-              throw new Error(
-                `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${acting.map((s) => `\`${s.id}\``).join(", ")}).`,
-              );
-            }
-            if (!sessionId || !lastMessage?.id) return;
-            await touchSessionSpace({ id: sessionId, orgId, userId: user.id }, space.id);
-          },
-          spaceOfUri: async (uri) => {
-            const fileId = parseFileUri(uri);
-            return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
-          },
-        }
-      : undefined;
+  const organization: OrganizationSpaces = {
+    spaces: acting,
+    touch: async (touchedSpaceId) => {
+      const space = acting.find((candidate) => candidate.id === touchedSpaceId);
+      if (!space) {
+        throw new Error(
+          `This conversation cannot act in the space \`${touchedSpaceId}\`: it is not one of the spaces it may act in (${acting.map((s) => `\`${s.id}\``).join(", ")}).`,
+        );
+      }
+      if (!sessionId || !lastMessage?.id) return;
+      await touchSessionSpace({ id: sessionId, orgId, userId: user.id }, space.id);
+    },
+    spaceOfUri: async (uri) => {
+      const fileId = parseFileUri(uri);
+      return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
+    },
+  };
 
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
@@ -348,21 +350,16 @@ export async function handleChatStream(
           sessionId,
           orgId,
           user.id,
-          scope.kind === "space"
-            ? { spaceId: scope.spaceId }
-            : {
-                spaceId: null,
-                readable: spacesHolding(scope.reachable, "chat:read").map((space) => space.id),
-              },
+          spacesHolding(reachable, "chat:read").map((space) => space.id),
           bodySkills,
+          defaultSpace?.id,
         )
       : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
-  const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
-  // fetch when not wired) for every PLATFORM read the turn makes (/api/models,
-  // /api/spaces, and the MCP hops; `/api/me/context` dispatches directly).
+  // fetch when not wired) for every PLATFORM read the turn makes (/api/models
+  // and the MCP hops).
   // Auth + RBAC run each hop.
   //
   // Inference is the exception and does NOT ride this seam: the proxy binding
@@ -398,11 +395,9 @@ export async function handleChatStream(
   };
 
   // ── Preamble phase A ─────────────────────────────────────────────────────
-  // `listModels` resolves the row the turn binds to. The space is NOT looked up:
-  // the mount's middleware entered it (a space session) or read the reach (an
-  // organization session) before this handler ran, and `chatScope` is that answer —
-  // reading `/api/spaces` again would be a second, divergent one (it also ignored an
-  // API key's pinned space).
+  // `listModels` resolves the row the turn binds to. The spaces are NOT looked up:
+  // the router's middleware read the reach before this handler ran, and `reachable` is
+  // that answer — reading `/api/spaces` again would be a second, divergent one.
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
   // Flipping a switch changes the system prompt and, through the narrowed token, the
@@ -415,29 +410,27 @@ export async function handleChatStream(
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));
     // `auto` shows the whole catalogue in the context and `strict` lists nothing:
-    // only a `manual` turn lists the space's skills on the user's request.
+    // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && skills.skillMode === "manual";
     return { skills, permissions, capabilities, listsSkills };
   });
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // The enforced skills (the space's, or those of every space an organization session
-  // may chat in) depend on nothing but the ids, so they start
+  // The enforced skills (those of every space of the acting set) depend on nothing but the ids, so they start
   // now; phase A's join awaits them, so their 503 refuses the turn before any
   // file is materialized.
-  const enforcedSkills: Promise<EnforcedChatSkill[]> = enforcedSkillsOf(scope, (enforcedIn) =>
+  const enforcedSkills: Promise<EnforcedChatSkill[]> = enforcedSkillsOf(reachable, (enforcedIn) =>
     deps.loadEnforcedSkills(orgId, enforcedIn),
   );
-  // Then the caller-context block. It depends on the space id and the caller's
-  // headers and the session row (the turn's grants and its skills) — never on the
+  // Then the caller-context block. It depends on the reach and the session row
+  // (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
   // resolves, overlapping the model list, the attachment materialization, the
-  // credential resolution and the gate rather than waiting behind them. It is a
-  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
-  // nothing, which is acceptable — what a rejected turn must not do is persist
-  // a user message, open an MCP session or record usage, none of which happen
-  // before the gate.
+  // credential resolution and the gate rather than waiting behind them. A turn the gate
+  // rejects has read its skills for nothing, which is acceptable — what a rejected turn
+  // must not do is persist a user message, open an MCP session for the engine or record
+  // usage, none of which happen before the gate.
   //
   // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
   // connection from `platformMcp.url`, and the MCP server's instructions reach
@@ -457,11 +450,9 @@ export async function handleChatStream(
   > = turn
     .then(({ skills, permissions, capabilities }) =>
       buildCallerContextBlock(c, {
-        origin,
-        headers,
-        scope,
+        reachable,
+        defaultSpaceId: defaultSpace?.id,
         user,
-        deps,
         // UI language forwarded by the client; validated/defaulted in the builder.
         locale: c.req.header("X-Chat-Locale"),
         capabilities,
@@ -477,7 +468,7 @@ export async function handleChatStream(
         openSkillsClient: (signal) =>
           connectPlatformMcp({
             signal,
-            url: platformMcpUrl(origin, orgId, spaceId),
+            url: platformMcpUrl(origin, orgId),
             headers: {
               Authorization: `Bearer ${mintMcpLoopbackToken({
                 userId: user.id,
@@ -549,10 +540,10 @@ export async function handleChatStream(
     // the caller does: an `appfile://` the user picked from the gallery — which
     // `runs:read-all` widens to the whole space's run outputs — must still resolve when
     // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces =
-      scope.kind === "space"
-        ? [{ id: scope.spaceId, permissions: c.get("permissions") }]
-        : acting.map((space) => ({ id: space.id, permissions: new Set(space.permissions) }));
+    const attachmentSpaces = acting.map((space) => ({
+      id: space.id,
+      permissions: new Set(space.permissions),
+    }));
     lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
       return deps.resolveChatAttachment({
         orgId,
@@ -562,7 +553,7 @@ export async function handleChatStream(
         spaces: attachmentSpaces,
         // The space the file belongs to is touched by the session that comes to hold it,
         // before anything is materialized there.
-        beforeResolve: organization?.touch,
+        beforeResolve: organization.touch,
       });
     });
     messages[messages.length - 1] = lastMessage;
@@ -623,7 +614,7 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt(capabilities, scope.kind);
+  let system = buildSystemPrompt(capabilities);
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.
@@ -701,7 +692,7 @@ export async function handleChatStream(
 
   // Generation abort is DECOUPLED from the request connection: a client
   // disconnect must NOT cancel generation (that was the data-loss bug). Only an
-  // explicit stop (POST /api/chat/sessions/:id/stop) aborts this controller.
+  // explicit stop (POST …/chat/sessions/:id/stop) aborts this controller.
   const generation = new AbortController();
   registerStopController(streamId, generation);
 
@@ -742,13 +733,11 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org/s/:space`, or
-  // `/api/mcp/o/:org` for an organization session), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
-  // permissions (the caller's resolved set — over their reach for an organization
-  // session — narrowed by `turnPermissions`) and
+  // permissions (the union over the caller's acting set, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
   const mcpToken = mintMcpLoopbackToken(
     {
@@ -770,10 +759,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  const mcpUrl = platformMcpUrl(origin, orgId, spaceId);
-  const platformSpaces: PlatformMcpSpaces = organization
-    ? { spaceId: null, organization }
-    : { spaceId: spaceId! };
+  const mcpUrl = platformMcpUrl(origin, orgId);
   try {
     const response = await finalize(
       runEngine({
@@ -794,17 +780,13 @@ export async function handleChatStream(
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,
-          ...platformSpaces,
+          organization,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
-          surfaceKey: platformMcpSurfaceKey(
-            mcpUrl,
-            permissions,
-            scope.kind === "organization" ? scope.reachable : undefined,
-          ),
+          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, reachable),
           listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).

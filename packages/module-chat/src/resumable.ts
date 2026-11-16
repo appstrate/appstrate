@@ -98,7 +98,7 @@ const RECORDING_RELEASE_GRACE_MS = 10_000;
 /**
  * Retries ioredis attempts per command before rejecting.
  *
- * This client sits on a REQUEST path — `GET /api/chat/sessions/:id/stream`
+ * This client sits on a REQUEST path — `GET /api/orgs/:orgId/chat/sessions/:id/stream`
  * reads through it — so it takes the same finite budget as every other
  * request-path client in the platform (`apps/api/src/lib/redis.ts`). `null`
  * ("retry forever", what this store used to pass) means that while Redis is

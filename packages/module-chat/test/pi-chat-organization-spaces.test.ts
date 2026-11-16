@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The tool layer of an organization session: the connection is the organization
+ * The tool layer of a conversation: the connection is the organization
  * endpoint, whose space-acting tools each take a `space_id`.
  *
  * The local `run_and_wait` takes the space from its arguments (refusing a missing
  * one in the server's own words), strips it before the shared launch, sends it as
  * `X-Space-Id` on the REST hops, and records it on the session first. A forwarded
- * tool and a `read_resource` record the space they name the same way. A space
- * session's pinned connection is unchanged.
+ * tool and a `read_resource` record the space they name the same way.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -131,14 +130,11 @@ function organizationOf(events: string[]): OrganizationSpaces {
   };
 }
 
-async function tools(
-  transport: ReturnType<typeof transcript>,
-  space: { spaceId: string } | { spaceId: null; organization: OrganizationSpaces },
-) {
+async function tools(transport: ReturnType<typeof transcript>) {
   const built = await buildPlatformMcpTools({
-    url: `${ORIGIN}/api/mcp/o/org_1${space.spaceId ? `/s/${space.spaceId}` : ""}?context=injected`,
+    url: `${ORIGIN}/api/mcp/o/org_1?context=injected`,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-    ...space,
+    organization: organizationOf(transport.events),
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
@@ -152,13 +148,10 @@ async function tools(
 
 const text = (result: { content: Array<{ text: string }> }) => result.content[0]!.text;
 
-describe("an organization connection's run_and_wait", () => {
+describe("the conversation's run_and_wait", () => {
   it("takes the space from its arguments, strips it, sends it as X-Space-Id, and records it first", async () => {
     const transport = transcript();
-    const { built, tool } = await tools(transport, {
-      spaceId: null,
-      organization: organizationOf(transport.events),
-    });
+    const { built, tool } = await tools(transport);
     try {
       const result = await tool("run_and_wait").execute("call_1", {
         kind: "agent",
@@ -180,10 +173,7 @@ describe("an organization connection's run_and_wait", () => {
 
   it("refuses a missing or unknown space in the server's words, launching and recording nothing", async () => {
     const transport = transcript();
-    const { built, tool } = await tools(transport, {
-      spaceId: null,
-      organization: organizationOf(transport.events),
-    });
+    const { built, tool } = await tools(transport);
     try {
       const missing = JSON.parse(
         text(await tool("run_and_wait").execute("c1", { kind: "agent", name: "demo" })),
@@ -205,32 +195,12 @@ describe("an organization connection's run_and_wait", () => {
       await built.close();
     }
   });
-
-  it("leaves a pinned connection unchanged: the fixed space header, and a space_id is an unknown argument", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport, { spaceId: "spc_alpha" });
-    try {
-      await tool("run_and_wait").execute("c1", { kind: "agent", scope: "@acme", name: "demo" });
-      expect(transport.launches[0]!.spaceHeader).toBe("spc_alpha");
-      expect(transport.polls).toEqual(["spc_alpha"]);
-
-      const refused = JSON.parse(
-        text(await tool("run_and_wait").execute("c2", { kind: "agent", space_id: "spc_beta" })),
-      );
-      expect(refused).toMatchObject({ code: "unknown_argument", arguments: ["space_id"] });
-    } finally {
-      await built.close();
-    }
-  });
 });
 
-describe("an organization connection's forwarded tools and resources", () => {
+describe("the conversation's forwarded tools and resources", () => {
   it("records the space a forwarded call names before dispatching it, and none when it names none", async () => {
     const transport = transcript();
-    const { built, tool } = await tools(transport, {
-      spaceId: null,
-      organization: organizationOf(transport.events),
-    });
+    const { built, tool } = await tools(transport);
     try {
       await tool("invoke_operation").execute("c1", {
         operation_id: "listAgents",
@@ -251,10 +221,7 @@ describe("an organization connection's forwarded tools and resources", () => {
 
   it("records the space of a resource URI it can place, before the read", async () => {
     const transport = transcript();
-    const { built, tool } = await tools(transport, {
-      spaceId: null,
-      organization: organizationOf(transport.events),
-    });
+    const { built, tool } = await tools(transport);
     try {
       await tool("read_resource").execute("c1", {
         uri: "skill://spc_beta/acme/tone/tone/SKILL.md",
@@ -264,17 +231,6 @@ describe("an organization connection's forwarded tools and resources", () => {
       transport.events.length = 0;
       await tool("read_resource").execute("c2", { uri: "appfile://file_unplaced00" });
       expect(transport.events).toEqual(["resources/read"]);
-    } finally {
-      await built.close();
-    }
-  });
-
-  it("records nothing on a pinned connection", async () => {
-    const transport = transcript();
-    const { built, tool } = await tools(transport, { spaceId: "spc_alpha" });
-    try {
-      await tool("invoke_operation").execute("c1", { operation_id: "x", space_id: "spc_beta" });
-      expect(transport.events).toEqual(["tools/call"]);
     } finally {
       await built.close();
     }

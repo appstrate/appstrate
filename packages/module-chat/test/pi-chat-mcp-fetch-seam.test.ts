@@ -23,7 +23,7 @@ import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 
 /** Nothing listens here — see the file header. */
 const ORIGIN = "http://127.0.0.1:1";
-const MCP_URL = `${ORIGIN}/api/mcp/o/org_1/s/spc_1`;
+const MCP_URL = `${ORIGIN}/api/mcp/o/org_1`;
 const RUN_ID = "run_seam_1";
 
 interface RegisteredTool {
@@ -130,7 +130,11 @@ function buildTurn(transport: ReturnType<typeof seamFetch>) {
   return buildPlatformMcpTools({
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-    spaceId: "spc_1",
+    organization: {
+      spaces: [{ id: "spc_1", name: "One", role: "owner" }],
+      touch: async () => {},
+      spaceOfUri: async () => undefined,
+    },
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
@@ -153,6 +157,7 @@ describe("buildPlatformMcpTools fetch seam", () => {
         kind: "agent",
         scope: "@acme",
         name: "demo",
+        space_id: "spc_1",
       });
 
       // The run reached its terminal status, which is only reachable if BOTH
@@ -187,6 +192,7 @@ describe("buildPlatformMcpTools fetch seam", () => {
         kind: "agent",
         scope: "@acme",
         name: "demo",
+        space_id: "spc_1",
         wait: 600,
       });
       const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;

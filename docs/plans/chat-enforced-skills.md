@@ -73,8 +73,7 @@ authority. `listEnforcedChatSkills` answers `EnforcedChatSkillRef
 ## The turn
 
 `handleChatStream` starts the read at the beginning of phase B, in parallel with
-the session upsert, keyed on the scope the mount entered (the session's space, or the acting set of an
-organization session), and awaits it in
+the session upsert, keyed on the acting set (the spaces the router read), and awaits it in
 phase A's join (with the model list and the session row). A 503 therefore
 refuses the turn before attachment materialization, credential resolution, the
 admission gate, the user message, the active-stream marker and the MCP session.
@@ -160,9 +159,9 @@ static per capability set, so the section stays byte-stable per session. An
 injected draft's `<skill>` tag carries `definition="draft"` instead of a
 version, since its `@draft` URI names it by definition.
 
-## `GET /api/chat/enforced-skills`
+## `GET /api/orgs/{orgId}/chat/enforced-skills`
 
-Answers the names for the scope the mount entered:
+Answers the names for the acting set:
 `{ object: "list", data: [{ id, name, version }] }`, read from the database
 through `listEnforcedChatSkills` (no archive download). It never returns
 content, because a member without `skills:read` may call it.
@@ -193,10 +192,10 @@ failure answers the same 503.
   `skills:read`) sees the enforced names in the composer
   (`EnforcedSkillsIndicator`).
 
-## In an organization session
+## Across the acting set
 
-An organization session (`/api/orgs/{orgId}/chat`, #1886) has no one space, so its skills come from every
-space it reaches:
+A conversation (`/api/orgs/{orgId}/chat`, #1886) has no owning space, so its skills come from every
+space it can act in:
 
 - **Enforced skills** are the union of `loadEnforcedSkills` over the acting set (the reachable spaces where
   the caller holds `chat:write`, `chat:read` and `mcp:read`: `actingSpaces`, `platform-services.ts`), read
@@ -209,4 +208,4 @@ space it reaches:
   procedures, not data: injecting one touches no space.
 - **The claim** (`injectedSkillsSchema`) binds each skill to its own space: every entry carries the
   `spaceId` its `skill://<spaceId>/…` URI names, and `resources/read` serves the skill only in a request
-  that entered that space. A space session's claim has the same shape, all entries in its one space.
+  that entered that space.

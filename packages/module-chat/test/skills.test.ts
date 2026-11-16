@@ -33,13 +33,11 @@ const resolve = (
   selection: ChatSkillSelection,
   contents: SkillContent[] = [],
   enforced: EnforcedChatSkill[] = [],
-  organization = false,
 ) =>
   resolveChatSkills(
     selection,
     new Map(contents.map((skill) => [skill.packageId, skill])),
     enforced,
-    organization,
   );
 
 describe("resolveChatSkills", () => {
@@ -148,7 +146,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toEqual([
-      "The skill `@a/house` is required by this space but has no published version to follow.",
+      "The skill `@a/house` is required by a space this conversation can act in but has no published version to follow.",
     ]);
   });
 
@@ -161,7 +159,9 @@ describe("resolveChatSkills — space-enforced skills", () => {
     expect(result.enforced).toEqual([]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/house"]);
     expect(result.notices).toHaveLength(1);
-    expect(result.notices[0]).toContain("is required by this space but does not fit");
+    expect(result.notices[0]).toContain(
+      "is required by a space this conversation can act in but does not fit",
+    );
   });
 
   it("spends the shared budget on the space's skills first", () => {
@@ -190,7 +190,7 @@ describe("resolveChatSkills — space-enforced skills", () => {
     );
     expect(result.enforced.map((s) => s.packageId)).toEqual(["@a/a", "@a/c"]);
     expect(result.notices).toEqual([
-      `The skill \`@a/b\` is required by this space but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
+      `The skill \`@a/b\` is required by a space this conversation can act in but does not fit (11 characters; the injected skills share ${BUDGET}, 10 left).`,
     ]);
   });
 });
@@ -242,12 +242,11 @@ describe("injectedSkills", () => {
     });
   });
 
-  it('names no "space" in an organization session\'s notices about a required skill', () => {
+  it("names the spaces the conversation can act in in the notices about a required skill", () => {
     const result = resolve(
       { skillMode: "auto", pinnedSkills: [] },
       [],
       [enforcedSkill("@a/house", null)],
-      true,
     );
     expect(result.notices).toEqual([
       "The skill `@a/house` is required by a space this conversation can act in but has no published version to follow.",
@@ -259,7 +258,6 @@ describe("injectedSkills", () => {
       { skillMode: "manual", pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
       [],
-      false,
     );
     expect(result.notices).toEqual([
       "The skill `@a/odd` was chosen for this conversation but could not be read.",

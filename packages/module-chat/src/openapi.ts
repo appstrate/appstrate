@@ -36,7 +36,6 @@ export const chatComponentSchemas = {
       "unread",
       "skill_mode",
       "pinned_skills",
-      "spaceId",
       "space_ids",
       "createdAt",
       "updatedAt",
@@ -52,13 +51,13 @@ export const chatComponentSchemas = {
       unread: {
         type: "boolean",
         description:
-          "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
+          "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read.",
       },
       skill_mode: {
         type: "string",
         enum: [...chatSkillModeValues],
         description:
-          "How turns use skills. `auto`: the space's skills are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the space enforces (GET /api/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/chat).",
+          "How turns use skills. `auto`: the skills of the spaces the conversation can act in are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the spaces enforce (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
       },
       pinned_skills: {
         type: "array",
@@ -66,16 +65,11 @@ export const chatComponentSchemas = {
         description:
           "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
       },
-      spaceId: {
-        type: ["string", "null"],
-        description:
-          "The space the session belongs to, fixed at creation. `null` for an organization session (opened from the overview, acting across spaces).",
-      },
       space_ids: {
         type: "array",
         items: { type: "string" },
         description:
-          "The spaces an organization session touched (tool calls naming a `space_id`, attachments); always empty for a space session. An organization session is listed and opened only while the caller reaches every one of them with `chat:read`.",
+          "The spaces the conversation touched: the space selected when it started or when a turn was sent, tool calls naming a `space_id`, attachments. The conversation is listed and opened only while the caller reaches every one of them with `chat:read`.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -106,22 +100,28 @@ export const chatComponentSchemas = {
   },
 } as const;
 
-const spaceChatPaths = {
-  "/api/chat/sessions": {
+export const chatPaths = {
+  "/api/orgs/{orgId}/chat/sessions": {
     get: {
       operationId: "listChatSessions",
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current space (`X-Space-Id`), most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
+        'List every conversation the caller can open in the organization, most recent activity (`updatedAt`) first: their own whose touched spaces they all reach with `chat:read`; with `?spaceId=`, those that touched that space. Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated: when `hasMore` is `true`, pass the last session\'s `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.',
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         {
           name: "limit",
           in: "query",
           description: "Page size. Out-of-range or non-numeric values fall back to 100.",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        },
+        {
+          name: "spaceId",
+          in: "query",
+          description:
+            "Keep the conversations that touched this space, which the caller must read with `chat:read` (else a 400 naming `spaceId`). The cursor and the page size apply within the filtered list.",
+          schema: { type: "string" },
         },
         {
           name: "q",
@@ -134,7 +134,7 @@ const spaceChatPaths = {
           name: "startingAfter",
           in: "query",
           description:
-            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400.",
+            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this (filtered) list is a 400.",
           schema: { type: "string" },
         },
       ],
@@ -167,17 +167,24 @@ const spaceChatPaths = {
       operationId: "createChatSession",
       tags: ["Chat"],
       summary: "Create a chat session",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
+      description:
+        "Starts a conversation of the organization and its author. With `spaceId` — the space the user is looking at, which must be one of the spaces the conversation can act in (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together; else a 400 naming the field) — the conversation touches it at creation, so it is listed in that space before anything else. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).",
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       requestBody: {
         required: false,
         content: {
           "application/json": {
             schema: {
               type: "object",
-              properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              properties: {
+                title: { type: "string", minLength: 1, maxLength: 200 },
+                spaceId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "The space the user is looking at: the conversation touches it at creation. Absent from the overview.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -200,14 +207,13 @@ const spaceChatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}": {
+  "/api/orgs/{orgId}/chat/sessions/{id}": {
     get: {
       operationId: "getChatSession",
       tags: ["Chat"],
       summary: "Get a chat session with its messages",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -243,8 +249,7 @@ const spaceChatPaths = {
       tags: ["Chat"],
       summary: "Rename a chat session",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -272,8 +277,7 @@ const spaceChatPaths = {
       tags: ["Chat"],
       summary: "Delete a chat session",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -283,7 +287,7 @@ const spaceChatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/read": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/read": {
     put: {
       operationId: "markChatSessionRead",
       tags: ["Chat"],
@@ -291,8 +295,7 @@ const spaceChatPaths = {
       description:
         "Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -306,7 +309,7 @@ const spaceChatPaths = {
       },
     },
   },
-  "/api/chat/sessions/{id}/stream": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/stream": {
     get: {
       operationId: "resumeChatStream",
       tags: ["Chat"],
@@ -314,8 +317,7 @@ const spaceChatPaths = {
       description:
         "Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -333,17 +335,14 @@ const spaceChatPaths = {
       },
     },
   },
-  "/api/chat/enforced-skills": {
+  "/api/orgs/{orgId}/chat/enforced-skills": {
     get: {
       operationId: "listChatEnforcedSkills",
       tags: ["Chat"],
-      summary: "List the skills the space enforces in chat",
+      summary: "List the skills the spaces enforce in chat",
       description:
-        "The skills the current space imposes on every chat conversation, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. Names only — the content is never returned here. Sorted by id.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
+        "The skills the spaces a conversation can act in impose on its turns, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. One entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).",
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         "200": {
           description: "Enforced skills",
@@ -382,21 +381,20 @@ const spaceChatPaths = {
           description: "Rate limited (120/min per caller)",
         },
         "503": enforcedSkillsUnavailableResponse(
-          "the space's enforced skills could not be loaded.",
+          "the enforced skills of the spaces the conversation may act in could not be loaded.",
         ),
       },
     },
   },
-  "/api/chat": {
+  "/api/orgs/{orgId}/chat": {
     post: {
       operationId: "streamChat",
       tags: ["Chat"],
       summary: "Run a conversational turn (streaming)",
       description:
-        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the conversation, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). `spaceId` is the space the user is looking at: the default of a request that names none (never a pin), which an existing conversation touches before the turn acts; absent from the overview, where the assistant asks. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         {
           name: "X-Model-Id",
           in: "header",
@@ -419,6 +417,11 @@ const spaceChatPaths = {
                   minItems: 1,
                 },
                 modelId: { type: "string" },
+                spaceId: {
+                  type: "string",
+                  description:
+                    "The space the user is looking at, one of the spaces the conversation can act in (else a 400 naming the field): the default of a request naming no space, touched by the conversation before the turn acts. Absent from the overview.",
+                },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
                 package_authoring: {
                   type: "boolean",
@@ -479,13 +482,13 @@ const spaceChatPaths = {
         },
         "503": {
           description:
-            "`enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
+            "`enforced_skills_unavailable` — the skills the acting spaces enforce could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
           content: problem,
         },
       },
     },
   },
-  "/api/chat/sessions/{id}/stop": {
+  "/api/orgs/{orgId}/chat/sessions/{id}/stop": {
     post: {
       operationId: "stopChatStream",
       tags: ["Chat"],
@@ -493,8 +496,7 @@ const spaceChatPaths = {
       description:
         "Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -509,113 +511,3 @@ const spaceChatPaths = {
     },
   },
 } as const;
-
-type OperationObject = {
-  operationId: string;
-  summary?: string;
-  description?: string;
-  parameters?: readonly { $ref?: string; name?: string; description?: string }[];
-  responses?: Readonly<Record<string, { description?: string }>>;
-  [key: string]: unknown;
-};
-
-/**
- * The session operations the organization mount serves — the same handlers as
- * the space mount, under `/api/orgs/{orgId}/chat`, each with its own operation id.
- */
-const ORG_MOUNT_OPERATION_IDS: Readonly<Record<string, string>> = {
-  listChatSessions: "listOrgChatSessions",
-  createChatSession: "createOrgChatSession",
-  getChatSession: "getOrgChatSession",
-  renameChatSession: "renameOrgChatSession",
-  deleteChatSession: "deleteOrgChatSession",
-  markChatSessionRead: "markOrgChatSessionRead",
-  resumeChatStream: "resumeOrgChatStream",
-  stopChatStream: "stopOrgChatStream",
-  listChatEnforcedSkills: "listOrgChatEnforcedSkills",
-  streamChat: "streamOrgChat",
-};
-
-const ORG_MOUNT_LIST_DESCRIPTION =
-  "List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.";
-
-const ORG_MOUNT_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  listOrgChatSessions: ORG_MOUNT_LIST_DESCRIPTION,
-  listOrgChatEnforcedSkills:
-    "The skills the spaces an organization session may act in impose on its conversations, one entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).",
-  streamOrgChat:
-    "Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A session id that belongs to a space session is a 404. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
-};
-
-const ORG_MOUNT_SUMMARIES: Readonly<Record<string, string>> = {
-  listOrgChatEnforcedSkills:
-    "List the skills the spaces of an organization session enforce in chat",
-};
-
-const ORG_MOUNT_STARTING_AFTER =
-  "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's listed sessions is a 400.";
-
-/** A 503 naming "the space's enforced skills": on this mount they are those of the acting set. */
-function orgMountUnavailableResponse(response: { description?: string }) {
-  const spaces = "the enforced skills of the spaces the session may act in";
-  return {
-    ...response,
-    description: response.description
-      ?.replace("the space's enforced skills", spaces)
-      .replace("the skills the space enforces", spaces),
-  };
-}
-
-function orgMountOperation(operation: OperationObject): OperationObject {
-  const operationId = ORG_MOUNT_OPERATION_IDS[operation.operationId]!;
-  const parameters = (operation.parameters ?? []).flatMap((parameter) =>
-    parameter.$ref === "#/components/parameters/XOrgId"
-      ? [{ $ref: "#/components/parameters/OrgIdPath" }]
-      : parameter.$ref === "#/components/parameters/XSpaceId"
-        ? []
-        : parameter.name === "startingAfter"
-          ? [{ ...parameter, description: ORG_MOUNT_STARTING_AFTER }]
-          : [parameter],
-  );
-  const description = ORG_MOUNT_DESCRIPTIONS[operationId] ?? operation.description;
-  const summary = ORG_MOUNT_SUMMARIES[operationId] ?? operation.summary;
-  const responses = operation.responses
-    ? {
-        ...operation.responses,
-        ...(operation.responses["503"]
-          ? { "503": orgMountUnavailableResponse(operation.responses["503"]) }
-          : {}),
-      }
-    : undefined;
-  return {
-    ...operation,
-    operationId,
-    parameters,
-    ...(summary ? { summary } : {}),
-    ...(description ? { description } : {}),
-    ...(responses ? { responses } : {}),
-  };
-}
-
-const orgChatPaths = Object.fromEntries(
-  Object.entries(spaceChatPaths).flatMap(([path, item]) => {
-    const operations = Object.entries(item).filter(
-      ([, operation]) => (operation as OperationObject).operationId in ORG_MOUNT_OPERATION_IDS,
-    );
-    return operations.length === 0
-      ? []
-      : [
-          [
-            path.replace(/^\/api\/chat(?=\/|$)/, "/api/orgs/{orgId}/chat"),
-            Object.fromEntries(
-              operations.map(([method, operation]) => [
-                method,
-                orgMountOperation(operation as OperationObject),
-              ]),
-            ),
-          ],
-        ];
-  }),
-);
-
-export const chatPaths = { ...spaceChatPaths, ...orgChatPaths };

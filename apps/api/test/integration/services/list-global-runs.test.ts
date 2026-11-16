@@ -159,7 +159,6 @@ describe("listGlobalRuns", () => {
     await db.insert(chatSessions).values({
       id: ownSessionId,
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const linked = await seedPackageRun();

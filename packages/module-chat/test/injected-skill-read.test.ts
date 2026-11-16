@@ -25,8 +25,6 @@ import {
 } from "../../../apps/api/test/helpers/seed.ts";
 import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
-import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
-import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildPlatformMcpTools, connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
@@ -60,10 +58,9 @@ beforeEach(async () => {
   expect(created.status).toBe(201);
 });
 
-/** A strict turn by `user` with `headers`: the real block, then its bearer. */
+/** A strict turn by `user`: the real block, then its bearer. */
 async function strictTurn(
   user: { id: string; email: string; name: string },
-  headers: Record<string, string>,
   granted: string[],
   orgRole: "owner" | "guest",
 ) {
@@ -71,11 +68,16 @@ async function strictTurn(
   const block = await buildCallerContextBlock(
     { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
-      origin: "http://localhost",
-      headers,
-      scope: { kind: "space", spaceId: owner.defaultSpaceId },
+      reachable: [
+        {
+          id: owner.defaultSpaceId,
+          name: "Default",
+          role: orgRole,
+          permissions: [...new Set([...granted, "chat:read"])],
+          credentialProxyOpen: false,
+        },
+      ],
       user,
-      deps: buildChatPlatformDeps(buildModuleInitContext()),
       capabilities: turnCapabilities((p) => permissions.includes(p)),
       permissions,
       skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
@@ -83,7 +85,7 @@ async function strictTurn(
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
       openSkillsClient: () =>
         connectPlatformMcp({
-          url: platformMcpUrl("http://localhost", owner.orgId, owner.defaultSpaceId),
+          url: platformMcpUrl("http://localhost", owner.orgId),
           headers: {
             Authorization: `Bearer ${mintMcpLoopbackToken({
               userId: user.id,
@@ -150,8 +152,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
   it("serves the author's injected draft, then 409s once the draft is edited", async () => {
     const { block, permissions, bearer, unclaimed } = await strictTurn(
       owner.user,
-      authHeaders(owner),
-      ["chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
+      ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
       "owner",
     );
     expect(permissions.some((p) => p.startsWith("skills:"))).toBe(false);
@@ -187,7 +188,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
   it("serves a reader the published version injected", async () => {
     await seedPublishedVersion(SKILL_ID, "1.3.0", { content: skillMd("Published body.") });
     // A guest reading skills through a custom role: `getSkill` serves them the published version.
-    const granted = ["chat:write", "mcp:read", "mcp:invoke", "skills:read"];
+    const granted = ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read"];
     const user = await createTestUser();
     await addOrgMember(owner.orgId, user.id, "guest");
     const role = await seedSpaceRole({ orgId: owner.orgId, permissions: granted });
@@ -198,12 +199,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
       customRoleId: role.id,
     });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer, unclaimed } = await strictTurn(
-      reader,
-      authHeaders({ ...owner, cookie: user.cookie }),
-      granted,
-      "guest",
-    );
+    const { block, bearer, unclaimed } = await strictTurn(reader, granted, "guest");
     const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
     expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" version="1.3.0">`);
     expect(block.injected.skills[SKILL_ID]).toEqual({
@@ -222,7 +218,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
 describe("one skill, the same bytes for the chat, an MCP client and `code sync`", () => {
   it("injects, serves over `resources/read` and archives for `code sync` identical files", async () => {
     await seedPublishedVersion(SKILL_ID, "1.3.0", { content: skillMd("Published body.") });
-    const granted = ["chat:write", "mcp:read", "mcp:invoke", "skills:read"];
+    const granted = ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read"];
     const user = await createTestUser();
     await addOrgMember(owner.orgId, user.id, "guest");
     const role = await seedSpaceRole({ orgId: owner.orgId, permissions: granted });
@@ -234,7 +230,7 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
     });
     const headers = authHeaders({ ...owner, cookie: user.cookie });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer } = await strictTurn(reader, headers, granted, "guest");
+    const { block, bearer } = await strictTurn(reader, granted, "guest");
     const uri = injectedUri(block.text);
 
     // An MCP client: the entry, then every file it lists.
@@ -288,11 +284,11 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
   /** The Pi tools of a manual turn by the owner, its bearer minted from the turn's set. */
   async function manualTurn(authoring: boolean) {
     const permissions = turnPermissions(
-      ["chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
+      ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
       { authoring, skillMode: "manual" },
     );
     const turn = await buildPlatformMcpTools({
-      url: platformMcpUrl("http://localhost", owner.orgId, owner.defaultSpaceId),
+      url: platformMcpUrl("http://localhost", owner.orgId),
       headers: {
         Authorization: `Bearer ${mintMcpLoopbackToken({
           userId: owner.user.id,
@@ -304,7 +300,11 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
         })}`,
         "x-org-id": owner.orgId,
       },
-      spaceId: owner.defaultSpaceId,
+      organization: {
+        spaces: [],
+        touch: async () => {},
+        spaceOfUri: async () => undefined,
+      },
       writeChunk: () => {},
       signal: new AbortController().signal,
       turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },

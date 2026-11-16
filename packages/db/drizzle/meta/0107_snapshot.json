@@ -9859,12 +9859,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -9941,27 +9935,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_chat_sessions_space_user": {
-          "name": "idx_chat_sessions_space_user",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "uq_chat_sessions_id_org_id": {
           "name": "uq_chat_sessions_id_org_id",
           "columns": [
@@ -9999,15 +9972,6 @@
           "tableFrom": "chat_sessions",
           "tableTo": "user",
           "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "chat_sessions_space_id_spaces_id_fk": {
-          "name": "chat_sessions_space_id_spaces_id_fk",
-          "tableFrom": "chat_sessions",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"

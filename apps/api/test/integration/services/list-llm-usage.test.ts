@@ -37,7 +37,6 @@ describe("listLlmUsage / getSettledFrontierId", () => {
     await db.insert(chatSessions).values({
       id: "chs_meter_1",
       orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     await db.insert(llmUsage).values([

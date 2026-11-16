@@ -44,7 +44,7 @@ import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
-import { buildPlatformMcpTools, type PlatformMcpSpaces } from "./mcp-tools.ts";
+import { buildPlatformMcpTools, type OrganizationSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -88,8 +88,10 @@ export interface PiChatInput {
    * app directly rather than opening real loopback sockets to this same process.
    * Omitted → global `fetch`.
    */
-  platformMcp: PlatformMcpSpaces & {
+  platformMcp: {
     url: string;
+    /** The spaces a call may name, and the record of those the conversation touched. */
+    organization: OrganizationSpaces;
     headers: Record<string, string>;
     fetch?: typeof fetch;
     surfaceKey?: string;
