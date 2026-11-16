@@ -62,22 +62,25 @@ function AddRow({
   onNavigate: () => void;
   onPick?: () => void;
 }) {
+  // The rule sits on a wrapper: on the rounded row itself its ends would curve.
   return (
-    <Link
-      to={to}
-      state={state}
-      onClick={(event) => {
-        if (!onPick) return onNavigate();
-        event.preventDefault();
-        onPick();
-      }}
-      className="text-muted-foreground hover:bg-accent hover:text-foreground mt-1 flex items-center gap-2.5 rounded-md border-t p-2 text-sm"
-    >
-      <span className="flex size-6 shrink-0 items-center justify-center">
-        <Plus size={15} />
-      </span>
-      {label}
-    </Link>
+    <div className="mt-1 border-t pt-1">
+      <Link
+        to={to}
+        state={state}
+        onClick={(event) => {
+          if (!onPick) return onNavigate();
+          event.preventDefault();
+          onPick();
+        }}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-2.5 rounded-md p-2 text-sm"
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <Plus size={15} />
+        </span>
+        {label}
+      </Link>
+    </div>
   );
 }
 
