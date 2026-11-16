@@ -195,6 +195,8 @@
   "skills.chip": "Skills · {{n}}",
   "context.show": "Show context",
   "context.hide": "Hide context",
+  "spaces.trigger": "Conversation spaces: {{names}}",
+  "spaces.title": "Conversation spaces",
   "context.resize": "Resize the context panel",
   "context.info.lastActivity": "Last activity",
   "context.info.access": "Your access",

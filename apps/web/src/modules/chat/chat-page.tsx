@@ -37,6 +37,7 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
+import { ConversationSpaces } from "./conversation-spaces";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -169,6 +170,7 @@ export function ChatModulePage() {
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
+          <ConversationSpaces conversationId={conversationId ?? null} />
           <ChatConversationSettingsButton
             activeId={conversationId ?? null}
             t={translate}

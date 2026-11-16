@@ -28,26 +28,18 @@ describe("resolveCrumbTitle", () => {
 });
 
 describe("chatTrailEntries", () => {
-  it("adds the spaces slot after the name when the conversation touched some", () => {
-    expect(chatTrailEntries("Chat", "Budget", false, 2)).toEqual([
-      { label: "Chat", href: "/chat" },
-      { label: "Budget" },
-      { label: "", slot: true },
-    ]);
-  });
-
-  it("draws nothing for a conversation that touched none", () => {
-    expect(chatTrailEntries("Chat", "Budget", false, 0)).toEqual([
+  it("is the chat and the conversation's name, without the spaces it touched", () => {
+    expect(chatTrailEntries("Chat", "Budget", false)).toEqual([
       { label: "Chat", href: "/chat" },
       { label: "Budget" },
     ]);
   });
 
   it("holds the name's slot while loading and falls back to the chat alone", () => {
-    expect(chatTrailEntries("Chat", null, true, 0)).toEqual([
+    expect(chatTrailEntries("Chat", null, true)).toEqual([
       { label: "Chat", href: "/chat" },
       { label: "", slot: true },
     ]);
-    expect(chatTrailEntries("Chat", null, false, 0)).toEqual([{ label: "Chat" }]);
+    expect(chatTrailEntries("Chat", null, false)).toEqual([{ label: "Chat" }]);
   });
 });

@@ -195,6 +195,8 @@
   "skills.chip": "Compétences · {{n}}",
   "context.show": "Afficher le contexte",
   "context.hide": "Masquer le contexte",
+  "spaces.trigger": "Espaces de la conversation : {{names}}",
+  "spaces.title": "Espaces de la conversation",
   "context.resize": "Redimensionner le panneau de contexte",
   "context.info.lastActivity": "Dernière activité",
   "context.info.access": "Votre accès",

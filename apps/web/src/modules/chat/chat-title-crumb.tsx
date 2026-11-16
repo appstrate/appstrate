@@ -5,13 +5,10 @@
  * "Chat / <conversation>" inside one (the parent links back to a new conversation). The name
  * is a plain segment; renaming lives in the conversation's settings dialog.
  *
- * Next to the name, the spaces the conversation touched (tile and name each), read from the
- * conversation itself (the list's row meanwhile): they follow its refetch when it touches a new
- * one, and are not drawn for a conversation that touched none.
- *
  * The name comes from the conversation list while it holds the row (renames and the first title land
  * there live) and from the conversation itself otherwise: a conversation belongs to the organization,
- * so one opened from outside the list's space filter keeps its name.
+ * so one opened from outside the list's space filter keeps its name. The spaces it touched are not
+ * part of the trail: `ConversationSpaces` draws them in the header's actions.
  *
  * While sessions load (or cannot be asked yet, `pending`) a skeleton slot reserves the space; an unknown (deleted) conversation
  * publishes "Chat" alone rather than a made-up name.
@@ -24,8 +21,6 @@ import { $api } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
-import { SpaceNamesRow } from "@/components/space-name";
-import { useSpacesOf } from "@/hooks/use-spaces";
 import { chatTrailEntries, resolveCrumbTitle } from "./chat-crumb-title";
 
 export function ChatTitleCrumb({
@@ -40,15 +35,14 @@ export function ChatTitleCrumb({
   const { data: sessions, isLoading } = useSessions();
   const orgId = useCurrentOrgId();
   const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
-  // The conversation itself, whatever the list's filter: its name when the list lacks the row, and
-  // its touched spaces. The same query as the info panel's, refetched by the session signal.
+  // The conversation itself, whatever the list's filter: its name when the list lacks the row.
+  // The same query as the info panel's, refetched by the session signal.
   const detail = $api.useQuery(
     "get",
     "/api/orgs/{orgId}/chat/sessions/{id}",
     { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
     { enabled: !!orgId && !!conversationId && !pending },
   );
-  const touched = useSpacesOf(detail.data?.space_ids ?? listed?.space_ids ?? []);
   const title = resolveCrumbTitle(listed, detail.data, t("threads.new"));
 
   // `isLoading`: the read is off without a space, and would wait forever.
@@ -56,7 +50,7 @@ export function ChatTitleCrumb({
     conversationId !== null && (pending || isLoading || (!listed && detail.isLoading));
 
   const chat = t("common:products.chat");
-  usePageBreadcrumb(chatTrailEntries(chat, title, loading, touched.length));
+  usePageBreadcrumb(chatTrailEntries(chat, title, loading));
 
   if (title === null && loading) {
     return (
@@ -65,9 +59,5 @@ export function ChatTitleCrumb({
       </ShellTrailContent>
     );
   }
-  return title !== null && touched.length > 0 ? (
-    <ShellTrailContent>
-      <SpaceNamesRow spaces={touched} />
-    </ShellTrailContent>
-  ) : null;
+  return null;
 }

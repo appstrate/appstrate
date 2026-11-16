@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
@@ -18,7 +18,13 @@ const SIZES = {
 } as const;
 
 /** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
-function SpaceTile({ space, size = "sm" }: { space: SpaceListed; size?: keyof typeof SIZES }) {
+export function SpaceTile({
+  space,
+  size = "sm",
+}: {
+  space: SpaceListed;
+  size?: keyof typeof SIZES;
+}) {
   const viewer = useViewer();
   return (
     <IdentityTile {...spaceTile(space, viewer)} className={cn("shrink-0", SIZES[size].tile)} />
@@ -118,32 +124,6 @@ export function SpaceTilesOf({
       <span className="truncate" title={names}>
         {names}
       </span>
-    </span>
-  );
-}
-
-/** Each space with its tile and name, set apart by « · »: the open conversation's trail. */
-export function SpaceNamesRow({
-  spaces,
-  size = "sm",
-  className,
-}: {
-  spaces: readonly SpaceListed[];
-  size?: keyof typeof SIZES;
-  className?: string;
-}) {
-  return (
-    <span className={cn("flex min-w-0 items-center gap-1.5", className)} data-testid="space-names">
-      {spaces.map((space, i) => (
-        <Fragment key={space.id}>
-          {i > 0 && (
-            <span aria-hidden className="text-border shrink-0 select-none">
-              ·
-            </span>
-          )}
-          <SpaceName space={space} size={size} className="shrink" />
-        </Fragment>
-      ))}
     </span>
   );
 }

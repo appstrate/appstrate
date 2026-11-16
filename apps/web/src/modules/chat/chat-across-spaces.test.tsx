@@ -18,7 +18,8 @@ installFakeStorage({
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
-const { SpaceNamesRow, SpaceTilesOf } = await import("../../components/space-name.tsx");
+const { SpaceTilesOf } = await import("../../components/space-name.tsx");
+const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
 const { ConversationRuns, ShownFile } = await import("./conversation-sidebar.tsx");
@@ -266,12 +267,29 @@ describe("the spaces a conversation touched", () => {
     expect(tiles(html)).toBe(1);
   });
 
-  it("draws a tile and a name per space in the top bar, set apart", () => {
-    const listed = spaces.slice(0, 2);
-    const { html } = renderOverview(<SpaceNamesRow spaces={listed} />, spaces);
+  it("draws one tile per space in the top bar's trigger, named for assistive tech", () => {
+    const { html } = renderOverview(
+      <ConversationSpacesControl spaces={spaces.slice(0, 2)} />,
+      spaces,
+    );
     expect(tiles(html)).toBe(2);
-    expect(html).toContain("Studio");
-    expect(html).toContain("Coffre");
-    expect(html).toContain("·");
+    expect(html).toContain("Espaces de la conversation : ");
+    expect(html).not.toContain("+");
+  });
+
+  it("counts the spaces past the visible tiles", () => {
+    const many = ["a", "b", "c", "d", "e"].map((id) => ({
+      ...spaces[0]!,
+      id: `spc_${id}`,
+      name: id,
+    }));
+    const { html } = renderOverview(<ConversationSpacesControl spaces={many} />, spaces);
+    expect(tiles(html)).toBe(3);
+    expect(html).toContain("+2");
+  });
+
+  it("draws nothing for a conversation that touched no space", () => {
+    const { html } = renderOverview(<ConversationSpacesControl spaces={[]} />, spaces);
+    expect(html).not.toContain("conversation-spaces");
   });
 });
