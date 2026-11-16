@@ -5,7 +5,7 @@
 // the richer, correlated shape the UI renders.
 
 import { jsonText } from "@appstrate/afps-shared/json-text";
-import { isApiCallToolName } from "@appstrate/core/integration";
+import { isApiCallToolName, type ToolIntegration } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { LOG_TOOL, platformTool } from "../lib/platform-tool-results";
 
@@ -21,16 +21,6 @@ interface AgentExecutionEntry extends ExecutionEntryBase {
   kind: "agent";
   message: string;
   level: "debug";
-}
-
-/**
- * The integration tool a call reached, as the runner records it on the tool's events: the
- * integration's package id, the tool's name on its server and the server's display title.
- */
-export interface ToolIntegration {
-  id: string;
-  tool: string;
-  title?: string;
 }
 
 export type ToolExecutionStatus = "running" | "success" | "failed" | "interrupted" | "unknown";
@@ -467,9 +457,9 @@ export function filterJournal(
   t: (key: string) => string,
   integrations: JournalIntegrations,
 ): ExecutionEntry[] {
-  const { levels, types, query, locale } = filters;
+  const { levels, types, showTools, query, locale } = filters;
   return entries.filter((entry) => {
-    if (!filters.showTools && entry.kind === "tool") return false;
+    if (!showTools && entry.kind === "tool") return false;
     if (levels.length > 0 && !levels.includes(journalLevel(entry))) return false;
     if (types.length > 0 && !types.includes(journalType(entry))) return false;
     if (

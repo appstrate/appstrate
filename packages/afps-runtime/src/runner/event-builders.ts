@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
+import type { ToolIntegration } from "@appstrate/core/integration";
 import type { RunEvent } from "../types/index.ts";
 import type { TokenUsage } from "../types/run-result.ts";
 
@@ -40,13 +41,6 @@ export function buildProgress(base: EventBase, message: string): RunEvent {
   };
 }
 
-/** Same shape as `ToolIntegration` (`@appstrate/mcp-transport`); absent on harness tools. */
-interface ToolEventIntegration {
-  id: string;
-  tool: string;
-  title?: string;
-}
-
 /**
  * Tool invocation start → `appstrate.progress` carrying `{ tool, args, toolCallId?,
  * integration? }`.
@@ -57,7 +51,7 @@ export function buildToolStartProgress(
     tool: string | undefined;
     args: unknown;
     toolCallId?: string;
-    integration?: ToolEventIntegration;
+    integration?: ToolIntegration;
   },
 ): RunEvent {
   return {
@@ -96,7 +90,7 @@ export function buildToolResultProgress(
     isError: boolean;
     toolCallId?: string;
     durationMs?: number;
-    integration?: ToolEventIntegration;
+    integration?: ToolIntegration;
   },
 ): RunEvent {
   const label = input.isError ? "Tool error" : "Tool result";

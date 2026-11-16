@@ -38,6 +38,7 @@ import {
   toolLabel,
   JOURNAL_TYPE_VALUES,
   type ExecutionEntry,
+  type IntegrationLook,
   type JournalIntegrations,
   type JournalTypeFilter,
   type ToolExecutionEntry,
@@ -147,13 +148,7 @@ function InlineSkeleton({ className }: { className: string }) {
 }
 
 /** The integration a call reached: its icon (decorative, its name follows) and its name. */
-function IntegrationName({
-  look,
-  className,
-}: {
-  look: ReturnType<JournalIntegrations>;
-  className?: string;
-}) {
+function IntegrationName({ look, className }: { look: IntegrationLook; className?: string }) {
   if (look.pending) {
     return (
       <>

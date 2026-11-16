@@ -16,7 +16,8 @@ import {
   sanitiseTextField,
   sanitiseToolDescriptor,
 } from "./sanitize.ts";
-import { TOOL_INTEGRATION_META_KEY, type ToolIntegration } from "./tool-meta.ts";
+import type { ToolIntegration } from "@appstrate/core/integration";
+import { TOOL_INTEGRATION_META_KEY } from "./tool-meta.ts";
 
 /** Why an upstream tool is not exposed by {@link exposeTool}. */
 export type ToolExposureExclusion = "schema_too_large_after_sanitisation" | "name_collision";

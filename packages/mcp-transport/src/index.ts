@@ -512,5 +512,4 @@ export {
   TOOL_INTEGRATION_META_KEY,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
-  type ToolIntegration,
 } from "./tool-meta.ts";

@@ -48,7 +48,7 @@ import {
 import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { integrationOf } from "./tool-integration.ts";
-import type { ToolIntegration } from "@appstrate/mcp-transport";
+import type { ToolIntegration } from "@appstrate/core/integration";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";

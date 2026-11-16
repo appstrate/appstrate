@@ -267,6 +267,17 @@ export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
 }
 
+/** The tool a resolver yields for one api_call surface. */
+function resolvedApiCallTool(meta: ApiCallIntegrationMeta, call: ApiCallFn): Tool {
+  return makeApiCallTool(meta, call, {
+    toolName: apiCallToolName(meta),
+    description:
+      `Make an authenticated request through the "${meta.name}" integration's ` +
+      "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
+      "and responseMode. The target must match the integration auth's authorized_uris.",
+  });
+}
+
 /**
  * Reserved Appstrate transport / credential headers (lowercased). The remote
  * resolver imposes these to route and authenticate the credential-proxy call;
@@ -419,13 +430,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           `LocalIntegrationResolver: no credentials found for ${meta.name} in the local creds file`,
         );
       }
-      return makeApiCallTool(meta, this.buildCall(meta, entry), {
-        toolName: apiCallToolName(meta),
-        description:
-          `Make an authenticated request through the "${meta.name}" integration's ` +
-          "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-          "and responseMode. The target must match the integration auth's authorized_uris.",
-      });
+      return resolvedApiCallTool(meta, this.buildCall(meta, entry));
     });
   }
 
@@ -718,13 +723,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
 
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
     return readApiCallSurfaces(bundle, refs).map((meta) =>
-      makeApiCallTool(meta, this.buildCall(meta), {
-        toolName: apiCallToolName(meta),
-        description:
-          `Make an authenticated request through the "${meta.name}" integration's ` +
-          "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-          "and responseMode. The target must match the integration auth's authorized_uris.",
-      }),
+      resolvedApiCallTool(meta, this.buildCall(meta)),
     );
   }
 

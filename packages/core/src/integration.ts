@@ -112,6 +112,20 @@ export function platformToolName(tool: string): string {
   return `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
 }
 
+/**
+ * The integration tool a run's tool call reached, as recorded on the tool's `appstrate.progress`
+ * events (`data.integration`) and stamped by the host on the descriptor it exposes
+ * (`_meta["dev.appstrate/integration"]`).
+ */
+export interface ToolIntegration {
+  /** Integration package id (`@scope/name`). */
+  id: string;
+  /** The tool's name on its server. */
+  tool: string;
+  /** The server's `title`, else `annotations.title`. */
+  title?: string;
+}
+
 /** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
 export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
 

@@ -78,9 +78,10 @@ interface ToolContext {
   scopeFor: (scope: "actor" | "shared" | undefined) => PersistenceScope;
 }
 
-type RunTool = ((ctx: ToolContext) => AppstrateToolDefinition) & {
+interface RunTool {
   descriptor: AppstrateToolDefinition["descriptor"];
-};
+  bind: (ctx: ToolContext) => AppstrateToolDefinition;
+}
 
 function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
@@ -113,7 +114,7 @@ function defineTool<S extends z.ZodObject>(spec: {
     description: spec.description,
     inputSchema: inputSchema as AppstrateToolDefinition["descriptor"]["inputSchema"],
   };
-  const bind = (ctx: ToolContext): AppstrateToolDefinition => ({
+  const bind: RunTool["bind"] = (ctx) => ({
     descriptor,
     handler: async (raw) => {
       const parsed = spec.args.safeParse(raw ?? {});
@@ -138,7 +139,7 @@ function defineTool<S extends z.ZodObject>(spec: {
       }
     },
   });
-  return Object.assign(bind, { descriptor });
+  return { descriptor, bind };
 }
 
 const scopeArg = (description: string) =>
@@ -416,7 +417,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
     actorScope,
     scopeFor: (scope) => (scope === "shared" ? { type: "shared" } : actorScope),
   };
-  return RUN_TOOLS.map((tool) => tool(ctx));
+  return RUN_TOOLS.map((tool) => tool.bind(ctx));
 }
 
 /**

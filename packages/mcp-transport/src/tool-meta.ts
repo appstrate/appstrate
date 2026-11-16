@@ -26,6 +26,8 @@
  * Reverse-DNS namespaced per AFPS §2.2, matching `UPSTREAM_META_KEY`.
  */
 
+import type { ToolIntegration } from "@appstrate/core/integration";
+
 /** `_meta` key marking the generic credential-injecting `api_call` tool. */
 export const API_CALL_TOOL_META_KEY = "dev.appstrate/api-call";
 
@@ -88,17 +90,7 @@ export function readApiUploadSiblingKey(tool: ToolMetaCarrier): string | undefin
  */
 export const TOOL_INTEGRATION_META_KEY = "dev.appstrate/integration";
 
-/** Payload of {@link TOOL_INTEGRATION_META_KEY}. */
-export interface ToolIntegration {
-  /** Integration package id (`@scope/name`). */
-  id: string;
-  /** The tool's name on its server. */
-  tool: string;
-  /** The server's `title`, else `annotations.title`. */
-  title?: string;
-}
-
-/** An empty field reads as absent. */
+/** The payload of {@link TOOL_INTEGRATION_META_KEY}; an empty field reads as absent. */
 export function readToolIntegration(tool: ToolMetaCarrier): ToolIntegration | undefined {
   const id = readMarkerField(tool, TOOL_INTEGRATION_META_KEY, "id");
   const name = readMarkerField(tool, TOOL_INTEGRATION_META_KEY, "tool");

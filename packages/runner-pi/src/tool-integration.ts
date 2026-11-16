@@ -6,7 +6,7 @@
  * the registered definition object (`getToolDefinition`), so the identity is keyed on it.
  */
 
-import type { ToolIntegration } from "@appstrate/mcp-transport";
+import type { ToolIntegration } from "@appstrate/core/integration";
 import type { ExtensionAPI } from "./pi-sdk.ts";
 
 type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
