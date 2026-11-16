@@ -19,7 +19,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { $api } from "../../api/client";
-import { SpaceName, SpaceTile } from "../../components/space-name";
+import { SpaceName, SpaceTile, SpaceTileStack } from "../../components/space-name";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpacesOf } from "../../hooks/use-spaces";
 import { spaceLabel } from "../../lib/space-label";
@@ -39,7 +39,6 @@ export function ConversationSpacesControl({
   if (spaces.length === 0) return null;
   const names = spaces.map((space) => spaceLabel(space, t)).join(", ");
   const label = t("chat:spaces.trigger", { names });
-  const hidden = spaces.length - VISIBLE_SPACE_TILES;
   return (
     <DropdownMenu>
       <Tooltip>
@@ -49,18 +48,11 @@ export function ConversationSpacesControl({
               type="button"
               variant="ghost"
               size="icon"
-              className="size-auto h-8 shrink-0 gap-0.5 px-2"
+              className="size-auto h-8 shrink-0 px-2"
               aria-label={label}
               data-testid="conversation-spaces"
             >
-              {spaces.slice(0, VISIBLE_SPACE_TILES).map((space) => (
-                <SpaceTile key={space.id} space={space} />
-              ))}
-              {hidden > 0 && (
-                <span className="bg-muted text-muted-foreground flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[10px] leading-none font-medium tabular-nums">
-                  +{hidden}
-                </span>
-              )}
+              <SpaceTileStack spaces={spaces} max={VISIBLE_SPACE_TILES} />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

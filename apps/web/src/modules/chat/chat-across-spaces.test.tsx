@@ -247,7 +247,8 @@ describe("the spaces a conversation touched", () => {
     color: null,
   });
   const spaces = [named("spc_a", "Studio"), named("spc_b", "Coffre"), named("spc_c", "Atelier")];
-  const tiles = (html: string) => html.match(/size-4 rounded-\[4px\]/g)?.length ?? 0;
+  // An identity tile (the « +N » count is not one).
+  const tiles = (html: string) => html.match(/overflow-hidden @container/g)?.length ?? 0;
 
   it("draws one tile per touched space in a list row, then the names joined", () => {
     const { html } = renderOverview(<>{renderSpaces(["spc_a", "spc_b", "spc_c"])}</>, spaces);
