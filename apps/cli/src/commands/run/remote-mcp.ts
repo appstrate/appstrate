@@ -164,7 +164,11 @@ export async function buildRemoteMcpExtensions(
       const before = factories.length;
       for (const tool of tools) {
         if (toolExclusion(tool.name, target.allowlist, target.hidden)) continue;
-        const exposure = exposeTool(tool, { namespace, isTaken: (name) => toolNames.has(name) });
+        const exposure = exposeTool(tool, {
+          integrationId: ref.name,
+          namespace,
+          isTaken: (name) => toolNames.has(name),
+        });
         if ("exclusion" in exposure) continue;
         toolNames.add(exposure.descriptor.name);
         factories.push(

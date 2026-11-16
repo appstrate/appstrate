@@ -132,6 +132,8 @@ export {
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  readApiCallSurfaces,
+  apiCallToolName,
   readIntegrationManifest,
   type IntegrationApiCallResolver,
   type IntegrationRef,

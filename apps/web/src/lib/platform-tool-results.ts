@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Reads the results of the `@appstrate/platform` tools `recall_memory` and
- * `run_history` (an MCP text part holding `{ memories }` / a `{ data }` envelope;
- * an already-parsed or bare-string result reads the same). `null` = unknown
- * shape, the caller keeps the raw JSON.
+ * The `@appstrate/platform` tools a journal row reached, told by the integration identity
+ * the runner records on the call, and the results of `recall_memory` and `run_history`
+ * (an MCP text part holding `{ memories }` / a `{ data }` envelope; an already-parsed or
+ * bare-string result reads the same). `null` = unknown shape, the caller keeps the raw JSON.
  */
 
-import { platformToolName } from "@appstrate/core/integration";
+import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 
-/** The names the agent (and so a tool row) sees: `appstrate_platform__<tool>`. */
-export const RECALL_MEMORY_TOOL = platformToolName("recall_memory");
-export const RUN_HISTORY_TOOL = platformToolName("run_history");
+/** Names of the platform tools on their own server. */
+export const LOG_TOOL = "log";
+export const RECALL_MEMORY_TOOL = "recall_memory";
+export const RUN_HISTORY_TOOL = "run_history";
+
+/** The platform tool a call reached; `undefined` for any other tool or a call with no identity. */
+export function platformTool(
+  integration: { id: string; tool: string } | undefined,
+): string | undefined {
+  return integration?.id === PLATFORM_INTEGRATION_ID ? integration.tool : undefined;
+}
 
 export interface RecalledMemory {
   id: string;

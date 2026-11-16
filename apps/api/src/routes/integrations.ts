@@ -91,6 +91,7 @@ import { assertSpaceId } from "../lib/ids.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { ConnectionCaller, SpaceSeen } from "../services/connection-reach.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
+import { withRunToolDescriptions } from "../services/run-tools-mcp.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
@@ -1111,7 +1112,7 @@ export function createIntegrationsRouter() {
       ...spaceListCaller(c),
       reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
     );
-    return c.json(status);
+    return c.json(withRunToolDescriptions(status));
   });
 
   // ─── OAuth client registration (admin) ─────
@@ -1671,7 +1672,7 @@ export function createIntegrationsRouter() {
         ...spaceListCaller(c),
         reachOutsideRunIfPermitted(callerPermissions(c), c.get("space")!),
       );
-      return c.json(detail);
+      return c.json(withRunToolDescriptions(detail));
     },
   );
 

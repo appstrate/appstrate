@@ -401,6 +401,59 @@ describe("installSessionBridge — tool_execution_start", () => {
   });
 });
 
+describe("installSessionBridge — integration identity", () => {
+  const gh = { id: "@acme/github", tool: "list.issues", title: "List issues" };
+  const toolIntegration = (name: string) =>
+    name === "acme_github__list_issues_1a2b3c4d" ? gh : undefined;
+
+  it("stamps the integration tool on the start and the end event of its call", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { toolIntegration });
+
+    session.emit({
+      type: "tool_execution_start",
+      toolName: "acme_github__list_issues_1a2b3c4d",
+      toolCallId: "call_1",
+      args: {},
+    });
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "acme_github__list_issues_1a2b3c4d",
+      toolCallId: "call_1",
+      result: "[]",
+      isError: false,
+    });
+
+    const data = sink.events.map((e) => (e as unknown as { data: Record<string, unknown> }).data);
+    expect(data[0]).toEqual({
+      tool: "acme_github__list_issues_1a2b3c4d",
+      args: {},
+      toolCallId: "call_1",
+      integration: gh,
+    });
+    expect(data[1]).toMatchObject({ toolCallId: "call_1", isError: false, integration: gh });
+  });
+
+  it("stamps nothing on a tool no integration serves", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { toolIntegration });
+
+    session.emit({ type: "tool_execution_start", toolName: "output", toolCallId: "c", args: {} });
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "output",
+      toolCallId: "c",
+      isError: false,
+    });
+
+    for (const event of sink.events) {
+      expect((event as unknown as { data: object }).data).not.toHaveProperty("integration");
+    }
+  });
+});
+
 describe("installSessionBridge — tool_execution_end", () => {
   it("emits appstrate.progress with tool + result data on success", () => {
     const sink = createInternalCapture();

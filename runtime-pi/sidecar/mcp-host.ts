@@ -41,6 +41,7 @@ import {
   notifyDetached,
   sanitiseTextField,
   toolExclusion,
+  withToolIntegration,
   type AppstrateMcpClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -127,6 +128,8 @@ function relayProgress(extra: AppstrateRequestExtra): ProgressRelay | undefined 
 }
 
 interface McpHostUpstream {
+  /** Package id of the integration this upstream serves; stamped on each of its tools. */
+  integrationId: string;
   /** Stable identifier for this upstream — appears in tool name prefix. */
   namespace: string;
   /** Connected client (any transport). */
@@ -495,6 +498,7 @@ export class McpHost {
       const exposure = trusted
         ? null
         : exposeTool(tool, {
+            integrationId: upstream.integrationId,
             namespace: normalisedNs,
             isTaken: (name) => this.toolToNamespace.has(name),
           });
@@ -507,7 +511,11 @@ export class McpHost {
       if (!tooLarge && claim(tool.name)) continue;
       let descriptor: Tool;
       if (exposure === null) {
-        descriptor = { ...tool, name: `${normalisedNs}__${tool.name}` };
+        descriptor = withToolIntegration(
+          { ...tool, name: `${normalisedNs}__${tool.name}` },
+          upstream.integrationId,
+          tool,
+        );
       } else {
         if ("exclusion" in exposure) {
           this.options.onLog?.({

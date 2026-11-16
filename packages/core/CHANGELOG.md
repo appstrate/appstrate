@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ToolIntegration`** (`@appstrate/core/integration`, #2233): `{ id, tool, title? }`, the
+  integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
+  `data.integration`.
+
 ### Fixed
 
 - **`createAjv`** (`@appstrate/core/ajv`) no longer registers ajv-formats' `formatMinimum` /

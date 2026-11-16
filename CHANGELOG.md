@@ -681,6 +681,15 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
 
 ### Added
 
+- **Tool events name the integration tool they call** (#2233). The `appstrate.progress` start
+  and end events of a call to an integration's tool carry `data.integration`:
+  `{ id, tool, title? }`, the integration's package id, the tool's name on its server and its
+  title when the server gives one (`tool` and `title` are each sanitised and capped at 512
+  bytes). `data.tool` stays the name the model called. The sidecar's host and the CLI stamp it on
+  each tool they expose (`_meta["dev.appstrate/integration"]`); the platform's own tools
+  (`@appstrate/platform`) and `api_call` / `api_upload` carry it too, the runner's `output` and
+  `publish_file` do not. Runs recorded before this release have none.
+
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound
   (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
   `recall_memory`, `run_history` and `notify`. All but `notify` are selected by default:

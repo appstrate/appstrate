@@ -18,11 +18,14 @@ import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "./runtime-event.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
+import { registerIntegrationTool } from "./tool-integration.ts";
 import {
   apiCallRequestJsonSchema,
   apiCallTargetJsonSchema,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  readApiCallSurfaces,
+  apiCallToolName,
   readIntegrationManifest,
   type IntegrationApiCallResolver,
   type IntegrationRef,
@@ -85,12 +88,9 @@ export async function buildApiCallExtensionFactory(
   // Keep only refs with ≥1 SELECTED apiCall surface. Pure MCP-server
   // integrations have no generic call surface and are skipped (their tools
   // flow through the sidecar/runner path on the platform, not the CLI). An
-  // integration may opt several auths into api_call, yielding multiple tools
-  // — track the owning integration id and whether it is selected per emitted
-  // tool so the index pairing below stays aligned with the resolver's
-  // (ref, auth) iteration order.
+  // integration may opt several auths into api_call, yielding multiple tools.
   const refsWithApiCall: IntegrationRef[] = [];
-  const perTool: { integrationId: string; selected: boolean }[] = [];
+  const selectedByIntegration = new Map<string, ReadonlySet<string>>();
   for (const ref of refs) {
     const metas = readApiCallIntegrationMetas(opts.bundle, ref);
     const selected = selectedApiCallToolNames(
@@ -99,26 +99,30 @@ export async function buildApiCallExtensionFactory(
     );
     if (!metas.some((m) => selected.has(m.toolName))) continue;
     refsWithApiCall.push(ref);
-    for (const meta of metas) {
-      perTool.push({ integrationId: ref.name, selected: selected.has(meta.toolName) });
-    }
+    selectedByIntegration.set(ref.name, selected);
   }
   if (refsWithApiCall.length === 0) return NO_EXTENSIONS;
 
   const tools = await opts.integrationResolver.resolve(refsWithApiCall, opts.bundle);
   if (tools.length === 0) return NO_EXTENSIONS;
 
-  // The resolver yields tools in the same (ref, auth) order we flattened
-  // above — pair each AFPS tool with its owning integration id by index.
+  // Each resolved tool is paired with its surface by name, never by position.
+  const surfaces = new Map(
+    readApiCallSurfaces(opts.bundle, refsWithApiCall).map((meta) => [apiCallToolName(meta), meta]),
+  );
   const factories: ExtensionFactory[] = [];
   const integrationIds = new Set<string>();
   const toolNames = new Set<string>();
-  for (let i = 0; i < tools.length; i++) {
-    const tool = tools[i]!;
-    if (perTool[i]?.selected === false) continue;
-    const integrationId = perTool[i]?.integrationId ?? tool.name;
-    factories.push(makeApiCallExtension(tool, integrationId, opts));
-    integrationIds.add(integrationId);
+  for (const tool of tools) {
+    const surface = surfaces.get(tool.name);
+    if (!surface) {
+      throw new Error(
+        `api_call: the integration resolver returned ${JSON.stringify(tool.name)}, which no integration of the run declares`,
+      );
+    }
+    if (!selectedByIntegration.get(surface.name)!.has(surface.toolName)) continue;
+    factories.push(makeApiCallExtension(tool, surface.name, surface.toolName, opts));
+    integrationIds.add(surface.name);
     toolNames.add(tool.name);
   }
   return { factories, integrationIds, toolNames };
@@ -140,13 +144,16 @@ function selectedApiCallToolNames(
   return new Set(selectedApiCallConfigs(integration, selection).map((cfg) => cfg.toolName));
 }
 
+/** `upstreamName`: the tool's name within its integration (`api_call…`), as the sidecar names it. */
 function makeApiCallExtension(
   tool: AfpsTool,
   integrationId: string,
+  upstreamName: string,
   opts: BuildApiCallExtensionFactoryOptions,
 ): ExtensionFactory {
+  const integration = { id: integrationId, tool: upstreamName };
   return (pi: ExtensionAPI) => {
-    pi.registerTool({
+    registerIntegrationTool(pi, integration, {
       name: tool.name,
       label: tool.name,
       description: tool.description,

@@ -25,15 +25,26 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "../lib/format-duration";
 import {
   formatTimestamp,
   journalLevel,
   levelColors,
+  filterJournal,
+  journalIntegrationIds,
+  journalType,
+  toolLabel,
+  JOURNAL_TYPE_VALUES,
   type ExecutionEntry,
+  type IntegrationLook,
+  type JournalIntegrations,
+  type JournalTypeFilter,
+  type ToolExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
+import { PackageIcon } from "./package-icon";
 import { ItemList } from "./item-list";
 import { Waiting } from "./loading-skeletons";
 import { EmptyState } from "./page-states";
@@ -44,6 +55,7 @@ import {
   RECALL_MEMORY_TOOL,
   RUN_HISTORY_TOOL,
   historyRuns,
+  platformTool,
   recalledMemories,
 } from "../lib/platform-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
@@ -128,6 +140,56 @@ function ToolStatus({
   );
 }
 
+/** A line-height placeholder, a `span` so it is valid inside the row's button. */
+function InlineSkeleton({ className }: { className: string }) {
+  return (
+    <span className={cn("bg-muted inline-block animate-pulse rounded-sm", className)} aria-hidden />
+  );
+}
+
+/** The integration a call reached: its icon (decorative, its name follows) and its name. */
+function IntegrationName({ look, className }: { look: IntegrationLook; className?: string }) {
+  if (look.pending) {
+    return (
+      <>
+        <InlineSkeleton className="size-4 shrink-0" />
+        <InlineSkeleton className="h-3 w-16 shrink-0" />
+      </>
+    );
+  }
+  return (
+    <>
+      <PackageIcon type="integration" icon={look.icon} size="xs" />
+      <span className={cn("truncate", className)}>{look.name}</span>
+    </>
+  );
+}
+
+/** A tool row's event: the integration it reached, the tool's label, then what it was asked. */
+export function ToolCallEvent({
+  entry,
+  integrations,
+}: {
+  entry: ToolExecutionEntry;
+  integrations: JournalIntegrations;
+}) {
+  const { t } = useTranslation("agents");
+  return (
+    <>
+      {entry.integration && (
+        <IntegrationName
+          look={integrations(entry.integration.id)}
+          className="text-muted-foreground max-w-40 shrink-0"
+        />
+      )}
+      <span className="min-w-0 truncate">
+        <span className="font-medium">{toolLabel(entry, t)}</span>
+        {entry.detail && <span className="text-muted-foreground"> · {entry.detail}</span>}
+      </span>
+    </>
+  );
+}
+
 function formatStructuredValue(value: unknown): string {
   if (typeof value === "string") return value;
   try {
@@ -160,9 +222,11 @@ function InspectorSection({ label, children }: { label: string; children: ReactN
  * status and date); anything else, and the raw payload of those two, is the JSON
  * as the runner logged it.
  */
-function ToolResult({ tool, result }: { tool: string; result: unknown }) {
+function ToolResult({ entry }: { entry: ToolExecutionEntry }) {
   const { t } = useTranslation("agents");
   const [showJson, setShowJson] = useState(false);
+  const { result } = entry;
+  const tool = platformTool(entry.integration);
   const memories = tool === RECALL_MEMORY_TOOL ? recalledMemories(result) : null;
   const runs = tool === RUN_HISTORY_TOOL ? historyRuns(result) : null;
   const raw = <JsonBlock value={result} />;
@@ -227,6 +291,7 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
 
 interface LogViewerProps {
   entries: ExecutionEntry[];
+  integrations: JournalIntegrations;
   /** The entries are still being read: rows on their way replace the empty state. */
   isLoading?: boolean;
   /** Terminal failures open with the causal event near the middle of the journal. */
@@ -242,19 +307,11 @@ interface LogViewerProps {
 
 export type JournalOverviewFilter = "tools" | "warnings" | "errors";
 type JournalLevelFilter = ReturnType<typeof journalLevel>;
-type JournalTypeFilter = "message" | "tool_call" | "tool_result" | "diagnostic";
-
-function journalType(entry: ExecutionEntry): JournalTypeFilter {
-  if (entry.kind === "agent") return "message";
-  if (entry.kind === "tool") return entry.status === "running" ? "tool_call" : "tool_result";
-  return "diagnostic";
-}
-
 const FOCUS_FILTERS: Record<
   JournalOverviewFilter,
   { levels: JournalLevelFilter[]; types: JournalTypeFilter[] }
 > = {
-  tools: { levels: [], types: ["tool_call", "tool_result"] },
+  tools: { levels: [], types: ["tool"] },
   warnings: { levels: ["warn"], types: [] },
   errors: { levels: ["error"], types: [] },
 };
@@ -273,17 +330,9 @@ function facet(
   return [{ id, label, values, options, onChange }];
 }
 
-function journalSearchText(entry: ExecutionEntry): string {
-  if (entry.kind === "tool") {
-    return [entry.tool, entry.detail, entry.status].filter(Boolean).join(" ");
-  }
-  return [entry.message, entry.kind === "runtime" ? entry.sourceType : undefined]
-    .filter(Boolean)
-    .join(" ");
-}
-
 export function LogViewer({
   entries,
+  integrations,
   isLoading = false,
   focusError = false,
   headerActions,
@@ -305,29 +354,45 @@ export function LogViewer({
   const focus = initialFocus ? FOCUS_FILTERS[initialFocus] : undefined;
   const [levelFilters, setLevelFilters] = useState<string[]>(focus?.levels ?? []);
   const [typeFilters, setTypeFilters] = useState<string[]>(focus?.types ?? []);
+  const [integrationFilters, setIntegrationFilters] = useState<string[]>([]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
-  const visibleEntries = useMemo(() => {
-    return entries.filter((entry) => {
-      if (!showTools && entry.kind === "tool") return false;
-      if (levelFilters.length > 0 && !levelFilters.includes(journalLevel(entry))) return false;
-      if (typeFilters.length > 0 && !typeFilters.includes(journalType(entry))) return false;
-      if (
-        normalizedQuery &&
-        !journalSearchText(entry).toLocaleLowerCase(i18n.language).includes(normalizedQuery)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [entries, i18n.language, levelFilters, normalizedQuery, showTools, typeFilters]);
+  const visibleEntries = useMemo(
+    () =>
+      filterJournal(
+        entries,
+        {
+          levels: levelFilters,
+          types: typeFilters,
+          integrations: integrationFilters,
+          showTools,
+          query: normalizedQuery,
+          locale: i18n.language,
+        },
+        t,
+        integrations,
+      ),
+    [
+      entries,
+      i18n.language,
+      integrationFilters,
+      integrations,
+      levelFilters,
+      normalizedQuery,
+      showTools,
+      t,
+      typeFilters,
+    ],
+  );
   const availableLevels = (["info", "warn", "error"] as const).filter((value) =>
     entries.some((entry) => journalLevel(entry) === value),
   );
-  const availableTypes = (["message", "tool_call", "tool_result", "diagnostic"] as const).filter(
-    (value) => entries.some((entry) => journalType(entry) === value),
+  const availableTypes = JOURNAL_TYPE_VALUES.filter((value) =>
+    entries.some((entry) => journalType(entry) === value),
   );
-  const activeFilterCount = levelFilters.length + typeFilters.length + display.length;
+  const availableIntegrations = useMemo(() => journalIntegrationIds(entries), [entries]);
+  const activeFilterCount =
+    levelFilters.length + typeFilters.length + integrationFilters.length + display.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;
   const filters: FilterSpec[] = [
     ...facet(
@@ -345,6 +410,14 @@ export function LogViewer({
       availableTypes,
       (value) => t(`log.type.${value}`),
       setTypeFilters,
+    ),
+    ...facet(
+      "integration",
+      t("log.filterIntegration"),
+      integrationFilters,
+      availableIntegrations,
+      (value) => integrations(value).name,
+      setIntegrationFilters,
     ),
     {
       id: "display",
@@ -368,7 +441,7 @@ export function LogViewer({
 
   useEffect(() => {
     positionedRef.current = false;
-  }, [levelFilters, normalizedQuery, showTools, typeFilters]);
+  }, [integrationFilters, levelFilters, normalizedQuery, showTools, typeFilters]);
 
   // Auto-scroll when entries are added OR a running tool row settles in place.
   useEffect(() => {
@@ -433,6 +506,7 @@ export function LogViewer({
     setQuery("");
     setLevelFilters([]);
     setTypeFilters([]);
+    setIntegrationFilters([]);
     setDisplay([]);
   };
 
@@ -575,18 +649,13 @@ export function LogViewer({
                             className={cn(
                               "text-foreground min-w-0",
                               entry.kind === "tool"
-                                ? "truncate"
+                                ? "flex items-center gap-1.5"
                                 : "break-words whitespace-pre-wrap",
                               entry.level && levelColors[entry.level],
                             )}
                           >
                             {entry.kind === "tool" ? (
-                              <>
-                                <span className="font-medium">{entry.tool}</span>
-                                {entry.detail && (
-                                  <span className="text-muted-foreground"> · {entry.detail}</span>
-                                )}
-                              </>
+                              <ToolCallEvent entry={entry} integrations={integrations} />
                             ) : (
                               entry.message
                             )}
@@ -617,13 +686,16 @@ export function LogViewer({
 
 export function LogEntryInspector({
   entry,
+  integrations,
   onClose,
 }: {
   entry: ExecutionEntry;
+  integrations: JournalIntegrations;
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation("agents");
   const type = journalType(entry);
+  const label = entry.kind === "tool" ? toolLabel(entry, t) : undefined;
 
   return (
     <div className="flex h-full min-h-[400px] flex-col">
@@ -652,7 +724,29 @@ export function LogEntryInspector({
             <Fact label={t("log.filterLevel")}>{t(`log.level.${journalLevel(entry)}`)}</Fact>
             {entry.kind === "tool" && (
               <>
-                <Fact label={t("log.tool")}>{entry.tool}</Fact>
+                <Fact label={t("log.tool")}>{label}</Fact>
+                {entry.integration && (
+                  <>
+                    <Fact label={t("log.filterIntegration")}>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <IntegrationName look={integrations(entry.integration.id)} />
+                      </span>
+                    </Fact>
+                    <Fact label={t("log.integrationId")}>
+                      <CopyableValue value={entry.integration.id} />
+                    </Fact>
+                    {entry.integration.tool !== label && (
+                      <Fact label={t("log.upstreamTool")}>
+                        <CopyableValue value={entry.integration.tool} />
+                      </Fact>
+                    )}
+                  </>
+                )}
+                {entry.tool !== label && (
+                  <Fact label={t("log.technicalName")}>
+                    <CopyableValue value={entry.tool} />
+                  </Fact>
+                )}
                 <Fact label={t("log.status")}>
                   <ToolStatus status={entry.status} showLabel />
                 </Fact>
@@ -672,7 +766,7 @@ export function LogEntryInspector({
               )}
               {entry.result !== undefined && (
                 <InspectorSection label={t("log.result")}>
-                  <ToolResult key={entry.id} tool={entry.tool} result={entry.result} />
+                  <ToolResult key={entry.id} entry={entry} />
                 </InspectorSection>
               )}
               {entry.detail && entry.args === undefined && (
@@ -689,6 +783,15 @@ export function LogEntryInspector({
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+function CopyableValue({ value }: { value: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="font-mono text-xs break-all">{value}</span>
+      <CopyButton value={value} />
+    </span>
   );
 }
 

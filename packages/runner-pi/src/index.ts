@@ -83,6 +83,8 @@ export { piToolResultOrThrow } from "./pi-tool-result.ts";
 
 export { callToolResultToPi, mcpToolForwardFactory, type McpToolCallPlan } from "./mcp-forward.ts";
 
+export { integrationOf, registerIntegrationTool } from "./tool-integration.ts";
+
 export type { RuntimeEventEmitter } from "./runtime-event.ts";
 
 export { spillResourcesToWorkspace } from "./resource-spill.ts";

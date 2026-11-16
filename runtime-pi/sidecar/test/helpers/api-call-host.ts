@@ -36,6 +36,7 @@ export async function buildApiCallHost(
     });
     const sharedNamespace = allocatedByRequested.get(integ.namespace);
     const allocated = await host.register({
+      integrationId: integ.namespace,
       namespace: integ.namespace,
       client: wrapClient(pair.client, { close: () => pair.close() }),
       // Single-connection hosts: no selector, so the upstream binds none.
