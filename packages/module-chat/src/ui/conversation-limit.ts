@@ -121,7 +121,9 @@ export function useConversationLimit({
   const queryClient = useQueryClient();
   const [created, setCreated] = useState<Created | null>(null);
   const gateRef = useRef<ReturnType<typeof creationGate>>(undefined);
-  const [draftRestricted, setDraftRestricted] = useState(false);
+  // A conversation started in a space is limited to it unless the user lifts the limit before
+  // sending; from the overview there is no origin to limit to, so it starts unlimited.
+  const [draftRestricted, setDraftRestricted] = useState(true);
   // The limit the user last set on a conversation that exists, over what was loaded or frozen.
   const [override, setOverride] = useState<boolean>();
 

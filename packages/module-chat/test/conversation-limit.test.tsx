@@ -11,7 +11,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import { changeLimit, creationFields, creationGate } from "../src/ui/conversation-limit.ts";
+import {
+  changeLimit,
+  creationFields,
+  creationGate,
+  useConversationLimit,
+} from "../src/ui/conversation-limit.ts";
 import {
   callSpaceOf,
   limitAccessibleNames,
@@ -185,6 +190,40 @@ describe("the space a tool card shows", () => {
     expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: true })).toBe("spc_a");
     expect(pinnedSpaceOf({ originSpaceId: "spc_a", restricted: false })).toBeUndefined();
     expect(pinnedSpaceOf({ originSpaceId: null, restricted: true })).toBeUndefined();
+  });
+});
+
+describe("a new conversation's default limit", () => {
+  function draft(selectedSpaceId: string | undefined) {
+    let seen: ReturnType<typeof useConversationLimit> | undefined;
+    function Harness() {
+      seen = useConversationLimit({
+        id: "chs_new",
+        transport: undefined,
+        persistedAtMount: false,
+        stored: undefined,
+        selectedSpaceId,
+      });
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+    return seen!;
+  }
+
+  it("is limited to the space it is started in", () => {
+    const limit = draft("spc_a");
+    expect(limit.scope).toMatchObject({ originSpaceId: "spc_a", restricted: true });
+    expect(limit.getCreation()).toEqual({ spaceId: "spc_a", restricted: true });
+  });
+
+  it("is unlimited from the overview, which has no space to limit to", () => {
+    const limit = draft(undefined);
+    expect(limit.scope).toMatchObject({ originSpaceId: null, restricted: false });
+    expect(limit.getCreation()).toEqual({});
   });
 });
 
