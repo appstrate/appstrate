@@ -25,6 +25,12 @@ export function useSpaces(enabled = true) {
   });
 }
 
+/** The listed spaces among `spaceIds`, in order; the ones the listing does not know are left out. */
+export function useSpacesOf(spaceIds: readonly string[]) {
+  const { data: spaces } = useSpaces();
+  return spaceIds.flatMap((id) => spaces?.find((s) => s.id === id) ?? []);
+}
+
 /** What to call a space of the listing, by id; `undefined` for one the caller does not reach. */
 export function useSpaceLabelOf(): (id: string | null | undefined) => string | undefined {
   const { t } = useTranslation();

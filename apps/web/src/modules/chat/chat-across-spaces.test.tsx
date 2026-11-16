@@ -18,6 +18,8 @@ installFakeStorage({
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
+const { SpaceNamesRow, SpaceTilesOf } = await import("../../components/space-name.tsx");
+const { renderSpaces } = await import("./render-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
 const { ConversationRuns, ShownFile } = await import("./conversation-sidebar.tsx");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
@@ -233,5 +235,43 @@ describe("the stream's chat channel", () => {
     } finally {
       window.__APP_CONFIG__ = config;
     }
+  });
+});
+
+describe("the spaces a conversation touched", () => {
+  const named = (id: string, name: string) => ({
+    ...space(id, ["chat:read", "runs:read"]),
+    name,
+    icon: null,
+    color: null,
+  });
+  const spaces = [named("spc_a", "Studio"), named("spc_b", "Coffre"), named("spc_c", "Atelier")];
+  const tiles = (html: string) => html.match(/size-4 rounded-\[4px\]/g)?.length ?? 0;
+
+  it("draws one tile per touched space in a list row, then the names joined", () => {
+    const { html } = renderOverview(<>{renderSpaces(["spc_a", "spc_b", "spc_c"])}</>, spaces);
+    expect(tiles(html)).toBe(3);
+    expect(html).toContain("Studio, Coffre, Atelier");
+    expect(html).not.toContain("+2");
+  });
+
+  it("reads a single space as the usual tile and name", () => {
+    const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_b"]} />, spaces);
+    expect(tiles(html)).toBe(1);
+    expect(html).toContain("Coffre");
+  });
+
+  it("leaves the spaces the reader does not reach out", () => {
+    const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_a", "spc_gone"]} />, spaces);
+    expect(tiles(html)).toBe(1);
+  });
+
+  it("draws a tile and a name per space in the top bar, set apart", () => {
+    const listed = spaces.slice(0, 2);
+    const { html } = renderOverview(<SpaceNamesRow spaces={listed} />, spaces);
+    expect(tiles(html)).toBe(2);
+    expect(html).toContain("Studio");
+    expect(html).toContain("Coffre");
+    expect(html).toContain("·");
   });
 });

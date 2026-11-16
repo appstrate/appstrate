@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's skill chips: what the conversation loads (the origin space's imposed skills,
- * locked, and the user's pins, removable), the « +N » overflow, the skeleton while the enforced
+ * The composer's skill pills: what the conversation loads (the origin space's imposed skills in
+ * ONE locked pill, the user's pins in ONE other), count or single name, the skeleton while the enforced
  * read is on its way. SSR only; the tooltip bodies are closed, so the texts are asserted through
  * the accessible names.
  */
@@ -13,7 +13,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { SkillChips } from "../src/ui/enforced-skills.tsx";
-import { splitSkillChips, type SkillChipModel } from "../src/ui/chat-skills.ts";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider, type ChatHost, type ChatTransport } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
@@ -69,7 +68,6 @@ function render({
             <SkillChips
               transport={transport === null ? undefined : transport}
               selection={selection}
-              onSelectionChange={() => {}}
               onOpenPicker={picker ? () => {} : undefined}
               fallback={<i data-testid="fallback" />}
             />
@@ -82,63 +80,83 @@ function render({
 
 const tone: SkillHint = { packageId: "@acme/tone", display_name: "Tone", version: "1.0.0" };
 
+const policy: SkillHint = { packageId: "@acme/policy", display_name: "Policy", version: null };
+
 describe("SkillChips", () => {
-  it("draws an imposed skill locked, named, with the space in its accessible name", () => {
+  it("draws ONE locked pill for a single imposed skill, named, with the space in its label", () => {
     const html = render({ enforced: [tone] });
-    expect(html).toContain('data-testid="skill-chip-enforced"');
+    expect(html.match(/skill-pill-enforced/g)).toHaveLength(1);
     expect(html).toContain("Tone");
-    expect(html).toContain("skills.chipEnforcedLabel");
+    expect(html).toContain("skills.enforcedPillLabel");
     expect(html).toContain("Studio");
-    expect(html).not.toContain("skill-chip-remove");
+    expect(html).not.toContain("skills.enforcedCount");
   });
 
-  it("shows imposed skills read-only, without the picker: no pins, no « + »", () => {
+  it("counts several imposed skills in the one pill, naming them in its accessible label", () => {
+    const html = render({ enforced: [tone, policy] });
+    expect(html.match(/skill-pill-enforced/g)).toHaveLength(1);
+    expect(html).toContain("skills.enforcedCount {&quot;n&quot;:2}");
+    // The tooltip's list is closed: the names reach the label.
+    expect(html).toContain("Tone, Policy");
+  });
+
+  it("shows imposed skills read-only, without the picker: a focusable note, no pins, no « + »", () => {
     const html = render({
       enforced: [tone],
       selection: manual(["@acme/pinned"]),
       picker: false,
       canReadSkills: false,
     });
-    expect(html).toContain("skill-chip-enforced");
+    expect(html).toContain("skill-pill-enforced");
     expect(html).toContain('role="note"');
-    expect(html).not.toContain("skill-chip-pinned");
+    expect(html).toContain('tabindex="0"');
+    expect(html).not.toContain("skill-pill-pinned");
     expect(html).not.toContain("skill-chips-add");
   });
 
-  it("draws a pinned skill removable, named by its bare package name", () => {
-    const html = render({ selection: manual(["@acme/policy"]) });
-    expect(html).toContain('data-testid="skill-chip-pinned"');
-    expect(html).toContain("policy");
-    expect(html).toContain("skills.chipRemove");
-    expect(html).toContain('data-testid="skill-chips-add"');
+  it("opens the picker from the imposed pill when the user can pick", () => {
+    const html = render({ enforced: [tone] });
+    expect(html).toMatch(/<button[^>]*data-testid="skill-pill-enforced"/);
+    expect(html).not.toContain('role="note"');
   });
 
-  it("lists the imposed skills before the pins, and never twice", () => {
+  it("draws ONE pill for a single pinned skill, named by its bare package name", () => {
+    const html = render({ selection: manual(["@acme/policy"]) });
+    expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
+    expect(html).toContain("policy");
+    expect(html).toContain("skills.pinnedPillLabel");
+    expect(html).toContain('data-testid="skill-chips-add"');
+    expect(html).not.toContain("skill-chip-remove");
+  });
+
+  it("counts several pinned skills in the one pill, with no per-skill chip nor « +N »", () => {
+    const html = render({ selection: manual(["@a/one", "@a/two", "@a/three", "@a/four"]) });
+    expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
+    expect(html).toContain("skills.pinnedCount {&quot;n&quot;:4}");
+    expect(html).toContain("one, two, three, four");
+    expect(html).not.toContain("skill-chip-overflow");
+  });
+
+  it("lists the imposed pill before the pinned one, and never counts a skill twice", () => {
     const html = render({ enforced: [tone], selection: manual(["@acme/tone", "@acme/b"]) });
-    expect(html.match(/skill-chip-enforced/g)).toHaveLength(1);
-    expect(html.match(/skill-chip-pinned/g)).toHaveLength(1);
-    expect(html.indexOf("skill-chip-enforced")).toBeLessThan(html.indexOf("skill-chip-pinned"));
+    expect(html.match(/skill-pill-enforced/g)).toHaveLength(1);
+    expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
+    expect(html.indexOf("skill-pill-enforced")).toBeLessThan(html.indexOf("skill-pill-pinned"));
+    // One own pin left once the imposed one is taken out: its name, not a count.
+    expect(html).not.toContain("skills.pinnedCount");
   });
 
   it("ignores pins in automatic mode, where none is injected", () => {
     const html = render({ selection: { skillMode: "auto", pinnedSkills: ["@acme/b"] } });
     expect(html).toContain('data-testid="fallback"');
-    expect(html).not.toContain("skill-chip-pinned");
-  });
-
-  it("folds the rest into a « +N » chip past the visible ones", () => {
-    const html = render({ selection: manual(["@a/one", "@a/two", "@a/three", "@a/four"]) });
-    expect(html.match(/skill-chip-pinned/g)).toHaveLength(2);
-    expect(html).toContain('data-testid="skill-chip-overflow"');
-    expect(html).toContain("skills.chipsMore");
-    expect(html).toContain("three, four");
+    expect(html).not.toContain("skill-pill-pinned");
   });
 
   it("falls back to the picker entry when nothing is loaded", () => {
     expect(render()).toContain('data-testid="fallback"');
   });
 
-  it("shows no imposed skill in « Vue d'ensemble »: no read, no chip, no placeholder", () => {
+  it("shows no imposed skill in « Vue d'ensemble »: no read, no pill, no placeholder", () => {
     const html = render({ enforced: null, originSpaceId: null });
     expect(html).toContain('data-testid="fallback"');
     expect(html).not.toContain("animate-pulse");
@@ -146,31 +164,13 @@ describe("SkillChips", () => {
 
   it("shows none when the author can no longer act in the origin space", () => {
     const html = render({ enforced: [tone], originSpaceId: "spc_gone" });
-    expect(html).not.toContain("skill-chip-enforced");
+    expect(html).not.toContain("skill-pill-enforced");
   });
 
   it("holds the place with a skeleton while the imposed skills load", () => {
     const html = render({ enforced: null });
     expect(html).toContain("animate-pulse");
-    expect(html).not.toContain("skill-chip");
+    expect(html).not.toContain("skill-pill");
     expect(html).not.toContain('data-testid="fallback"');
-  });
-});
-
-describe("splitSkillChips", () => {
-  const chip = (i: number): SkillChipModel => ({
-    packageId: `@a/${i}`,
-    name: `${i}`,
-    enforced: false,
-  });
-  it("shows everything up to the limit", () => {
-    expect(splitSkillChips([chip(1), chip(2)]).overflow).toHaveLength(0);
-  });
-  it("does not fold a single chip into « +1 »", () => {
-    expect(splitSkillChips([chip(1), chip(2), chip(3)]).overflow).toHaveLength(0);
-  });
-  it("folds two or more", () => {
-    const { visible, overflow } = splitSkillChips([chip(1), chip(2), chip(3), chip(4)]);
-    expect([visible.length, overflow.length]).toEqual([2, 2]);
   });
 });

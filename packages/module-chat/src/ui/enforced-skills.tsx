@@ -1,70 +1,97 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills loaded in the conversation, as chips in the composer's tool row: the ones the origin
- * space imposes (locked, read-only: also for a member without `skills:read`) and the ones the user
- * pinned (removable). One line: the first chips, then a « +N » chip listing the rest.
+ * The skills loaded in the conversation, as pills in the composer's tool row: ONE locked pill for
+ * the ones the origin space imposes (also readable by a member without `skills:read`) and ONE for
+ * the ones the user added. Each shows its count, or the name when there is a single skill; the
+ * tooltip lists the names. Removal happens in the picker, which both pills open.
  */
 
 import type { ReactNode } from "react";
-import { LockIcon, PlusIcon, XIcon } from "lucide-react";
+import { BookOpenIcon, LockIcon, PlusIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
-import { ownPins, splitSkillChips, togglePinned, type SkillChipModel } from "./chat-skills.ts";
+import { ownPins } from "./chat-skills.ts";
 import { useOriginSpaceNode, useSpaceLabel, useConversationScope } from "./conversation-scope.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
 
+interface LoadedSkill {
+  packageId: string;
+  name: string;
+}
+
 /**
- * What the conversation loads, as chips. Pins count only in a mode that injects them (`auto`
- * keeps them but uses none); an enforced skill is never listed twice.
+ * What the conversation loads: the origin space's imposed skills and the user's own pins. Pins
+ * count only in a mode that injects them (`auto` keeps them but uses none); an enforced skill is
+ * never listed twice.
  */
 function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
   const enforcedQuery = useEnforcedSkills(transport);
   const { catalogue } = useSkillCatalogue(transport);
-  const enforced = enforcedQuery.data ?? [];
-  const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
+  const enforcedSkills = enforcedQuery.data ?? [];
+  const enforcedIds = new Set(enforcedSkills.map((skill) => skill.packageId));
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
-  const chips: SkillChipModel[] = [
-    ...enforced.map((s) => ({
-      packageId: s.packageId,
-      name: s.display_name ?? s.packageId,
-      enforced: true,
-    })),
-    ...(injectsSkills(selection.skillMode) ? ownPins(selection.pinnedSkills, enforcedIds) : []).map(
-      (id) => ({
-        packageId: id,
-        name: names.get(id) ?? parseScopedName(id)?.name ?? id,
-        enforced: false,
-      }),
-    ),
-  ];
+  const enforced: LoadedSkill[] = enforcedSkills.map((s) => ({
+    packageId: s.packageId,
+    name: s.display_name ?? s.packageId,
+  }));
+  const pinned: LoadedSkill[] = (
+    injectsSkills(selection.skillMode) ? ownPins(selection.pinnedSkills, enforcedIds) : []
+  ).map((id) => ({
+    packageId: id,
+    name: names.get(id) ?? parseScopedName(id)?.name ?? id,
+  }));
   // `isLoading`: the read is off without a space, and would wait forever.
-  return { chips, loading: enforcedQuery.isLoading };
+  return { enforced, pinned, loading: enforcedQuery.isLoading };
 }
 
-const CHIP_CLASS = cn(
+const PILL_CLASS = cn(
   badgeVariants({ variant: "secondary" }),
-  "text-muted-foreground h-7 min-w-0 shrink gap-1.5 py-0 font-normal",
+  "text-muted-foreground h-7 min-w-0 shrink gap-1.5 px-2.5 py-0 font-normal",
 );
 
-function EnforcedChip({ chip, onOpen }: { chip: SkillChipModel; onOpen?: () => void }) {
+/** The pill's text: the count of several skills, the name of a single one. */
+function pillText(
+  skills: readonly LoadedSkill[],
+  countKey: string,
+  t: ReturnType<typeof useChatHost>["t"],
+): string {
+  return skills.length === 1 ? skills[0]!.name : t(countKey, { n: skills.length });
+}
+
+function namesOf(skills: readonly LoadedSkill[]): string {
+  return skills.map((skill) => skill.name).join(", ");
+}
+
+function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
+  return (
+    <ul>
+      {skills.map((skill) => (
+        <li key={skill.packageId}>{skill.name}</li>
+      ))}
+    </ul>
+  );
+}
+
+/** The imposed skills, locked in one pill: it opens the picker for who can pick, else is a focusable note. */
+function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen?: () => void }) {
   const { t } = useChatHost();
   const spaceNode = useOriginSpaceNode();
   // The plain name: the node above carries a tile the accessible name must not.
   const spaceLabel =
     useSpaceLabel(useConversationScope().originSpaceId) ?? t("composer.limit.thisSpace");
-  const label = t("skills.chipEnforcedLabel", { skill: chip.name, space: spaceLabel });
+  const label = t("skills.enforcedPillLabel", { space: spaceLabel, names: namesOf(skills) });
   const body = (
     <>
       <LockIcon className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="max-w-32 truncate">{chip.name}</span>
+      <span className="max-w-32 truncate">{pillText(skills, "skills.enforcedCount", t)}</span>
     </>
   );
   return (
@@ -73,10 +100,10 @@ function EnforcedChip({ chip, onOpen }: { chip: SkillChipModel; onOpen?: () => v
         {onOpen ? (
           <button
             type="button"
-            data-testid="skill-chip-enforced"
+            data-testid="skill-pill-enforced"
             aria-label={label}
             onClick={onOpen}
-            className={cn(CHIP_CLASS, "px-2.5")}
+            className={PILL_CLASS}
           >
             {body}
           </button>
@@ -84,9 +111,9 @@ function EnforcedChip({ chip, onOpen }: { chip: SkillChipModel; onOpen?: () => v
           <span
             role="note"
             tabIndex={0}
-            data-testid="skill-chip-enforced"
+            data-testid="skill-pill-enforced"
             aria-label={label}
-            className={cn(CHIP_CLASS, "px-2.5")}
+            className={PILL_CLASS}
           >
             {body}
           </span>
@@ -94,68 +121,31 @@ function EnforcedChip({ chip, onOpen }: { chip: SkillChipModel; onOpen?: () => v
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         {sentenceWithNode(t, "skills.enforcedBy", spaceNode)}
+        <SkillNameList skills={skills} />
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function PinnedChip({
-  chip,
-  onOpen,
-  onRemove,
-}: {
-  chip: SkillChipModel;
-  onOpen: () => void;
-  onRemove: () => void;
-}) {
-  const { t } = useChatHost();
-  return (
-    <span data-testid="skill-chip-pinned" className={cn(CHIP_CLASS, "pr-1 pl-2.5")}>
-      <button
-        type="button"
-        aria-label={t("skills.chipOpen", { skill: chip.name })}
-        onClick={onOpen}
-        className="max-w-32 min-w-0 truncate"
-      >
-        {chip.name}
-      </button>
-      <button
-        type="button"
-        data-testid="skill-chip-remove"
-        aria-label={t("skills.chipRemove", { skill: chip.name })}
-        onClick={onRemove}
-        className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full"
-      >
-        <XIcon className="size-3" aria-hidden="true" />
-      </button>
-    </span>
-  );
-}
-
-function OverflowChip({ chips }: { chips: readonly SkillChipModel[] }) {
+/** The skills the user added, in one pill: it opens the picker, where they are removed. */
+function PinnedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen: () => void }) {
   const { t } = useChatHost();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          role="note"
-          tabIndex={0}
-          data-testid="skill-chip-overflow"
-          aria-label={t("skills.chipsMoreLabel", {
-            n: chips.length,
-            names: chips.map((chip) => chip.name).join(", "),
-          })}
-          className={cn(CHIP_CLASS, "shrink-0 px-2.5")}
+        <button
+          type="button"
+          data-testid="skill-pill-pinned"
+          aria-label={t("skills.pinnedPillLabel", { names: namesOf(skills) })}
+          onClick={onOpen}
+          className={PILL_CLASS}
         >
-          {t("skills.chipsMore", { n: chips.length })}
-        </span>
+          <BookOpenIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="max-w-32 truncate">{pillText(skills, "skills.pinnedCount", t)}</span>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
-        <ul>
-          {chips.map((chip) => (
-            <li key={chip.packageId}>{chip.name}</li>
-          ))}
-        </ul>
+        <SkillNameList skills={skills} />
       </TooltipContent>
     </Tooltip>
   );
@@ -164,31 +154,27 @@ function OverflowChip({ chips }: { chips: readonly SkillChipModel[] }) {
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
-  onSelectionChange: (selection: ChatSkillSelection) => void;
-  /** Absent for a member who cannot pick: the chips are then read-only and enforced-only. */
+  /** Absent for a member who cannot pick: the pill is then read-only and enforced-only. */
   onOpenPicker?: () => void;
   /** Drawn when no skill is loaded: today's entry to the picker (its summary chip). */
   fallback?: ReactNode;
 }
 
-/** The skill chips of the composer's tool row, or `fallback` while no skill is loaded. */
+/** The skill pills of the composer's tool row, or `fallback` while no skill is loaded. */
 export function SkillChips({
   transport,
   selection,
-  onSelectionChange,
   onOpenPicker,
   fallback = null,
 }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { chips: all, loading } = useLoadedSkills(transport, selection);
-  const enforcedIds = new Set(all.filter((chip) => chip.enforced).map((chip) => chip.packageId));
+  const { enforced, pinned: allPinned, loading } = useLoadedSkills(transport, selection);
   // Pins are the user's to edit: without the picker, only what the space imposes shows.
-  const chips = onOpenPicker ? all : all.filter((chip) => chip.enforced);
-  // Same footprint as a real chip: no layout shift when the read answers.
+  const pinned = onOpenPicker ? allPinned : [];
+  // Same footprint as a real pill: no layout shift when the read answers.
   if (loading) return <Skeleton className="h-7 w-28 shrink-0 rounded-full" aria-hidden />;
-  if (chips.length === 0) return <>{fallback}</>;
+  if (enforced.length === 0 && pinned.length === 0) return <>{fallback}</>;
 
-  const { visible, overflow } = splitSkillChips(chips);
   return (
     <div
       role="group"
@@ -196,27 +182,8 @@ export function SkillChips({
       data-testid="skill-chips"
       className="flex min-w-0 flex-nowrap items-center gap-1.5"
     >
-      {visible.map((chip) =>
-        chip.enforced ? (
-          <EnforcedChip key={chip.packageId} chip={chip} onOpen={onOpenPicker} />
-        ) : (
-          <PinnedChip
-            key={chip.packageId}
-            chip={chip}
-            onOpen={onOpenPicker!}
-            onRemove={() =>
-              onSelectionChange({
-                ...selection,
-                pinnedSkills: togglePinned(
-                  ownPins(selection.pinnedSkills, enforcedIds),
-                  chip.packageId,
-                ),
-              })
-            }
-          />
-        ),
-      )}
-      {overflow.length > 0 && <OverflowChip chips={overflow} />}
+      {enforced.length > 0 && <EnforcedPill skills={enforced} onOpen={onOpenPicker} />}
+      {pinned.length > 0 && <PinnedPill skills={pinned} onOpen={onOpenPicker!} />}
       {onOpenPicker && (
         <button
           type="button"

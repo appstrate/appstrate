@@ -226,7 +226,6 @@ export function ComposerTools({
         <SkillChips
           transport={transport}
           selection={selection}
-          onSelectionChange={onSelectionChange}
           onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
           fallback={
             showPicker ? (
