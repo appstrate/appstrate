@@ -13,7 +13,6 @@
 import { describe, it, expect } from "bun:test";
 import { formatErrorChain, getErrorMessage } from "../src/errors.ts";
 import { ApiError } from "../src/api-errors.ts";
-import { BundlerError } from "../src/mcp-server-bundle/npm-vendor.ts";
 import { PackageZipError } from "../src/zip.ts";
 
 describe("the gap formatErrorChain closes", () => {
@@ -173,16 +172,6 @@ describe("custom Error classes carry a cause through construction", () => {
       detail: "gone",
     });
     expect("cause" in err).toBe(false);
-  });
-
-  it("BundlerError accepts a cause", () => {
-    const inner = new SyntaxError("Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON");
-    const err = new BundlerError("installed package.json is not valid JSON", "INSTALL_TREE_PARSE", {
-      cause: inner,
-    });
-    expect(err.code).toBe("INSTALL_TREE_PARSE");
-    expect(err.cause).toBe(inner);
-    expect(formatErrorChain(err)).toContain("<!DOCTYPE");
   });
 
   it("PackageZipError keeps its cause behind the `details` parameter", () => {

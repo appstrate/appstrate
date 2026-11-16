@@ -43,7 +43,6 @@ const PACKAGES_SCHEMA = {
   properties: {
     agent: { $ref: "#/components/schemas/LibraryPackageList" },
     skill: { $ref: "#/components/schemas/LibraryPackageList" },
-    "mcp-server": { $ref: "#/components/schemas/LibraryPackageList" },
     integration: { $ref: "#/components/schemas/LibraryPackageList" },
   },
 } as const;
@@ -93,7 +92,6 @@ const PACKAGES_EXAMPLE = {
     },
   ],
   skill: [],
-  "mcp-server": [],
   integration: [
     {
       id: "pkg_gmail",

@@ -33,7 +33,7 @@ import { usePackageVersions } from "../../hooks/use-packages";
 import { matchesSearch } from "../../lib/strings";
 import { isPinnedEntry, previewBlockReason } from "../../lib/package-file-tree";
 import { fileTextOperation, type DraftFile } from "../../lib/package-file-drafts";
-import { primaryDisplayFile } from "../../lib/package-files";
+import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import { CompareWithDraftModal } from "../package-detail/compare-with-draft-modal";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { Modal } from "../modal";
@@ -107,7 +107,7 @@ export function PackageFilesView({
   const isPinned = (path: string) => path === "manifest.json" || isPinnedEntry(type, path);
 
   const visibleFiles = (entries ?? []).filter((file) => matchesSearch(query, [file.path]));
-  const mainFile = initialPath ?? primaryDisplayFile(type).name;
+  const mainFile = initialPath ?? PACKAGE_CONTENT_FILE[type];
   const activeFile =
     visibleFiles.find((file) => file.path === selectedPath) ??
     visibleFiles.find((file) => file.path === mainFile) ??

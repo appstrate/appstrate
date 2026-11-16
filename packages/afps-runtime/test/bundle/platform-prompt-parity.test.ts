@@ -68,15 +68,17 @@ function makeFixtureBundle(): Bundle {
   const mcp = pkg(
     "@fixture/search@1.0.0",
     {
-      manifest_version: "0.3",
       name: "@fixture/search",
       version: "1.0.0",
-      type: "mcp-server",
+      type: "integration",
       schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
     },
     { "server/index.js": "//" },

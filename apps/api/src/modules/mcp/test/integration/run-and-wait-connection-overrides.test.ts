@@ -312,7 +312,6 @@ describe("mcp run_and_wait — connection_overrides", () => {
     const OAUTH = "@mcpconn/oauth-svc";
     const manifest = localIntegrationManifest({
       name: OAUTH,
-      serverName: `${OAUTH}-server`,
       version: "1.0.0",
       auths: {
         primary: {

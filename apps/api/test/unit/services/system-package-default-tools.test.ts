@@ -23,12 +23,12 @@ import {
 } from "@appstrate/core/system-packages";
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import {
+  getLocalServer,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   scopesNotCovered,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import { getLocalServerRef } from "../../../src/services/integration-manifest-helpers.ts";
 
 const ARCHIVE_DIR = join(import.meta.dir, "../../../../../system-packages");
 
@@ -41,36 +41,24 @@ interface Pkg {
   missingServer?: string;
 }
 
-function mcpServerToolsOf(server: SystemPackageEntry): Array<{ name: string }> | undefined {
-  const tools = (server.manifest as { tools?: Array<{ name?: unknown }> }).tools;
-  if (!Array.isArray(tools)) return undefined;
-  return tools.flatMap((t) => (typeof t?.name === "string" ? [{ name: t.name }] : []));
-}
-
 /** Integrations an agent can call: a `remote` or `local` source, or a non-empty catalog. */
 function callableIntegrations(packages: SystemPackageEntry[]): Pkg[] {
-  const mcpServers = new Map(
-    packages.filter((p) => p.type === "mcp-server").map((p) => [p.packageId, p]),
-  );
   const callable: Pkg[] = [];
   for (const entry of packages) {
     if (entry.type !== "integration") continue;
     const manifest = entry.manifest as unknown as IntegrationManifest;
     const sourceKind = (entry.manifest.source as { kind?: string } | undefined)?.kind;
-    const serverRef = getLocalServerRef(manifest);
-    const server = serverRef ? mcpServers.get(serverRef.name) : undefined;
-    const catalog = resolveIntegrationToolCatalog({
-      integration: manifest,
-      mcpServerTools: server ? mcpServerToolsOf(server) : undefined,
-    }).map((tool) => tool.name);
+    const catalog = resolveIntegrationToolCatalog({ integration: manifest }).map(
+      (tool) => tool.name,
+    );
     if (sourceKind !== "remote" && sourceKind !== "local" && catalog.length === 0) continue;
     callable.push({
       packageId: entry.packageId,
       sourceKind,
       manifest,
       catalog: new Set(catalog),
-      ...(sourceKind === "local" && !server
-        ? { missingServer: serverRef?.name ?? "(no source.server)" }
+      ...(sourceKind === "local" && !getLocalServer(manifest)
+        ? { missingServer: "(no runnable source.server)" }
         : {}),
     });
   }
@@ -103,10 +91,10 @@ describe("system-package default_tools", () => {
   });
 
   // Without it the catalog falls back to `tools_policy` keys, not the server's tools.
-  it("ships the mcp-server every local integration references", () => {
+  it("gives every local integration a runnable inline server", () => {
     const missing = callable
       .filter((p) => p.missingServer !== undefined)
-      .map((p) => `${p.packageId}: mcp-server ${p.missingServer} is not a shipped system package`);
+      .map((p) => `${p.packageId}: ${p.missingServer}`);
     expect(missing).toEqual([]);
   });
 

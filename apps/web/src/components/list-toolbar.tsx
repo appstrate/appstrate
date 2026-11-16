@@ -231,7 +231,6 @@ export function ListToolbar({
   onReset,
   columns,
   actions,
-  tabs,
 }: {
   /**
    * The text filter — present only where the screen can answer it truthfully. A list held whole
@@ -250,8 +249,6 @@ export function ListToolbar({
   columns?: ColumnMenuSpec;
   /** The page's own action, at the right end of the bar. */
   actions?: ReactNode;
-  /** `CollectionTabs` splitting the list, drawn first on the bar's line. */
-  tabs?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -263,7 +260,6 @@ export function ListToolbar({
   return (
     <div className="@container/bar mb-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {tabs}
         {search && (
           <Input
             value={search.value}

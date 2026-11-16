@@ -73,12 +73,9 @@ describe("loading skeletons", () => {
     expect(render(<SettingsTableSkeleton toolbar />)).toContain("sm:max-w-[280px]");
   });
 
-  it("draws what leads and ends a collection's bar only where the page has it", () => {
-    const tabs = "h-8 w-44";
+  it("draws what ends a collection's bar only where the page has it", () => {
     const views = "h-8 w-[5.25rem]";
-    expect(render(<ListPageSkeleton list="integrations" tabs views />)).toContain(tabs);
-    expect(render(<ListPageSkeleton list="integrations" tabs views />)).toContain(views);
-    expect(render(<ListPageSkeleton />)).not.toContain(tabs);
+    expect(render(<ListPageSkeleton list="integrations" views />)).toContain(views);
     expect(render(<ListPageSkeleton />)).not.toContain(views);
   });
 

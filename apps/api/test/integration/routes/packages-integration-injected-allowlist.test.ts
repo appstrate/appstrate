@@ -17,13 +17,11 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import {
   apiIntegrationManifest,
   envDelivery,
   localIntegrationManifest,
-  mcpServerManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
@@ -139,7 +137,6 @@ describe("writing an injecting auth's allowlist", () => {
 
 describe("a default_tools entry the integration provably does not expose", () => {
   const auths = { api: { type: "api_key" as const } };
-  const SERVER_ID = `${ID}-server`;
 
   async function expectNothingWritten() {
     expect(await db.select({ id: packages.id }).from(packages).where(eq(packages.id, ID))).toEqual(
@@ -184,33 +181,30 @@ describe("a default_tools entry the integration provably does not expose", () =>
     expect(res.status).toBe(201);
   });
 
-  it("judges a local default against the mcp-server a run spawns: create, import, publish", async () => {
-    const server = (version: string, tools: string[]) => ({
-      ...mcpServerManifest({ name: SERVER_ID, version }),
-      tools: tools.map((name) => ({ name })),
-    });
-    await seedPackage({
-      id: SERVER_ID,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      // The draft a run never reads: only the published 1.0.0 declares `send`.
-      draftManifest: server("1.1.0", ["search", "draft_only"]),
-    });
-    await seedPackageVersion({
-      packageId: SERVER_ID,
-      version: "1.0.0",
-      manifest: server("1.0.0", ["search", "send"]),
-    });
+  it("judges a local default against the tools its own server declares: create, import", async () => {
     const local = (defaultTools: string[]) => ({
-      ...localIntegrationManifest({ name: ID, auths }),
+      ...localIntegrationManifest({
+        name: ID,
+        server: { tools: [{ name: "search" }, { name: "send" }] },
+        auths,
+      }),
       default_tools: defaultTools,
     });
+    const payload = [{ op: "write", path: "server/index.js", text: "// server\n" }];
+    const createWithPayload = (m: Record<string, unknown>) =>
+      app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: m, operations: payload }),
+      });
 
     const unexposed = local(["search", "draft_only"]);
-    await expectRefused(await create(unexposed), "manifest.default_tools");
+    await expectRefused(await createWithPayload(unexposed), "manifest.default_tools");
     const form = new FormData();
-    const zip = zipSync({ "manifest.json": new TextEncoder().encode(JSON.stringify(unexposed)) });
+    const zip = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(unexposed)),
+      "server/index.js": new TextEncoder().encode("// server\n"),
+    });
     form.append("file", new File([new Uint8Array(zip)], "local.afps"));
     await expectRefused(
       await app.request("/api/packages/import", {
@@ -222,29 +216,7 @@ describe("a default_tools entry the integration provably does not expose", () =>
     );
     await expectNothingWritten();
 
-    expect((await create(local(["search", "send"]))).status).toBe(201);
-    // The spawn now resolves `^1.0.0` to a version that dropped `send`: the draft cannot freeze.
-    await seedPackageVersion({
-      packageId: SERVER_ID,
-      version: "1.0.1",
-      manifest: server("1.0.1", ["search"]),
-    });
-    await expectRefused(
-      await app.request(`/api/packages/integrations/${ID}/versions`, {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ version: "1.0.1" }),
-      }),
-      "manifest.default_tools",
-    );
-  });
-
-  it("leaves a local default unjudged while its mcp-server does not resolve", async () => {
-    const res = await create({
-      ...localIntegrationManifest({ name: ID, auths }),
-      default_tools: ["anything"],
-    });
-    expect(res.status).toBe(201);
+    expect((await createWithPayload(local(["search", "send"]))).status).toBe(201);
   });
 
   it("accepts a none default another vendor's root _meta key may supply, and reads it back", async () => {

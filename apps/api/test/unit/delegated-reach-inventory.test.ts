@@ -195,7 +195,7 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
-  getMcpServerBundle: {
+  getIntegrationBundle: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
@@ -233,10 +233,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
   },
-  createMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
-  },
   createSkillVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: skills:write in home space",
@@ -264,14 +260,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   deleteIntegrationPackageVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:delete in home space",
-  },
-  deleteMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
-  },
-  deleteMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
   },
   deleteSkill: {
     category: "handler-guarded",
@@ -330,10 +318,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
   },
-  restoreMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
-  },
   restoreSkillVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: skills:write in home space",
@@ -376,10 +360,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   updateIntegrationPackage: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
-  },
-  updateMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
   },
   updateSkill: {
     category: "handler-guarded",

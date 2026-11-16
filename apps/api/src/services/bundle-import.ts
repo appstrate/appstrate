@@ -46,7 +46,6 @@ import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
-  findUnexposedLocalDefaultTools,
   validateAgentIntegrationSelections,
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
@@ -668,7 +667,7 @@ function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
  * handed to the validator is therefore the post-import
  * `incoming ∪ already-present` catalog: every manifest the bundle carries,
  * keyed by package id, is resolved together with existing versions and
- * dist-tags. Same map covers the mcp-servers a local integration references.
+ * dist-tags.
  */
 async function assertBundleAgentsExposeCallableTools(
   bundle: Bundle,
@@ -708,28 +707,6 @@ function assertBundleRootConforms(bundle: Bundle): void {
   const type = (root.manifest as { type?: PackageType }).type;
   if (!type) return;
   assertArchiveContentConforms(type, root.files, "file", `${bundle.root}: `);
-}
-
-/**
- * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
- * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
- */
-async function assertBundleRootDefaultToolsExposed(
-  bundle: Bundle,
-  orgId: string,
-  carried: ReadonlyMap<string, CarriedVersion[]>,
-): Promise<void> {
-  const root = bundle.packages.get(bundle.root);
-  const parsed = parsePackageIdentity(bundle.root);
-  if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
-  assertNoManifestViolations(
-    await findUnexposedLocalDefaultTools(
-      root.manifest as unknown as Record<string, unknown>,
-      orgId,
-      carried,
-    ),
-    `${bundle.root}: `,
-  );
 }
 
 /**
@@ -784,7 +761,6 @@ export async function preflightBundleImport(
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
-  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

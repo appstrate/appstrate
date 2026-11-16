@@ -2,15 +2,20 @@
 
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-import { LocalServerField } from "./local-server-field";
+import { LocalUnavailableHint } from "../integration-source-label";
+import { LocalServerFields } from "./local-server-fields";
 import { getSource, setSource, type SourceKind } from "./utils";
 
 interface SourceSectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
+  /** Paths of the package's draft files, to check the local entry point against. */
+  serverFiles?: readonly string[];
+  /** Flag the empty required fields (after a refused save). */
+  showErrors?: boolean;
 }
 
-export function SourceSection({ manifest, onChange }: SourceSectionProps) {
+export function SourceSection({ manifest, onChange, serverFiles, showErrors }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const source = getSource(manifest);
   const update = (patch: Partial<typeof source>) =>
@@ -26,6 +31,8 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
         enumValues={["remote", "local", "none"]}
         description={t("integrationEditor.source.kindDesc")}
       />
+      {/* Authoring stays possible; a local server only cannot run on this instance. */}
+      {source.kind === "local" && <LocalUnavailableHint inline />}
 
       {source.kind === "remote" && (
         <>
@@ -57,10 +64,11 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
       )}
 
       {source.kind === "local" && (
-        <LocalServerField
-          name={source.serverName}
-          version={source.serverVersion}
+        <LocalServerFields
+          source={source}
           onChange={update}
+          serverFiles={serverFiles}
+          showErrors={showErrors}
         />
       )}
 

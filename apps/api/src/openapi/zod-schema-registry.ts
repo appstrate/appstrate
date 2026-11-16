@@ -509,12 +509,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "PATCH",
-    path: "/api/packages/mcp-servers/{scope}/{name}",
-    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
-    description: "Update a draft mcp-server package",
-  },
-  {
-    method: "PATCH",
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
@@ -545,12 +539,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/packages/integrations/{scope}/{name}/versions",
     jsonSchema: toJsonSchema(createVersionBodySchema),
     description: "Publish a version from the integrations draft",
-  },
-  {
-    method: "POST",
-    path: "/api/packages/mcp-servers/{scope}/{name}/versions",
-    jsonSchema: toJsonSchema(createVersionBodySchema),
-    description: "Publish a version from the mcp-servers draft",
   },
   {
     method: "POST",

@@ -43,6 +43,10 @@ import {
   acquiresByConnectLogin,
   isUnauthenticatedIntegration,
   findConnectionlessVariables,
+  getLocalServer,
+  getLocalServerTools,
+  getLocalServerEnv,
+  type LocalServer,
   PLATFORM_META_KEY,
   isRuntimeBoundIntegration,
   findRuntimeBinding,
@@ -51,6 +55,16 @@ import {
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
+
+/** A `local` source: the MCP server is declared inline and shipped in the integration archive. */
+const LOCAL_SOURCE = {
+  kind: "local",
+  server: {
+    type: "node",
+    entry_point: "server/index.ts",
+    mcp_config: { command: "node", args: ["server/index.ts"] },
+  },
+};
 
 // ─────────────────────────────────────────────
 // Fixture helpers
@@ -106,25 +120,34 @@ describe("integrationManifestSchema — source kinds", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts a local source referencing an mcp-server", () => {
+  it("accepts a local source declaring its server inline", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest({ source: LOCAL_SOURCE }));
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a local source with an advisory tools catalog and literal env", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.2.0" } },
+        source: {
+          kind: "local",
+          server: {
+            ...LOCAL_SOURCE.server,
+            mcp_config: { command: "node", env: { MODE: "fast" } },
+            tools: [{ name: "search", description: "Search" }],
+          },
+        },
       }),
     );
     expect(r.success).toBe(true);
   });
 
-  it("accepts a local source with vendored:true", () => {
+  it("rejects the retired { name, version } local server reference", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        source: {
-          kind: "local",
-          server: { name: "@official/gmail-server", version: "^1.0.0", vendored: true },
-        },
+        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.2.0" } },
       }),
     );
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
   });
 
   it("accepts a none source (no MCP backing)", () => {
@@ -176,7 +199,7 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     // §7.3 issuer-or-endpoints rule applies to non-remote sources. Use a local
     // source so the rule is in force (a remote source waives it — see below).
     const m = baseManifest({
-      source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+      source: LOCAL_SOURCE,
     });
     const auths = m.auths as Record<string, Record<string, unknown>>;
     delete auths.oauth!.issuer;
@@ -495,7 +518,7 @@ describe("integrationManifestSchema — authorized_uris", () => {
 describe("integrationManifestSchema — templated authorized_uris", () => {
   function sshLike(auth: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
     return baseManifest({
-      source: { kind: "local", server: { name: "@appstrate/ssh-mcp", version: "^1.0.0" } },
+      source: LOCAL_SOURCE,
       auths: {
         primary: {
           type: "custom",
@@ -1843,7 +1866,7 @@ describe("getApiCallConfigs", () => {
   it("works orthogonally to a local source (api_call alongside an MCP server)", () => {
     const m = parse(
       baseManifest({
-        source: { kind: "local", server: { name: "@x/srv", version: "^1.0.0" } },
+        source: LOCAL_SOURCE,
         _meta: { "dev.appstrate/api": { auths: { oauth: {} } } },
       }),
     );
@@ -2590,7 +2613,7 @@ describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
     expect(r.success).toBe(true);
   });
 
-  it("does not validate array membership for non-none sources (catalog lives in the mcp-server)", () => {
+  it("does not validate array membership for non-none sources (a remote catalog lives upstream)", () => {
     // A remote source's authoritative tool list is the upstream MCP server's,
     // unknowable in a pure-manifest superRefine — so an arbitrary name is left
     // for runtime rather than falsely rejected.
@@ -2603,8 +2626,14 @@ describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
 
 describe("findUnexposedDefaultTools — write-path default_tools policy", () => {
   const REMOTE = baseManifest().source;
-  const LOCAL = { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } };
+  const LOCAL = LOCAL_SOURCE;
   const SERVER_TOOLS = [{ name: "search" }, { name: "send" }];
+  /** A local integration declaring `tools` on its server: its catalog is then known. */
+  const localWithTools = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({
+      source: { kind: "local", server: { ...LOCAL.server, tools: SERVER_TOOLS } },
+      ...overrides,
+    });
   const FOREIGN_META = { "dev.appstrate/api": { auths: { key: {} } }, "com.example/tools": {} };
   const unexposed = (name: string) => ({
     path: ["default_tools"],
@@ -2616,17 +2645,13 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
   const local = (overrides: Record<string, unknown> = {}) =>
     baseManifest({ source: LOCAL, ...overrides });
   /** The schema reads the manifest and the policy finds nothing in it. */
-  function expectNothing(manifest: Record<string, unknown>, mcpServerTools?: { name: string }[]) {
+  function expectNothing(manifest: Record<string, unknown>) {
     expect(errorPaths(manifest)).toEqual([]);
-    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual([]);
+    expect(findUnexposedDefaultTools(manifest)).toEqual([]);
   }
   /** The policy refuses `names` in a manifest the schema still reads. */
-  function expectRefusedOnWrite(
-    manifest: Record<string, unknown>,
-    names: string[],
-    mcpServerTools?: { name: string }[],
-  ) {
-    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual(names.map(unexposed));
+  function expectRefusedOnWrite(manifest: Record<string, unknown>, names: string[]) {
+    expect(findUnexposedDefaultTools(manifest)).toEqual(names.map(unexposed));
     expect(errorPaths(manifest)).toEqual([]);
   }
   /** The policy and the schema refuse `name` with the same issue. */
@@ -2690,9 +2715,8 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
       expectRefusedOnWrite(baseManifest(policed), ["api_call"]);
     });
 
-    it("ignores mcpServerTools, which are a local source's catalog", () => {
-      expectRefusedOnWrite(remote({ default_tools: ["extra"] }), ["extra"], [{ name: "extra" }]);
-      expectNothing(baseManifest({ default_tools: ["nope"] }), SERVER_TOOLS);
+    it("ignores a source.server.tools, which only a local source has", () => {
+      expectNothing(baseManifest({ default_tools: ["nope"] }));
     });
   });
 
@@ -2700,9 +2724,6 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
     it("refuses a name outside the api tools when every root _meta key is Appstrate's", () => {
       expectNothing(apiManifest({ default_tools: ["api_call"] }));
       expectRefusedBySchema(apiManifest({ default_tools: ["api_call", "nope"] }), "nope");
-      expect(
-        findUnexposedDefaultTools(apiManifest({ default_tools: ["nope"] }), [{ name: "nope" }]),
-      ).toEqual([unexposed("nope")]);
     });
 
     it("refuses any name when the manifest carries no _meta", () => {
@@ -2735,33 +2756,34 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
   });
 
   describe("local source", () => {
-    it("leaves a name unjudged without the mcp-server's tools", () => {
+    it("leaves a name unjudged when source.server declares no tools", () => {
       expectNothing(local({ default_tools: ["nope"] }));
       expectNothing(local({ default_tools: ["nope"], tools_policy: { search: {} } }));
     });
 
-    it("refuses a name the mcp-server's tools do not hold", () => {
-      expectRefusedOnWrite(local({ default_tools: ["search", "nope"] }), ["nope"], SERVER_TOOLS);
+    it("refuses a name source.server.tools does not hold, which the schema still reads", () => {
+      expectRefusedOnWrite(localWithTools({ default_tools: ["search", "nope"] }), ["nope"]);
     });
 
-    it("finds nothing when the mcp-server's tools hold every name", () => {
-      expectNothing(local({ default_tools: ["search", "send"] }), SERVER_TOOLS);
+    it("finds nothing when source.server.tools holds every name", () => {
+      expectNothing(localWithTools({ default_tools: ["search", "send"] }));
     });
 
-    it("accepts api_call beside the mcp-server's tools only where _meta exposes it", () => {
+    it("accepts api_call beside source.server.tools only where _meta exposes it", () => {
       const defaultTools = ["search", API_CALL_TOOL_NAME];
-      expectNothing(apiManifest({ source: LOCAL, default_tools: defaultTools }), SERVER_TOOLS);
-      expectRefusedOnWrite(
-        local({ default_tools: defaultTools }),
-        [API_CALL_TOOL_NAME],
-        SERVER_TOOLS,
+      expectNothing(
+        apiManifest({
+          source: { kind: "local", server: { ...LOCAL.server, tools: SERVER_TOOLS } },
+          default_tools: defaultTools,
+        }),
       );
+      expectRefusedOnWrite(localWithTools({ default_tools: defaultTools }), [API_CALL_TOOL_NAME]);
     });
 
-    it("refuses a hidden name with and without the mcp-server's tools", () => {
-      const manifest = local({ default_tools: ["search", "send"], hidden_tools: ["send"] });
-      expectRefusedOnWrite(manifest, ["send"]);
-      expectRefusedOnWrite(manifest, ["send"], SERVER_TOOLS);
+    it("refuses a hidden name with and without source.server.tools", () => {
+      const hidden = { default_tools: ["search", "send"], hidden_tools: ["send"] };
+      expectRefusedOnWrite(local(hidden), ["send"]);
+      expectRefusedOnWrite(localWithTools(hidden), ["send"]);
     });
   });
 
@@ -2775,13 +2797,13 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
     expectNothing(
       apiManifest({ default_tools: "*", allow_undeclared_tools: true, hidden_tools: ["api_call"] }),
     );
-    expectNothing(local({ default_tools: [] }), SERVER_TOOLS);
-    expectNothing(local(), SERVER_TOOLS);
+    expectNothing(localWithTools({ default_tools: [] }));
+    expectNothing(localWithTools());
   });
 
   it("leaves a non-string entry to the schema", () => {
-    const manifest = local({ default_tools: [42] });
-    expect(findUnexposedDefaultTools(manifest, SERVER_TOOLS)).toEqual([]);
+    const manifest = localWithTools({ default_tools: [42] });
+    expect(findUnexposedDefaultTools(manifest)).toEqual([]);
     expect(errorPaths(manifest)).toContain("default_tools");
   });
 
@@ -3067,6 +3089,79 @@ describe("unauthenticated integrations (AFPS §7.2)", () => {
       { path: ["variables"], message: expect.stringContaining("cannot declare variables") },
     ]);
     expect(findConnectionlessVariables(unauthenticated)).toEqual([]);
+  });
+});
+
+describe("getLocalServer / getLocalServerTools", () => {
+  it("reads source.server of a local integration", () => {
+    const m = baseManifest({ source: LOCAL_SOURCE });
+    expect(getLocalServer(m)).toEqual(LOCAL_SOURCE.server as unknown as LocalServer);
+  });
+
+  it("is null for a non-local source, a missing server and a malformed server", () => {
+    expect(getLocalServer(baseManifest())).toBeNull();
+    expect(getLocalServer(baseManifest({ source: { kind: "none" } }))).toBeNull();
+    expect(getLocalServer(baseManifest({ source: { kind: "local" } }))).toBeNull();
+    expect(getLocalServer(baseManifest({ source: { kind: "local", server: [] } }))).toBeNull();
+    expect(
+      getLocalServer(baseManifest({ source: { kind: "local", server: { type: "node" } } })),
+    ).toBeNull();
+    expect(getLocalServer(null)).toBeNull();
+  });
+
+  it("returns the advisory tools catalog, undefined when absent or not local", () => {
+    const tools = [{ name: "search", description: "Search" }, { name: "send" }];
+    const withTools = baseManifest({
+      source: { kind: "local", server: { ...LOCAL_SOURCE.server, tools } },
+    });
+    expect(getLocalServerTools(withTools)).toEqual(tools);
+    expect(getLocalServerTools(baseManifest({ source: LOCAL_SOURCE }))).toBeUndefined();
+    expect(getLocalServerTools(baseManifest())).toBeUndefined();
+  });
+
+  it("keeps an explicitly empty catalog", () => {
+    const m = baseManifest({
+      source: { kind: "local", server: { ...LOCAL_SOURCE.server, tools: [] } },
+    });
+    expect(getLocalServerTools(m)).toEqual([]);
+  });
+});
+
+describe("getLocalServerEnv", () => {
+  const withServer = (mcp_config: Record<string, unknown>) =>
+    baseManifest({
+      source: { kind: "local", server: { ...LOCAL_SOURCE.server, mcp_config } },
+    });
+
+  it("returns the literal mcp_config.env entries", () => {
+    expect(
+      getLocalServerEnv(withServer({ command: "node", env: { MODE: "fast", REGION: "eu" } })),
+    ).toEqual({ MODE: "fast", REGION: "eu" });
+  });
+
+  it("is empty when mcp_config declares no env", () => {
+    expect(getLocalServerEnv(withServer({ command: "node" }))).toEqual({});
+  });
+
+  it("is empty for a remote manifest and for a manifest without a source", () => {
+    expect(
+      getLocalServerEnv(
+        baseManifest({
+          source: {
+            kind: "remote",
+            remote: { url: "https://x.test/mcp", transport: "streamable-http" },
+          },
+        }),
+      ),
+    ).toEqual({});
+    expect(getLocalServerEnv(baseManifest())).toEqual({});
+    expect(getLocalServerEnv(null)).toEqual({});
+  });
+
+  it("skips non-string values instead of coercing them", () => {
+    expect(getLocalServerEnv(withServer({ command: "node", env: { OK: "1", BAD: 2 } }))).toEqual({
+      OK: "1",
+    });
   });
 });
 

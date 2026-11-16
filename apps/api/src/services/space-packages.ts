@@ -27,17 +27,12 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope } from "./spaces.ts";
-import { ApiError } from "../lib/errors.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { parsePackageZip } from "@appstrate/core/zip";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   getLatestVersionId,
   getVersionDetail,
-  getVersionForDownload,
   requirePublishedArchive,
 } from "./package-versions.ts";
-import { downloadVersionZip } from "./package-storage.ts";
 import { serveSkillMd } from "./served-skill.ts";
 import {
   activeHereSql,
@@ -49,57 +44,6 @@ import {
 // ---------------------------------------------------------------------------
 // Activate / Deactivate
 // ---------------------------------------------------------------------------
-
-/**
- * Historical mcp-server drafts may predate companion-file validation. Refuse
- * to activate one unless the exact `latest` archive is present and passes the
- * same parser used at authoring/import and runtime boot. System packages are
- * boot-registry artifacts and do not have a package_versions row here.
- *
- * Exported because {@link activatePackageWithin} cannot run it (object storage
- * has no place inside a transaction); callers owning the transaction run it first.
- * A republication between this check and the commit is accepted: the run path
- * parses what it downloads anyway.
- */
-export async function assertMcpServerActivatable(
-  scope: SpaceScope,
-  packageId: string,
-): Promise<void> {
-  const [pkg] = await db
-    .select({ type: packages.type, source: packages.source })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-    .limit(1);
-  if (!pkg || pkg.type !== "mcp-server" || pkg.source === "system") return;
-
-  const version = await getVersionForDownload(packageId, "latest");
-  if (!version) {
-    throw new ApiError({
-      status: 422,
-      code: "bundle_invalid",
-      title: "Invalid MCP Server Bundle",
-      detail: `MCP-server package '${packageId}' has no activatable published version.`,
-    });
-  }
-
-  try {
-    const bytes = await downloadVersionZip(packageId, version.version, version.integrity);
-    if (!bytes) throw new Error(`archive for ${packageId}@${version.version} is missing`);
-    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredDependencyKeys: "tolerate" });
-    if (parsed.type !== "mcp-server" || parsed.packageId !== packageId) {
-      throw new Error(
-        `archive identity is ${parsed.packageId} (${parsed.type}), expected ${packageId} (mcp-server)`,
-      );
-    }
-  } catch (err) {
-    throw new ApiError({
-      status: 422,
-      code: "bundle_invalid",
-      title: "Invalid MCP Server Bundle",
-      detail: `MCP-server package '${packageId}@${version.version}' is not executable: ${getErrorMessage(err)}`,
-    });
-  }
-}
 
 /** The placement row of `(space, package)`, `FOR UPDATE` so a concurrent withdrawal cannot delete it under a door's decision. */
 async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
@@ -237,7 +181,6 @@ export async function activatePackage(
   opts?: { placeAs?: PlacementAuthority },
 ): Promise<PackageActivation> {
   await assertSpaceInScope(scope);
-  await assertMcpServerActivatable(scope, packageId);
 
   // One transaction: the org-visibility check is atomic with the write.
   return db.transaction((tx) => activatePackageWithin(tx, scope, packageId, opts));
@@ -245,8 +188,7 @@ export async function activatePackage(
 
 /**
  * {@link activatePackage}'s body inside the caller's transaction, for the home
- * move; the caller has already run {@link assertSpaceInScope} and
- * {@link assertMcpServerActivatable}. `keepExistingDecision` leaves a
+ * move; the caller has already run {@link assertSpaceInScope}. `keepExistingDecision` leaves a
  * destination's existing on/off verdict alone (a move transfers authority, not
  * what a space runs).
  */

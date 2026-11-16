@@ -167,11 +167,10 @@ async function forkWithConfig(
   // `packages.draft_content` of the fork, read from the SAME declaration every
   // other writer of that column reads (`PACKAGE_CONTENT_ENTRY`) rather than
   // from a hardcoded `prompt.md`/`SKILL.md` pair. That pair covered two of the
-  // four types: an integration forked to `""` even when its bundle shipped a
-  // real `INTEGRATION.md`, and an mcp-server always did — a column NO import of
-  // the same bytes would ever produce, which then read back as a 0-byte
-  // `INTEGRATION.md` in the file explorer, while `?version=…` still served
-  // the file.
+  // three types: an integration forked to `""` even when its bundle shipped a
+  // real `INTEGRATION.md`, a column NO import of the same bytes would ever
+  // produce, which then read back as a 0-byte `INTEGRATION.md` in the file
+  // explorer, while `?version=…` still served the file.
   //
   // The absence branch reproduces `parsePackageZip`'s own manifest-text
   // fallback, so the fork's column is byte-identical to what importing the
@@ -185,10 +184,10 @@ async function forkWithConfig(
   // materialize manifest JSON AS the agent's `prompt.md`.
   const manifestText = JSON.stringify(updatedManifest, null, 2);
   const contentEntry = PACKAGE_CONTENT_ENTRY[cfg.type];
-  const contentBytes = contentEntry ? zipEntries[contentEntry.path] : undefined;
+  const contentBytes = zipEntries[contentEntry.path];
   const content = contentBytes
     ? new TextDecoder().decode(contentBytes)
-    : contentEntry?.required
+    : contentEntry.required
       ? ""
       : manifestText;
 

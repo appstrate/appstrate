@@ -130,12 +130,23 @@ export function useIntegrationNames(): (
 
 /** `GET /api/integrations` answers at most this many ids per request (its `id` filter's bound). */
 const IDS_PER_REQUEST = 100;
+/** The answer for no id, one array so it is the same value from render to render. */
+const NO_ROWS: IntegrationSummaryWire[] = [];
 
-/** The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed here has no row; `undefined` until every request answered. */
+/**
+ * The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed
+ * here has no row; `undefined` until every request answered. When `ids` changes, the previous set's
+ * rows stand in (`isPlaceholderData`) until the new set's answer.
+ */
 export function useIntegrationsById(
   ids: readonly string[],
   options?: { enabled?: boolean },
-): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean; error: unknown } {
+): {
+  data: IntegrationSummaryWire[] | undefined;
+  isLoading: boolean;
+  isPlaceholderData: boolean;
+  error: unknown;
+} {
   const scope = useIntegrationsReadScope();
   // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
@@ -166,8 +177,9 @@ export function useIntegrationsById(
         : undefined,
   });
   return {
-    data: unique.length === 0 ? [] : query.data,
+    data: unique.length === 0 ? NO_ROWS : query.data,
     isLoading: unique.length > 0 && query.isLoading,
+    isPlaceholderData: unique.length > 0 && query.isPlaceholderData,
     error: query.error,
   };
 }

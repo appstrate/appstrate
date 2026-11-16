@@ -65,7 +65,7 @@ Each run gets its own sidecar and agent process. The **sidecar** holds the crede
 - **Chat.** A conversational assistant in the dashboard that acts with your own permissions: it can run your agents, read your runs and files, and connect accounts. See [Chat](/using-appstrate/chat).
 - **Skills.** Reusable `SKILL.md` instructions that agents (and the chat) load on demand.
 - **Scheduling.** Cron schedules with timezones. With Redis they are distributed and fire exactly once.
-- **AFPS packages.** Agents, skills, MCP servers and integrations are all versioned [AFPS packages](/features/packages) you can import, publish and share.
+- **AFPS packages.** Agents, skills and integrations are all versioned [AFPS packages](/features/packages) you can import, publish and share.
 - **Spaces, roles and end-users.** An organization holds spaces, each with its own agents, runs, schedules and API keys, and role-based access. [End-users](/features/end-users) let a product you build run agents on behalf of its own customers.
 - **Webhooks.** Run events delivered with Standard Webhooks signatures, with up to 8 delivery attempts.
 - **A complete REST API.** Everything the dashboard does goes through an [OpenAPI 3.1 API](/api). Each instance serves its own spec at `/api/openapi.json` and Swagger UI at `/api/docs`.

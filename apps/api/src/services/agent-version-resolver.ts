@@ -43,7 +43,7 @@
  * hot path, by `RunPackageCatalog` — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
- * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
+ * local-server spawns are frozen by the shared run-pipeline dependency resolver
  * before the sidecar receives its spawn plan.
  */
 

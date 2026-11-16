@@ -10,8 +10,7 @@ import { Modal } from "./modal";
 
 interface CreationHandoffChoicesProps {
   resource: CreationResource;
-  /** Absent for a type that cannot be written by hand (a local MCP server embeds its code). */
-  onManual?: () => void;
+  onManual: () => void;
   onChat: (prompt: string) => void;
   /** Importing a type takes the same grant as creating it, so whoever opens this may import. */
   onImport: () => void;
@@ -39,8 +38,8 @@ export function CreationHandoffModal({
 
 /**
  * The ways to make a package, the same for every type: by hand, with the chat, or from an
- * archive, and for an integration first the guided way from an MCP server URL. A way a type does
- * not have, or the chat when it is out of reach, stays listed, disabled, with the reason.
+ * archive, and for an integration first the guided way from an MCP server URL. The chat, when it is out of
+ * reach, stays listed, disabled, with the reason.
  */
 export function CreationHandoffChoices({
   resource,
@@ -66,7 +65,6 @@ export function CreationHandoffChoices({
             title: t("creation.fromUrl.title"),
             description: t("creation.fromUrl.description"),
             onClick: onFromUrl,
-            disabled: false,
           },
         ]
       : []),
@@ -74,11 +72,8 @@ export function CreationHandoffChoices({
       id: "manual",
       icon: PencilLine,
       title: t("creation.manual.title"),
-      description: t(
-        onManual ? "creation.manual.description" : "creation.manual.unavailableDescription",
-      ),
-      onClick: () => onManual?.(),
-      disabled: !onManual,
+      description: t("creation.manual.description"),
+      onClick: onManual,
     },
     {
       id: "chat",
@@ -96,7 +91,6 @@ export function CreationHandoffChoices({
       title: t("creation.import.title"),
       description: t("creation.import.description"),
       onClick: onImport,
-      disabled: false,
     },
   ];
 

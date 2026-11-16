@@ -20,13 +20,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { fieldsConnect, hostedSubmit, type ProblemBody } from "../../helpers/connect-surfaces.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
   connectToolBlock,
-  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import {
@@ -42,14 +41,12 @@ import type {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const INTEGRATION_ID = "@myorg/portal";
-const SERVER_ID = "@myorg/portal-server";
 
 /** A `custom` auth whose connect is a `runAt: "link"` connect.tool → OrchestratedStrategy. */
 function connectToolManifest(): IntegrationManifest {
   return localIntegrationManifest({
     name: INTEGRATION_ID,
     displayName: "Portal",
-    serverName: SERVER_ID,
     auths: {
       session: {
         type: "custom",
@@ -120,31 +117,6 @@ describe("connect-run failures at the route boundary", () => {
       type: "integration",
       source: "local",
       draftManifest: connectToolManifest(),
-    });
-    // The local source references a separate mcp-server package; the launcher
-    // resolves its runnable server config before it can spawn anything.
-    //
-    // It must be PUBLISHED, not draft-only. The launcher resolves through the
-    // same published-version kernel the agent-run path uses, and it has to:
-    // `/internal/mcp-server-bundle/:scope/:name` serves bytes only out of
-    // `package_versions` and REFUSES a request with no `?version=` (issue #588
-    // — serving "latest" is exactly the manifest/bytes skew it closed). Only
-    // system mcp-servers, answered from the boot registry, may omit it. So a
-    // draft-only local mcp-server has no bytes to spawn from at all, and
-    // seeding one here would fixture a scenario that cannot run end to end.
-    await seedPackage({
-      id: SERVER_ID,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: mcpServerManifest({ name: SERVER_ID }),
-    });
-    // `1.0.0`, not the helper's default: the integration fixture declares
-    // `source.server.version: "^1.0.0"`, and the resolver honours that range.
-    await seedPackageVersion({
-      packageId: SERVER_ID,
-      version: "1.0.0",
-      manifest: mcpServerManifest({ name: SERVER_ID, version: "1.0.0" }),
     });
   });
 

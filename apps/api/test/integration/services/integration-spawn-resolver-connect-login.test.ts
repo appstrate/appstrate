@@ -14,26 +14,23 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { LoginSecretStrategy } from "../../../src/services/connect/login-secret-strategy.ts";
 import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
   connectToolBlock,
-  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/wajax-spawn";
-const MCP_SERVER = "@orga/wajax-server";
 
 function runStartManifest(name = INTEG): IntegrationManifest {
   return localIntegrationManifest({
     name,
-    serverName: MCP_SERVER,
     version: "0.1.0",
     displayName: "OrgaBusiness",
     description: "Form-login integration (run-start)",
@@ -87,25 +84,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       source: "local",
       draftManifest: runStartManifest(),
     });
-    // The integration's `source.kind: "local"` references a separate mcp-server
-    // package; the spawn resolver looks it up for the runnable server config.
-    const serverManifest = mcpServerManifest({
-      name: MCP_SERVER,
-      version: "0.1.0",
-      serverType: "node",
-    });
-    await seedPackage({
-      id: MCP_SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({
-      packageId: MCP_SERVER,
-      version: "0.1.0",
-      manifest: serverManifest,
-    });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   });
 
@@ -125,7 +103,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -192,7 +169,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -209,7 +185,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
     const manifest = localIntegrationManifest({
       name: INTEG,
-      serverName: MCP_SERVER,
       version: "0.1.0",
       displayName: "OrgaBusiness",
       auths: {
@@ -236,23 +211,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       source: "local",
       draftManifest: manifest,
     });
-    const serverManifest = mcpServerManifest({
-      name: MCP_SERVER,
-      version: "0.1.0",
-      serverType: "node",
-    });
-    await seedPackage({
-      id: MCP_SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({
-      packageId: MCP_SERVER,
-      version: "0.1.0",
-      manifest: serverManifest,
-    });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await new LoginSecretStrategy().complete(connectCtx(), {
       kind: "fields",
@@ -260,7 +218,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     });
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -283,7 +240,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     // with non-empty `default_scopes` (enforced by core schema superRefine).
     const manifest = localIntegrationManifest({
       name: INTEG,
-      serverName: MCP_SERVER,
       version: "0.1.0",
       displayName: "OrgaBusiness",
       auths: {
@@ -313,23 +269,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       source: "local",
       draftManifest: manifest,
     });
-    const serverManifest = mcpServerManifest({
-      name: MCP_SERVER,
-      version: "0.1.0",
-      serverType: "node",
-    });
-    await seedPackage({
-      id: MCP_SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({
-      packageId: MCP_SERVER,
-      version: "0.1.0",
-      manifest: serverManifest,
-    });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
 
     await new LoginSecretStrategy().complete(connectCtx(), {
@@ -348,7 +287,6 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     };
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: wildcardAgent,

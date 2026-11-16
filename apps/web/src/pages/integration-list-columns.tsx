@@ -6,10 +6,9 @@ import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
 import {
   useCatalogueOriginColumn,
-  useCatalogueProtocolColumn,
+  useCatalogueSourceColumn,
 } from "../components/catalogue-columns";
 import { useOrg } from "../hooks/use-org";
-import { integrationProtocol } from "../lib/integration-collection";
 
 /**
  * One comparable integration fact per column. `connectionCounts` is the caller's own connections
@@ -20,9 +19,8 @@ export function useIntegrationListColumns(
 ): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
-  // Remote tab only: API or MCP.
-  const protocol = useCatalogueProtocolColumn<IntegrationIndexItem>((integration) =>
-    integrationProtocol(integration.source_kind),
+  const source = useCatalogueSourceColumn<IntegrationIndexItem>(
+    (integration) => integration.source_kind,
   );
 
   return [
@@ -39,19 +37,7 @@ export function useIntegrationListColumns(
       ),
     },
     origin,
-    protocol,
-    {
-      // Local tab only: the server package the sandbox runs.
-      id: "server",
-      header: t("integrations.col.server"),
-      width: 140,
-      elastic: true,
-      cell: ({ server }) => (
-        <span className="text-muted-foreground truncate font-mono text-xs">
-          {server ? `${server.name} ${server.version}` : "—"}
-        </span>
-      ),
-    },
+    source,
     {
       id: "connections",
       header: t("integrations.col.connections"),

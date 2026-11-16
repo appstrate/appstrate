@@ -48,7 +48,6 @@ function integManifest(version: string, requiredScopes: string[]) {
   return localIntegrationManifest({
     name: INTEG,
     version,
-    serverName: "@schedpin/svc-server",
     auths: {
       primary: {
         type: "oauth2",

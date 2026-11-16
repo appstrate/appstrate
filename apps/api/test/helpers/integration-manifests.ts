@@ -49,25 +49,6 @@ export function envDelivery(entries: Record<string, string>): {
 }
 
 /**
- * AFPS §7.6 `delivery.env` map with `user_config_key` bridge — exercises
- * the CC-4 substitution path where a local-source integration's env var also
- * flows into the referenced mcp-server's `mcp_config.env` template via
- * `${user_config.<key>}`. Each entry: `{ envVar: { field, userConfigKey } }`.
- */
-export function envDeliveryWithUserConfigKey(
-  entries: Record<string, { field: string; userConfigKey?: string }>,
-): { env: Record<string, { value: string; user_config_key?: string }> } {
-  const env: Record<string, { value: string; user_config_key?: string }> = {};
-  for (const [k, conf] of Object.entries(entries)) {
-    env[k] = {
-      value: `{$credential.${conf.field}}`,
-      ...(conf.userConfigKey ? { user_config_key: conf.userConfigKey } : {}),
-    };
-  }
-  return { env };
-}
-
-/**
  * AFPS §7.6 `delivery.files` map — entries are
  * `{ absolutePath: { credentialField, mode? } }`. The value template uses the
  * standard `{$credential.<field>}` grammar so the spawn resolver renders the
@@ -165,18 +146,38 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
   return auth;
 }
 
+/** The inline `source.server` of a local integration, in builder terms. */
+export interface LocalServerSpec {
+  type?: "node" | "python" | "binary" | "uv";
+  /** Path inside the integration archive. Defaults to `server/index.js`. */
+  entryPoint?: string;
+  /** Literal `mcp_config.env` entries, merged into the runner env under `delivery.env`. */
+  env?: Record<string, string>;
+  /** Advisory `source.server.tools` catalog. */
+  tools?: Array<{ name: string; description?: string }>;
+  /**
+   * Appstrate runtime override → `_meta["dev.appstrate/mcp-server"].runtime`. AFPS has no `bun`
+   * server type, so a bun-native server keeps a valid `type` and declares the real runtime here.
+   */
+  appstrateRuntime?: string;
+  /**
+   * Shared-workspace opt-in (`_meta["dev.appstrate/workspace"]`): the spawn resolver populates
+   * `IntegrationSpawnSpec.workspaceMount` from it.
+   */
+  workspace?: { mount?: string; access?: "ro" | "rw" };
+}
+
 /**
- * Build an AFPS integration manifest with a `local` source (referencing the
- * mcp-server package `<name>-server` unless `serverName` says otherwise) and the
- * given auths.
+ * Build an AFPS integration manifest with a `local` source declaring its MCP
+ * server inline (`source.server`) and the given auths.
  */
 export function localIntegrationManifest(opts: {
   name: string;
   version?: string;
   displayName?: string;
   description?: string;
-  /** Scoped name of the referenced mcp-server package (`source.server.name`). Defaults to `<name>-server`: never `name`, which the write routes refuse. */
-  serverName?: string;
+  /** The inline server declaration; defaults to a node server at `server/index.js`. */
+  server?: LocalServerSpec;
   auths: Record<string, AuthSpec>;
   tools_policy?: Record<
     string,
@@ -190,6 +191,14 @@ export function localIntegrationManifest(opts: {
   const version = opts.version ?? "1.0.0";
   const auths: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(opts.auths)) auths[k] = buildAuth(spec);
+  const server = opts.server ?? {};
+  const type = server.type ?? "node";
+  const entryPoint = server.entryPoint ?? "server/index.js";
+  const meta: Record<string, unknown> = {};
+  if (server.appstrateRuntime) {
+    meta["dev.appstrate/mcp-server"] = { runtime: server.appstrateRuntime };
+  }
+  if (server.workspace) meta["dev.appstrate/workspace"] = server.workspace;
   return {
     type: "integration",
     schema_version: "0.1",
@@ -199,8 +208,18 @@ export function localIntegrationManifest(opts: {
     ...(opts.description !== undefined ? { description: opts.description } : {}),
     source: {
       kind: "local",
-      server: { name: opts.serverName ?? `${opts.name}-server`, version: `^${version}` },
+      server: {
+        type,
+        entry_point: entryPoint,
+        mcp_config: {
+          command: type === "node" ? "node" : "python3",
+          args: [entryPoint],
+          ...(server.env ? { env: server.env } : {}),
+        },
+        ...(server.tools ? { tools: server.tools } : {}),
+      },
     },
+    ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
     ...(opts.allow_undeclared_tools === true ? { allow_undeclared_tools: true } : {}),
@@ -334,68 +353,4 @@ export function connectToolBlock(opts: {
   if (opts.persistLoginSecret !== undefined) meta.persist_login_secret = opts.persistLoginSecret;
   if (opts.reauthOn !== undefined) meta.reauth_on = opts.reauthOn;
   return { tool: {}, _meta: { "dev.appstrate/connect": meta } };
-}
-
-/** Build a minimal AFPS mcp-server (MCPB) manifest for the local-source path. */
-export function mcpServerManifest(opts: {
-  /**
-   * Scoped AFPS identity at the manifest root (AFPS §3.4 lifted it from
-   * `_meta["dev.afps/mcp-server"].name`). Must follow `@scope/name`.
-   */
-  name: string;
-  version?: string;
-  serverType?: "node" | "python" | "binary" | "uv";
-  entryPoint?: string;
-  /**
-   * Appstrate runtime override → `_meta["dev.appstrate/mcp-server"].runtime`.
-   * MCPB has no `bun` server.type, so a bun-native server keeps an MCPB-valid
-   * `serverType` and declares the real runtime here. Server-side only — never
-   * belongs on the integration manifest.
-   */
-  appstrateRuntime?: string;
-  /**
-   * MCPB `server.mcp_config.env` map — typically literal strings or
-   * `"${user_config.<key>}"` placeholders. Used to exercise the AFPS
-   * §7.6 `user_config_key` substitution path (CC-4) — the integration's
-   * `delivery.env.<var>.user_config_key` names the placeholder key here.
-   */
-  mcpConfigEnv?: Record<string, string>;
-  /**
-   * Shared-workspace opt-in (`_meta["dev.appstrate/workspace"]`).
-   * When set, the spawn resolver populates
-   * `IntegrationSpawnSpec.workspaceMount` from this declaration; the
-   * sidecar then mounts the per-run shared workspace into the runner
-   * (Docker volume in tier 3, host directory in tier 0-2).
-   */
-  workspace?: { mount?: string; access?: "ro" | "rw" };
-}): Record<string, unknown> {
-  const type = opts.serverType ?? "node";
-  const entryPoint = opts.entryPoint ?? "main.js";
-  const mcpConfig: Record<string, unknown> = {
-    command: type === "node" ? "node" : "python3",
-    args: [entryPoint],
-  };
-  if (opts.mcpConfigEnv) mcpConfig.env = opts.mcpConfigEnv;
-  const manifest: Record<string, unknown> = {
-    manifest_version: "0.3",
-    name: opts.name,
-    version: opts.version ?? "1.0.0",
-    type: "mcp-server",
-    schema_version: "0.1",
-    display_name: opts.name,
-    server: {
-      type,
-      entry_point: entryPoint,
-      mcp_config: mcpConfig,
-    },
-  };
-  const meta: Record<string, unknown> = {};
-  if (opts.appstrateRuntime) {
-    meta["dev.appstrate/mcp-server"] = { runtime: opts.appstrateRuntime };
-  }
-  if (opts.workspace) {
-    meta["dev.appstrate/workspace"] = opts.workspace;
-  }
-  if (Object.keys(meta).length > 0) manifest._meta = meta;
-  return manifest;
 }

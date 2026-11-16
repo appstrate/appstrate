@@ -202,7 +202,7 @@ change. Two touches:
   `agents:run`, `runs:read`, `runs:cancel`, `files:read`, `persistence:read`,
   `integrations:read`, `integrations:connect`, `integrations:disconnect`,
   plus module contributions `chat:read`, `chat:write`, `mcp:read`, `mcp:invoke`.
-  **Not**: `agents:read`, `skills:read`, `mcp-servers:read`, `schedules:read`,
+  **Not**: `agents:read`, `skills:read`, `schedules:read`,
   `end-users:*`, `runs:read-all`, any `:write`.
   Chat and MCP are included on purpose: they are the friendly surfaces a
   non-builder uses, and every write they can trigger (`import_package_file`,
@@ -213,18 +213,18 @@ change. Two touches:
   `source`, `input` (schema + space values + locked fields — the run form needs
   it), `output` (shape only), `effective_timeout_seconds`, `running_runs`,
   `last_run` (own, per Part A) and `dependencies.integrations`. It omits
-  `manifest`, `prompt`, `dependencies.skills`, `dependencies.mcp_servers`,
+  `manifest`, `prompt`, `dependencies.skills`,
   `lock_version`, `updatedAt`, `has_unarchived_changes`, `version_count`,
   `forked_from`. The integrations are the one dependency group a launcher is
   entitled to: it holds `integrations:read`/`connect`/`disconnect` precisely so
   it can hook its own accounts up to the agents it launches, and the run
   preflight already names the missing ids back to it (`connection_missing`).
-  The skills and the MCP servers ARE the composition and stay withheld. An
+  The skills ARE the composition and stay withheld. An
   omitted group is absent, never an empty array — `skills: []` would say the
   agent declares none, which is false rather than unknown. Everything the
   summary omits is already optional on the wire (system agents omit the
   manifest half today, `agent-detail-handler.ts:178-185`); `dependencies`
-  itself stays required on both DTOs, with `skills` and `mcp_servers` optional
+  itself stays required on both DTOs, with `skills` optional
   inside it.
 - **D-B5 — French label « Exécutant », key `runner`.**
 
@@ -244,25 +244,25 @@ change. Two touches:
 
 ### B.3 Summary read on the two agent routes
 
-| Route                                                 | File                                            | Change                                                                                                                                                                                                                                                                     |
-| ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agents`                                     | `routes/agents.ts:185`                          | guard `requireAnyPermission(["agents:read", "agents:run"])`. When `!permissions.has("agents:read")`: drop `dependencies.skills` and `dependencies.mcp_servers`, keep `dependencies.integrations`; `keywords` stay. `running_runs` already goes through Part A's predicate. |
-| `GET /api/agents/:scope/:name`                        | `routes/agents.ts:311` → `buildAgentDetailDto`  | same guard; extend the existing `agent.source !== "system" && rawItem` branch with `&& hasAgentsRead` so the summary omits the D-B4 fields; `buildDependencyGroups` drops the `skills` and `mcp_servers` groups in that case and keeps `integrations`.                     |
-| `GET /api/agents/:scope/:name/settings`               | `routes/agents.ts:375`                          | same disjunction — the run modal reads the resolved model from it (`run-modal.tsx:114`, `useAgentModel`). Read-only, exposes `modelId`/`generationConfig`, no prompt.                                                                                                      |
-| Everything else under `/api/agents/*`                 | versions, bundle export, files explorer, drafts | unchanged: `agents:read` / `agents:write`. A runner gets 403 there, which is the point.                                                                                                                                                                                    |
-| `/api/packages/skills*`, `/api/packages/mcp-servers*` | —                                               | unchanged: `skills:read` / `mcp-servers:read`; 403 for a runner.                                                                                                                                                                                                           |
-| `requireAgent` (`middleware/guards.ts:12`)            | —                                               | unchanged (space-access lookup, no read permission).                                                                                                                                                                                                                       |
+| Route                                      | File                                            | Change                                                                                                                                                                                                                                      |
+| ------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agents`                          | `routes/agents.ts:185`                          | guard `requireAnyPermission(["agents:read", "agents:run"])`. When `!permissions.has("agents:read")`: drop `dependencies.skills`, keep `dependencies.integrations`; `keywords` stay. `running_runs` already goes through Part A's predicate. |
+| `GET /api/agents/:scope/:name`             | `routes/agents.ts:311` → `buildAgentDetailDto`  | same guard; extend the existing `agent.source !== "system" && rawItem` branch with `&& hasAgentsRead` so the summary omits the D-B4 fields; `buildDependencyGroups` drops the `skills` group in that case and keeps `integrations`.         |
+| `GET /api/agents/:scope/:name/settings`    | `routes/agents.ts:375`                          | same disjunction — the run modal reads the resolved model from it (`run-modal.tsx:114`, `useAgentModel`). Read-only, exposes `modelId`/`generationConfig`, no prompt.                                                                       |
+| Everything else under `/api/agents/*`      | versions, bundle export, files explorer, drafts | unchanged: `agents:read` / `agents:write`. A runner gets 403 there, which is the point.                                                                                                                                                     |
+| `/api/packages/skills*`                    | —                                               | unchanged: `skills:read`; 403 for a runner.                                                                                                                                                                                                 |
+| `requireAgent` (`middleware/guards.ts:12`) | —                                               | unchanged (space-access lookup, no read permission).                                                                                                                                                                                        |
 
 Also list `runner` in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.3 and add
 a sentence to §3.4 `agents` row: "`run` also grants the summary projection of
-the two agent read routes (no manifest, prompt, skills or MCP servers; the integrations stay)".
+the two agent read routes (no manifest, prompt or skills; the integrations stay)".
 
 ### B.4 SPA
 
 | Where                                                               | Change                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/locales/{fr,en}/settings.json`                        | `roles.preset.runner`: « Exécutant » / "Runner"; the preset selects (`use-roles.ts:169`, `workspace-settings/general.tsx`) derive from `SPACE_ROLE_PRESETS`.                                                                                                                                                                     |
-| Sidebar (`components/app-sidebar.tsx` — no permission gating today) | hide **Skills** without `skills:read`, **MCP servers** without `mcp-servers:read`, **Schedules** without `schedules:read`. Agents entry shown when `agents:read \|\| agents:run`.                                                                                                                                                |
+| Sidebar (`components/app-sidebar.tsx` — no permission gating today) | hide **Skills** without `skills:read`, **Schedules** without `schedules:read`. Agents entry shown when `agents:read \|\| agents:run`.                                                                                                                                                                                            |
 | `pages/package-list.tsx` (agents)                                   | render when `can("agents:read") \|\| can("agents:run")`; card already tolerates missing `dependencies`? — verify, else guard the deps badge.                                                                                                                                                                                     |
 | `pages/unified-package-detail.tsx`                                  | tabs Editor / Files / Versions / Settings gated on `can("agents:read")` (currently only `agents:configure` at `:279` for install controls). Runner sees Overview + Runs + **Run** button (`run-agent-button.tsx:152` already keys on `agents:run`).                                                                              |
 | `components/run-modal.tsx`                                          | no change — consumes `agent.input` and the settings route, both in the summary.                                                                                                                                                                                                                                                  |

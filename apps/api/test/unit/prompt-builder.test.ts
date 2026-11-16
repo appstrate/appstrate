@@ -26,7 +26,6 @@ function makeTestBundle(opts: {
   integrations?: ToolMeta[];
   /** Declared by the root, with no bundle member (the build skipped it). */
   memberlessIntegrations?: string[];
-  mcpServers?: ToolMeta[];
   skills?: ToolMeta[];
   /**
    * Per-dependency doc-companion content, keyed by package id. Written to
@@ -69,8 +68,7 @@ function makeTestBundle(opts: {
 
   const docsById = new Map((opts.packageDocs ?? []).map((d) => [d.id, d.content]));
   // Each AFPS dependency type carries its own doc companion at the
-  // archive root: skill→SKILL.md, integration→INTEGRATION.md,
-  // mcp-server→README.md (the convention used across the codebase).
+  // archive root: skill→SKILL.md, integration→INTEGRATION.md.
   const addPackage = (meta: ToolMeta, type: string, docFile: string): void => {
     const identity = `${meta.id}@1.0.0` as PackageIdentity;
     // `name` is the package id, as in a published manifest: members are found by it.
@@ -87,7 +85,6 @@ function makeTestBundle(opts: {
     packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
   };
   for (const i of opts.integrations ?? []) addPackage(i, "integration", "INTEGRATION.md");
-  for (const m of opts.mcpServers ?? []) addPackage(m, "mcp-server", "README.md");
   for (const s of opts.skills ?? []) addPackage(s, "skill", "SKILL.md");
 
   return {
@@ -127,7 +124,6 @@ interface PromptContext {
   availableSkills?: ToolMeta[];
   availableIntegrations?: ToolMeta[];
   memberlessIntegrations?: string[];
-  availableMcpServers?: ToolMeta[];
   packageDocs?: Array<{ id: string; content: string }>;
   resources?: AppstrateRunPlan["resources"];
   droppedIntegrations?: AppstrateRunPlan["droppedIntegrations"];
@@ -156,7 +152,6 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
     ...(ctx.availableIntegrations ? { integrations: ctx.availableIntegrations } : {}),
     ...(ctx.memberlessIntegrations ? { memberlessIntegrations: ctx.memberlessIntegrations } : {}),
-    ...(ctx.availableMcpServers ? { mcpServers: ctx.availableMcpServers } : {}),
     ...(ctx.packageDocs ? { packageDocs: ctx.packageDocs } : {}),
   });
   const plan: AppstrateRunPlan = {
@@ -395,11 +390,10 @@ describe("buildEnrichedPrompt — effective agent resources", () => {
 
 describe("buildEnrichedPrompt — dependency doc companions", () => {
   // AFPS dependencies carry a doc companion at their archive root:
-  // skill→SKILL.md, integration→INTEGRATION.md, mcp-server→README.md.
+  // skill→SKILL.md, integration→INTEGRATION.md.
   // None of their content is rendered into the platform prompt: an
-  // integration is listed with the location of its INTEGRATION.md, an
-  // mcp-server self-documents via MCP `tools/list`, and a skill's SKILL.md
-  // is loaded only when the skill is activated in-container.
+  // integration is listed with the location of its INTEGRATION.md, and a
+  // skill's SKILL.md is loaded only when the skill is activated in-container.
   it("lists spawned integrations with a location iff they ship INTEGRATION.md, never its content", () => {
     const prompt = buildEnrichedPrompt(
       baseContext({
@@ -446,18 +440,6 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
       }),
     );
     expect(prompt).not.toContain("<available_integrations>");
-  });
-
-  it("never renders mcp-server README.md content in the prompt", () => {
-    const ctx = baseContext({
-      availableMcpServers: [
-        { id: "@org/scraper", name: "Scraper", description: "Web scraper MCP server" },
-      ],
-      packageDocs: [{ id: "@org/scraper", content: "## Usage\n\nInvoke the `scrape` tool." }],
-    });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Usage");
-    expect(prompt).not.toContain("Invoke the `scrape` tool.");
   });
 
   it("never renders skill SKILL.md body content in the prompt", () => {

@@ -11,7 +11,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -56,7 +56,6 @@ export const agentsPaths = {
                     unread_count: 2,
                     dependencies: {
                       skills: {},
-                      mcp_servers: {},
                       integrations: {},
                     },
                   },
@@ -78,7 +77,6 @@ export const agentsPaths = {
                     unread_count: 0,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
-                      mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
                       integrations: { "@appstrate/github": "^2.0.0" },
                     },
                   },

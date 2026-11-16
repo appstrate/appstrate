@@ -12,22 +12,23 @@
  * (`runAt: "link"` orchestrated `connect.tool` login, see
  * `connect-run-launcher.ts`) has NEITHER: its id is minted as
  * `connect_<hex>` and never inserted into `runs`, and it has no agent at all —
- * it exists only to spawn one integration's mcp-server long enough to call its
+ * it exists only to spawn one integration's local server long enough to call its
  * `login` tool. Both walls are hard 404s, so the two calls its sidecar makes
  * on the way up could never succeed:
  *
  *   1. `GET /internal/integration-credentials/{integrationId}` —
  *      `runConnectOnce` awaits it BEFORE the spawn (it seeds the shared
  *      credentials Source) and throws on any non-2xx;
- *   2. `GET /internal/mcp-server-bundle/{mcpServerId}?version=` — the runnable
- *      bytes, fetched inside `spawnAndConnectLocalIntegration`.
+ *   2. `GET /internal/integration-bundle/{integrationId}?version=` — the
+ *      runnable bytes (the integration's own archive), fetched inside
+ *      `spawnAndConnectLocalIntegration`.
  *
  * A grant is the narrow, short-lived replacement for the manifest walk: the
- * launcher resolves the spec (which integration, which mcp-server, which
+ * launcher resolves the spec (which integration, which
  * concrete version) BEFORE it creates the sidecar, and writes exactly that
  * into the grant. The routes then authorise by EXACT MATCH against it. A
  * connect token therefore reaches one integration's (empty) credential
- * surface and one mcp-server's bytes at one version — nothing else in the org.
+ * surface and that integration's bytes at one version — nothing else in the org.
  *
  * ## Why the cache and not a table
  *
@@ -82,26 +83,24 @@ export interface ConnectRunGrant {
    *
    * ENFORCED, not decoration: the byte route binds it as the tenant filter on
    * the `package_versions` lookup (`routes/internal.ts`,
-   * `serveMcpServerBundle`), a query that carries no tenant boundary of its
+   * `serveIntegrationBundle`), a query that carries no tenant boundary of its
    * own. That is a real comparison and not a vacuous one — this value is
    * frozen from the caller's scope at grant time, while the other side is the
    * org owning the row at FETCH time, so a package deleted and recreated in
    * another org between the two reads is refused. `orgOrSystemFilter`
    * semantics: the org's own packages OR system packages, matching the
-   * org-scoped resolver that picked `mcpServerId` in the first place.
+   * org-scoped read that produced the integration manifest in the first place.
    */
   orgId: string;
-  /** The ONE integration whose credential surface this run may read. */
+  /** The ONE integration whose credential surface and archive bytes this run may read. */
   integrationId: string;
-  /** The ONE mcp-server package whose bundle bytes this run may fetch. */
-  mcpServerId: string;
   /**
-   * The CONCRETE version the launcher's resolver picked, or `null` for a
-   * system mcp-server (served from the in-memory boot registry by id alone —
-   * the one population the byte route answers without a `?version=`). `null`
-   * grants ONLY that short-circuit; it is never a licence to pick a version.
+   * The CONCRETE published version whose archive the launcher's spawn spec names, or `null` for
+   * an integration with none (a system one, served from the in-memory boot registry, or a draft
+   * nothing was published for — the byte route answers those without a `?version=`). `null`
+   * grants ONLY that unversioned answer; it is never a licence to pick a version.
    */
-  mcpServerVersion: string | null;
+  version: string | null;
 }
 
 const KEY_PREFIX = "connect-run-grant:";
@@ -165,16 +164,14 @@ export async function readConnectRunGrant(connectId: string): Promise<ConnectRun
   if (
     typeof g.orgId !== "string" ||
     typeof g.integrationId !== "string" ||
-    typeof g.mcpServerId !== "string" ||
-    !(typeof g.mcpServerVersion === "string" || g.mcpServerVersion === null)
+    !(typeof g.version === "string" || g.version === null)
   ) {
     return null;
   }
   return {
     orgId: g.orgId,
     integrationId: g.integrationId,
-    mcpServerId: g.mcpServerId,
-    mcpServerVersion: g.mcpServerVersion,
+    version: g.version,
   };
 }
 

@@ -53,6 +53,8 @@ import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
+import type { IntegrationSource } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import { toastError } from "../lib/mutation-error";
 import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement";
@@ -169,7 +171,7 @@ export function CataloguePreview({
   mayConfigureIn,
   integrations,
   agents,
-  protocol,
+  source,
   actionsMenu,
   icon,
   pinnedVersion,
@@ -190,8 +192,8 @@ export function CataloguePreview({
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
   agents: LibraryPackageItem[];
-  /** An integration's protocol, when the catalogue knows it. */
-  protocol?: string;
+  /** An integration's source (API, remote or local MCP), when the catalogue knows it. */
+  source?: IntegrationSource;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
   /** The package's tile, the one its card draws. */
@@ -411,9 +413,9 @@ export function CataloguePreview({
       {/* "À propos" comes FIRST, in the same order for every type; what varies by type follows. */}
       <SettingsGroup title={t("orgSettings.tabGeneral")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
-          {protocol && (
-            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-              {protocol}
+          {source && (
+            <PropertyRow icon={Plug} label={t("integrations.col.source")}>
+              <IntegrationSourceLabel source={source} />
             </PropertyRow>
           )}
           {usedBy.length > 0 && (

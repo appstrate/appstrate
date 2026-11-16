@@ -990,7 +990,7 @@ enum invitation_status pending,accepted,expired,cancelled
 enum llm_usage_source proxy,runner
 enum org_role owner,admin,member,guest
 enum package_source local,system
-enum package_type agent,skill,integration,mcp-server
+enum package_type agent,skill,integration
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
 enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid,package_removed

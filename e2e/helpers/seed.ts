@@ -252,9 +252,14 @@ export async function createIntegration(
     description: overrides.description ?? `E2E test integration ${name}`,
     keywords: overrides.keywords ?? [],
     icon: overrides.icon ?? "logos:slack-icon",
-    // The mcp-server package a local integration runs is a SEPARATE package:
-    // naming the integration itself is refused by the write routes.
-    source: { kind: "local", server: { name: `${scope}/${name}-server`, version: "^0.1.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.ts",
+        mcp_config: { command: "bun", args: ["server/index.ts"] },
+      },
+    },
     auths: {
       api: {
         type: "api_key",

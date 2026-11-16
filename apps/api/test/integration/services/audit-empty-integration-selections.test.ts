@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {} from "../../helpers/integration-manifests.ts";
 import { spacePackages, packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
@@ -221,28 +221,19 @@ describe("auditEmptyIntegrationSelections", () => {
   });
 
   it("flags a non-empty inherited selection when hidden_tools removes every tool", async () => {
-    const serverId = "@audorg/hidden-server";
-    const serverManifest = {
-      ...mcpServerManifest({ name: serverId, version: "1.0.0" }),
-      tools: [{ name: "list_messages" }],
-    };
-    await seedPackage({
-      id: serverId,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({
-      packageId: serverId,
-      version: "1.0.0",
-      manifest: serverManifest,
-    });
     const baseIntegration = integrationManifest("1.0.0");
     delete baseIntegration._meta;
     const hidden = {
       ...baseIntegration,
-      source: { kind: "local", server: { name: serverId, version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+          tools: [{ name: "list_messages" }],
+        },
+      },
       default_tools: ["list_messages"],
       hidden_tools: ["list_messages"],
     };

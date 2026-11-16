@@ -226,7 +226,7 @@ export function buildServerInstructions(
   // Authoring a package means an inline run writing it; without that grant
   // only the validation half of the bullet is true.
   const packageFiles = inline
-    ? "MCP package authoring — call `get_runtime_capabilities` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
+    ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.

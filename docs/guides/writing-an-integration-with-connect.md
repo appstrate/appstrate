@@ -55,15 +55,23 @@ needed.
 Every integration declares `source.kind` to tell the platform how the upstream is
 reached. The authentication layer (`auths`) is applied on top, regardless of source.
 
-| `source.kind` | Sub-object                                                                         | When to use                                                                                   |
-| ------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `local`       | `source.server: { name, version, vendored? }` — references an `mcp-server` package | Local stdio MCP server (Node, Python, binary) bundled separately                              |
-| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`                    | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …)                  |
-| `none`        | _(no sub-object)_                                                                  | Serverless integration — no MCP server; reaches upstream via the `api_call` vendor capability |
+| `source.kind` | Sub-object                                                                   | When to use                                                                                   |
+| ------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `local`       | `source.server: { type, entry_point, mcp_config, tools? }` — declared inline | Local stdio MCP server (Node, Python, binary) shipped inside the integration archive          |
+| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`              | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …)                  |
+| `none`        | _(no sub-object)_                                                            | Serverless integration — no MCP server; reaches upstream via the `api_call` vendor capability |
 
 ```jsonc
-// local — references a separate mcp-server package by AFPS identity + semver range
-"source": { "kind": "local", "server": { "name": "@example/gmail-server", "version": "^1.2.0" } }
+// local — the server is declared inline; its payload (server/index.ts, …) ships in the integration archive
+"source": {
+  "kind": "local",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": { "command": "node", "args": ["server/index.ts"], "env": { "LOG_LEVEL": "info" } },
+    "tools": [{ "name": "list_messages", "description": "List recent messages" }]
+  }
+}
 
 // remote — hosted MCP endpoint
 "source": { "kind": "remote", "remote": { "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "streamable-http" } }
@@ -125,7 +133,7 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | Mode    | Vocabulary                                                          | Maps to                                                  | Use when                                                                                      |
 | ------- | ------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `http`  | `{ in, name, prefix?, value, encoding?, allow_server_override? }`   | OpenAPI Security Scheme location + AFPS `value` template | Server never sees the secret — sidecar injects it on outbound requests (MITM proxy injection) |
-| `env`   | Map of `ENV_NAME → { value, sensitive?, user_config_key? }`         | Kubernetes-style + MCPB `user_config`                    | `source.kind: "local"` — the MCP server reads the credential from its own env                 |
+| `env`   | Map of `ENV_NAME → { value, sensitive? }`                           | Kubernetes-style env                                     | `source.kind: "local"` — the MCP server reads the credential from its own env                 |
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
@@ -162,8 +170,7 @@ imported, since the platform does not evaluate it.
   "env": {
     "GMAIL_TOKEN": {
       "value": "{$credential.access_token}",
-      "sensitive": true,
-      "user_config_key": "GMAIL_TOKEN"
+      "sensitive": true
     }
   }
 }
@@ -859,8 +866,8 @@ name. It carries per-tool authorization metadata for `local` and `remote` source
 Whether its keys also bound the names an agent can select, and the names
 `default_tools` may hold, depends on the source:
 
-- `source.kind: "local"` — the catalog is the `tools[]` array of the referenced
-  `mcp-server` package. `tools_policy` is a **sparse policy overlay** on it: it need
+- `source.kind: "local"` — the catalog is the inline `source.server.tools` array
+  (advisory; absent means the server's own `tools/list` is the catalog at run time). `tools_policy` is a **sparse policy overlay** on it: it need
   not name every tool, and a key adds no tool.
 - `source.kind: "remote"` — the catalog is the endpoint's, read at run time. Once
   `tools_policy` declares any tool, its keys ARE what an agent can select by name
@@ -934,8 +941,8 @@ OPTIONAL tool selection an agent inherits when it declares the integration witho
   `connect.tool` name or the upload companion of a hidden `api_call`; for a `none`
   source declaring no `_meta` key outside `dev.appstrate/`, a name outside its
   catalog; for a `remote` source that declares a `tools_policy`, a name outside its
-  catalog; for a `local` source, a name outside the catalog of the referenced
-  `mcp-server`, on create, save, import and publish, when that package resolves. A
+  catalog; for a `local` source that declares `source.server.tools`, a name outside it, on create,
+  save, import and publish. A
   `remote` source with no `tools_policy` is judged no further: a name its endpoint
   does not serve selects nothing at run time.
 - `"*"` is accepted only with `allow_undeclared_tools: true`, and grants whatever the

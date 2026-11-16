@@ -5,6 +5,9 @@
 // the richer, correlated shape the UI renders.
 
 import { jsonText } from "@appstrate/afps-shared/json-text";
+import { isApiCallToolName, type ToolIntegration } from "@appstrate/core/integration";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { LOG_TOOL, platformTool } from "../lib/platform-tool-results";
 
 interface ExecutionEntryBase {
   /** Stable across live start -> result updates and historical replay. */
@@ -24,8 +27,11 @@ export type ToolExecutionStatus = "running" | "success" | "failed" | "interrupte
 
 export interface ToolExecutionEntry extends ExecutionEntryBase {
   kind: "tool";
+  /** The name the model called. */
   tool: string;
   toolCallId?: string;
+  /** Absent for a tool no integration serves (the runner's own, Pi's built-ins). */
+  integration?: ToolIntegration;
   status: ToolExecutionStatus;
   args?: unknown;
   result?: unknown;
@@ -159,9 +165,41 @@ function formatToolArgs(args: unknown): string {
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
 }
 
+/**
+ * An `api_call` reads as the request it sent; any other tool, or a call missing the method or
+ * target its schema requires (so never sent), as its flattened arguments.
+ */
+function toolDetail(args: unknown, integration: ToolIntegration | undefined): string {
+  const request = integration && isApiCallToolName(integration.tool) ? asRecordOrNull(args) : null;
+  if (request && typeof request.method === "string" && typeof request.target === "string") {
+    return `${request.method} ${request.target}`;
+  }
+  return formatToolArgs(args);
+}
+
+function readIntegration(data: Record<string, unknown>): ToolIntegration | undefined {
+  const raw = asRecordOrNull(data["integration"]);
+  const id = stringValue(raw?.id);
+  const tool = stringValue(raw?.tool);
+  if (!id || !tool) return undefined;
+  const title = stringValue(raw?.title);
+  return { id, tool, ...(title ? { title } : {}) };
+}
+
+/**
+ * A call of the platform `log` tool writes the journal row (`event === "log"`) that says the
+ * same thing: its tool row is shown only when the call did not complete, which writes none.
+ */
+function isRedundantLogCall(entry: ToolExecutionEntry): boolean {
+  return (
+    platformTool(entry.integration) === LOG_TOOL &&
+    (entry.status === "running" || entry.status === "success")
+  );
+}
+
 const ASSISTANT_MESSAGE_EVENT = "assistant_message";
 
-function owns(value: Record<string, unknown>, key: string): boolean {
+function owns(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
@@ -274,25 +312,27 @@ export function buildLogEntries(
             // Out-of-order: a result row was projected first; merge the late start into it.
             const existing = entries[existingIndex];
             if (existing?.kind === "tool") {
-              const args = logData["args"];
+              const integration = existing.integration ?? readIntegration(logData);
               entries[existingIndex] = {
                 ...existing,
                 tool: name === "unknown" ? existing.tool : name,
-                ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+                ...(integration ? { integration } : {}),
+                ...(owns(logData, "args") ? { args: logData["args"] } : {}),
                 orphaned: false,
               };
             }
             continue;
           }
 
-          const args = logData["args"];
+          const integration = readIntegration(logData);
           const entry: ToolExecutionEntry = {
             id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-start"),
             kind: "tool",
             tool: name,
             ...(callId ? { toolCallId: callId } : {}),
+            ...(integration ? { integration } : {}),
             status: options.isRunTerminal ? (callId ? "interrupted" : "unknown") : "running",
-            ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+            ...(owns(logData, "args") ? { args: logData["args"] } : {}),
             ...(typeof durationMs === "number" && Number.isFinite(durationMs)
               ? { durationMs }
               : {}),
@@ -309,9 +349,11 @@ export function buildLogEntries(
         if (existingIndex !== undefined) {
           const existing = entries[existingIndex];
           if (existing?.kind === "tool") {
+            const integration = existing.integration ?? readIntegration(logData);
             entries[existingIndex] = {
               ...existing,
               tool: existing.tool === "unknown" ? name : existing.tool,
+              ...(integration ? { integration } : {}),
               status,
               result: logData["result"],
               ...(typeof durationMs === "number" && Number.isFinite(durationMs)
@@ -323,11 +365,13 @@ export function buildLogEntries(
           continue;
         }
 
+        const integration = readIntegration(logData);
         const resultEntry: ToolExecutionEntry = {
           id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-result"),
           kind: "tool",
           tool: name,
           ...(callId ? { toolCallId: callId } : {}),
+          ...(integration ? { integration } : {}),
           status,
           result: logData["result"],
           orphaned: true,
@@ -352,7 +396,127 @@ export function buildLogEntries(
     }
   }
 
-  return { entries, output };
+  // Settled last: a call's identity, arguments and status may each arrive on either event.
+  const settled = entries.flatMap((entry): ExecutionEntry[] => {
+    if (entry.kind !== "tool") return [entry];
+    if (isRedundantLogCall(entry)) return [];
+    return [
+      owns(entry, "args") ? { ...entry, detail: toolDetail(entry.args, entry.integration) } : entry,
+    ];
+  });
+  return { entries: settled, output };
+}
+
+/** The integrations the journal's tool calls reached, in order of first call. */
+export function journalIntegrationIds(entries: readonly ExecutionEntry[]): string[] {
+  const ids = new Set<string>();
+  for (const entry of entries)
+    if (entry.kind === "tool" && entry.integration) ids.add(entry.integration.id);
+  return [...ids];
+}
+
+export interface IntegrationLook {
+  name: string;
+  icon?: string | null;
+  /** Its row is still being read: the name and icon are not known yet. */
+  pending: boolean;
+}
+
+/** An integration's display name and icon; its id stands in for a name the read does not know. */
+export type JournalIntegrations = (integrationId: string) => IntegrationLook;
+
+const JOURNAL_TYPES = {
+  agent: "message",
+  tool: "tool",
+  log: "journal",
+  runtime: "system",
+} as const satisfies Record<ExecutionEntry["kind"], string>;
+export type JournalTypeFilter = (typeof JOURNAL_TYPES)[ExecutionEntry["kind"]];
+export const JOURNAL_TYPE_VALUES = Object.values(JOURNAL_TYPES);
+
+/** A tool row keeps one type while it runs and once it settles: its status icon tells which. */
+export function journalType(entry: ExecutionEntry): JournalTypeFilter {
+  return JOURNAL_TYPES[entry.kind];
+}
+
+/** What the journal shows: an empty list of values does not filter on its dimension. */
+export interface JournalFilters {
+  levels: readonly string[];
+  types: readonly string[];
+  integrations: readonly string[];
+  showTools: boolean;
+  /** Trimmed and lower-cased in `locale`; empty matches every entry. */
+  query: string;
+  locale: string;
+}
+
+/** The entries the journal's filters and search keep, in order. */
+export function filterJournal(
+  entries: readonly ExecutionEntry[],
+  filters: JournalFilters,
+  t: (key: string) => string,
+  integrations: JournalIntegrations,
+): ExecutionEntry[] {
+  const { levels, types, showTools, query, locale } = filters;
+  return entries.filter((entry) => {
+    if (!showTools && entry.kind === "tool") return false;
+    if (levels.length > 0 && !levels.includes(journalLevel(entry))) return false;
+    if (types.length > 0 && !types.includes(journalType(entry))) return false;
+    if (
+      filters.integrations.length > 0 &&
+      !(
+        entry.kind === "tool" &&
+        entry.integration &&
+        filters.integrations.includes(entry.integration.id)
+      )
+    ) {
+      return false;
+    }
+    return (
+      !query ||
+      journalSearchText(entry, t, (id) => integrations(id).name)
+        .toLocaleLowerCase(locale)
+        .includes(query)
+    );
+  });
+}
+
+/** The tools the runner itself offers the model (`@appstrate/runner-pi` harness tools). */
+const HARNESS_TOOL_LABELS = new Map([
+  ["output", "log.harness.output"],
+  ["publish_file", "log.harness.publish_file"],
+]);
+
+/** What a tool row is called: its server's title or name, a harness tool's label, else the name the model called. */
+export function toolLabel(entry: ToolExecutionEntry, t: (key: string) => string): string {
+  if (entry.integration) return entry.integration.title ?? entry.integration.tool;
+  const harnessKey = HARNESS_TOOL_LABELS.get(entry.tool);
+  return harnessKey ? t(harnessKey) : entry.tool;
+}
+
+/** What the journal's search reads of an entry: a tool call by every name it goes by. */
+export function journalSearchText(
+  entry: ExecutionEntry,
+  t: (key: string) => string,
+  integrationName: (integrationId: string) => string,
+): string {
+  if (entry.kind === "tool") {
+    const integration = entry.integration;
+    return [
+      entry.tool,
+      toolLabel(entry, t),
+      integration?.tool,
+      integration?.id,
+      integration && integrationName(integration.id),
+      entry.detail,
+      entry.status,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  return [entry.message, entry.kind === "runtime" ? entry.sourceType : undefined]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {

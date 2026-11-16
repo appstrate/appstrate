@@ -53,7 +53,7 @@ function useCanSeePackage(type: PackageType): boolean {
   return packageSightPermissions(type).some(can);
 }
 
-// --- Packages — one factory over the four types ---
+// --- Packages — one factory over the package types ---
 // `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths stay literal for the typed client.
 
 /** A detail plus the response's `ETag` (sent back as `If-Match`); `null` when absent. */
@@ -62,7 +62,6 @@ export type Versioned<T> = T & { etag: string | null };
 type PackageDetailMap = {
   agent: Versioned<AgentDetail>;
   skill: Versioned<OrgPackageItemDetail>;
-  "mcp-server": Versioned<OrgPackageItemDetail>;
   integration: Versioned<OrgPackageItemDetail>;
 };
 

@@ -211,7 +211,6 @@ describe("CoreResources ↔ runtime catalog drift", () => {
       "space-members": true,
       agents: true,
       skills: true,
-      "mcp-servers": true,
       runs: true,
       files: true,
       schedules: true,
@@ -371,7 +370,6 @@ describe("canReadRuns / canRunAgents", () => {
 describe("packagePermission / packageSightPermissions", () => {
   it("spells each family's permission on its own resource", () => {
     expect(packagePermission("agent", "read")).toBe("agents:read");
-    expect(packagePermission("mcp-server", "write")).toBe("mcp-servers:write");
     expect(packagePermission("integration", "share")).toBe("integrations:share");
   });
 
@@ -379,14 +377,12 @@ describe("packagePermission / packageSightPermissions", () => {
     expect(packageSightPermissions("agent")).toEqual(["agents:read", "agents:run"]);
     expect(packageSightPermissions("skill")).toEqual(["skills:read"]);
     expect(packageSightPermissions("integration")).toEqual(["integrations:read"]);
-    expect(packageSightPermissions("mcp-server")).toEqual(["mcp-servers:read"]);
   });
 
   it("lists every family's write, and only writes, for the type-agnostic doors", () => {
     expect([...PACKAGE_WRITE_PERMISSIONS].sort()).toEqual([
       "agents:write",
       "integrations:write",
-      "mcp-servers:write",
       "skills:write",
     ]);
   });
@@ -396,7 +392,7 @@ describe("spacePackagePermission", () => {
   it("asks each family's activation grant, spelled as role data", () => {
     const acts = ["activate", "configure", "deactivate"] as const;
     const table = Object.fromEntries(
-      (["agent", "skill", "mcp-server", "integration"] as const).map((type) => [
+      (["agent", "skill", "integration"] as const).map((type) => [
         type,
         acts.map((op) => spacePackagePermission(type, op)),
       ]),
@@ -404,7 +400,6 @@ describe("spacePackagePermission", () => {
     expect(table).toEqual({
       agent: ["agents:configure", "agents:configure", "agents:configure"],
       skill: ["skills:write", "skills:write", "skills:write"],
-      "mcp-server": ["mcp-servers:write", "mcp-servers:write", "mcp-servers:write"],
       integration: ["integrations:install", "integrations:install", "integrations:uninstall"],
     });
   });

@@ -214,7 +214,6 @@
   "apiError.integrity_mismatch": "Cette version existe déjà avec un contenu différent.",
   "apiError.draft_overwrite": "Ce package a des modifications non publiées que l'import écraserait.",
   "apiError.version_not_higher": "Une version plus récente est déjà publiée : augmentez le numéro de version du manifeste, puis réimportez.",
-  "apiError.archive_required": "Un serveur MCP doit être importé sous forme d'archive .afps ou .zip.",
   "apiError.package_archive_unreadable": "L'archive de ce package est illisible : {{message}}",
   "apiError.version_artifact_unavailable": "Le contenu de cette version publiée n'est plus lisible : {{message}}",
   "apiError.post_install_failed": "Le package a été importé, mais sa mise en service a échoué : {{message}}",
@@ -325,7 +324,6 @@
   "apiError.agent_missing_prompt": "L'agent n'a pas de fichier prompt.md.",
   "apiError.agent_empty_prompt": "Le prompt de l'agent est vide.",
   "apiError.skill_missing_skill_md": "Le skill n'a pas de fichier SKILL.md.",
-  "apiError.mcp_server_missing_entry_point": "Le point d'entrée du serveur MCP est introuvable dans l'archive : {{message}}",
   "apiError.invalid_url": "URL GitHub invalide.",
   "apiError.repo_too_large": "Dépôt trop volumineux pour un import direct : {{message}}",
   "apiError.empty_path": "Aucun fichier trouvé à cet emplacement : {{message}}",
@@ -498,5 +496,6 @@
   "appearance.colorName.rose": "Rose",
   "appearance.colorName.cyan": "Cyan",
   "appearance.colorName.pink": "Fuchsia",
-  "appearance.colorName.orange": "Orange"
+  "appearance.colorName.orange": "Orange",
+  "apiError.local_server_missing_entry_point": "Le point d’entrée du serveur MCP local est introuvable dans les fichiers de l’intégration : {{message}}"
 }

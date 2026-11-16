@@ -85,7 +85,7 @@ export interface ResolvedPackage {
 }
 
 /** A `manifest.dependencies.*` section the bundle builder can walk. */
-export type DependencySection = "skills" | "mcp_servers" | "integrations";
+export type DependencySection = "skills" | "integrations";
 
 /**
  * Abstract catalog contract used by builders to resolve+fetch packages.

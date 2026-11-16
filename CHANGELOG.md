@@ -34,6 +34,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   database and rollback: its section in `scripts/migration/README.md`. Rehearse it on a restored
   production dump first.
 
+- **Run `scripts/migration/0054-fold-mcp-servers.ts` before the first boot of
+  this release** (#2220). A local MCP server is no longer a package of its own:
+  the script folds every stored `mcp-server` package into the integration that
+  referenced it and removes stored `mcp-servers:*` grants. Run it BEFORE the
+  release's migrations: drizzle `0106` rebuilds the `package_type` enum without
+  `mcp-server` and fails, with nothing applied, while a row of that type remains.
+  **Snapshot object storage first** (buckets `agent-packages` and
+  `library-packages`): `--apply` overwrites archives in place and queues server
+  archives for deletion, which `pg_dump` cannot roll back. Dry run first; any
+  `UNFOLDED` line must be resolved before `--apply`, which refuses (exit 1,
+  nothing written) otherwise. Then `--apply` with the app stopped. Procedure
+  and rollback (database dump plus storage snapshot) in
+  `scripts/migration/README.md`, section "`mcp-server` packages folded into
+  their integrations".
+
 - **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
   agents without the `@appstrate/platform` tools and without `output`.
 
@@ -135,6 +150,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persistence read.
 
 ### Changed
+
+- **Breaking (AFPS 0.13, API, CLI): a local MCP server is declared inline on
+  its integration; the `mcp-server` package type is gone** (#2220). A
+  `source.kind: "local"` integration now carries `source.server = { type,
+entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
+  in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
+  values merged into the runner env; the auth's `delivery.env` wins on
+  conflict.
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
+    manifest that still carries it is refused on every write path, naming the
+    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
+    permissions, the `createMcpServerPackage` chat operation,
+    `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.
+    `@appstrate/core/mcp-server` stays, now reading the integration manifest
+    (`getMcpServerRuntime`, `getMcpServerWorkspaceMount`, `getLocalServerEnv`);
+    `@appstrate/core/integration` gains `getLocalServer` and
+    `getLocalServerTools`. The `dev.appstrate/mcp-server` and
+    `dev.appstrate/workspace` `_meta` keys move to the integration manifest.
+  - `resolveIntegrationToolCatalog({ integration, listedTools? })`: a local
+    source's catalog is its own `source.server.tools`, so
+    `findUnexposedDefaultTools` judges local sources synchronously and
+    `findUnexposedLocalDefaultTools` is gone.
+  - The sidecar fetches the integration archive from
+    `GET /internal/integration-bundle/:scope/:name[?version=]` (replaces
+    `/internal/mcp-server-bundle/`): a system integration from the boot
+    registry, a version from that exact published archive, no version from the
+    draft. The run's agent must declare that local integration, or a connect
+    grant `{ integrationId, version }` must name it. The
+    `local_server_ref_missing`, `mcp_server_unresolved` and
+    `mcp_server_not_runnable` drop reasons become `local_server_not_runnable`.
+  - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
+    their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
+    packages are removed.
+  - The `package_type` Postgres enum keeps its `mcp-server` label for now
+    (Postgres cannot drop a value in place); application code never produces
+    it.
+
+- **The integrations page lists every integration in one list with a Source
+  column and filter** (API, remote MCP, local MCP). On an instance running
+  `RUN_ADAPTER=process` (app config `localIntegrations` false), a local
+  integration is marked « indisponible ici ».
 
 - **Breaking (API): a run's read state leaves the notifications; the bell
   shows only what needs attention.** Every finished run used to be a bell
@@ -623,6 +680,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
 
 ### Added
+
+- **Tool events name the integration tool they call** (#2233). The `appstrate.progress` start
+  and end events of a call to an integration's tool carry `data.integration`:
+  `{ id, tool, title? }`, the integration's package id, the tool's name on its server and its
+  title when the server gives one (`tool` and `title` are each sanitised and capped at 512
+  bytes). `data.tool` stays the name the model called. The sidecar's host and the CLI stamp it on
+  each tool they expose (`_meta["dev.appstrate/integration"]`); the platform's own tools
+  (`@appstrate/platform`) and `api_call` / `api_upload` carry it too, the runner's `output` and
+  `publish_file` do not. Runs recorded before this release have none.
 
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound
   (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,

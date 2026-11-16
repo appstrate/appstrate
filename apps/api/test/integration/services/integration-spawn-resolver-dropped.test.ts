@@ -25,10 +25,8 @@ import { and, eq } from "drizzle-orm";
 import { integrationConnections, runLogs } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import {
-  resolveIntegrationSpawns,
-  type DroppedIntegration,
-} from "../../../src/services/integration-spawn-resolver.ts";
+import type { DroppedIntegration } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import {
   recordDroppedIntegrations,
   INTEGRATION_DROPPED_EVENT,
@@ -36,7 +34,7 @@ import {
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedRun } from "../../helpers/seed.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 import {
   localIntegrationManifest,
@@ -44,14 +42,11 @@ import {
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@droporg/svc";
-const SERVER = "@droporg/svc-server";
-const MISSING_SERVER = "@droporg/no-such-server";
 const AGENT = "@droporg/agent";
 
-function integManifest(serverName: string): Record<string, unknown> {
+function integManifest(): Record<string, unknown> {
   return localIntegrationManifest({
     name: INTEG,
-    serverName,
     version: "1.0.0",
     auths: {
       primary: {
@@ -104,13 +99,8 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     });
   }
 
-  async function seedServer() {
-    await seedMcpServer({ id: SERVER, orgId: ctx.orgId });
-  }
-
   async function resolve() {
     return resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -181,13 +171,12 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   });
 
   it("reports `not_active` when the integration exists but is not active in the space", async () => {
-    await seedServer();
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integManifest(SERVER),
+      draftManifest: integManifest(),
     });
     await seedConnection();
     // Deliberately NOT installed in the space.
@@ -198,34 +187,13 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped).toEqual([{ integrationId: INTEG, reason: "not_active" }]);
   });
 
-  it("reports `mcp_server_unresolved` (with a detail) when the referenced server package is missing", async () => {
-    await seedPackage({
-      id: INTEG,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: integManifest(MISSING_SERVER),
-    });
-    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
-    await seedConnection();
-
-    const { specs, dropped } = await resolve();
-
-    expect(specs).toHaveLength(0);
-    expect(dropped).toHaveLength(1);
-    expect(dropped[0]!.reason).toBe("mcp_server_unresolved");
-    // The detail names the package the operator has to go install.
-    expect(dropped[0]!.detail).toContain(MISSING_SERVER);
-  });
-
   async function seedIntegration() {
-    await seedServer();
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integManifest(SERVER),
+      draftManifest: integManifest(),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   }
@@ -237,7 +205,6 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     await db.delete(integrationConnections).where(eq(integrationConnections.integrationId, INTEG));
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -250,21 +217,18 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     ]);
   });
 
-  it("reports `unbound` — without resolving the server — when the snapshot binds `[]` on purpose", async () => {
-    // The referenced server does not exist: any load past the binding check
-    // would surface as `mcp_server_unresolved` instead.
+  it("reports `unbound` when the snapshot binds `[]` on purpose", async () => {
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integManifest(MISSING_SERVER),
+      draftManifest: integManifest(),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -280,7 +244,6 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     await seedConnection();
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest({ tools: [], scopes: ["search.read"] }),
@@ -292,17 +255,15 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   });
 
   it("drops nothing for an inert integration switched off in the space", async () => {
-    await seedServer();
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integManifest(SERVER),
+      draftManifest: integManifest(),
     });
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest({ tools: [] }),
@@ -320,7 +281,6 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     await seedConnection();
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -348,13 +308,12 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   });
 
   it("leaves `dropped` empty on the happy path", async () => {
-    await seedServer();
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integManifest(SERVER),
+      draftManifest: integManifest(),
     });
     await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();

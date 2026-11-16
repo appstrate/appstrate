@@ -7,10 +7,10 @@
  * sidecar with a signed token whose id is `connect_<hex>`. That id has NO
  * `runs` row and the run has NO agent, so neither half of the run-token
  * pipeline can authorise it: `verifyRunToken` 404s on the row lookup, and
- * `assertAgentReferencesMcpServer` / `assertAgentDeclaresIntegration` have no
+ * `assertAgentDeclaresLocalIntegration` / `assertAgentDeclaresIntegration` have no
  * manifest to walk. Its authorization is the launcher-published
- * {@link ConnectRunGrant} instead — one integration, one mcp-server, one
- * concrete version.
+ * {@link ConnectRunGrant} instead — one integration, one concrete version
+ * (its credential surface and its archive bytes).
  *
  * Every test below names the source mutation it catches, because a suite that
  * only asserts refusals passes trivially on a route that refuses everything.
@@ -46,12 +46,13 @@ import {
 } from "../../../src/services/connect/connect-run-grant.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
+import { unzipArtifact } from "@appstrate/core/zip";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections, runs } from "@appstrate/db/schema";
@@ -63,8 +64,6 @@ const app = getTestApp();
 const AGENT = "@grantorg/test-agent";
 const INTEGRATION = "@grantorg/local-integ";
 const OTHER_INTEGRATION = "@grantorg/other-integ";
-const MCP_SERVER = "@grantorg/local-server";
-const OTHER_SERVER = "@grantorg/other-server";
 
 const SERVER_VERSION = "1.0.0";
 const OTHER_VERSION = "2.0.0";
@@ -81,7 +80,7 @@ describe("/internal/* — connect-run grant authorization", () => {
   /** Real run + its token: the regression control for the untouched run path. */
   let runId: string;
   let runToken: string;
-  /** Connect run granted (INTEGRATION, MCP_SERVER@1.0.0). */
+  /** Connect run granted (INTEGRATION@1.0.0). */
   let connectId: string;
   let connectToken: string;
   const mintedConnectIds: string[] = [];
@@ -93,38 +92,40 @@ describe("/internal/* — connect-run grant authorization", () => {
       {
         orgId: ctx.orgId,
         integrationId: INTEGRATION,
-        mcpServerId: MCP_SERVER,
-        mcpServerVersion: SERVER_VERSION,
+        version: SERVER_VERSION,
         ...over,
       },
       connectRunGrantTtlSeconds(60_000),
     );
   }
 
-  async function seedIntegrationPackage(id: string, serverName: string, installed: boolean) {
+  function integrationManifest(id: string, version: string) {
+    return localIntegrationManifest({
+      name: id,
+      version,
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+          delivery: httpHeaderDelivery({
+            name: "Authorization",
+            prefix: "Bearer ",
+            field: "api_key",
+          }),
+        },
+      },
+      tools_policy: { search: {} },
+    });
+  }
+
+  async function seedIntegrationPackage(id: string, installed: boolean) {
     await seedPackage({
       id,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: localIntegrationManifest({
-        name: id,
-        serverName,
-        version: "1.0.0",
-        auths: {
-          primary: {
-            type: "api_key",
-            authorizedUris: ["https://api.example.com/**"],
-            credentialFields: ["api_key"],
-            delivery: httpHeaderDelivery({
-              name: "Authorization",
-              prefix: "Bearer ",
-              field: "api_key",
-            }),
-          },
-        },
-        tools_policy: { search: {} },
-      }),
+      draftManifest: integrationManifest(id, "1.0.0"),
     });
     if (installed) {
       await seedPackageShare(ctx.defaultSpaceId, id);
@@ -132,27 +133,16 @@ describe("/internal/* — connect-run grant authorization", () => {
     }
   }
 
-  /** Publish one downloadable version of an already-seeded mcp-server package. */
-  async function seedServerVersion(id: string, version: string, bytes: Uint8Array) {
+  /** Publish one downloadable version of an already-seeded integration package. */
+  async function seedIntegrationVersion(id: string, version: string, bytes: Uint8Array) {
     await storage.uploadFile(BUCKET, `${id}/${version}.afps`, Buffer.from(bytes));
     await seedPackageVersion({
       packageId: id,
       version,
       integrity: computeIntegrity(bytes),
       artifactSize: bytes.length,
-      manifest: mcpServerManifest({ name: id, version }),
+      manifest: integrationManifest(id, version),
     });
-  }
-
-  async function seedServer(id: string, version: string, bytes: Uint8Array) {
-    await seedPackage({
-      id,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: mcpServerManifest({ name: id, version }),
-    });
-    await seedServerVersion(id, version, bytes);
   }
 
   /**
@@ -196,7 +186,7 @@ describe("/internal/* — connect-run grant authorization", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "grantorg" });
 
-    // The agent declares INTEGRATION (→ MCP_SERVER) so the RUN path has a real
+    // The agent declares INTEGRATION so the RUN path has a real
     // ALLOW of its own to defend. It never declares OTHER_INTEGRATION.
     await seedAgent({
       id: AGENT,
@@ -214,10 +204,10 @@ describe("/internal/* — connect-run grant authorization", () => {
       },
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
-    await seedIntegrationPackage(INTEGRATION, MCP_SERVER, true);
-    await seedIntegrationPackage(OTHER_INTEGRATION, OTHER_SERVER, true);
-    await seedServer(MCP_SERVER, SERVER_VERSION, SERVER_BYTES);
-    await seedServer(OTHER_SERVER, OTHER_VERSION, OTHER_BYTES);
+    await seedIntegrationPackage(INTEGRATION, true);
+    await seedIntegrationPackage(OTHER_INTEGRATION, true);
+    await seedIntegrationVersion(INTEGRATION, SERVER_VERSION, SERVER_BYTES);
+    await seedIntegrationVersion(OTHER_INTEGRATION, OTHER_VERSION, OTHER_BYTES);
 
     const run = await seedRun({
       packageId: AGENT,
@@ -225,6 +215,10 @@ describe("/internal/* — connect-run grant authorization", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
+      // The run froze the published version its spawn spec names.
+      resolvedIntegrationVersions: {
+        [INTEGRATION]: { source: "version", version: SERVER_VERSION },
+      },
     });
     runId = run.id;
     runToken = signRunToken(runId);
@@ -240,16 +234,16 @@ describe("/internal/* — connect-run grant authorization", () => {
     for (const id of mintedConnectIds.splice(0)) await deleteConnectRunGrant(id);
   });
 
-  // ─── GET /internal/mcp-server-bundle ───────────────────────────────────
+  // ─── GET /internal/integration-bundle ───────────────────────────────────
 
-  describe("GET /internal/mcp-server-bundle", () => {
-    it("ACCEPTANCE: a connect token fetches ITS OWN granted mcp-server bundle", async () => {
+  describe("GET /internal/integration-bundle", () => {
+    it("ACCEPTANCE: a connect token fetches ITS OWN granted integration archive", async () => {
       // Catches: deleting the connect branch from the byte route (the request
       // falls through to `verifyRunToken`, which 404s on the missing `runs`
       // row — the pre-existing bug this whole change closes). Also catches a
       // grant that is never written, or written after `createSidecar`.
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${connectToken}` } },
       );
       expect(res.status).toBe(200);
@@ -257,43 +251,69 @@ describe("/internal/* — connect-run grant authorization", () => {
       expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(Array.from(SERVER_BYTES));
     });
 
-    it("DENY: the same connect token cannot fetch a DIFFERENT mcp-server's bundle", async () => {
-      // Catches: dropping the `grant.mcpServerId !== mcpServerId` comparison,
-      // or weakening it to a prefix/`includes` match. OTHER_SERVER is a real,
+    it("DENY: the same connect token cannot fetch a DIFFERENT integration's archive", async () => {
+      // Catches: dropping the `grant.integrationId !== integrationId` comparison,
+      // or weakening it to a prefix/`includes` match. OTHER_INTEGRATION is a real,
       // downloadable package in the same org — the only thing refusing it is
       // the grant.
       const res = await app.request(
-        `/internal/mcp-server-bundle/${OTHER_SERVER}?version=${OTHER_VERSION}`,
+        `/internal/integration-bundle/${OTHER_INTEGRATION}?version=${OTHER_VERSION}`,
         { headers: { Authorization: `Bearer ${connectToken}` } },
       );
       expect(res.status).toBe(404);
-      expect(JSON.stringify(await res.json())).toMatch(/not the server this connect run resolved/i);
+      expect(JSON.stringify(await res.json())).toMatch(
+        /not the integration this connect run connects/i,
+      );
     });
 
     it("DENY: the granted package at a version the grant does not name", async () => {
       // Catches: matching only on package id and letting `?version=` through,
       // which would turn "one concrete version" into "any version of this
       // package" — the #588 manifest/bytes skew, reopened for connect runs.
-      await seedServerVersion(MCP_SERVER, "9.9.9", OTHER_BYTES);
-      const res = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}?version=9.9.9`, {
+      await seedIntegrationVersion(INTEGRATION, "9.9.9", OTHER_BYTES);
+      const res = await app.request(`/internal/integration-bundle/${INTEGRATION}?version=9.9.9`, {
         headers: { Authorization: `Bearer ${connectToken}` },
       });
       expect(res.status).toBe(404);
-      expect(JSON.stringify(await res.json())).toMatch(/is not the version this connect run/i);
+      expect(JSON.stringify(await res.json())).toMatch(/is not the version this run resolved/i);
     });
 
-    it("DENY: a system grant (version null) refuses a ?version= rather than reaching the DB", async () => {
-      // Catches: treating `mcpServerVersion: null` as "no version constraint".
-      // The null case exists ONLY for the boot-registry short-circuit; if it
-      // fell through to the `package_versions` lookup, a system grant would
-      // read any published version of the named package.
+    it("DENY: an unversioned grant (version null) refuses a ?version= rather than reaching the DB", async () => {
+      // Catches: treating `version: null` as "no version constraint". The null case exists ONLY
+      // for the unversioned answers (boot registry, draft files); if it fell through to the
+      // `package_versions` lookup, it would read any published version of the named package.
       const sysConnectId = newConnectId();
-      await grant(sysConnectId, { mcpServerVersion: null });
+      await grant(sysConnectId, { version: null });
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${signRunToken(sysConnectId)}` } },
       );
       expect(res.status).toBe(404);
+    });
+
+    it("ALLOW: an unversioned grant (nothing published) serves the integration's DRAFT files", async () => {
+      // The connect manifest is the draft while nothing is published, so the grant names no
+      // version and the byte route answers from the draft files, for THAT integration only.
+      await uploadPackageFiles("integrations", ctx.orgId, INTEGRATION, {
+        "server/index.js": new TextEncoder().encode("// draft server payload"),
+      });
+      const draftId = newConnectId();
+      await grant(draftId, { version: null });
+      const res = await app.request(`/internal/integration-bundle/${INTEGRATION}`, {
+        headers: { Authorization: `Bearer ${signRunToken(draftId)}` },
+      });
+      expect(res.status).toBe(200);
+      const files = unzipArtifact(new Uint8Array(await res.arrayBuffer()));
+      expect(new TextDecoder().decode(files["server/index.js"])).toBe("// draft server payload");
+
+      // …and not another integration's draft, whatever it holds.
+      await uploadPackageFiles("integrations", ctx.orgId, OTHER_INTEGRATION, {
+        "server/index.js": new TextEncoder().encode("// other draft"),
+      });
+      const other = await app.request(`/internal/integration-bundle/${OTHER_INTEGRATION}`, {
+        headers: { Authorization: `Bearer ${signRunToken(draftId)}` },
+      });
+      expect(other.status).toBe(404);
     });
 
     it("DENY: the granted package id, resolved in ANOTHER org's tenant", async () => {
@@ -308,55 +328,55 @@ describe("/internal/* — connect-run grant authorization", () => {
       // i.e. restoring the unfiltered `eq(packageId) + eq(version)` query that
       // had no tenant boundary at all.
       const foreign = await createTestContext({ orgSlug: "grantorg-foreign" });
-      const FOREIGN_SERVER = "@grantorg-foreign/local-server";
+      const FOREIGN_INTEGRATION = "@grantorg-foreign/local-integ";
       const FOREIGN_BYTES = new TextEncoder().encode("PK-foreign-tenant-bytes-marker");
       await seedPackage({
-        id: FOREIGN_SERVER,
+        id: FOREIGN_INTEGRATION,
         orgId: foreign.orgId,
-        type: "mcp-server",
+        type: "integration",
         source: "local",
-        draftManifest: mcpServerManifest({ name: FOREIGN_SERVER, version: SERVER_VERSION }),
+        draftManifest: integrationManifest(FOREIGN_INTEGRATION, SERVER_VERSION),
       });
-      await seedServerVersion(FOREIGN_SERVER, SERVER_VERSION, FOREIGN_BYTES);
+      await seedIntegrationVersion(FOREIGN_INTEGRATION, SERVER_VERSION, FOREIGN_BYTES);
 
       // The grant NAMES the foreign package (so the id match passes) but
       // carries OUR org — only the tenant filter can refuse this.
       const crossId = newConnectId();
-      await grant(crossId, { mcpServerId: FOREIGN_SERVER });
+      await grant(crossId, { integrationId: FOREIGN_INTEGRATION });
 
       const res = await app.request(
-        `/internal/mcp-server-bundle/${FOREIGN_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${FOREIGN_INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${signRunToken(crossId)}` } },
       );
       expect(res.status).toBe(404);
     });
 
-    it("ALLOW: a SYSTEM-owned mcp-server row (org_id NULL) stays reachable", async () => {
+    it("ALLOW: a SYSTEM-owned integration row (org_id NULL) stays reachable", async () => {
       // The control that keeps the tenant filter from being over-tight.
       // `orgOrSystemFilter` admits `org_id IS NULL`, matching the org-scoped
-      // resolver that wrote the grant — a system mcp-server is legitimately
+      // resolver that wrote the grant — a system integration is legitimately
       // not owned by the connect run's org. Without this, the DENY above would
       // pass just as well on a filter that refused everything it did not own.
       //
       // This row is NOT in the boot registry (`getTestApp()` skips `boot()`),
       // so the request goes through the `package_versions` lookup rather than
       // the in-memory short-circuit — the code path under test.
-      const SYS_SERVER = "@appstrate/sys-server";
+      const SYS_INTEGRATION = "@appstrate/sys-integ";
       const SYS_BYTES = new TextEncoder().encode("PK-system-owned-bytes-marker");
       await seedPackage({
-        id: SYS_SERVER,
+        id: SYS_INTEGRATION,
         orgId: null,
-        type: "mcp-server",
+        type: "integration",
         source: "local",
-        draftManifest: mcpServerManifest({ name: SYS_SERVER, version: SERVER_VERSION }),
+        draftManifest: integrationManifest(SYS_INTEGRATION, SERVER_VERSION),
       });
-      await seedServerVersion(SYS_SERVER, SERVER_VERSION, SYS_BYTES);
+      await seedIntegrationVersion(SYS_INTEGRATION, SERVER_VERSION, SYS_BYTES);
 
       const sysId = newConnectId();
-      await grant(sysId, { mcpServerId: SYS_SERVER });
+      await grant(sysId, { integrationId: SYS_INTEGRATION });
 
       const res = await app.request(
-        `/internal/mcp-server-bundle/${SYS_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${SYS_INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${signRunToken(sysId)}` } },
       );
       expect(res.status).toBe(200);
@@ -368,7 +388,7 @@ describe("/internal/* — connect-run grant authorization", () => {
       // absent, and any "trust the signature alone" shortcut.
       await deleteConnectRunGrant(connectId);
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${connectToken}` } },
       );
       expect(res.status).toBe(404);
@@ -386,8 +406,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         {
           orgId: ctx.orgId,
           integrationId: INTEGRATION,
-          mcpServerId: MCP_SERVER,
-          mcpServerVersion: SERVER_VERSION,
+          version: SERVER_VERSION,
         },
         1,
       );
@@ -398,19 +417,19 @@ describe("/internal/* — connect-run grant authorization", () => {
       expect(await readConnectRunGrant(expiringId)).toBeNull();
 
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${signRunToken(expiringId)}` } },
       );
       expect(res.status).toBe(404);
     });
 
-    it("REGRESSION: a real run token still reaches its agent's mcp-server, and only that one", async () => {
+    it("REGRESSION: a real run token still reaches its agent's integration, and only that one", async () => {
       // The control that keeps every DENY above honest, and the guard on
       // "the real-run path must not widen or narrow by one inch": catches a
       // connect branch that swallows run tokens, and catches replacing
-      // `assertAgentReferencesMcpServer` instead of adding beside it.
+      // `assertAgentDeclaresLocalIntegration` instead of adding beside it.
       const allowed = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${runToken}` } },
       );
       expect(allowed.status).toBe(200);
@@ -419,54 +438,55 @@ describe("/internal/* — connect-run grant authorization", () => {
       );
 
       const denied = await app.request(
-        `/internal/mcp-server-bundle/${OTHER_SERVER}?version=${OTHER_VERSION}`,
+        `/internal/integration-bundle/${OTHER_INTEGRATION}?version=${OTHER_VERSION}`,
         { headers: { Authorization: `Bearer ${runToken}` } },
       );
       expect(denied.status).toBe(404);
-      expect(JSON.stringify(await denied.json())).toMatch(/not referenced by the running agent/i);
+      expect(JSON.stringify(await denied.json())).toMatch(/no resolved version/i);
     });
 
     it("CROSS: a grant cannot widen a RUN token — the run path never reads one", async () => {
       // Catches: keying the grant on something a run token could also present,
       // or resolving the grant before knowing which population the id is in.
-      // A live grant naming OTHER_SERVER exists; the run token must still be
+      // A live grant naming OTHER_INTEGRATION exists; the run token must still be
       // judged solely by its agent's dependencies.
       const otherConnectId = newConnectId();
-      await grant(otherConnectId, { mcpServerId: OTHER_SERVER, mcpServerVersion: OTHER_VERSION });
+      await grant(otherConnectId, { integrationId: OTHER_INTEGRATION, version: OTHER_VERSION });
       // ...and one keyed by the RUN's own id, the most direct smuggling attempt.
       await writeConnectRunGrant(
         `${CONNECT_ID_PREFIX}${runId}`,
         {
           orgId: ctx.orgId,
           integrationId: OTHER_INTEGRATION,
-          mcpServerId: OTHER_SERVER,
-          mcpServerVersion: OTHER_VERSION,
+          version: OTHER_VERSION,
         },
         60,
       );
       mintedConnectIds.push(`${CONNECT_ID_PREFIX}${runId}`);
 
       const res = await app.request(
-        `/internal/mcp-server-bundle/${OTHER_SERVER}?version=${OTHER_VERSION}`,
+        `/internal/integration-bundle/${OTHER_INTEGRATION}?version=${OTHER_VERSION}`,
         { headers: { Authorization: `Bearer ${runToken}` } },
       );
       expect(res.status).toBe(404);
-      expect(JSON.stringify(await res.json())).toMatch(/not referenced by the running agent/i);
+      expect(JSON.stringify(await res.json())).toMatch(/no resolved version/i);
     });
 
     it("CROSS: a connect token cannot borrow the RUN branch's agent-manifest authorization", async () => {
-      // The mirror image: the agent DOES reference MCP_SERVER, and a run token
-      // is allowed it (asserted above). A connect token granted OTHER_SERVER
+      // The mirror image: the agent DOES declare INTEGRATION, and a run token
+      // is allowed it (asserted above). A connect token granted OTHER_INTEGRATION
       // must not inherit that — catches a branch that falls through to
-      // `assertAgentReferencesMcpServer` when the grant check fails.
+      // `assertAgentDeclaresLocalIntegration` when the grant check fails.
       const narrowId = newConnectId();
-      await grant(narrowId, { mcpServerId: OTHER_SERVER, mcpServerVersion: OTHER_VERSION });
+      await grant(narrowId, { integrationId: OTHER_INTEGRATION, version: OTHER_VERSION });
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${signRunToken(narrowId)}` } },
       );
       expect(res.status).toBe(404);
-      expect(JSON.stringify(await res.json())).toMatch(/not the server this connect run resolved/i);
+      expect(JSON.stringify(await res.json())).toMatch(
+        /not the integration this connect run connects/i,
+      );
     });
 
     it("a forged connect token (right shape, no signature) is still 401", async () => {
@@ -474,7 +494,7 @@ describe("/internal/* — connect-run grant authorization", () => {
       // VERIFIED id, which would let anyone mint `connect_<id>` for a grant id
       // they guessed.
       const res = await app.request(
-        `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+        `/internal/integration-bundle/${INTEGRATION}?version=${SERVER_VERSION}`,
         { headers: { Authorization: `Bearer ${connectId}.deadbeef` } },
       );
       expect(res.status).toBe(401);

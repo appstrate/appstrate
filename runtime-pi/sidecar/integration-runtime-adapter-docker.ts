@@ -793,7 +793,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       }
 
       // Per-run shared workspace mount. Wired ONLY when the spec's
-      // referenced mcp-server opted in via _meta.workspace AND the
+      // integration opted in via _meta.workspace AND the
       // launching orchestrator carried a workspace handle of the right
       // shape (volume for docker). A volume mismatch (spec says yes,
       // handle says no / wrong-kind) is logged as a warning and the
@@ -806,17 +806,17 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
           volumeFlags.push("-v", `${workspaceHandle.name}:${spec.workspaceMount.mount}${roSuffix}`);
           envFlags.push("-e", `${WORKSPACE_ENV_VAR}=${spec.workspaceMount.mount}`);
         } else {
-          // ERROR-level (not warn): the mcp-server author explicitly
+          // ERROR-level (not warn): the server author explicitly
           // opted into a shared workspace via `_meta.workspace` AND
           // the platform's MCP Roots advertisement will tell its
           // protocol client the path is available — but the actual
-          // bind is missing. A SOTA mcp-server that caches roots/list
+          // bind is missing. A SOTA local server that caches roots/list
           // would then issue write calls against an unmounted path,
           // failing in ways that look like server bugs rather than
           // misconfig. Surface loudly so operators see it on the
           // first run, not the tenth.
           logger.error(
-            "spec declares workspaceMount but launching orchestrator carried no volume handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
+            "spec declares workspaceMount but launching orchestrator carried no volume handle; runner spawned WITHOUT workspace — opt-in local server tools will fail",
             {
               integrationId: spec.integrationId,
               haveHandle: workspaceHandle?.kind ?? "none",

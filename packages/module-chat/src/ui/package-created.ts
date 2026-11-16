@@ -16,7 +16,6 @@ const CREATE_OPERATIONS: Readonly<Record<string, PackageType>> = {
   createAgent: "agent",
   createSkill: "skill",
   createIntegrationPackage: "integration",
-  createMcpServerPackage: "mcp-server",
 };
 
 export interface CreatedPackage {

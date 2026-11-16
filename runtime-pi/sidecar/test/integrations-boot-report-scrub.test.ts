@@ -29,7 +29,6 @@ const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
 /** A shape `scrubSecretMaterial` masks, distinctive enough to grep for. */
 const SECRET = "sk-ant-api03-LEAKED0000000000";
-const SERVER_ID = "@tractr/leaky-server";
 
 function localSpec(integrationId: string): IntegrationSpawnSpec {
   return {
@@ -40,7 +39,7 @@ function localSpec(integrationId: string): IntegrationSpawnSpec {
     manifest: {
       name: integrationId,
       version: "1.0.0",
-      server: { type: "bun", entry_point: "./server.ts", packageId: SERVER_ID },
+      server: { type: "bun", entry_point: "./server.ts" },
     },
     spawnEnv: {},
   } as IntegrationSpawnSpec;
@@ -163,7 +162,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
     });
     const fetchFn = (async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("/internal/mcp-server-bundle/")) {
+      if (url.includes("/internal/integration-bundle/")) {
         return new Response(bundle, { status: 200 });
       }
       return new Response(JSON.stringify({ detail: `unexpected: ${url}` }), { status: 404 });

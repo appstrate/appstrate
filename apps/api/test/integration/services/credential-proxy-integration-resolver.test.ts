@@ -91,7 +91,14 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
     name: INTEGRATION_ID,
     version: "1.0.0",
     display_name: "Gmail",
-    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       primary: {
         type: "oauth2",
@@ -233,7 +240,14 @@ describe("credential-proxy integration-resolver", () => {
         name: NO_AUTH,
         version: "1.0.0",
         display_name: "NoAuth",
-        source: { kind: "local", server: { name: "@official/noauth-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "api_key",
@@ -270,7 +284,14 @@ describe("credential-proxy integration-resolver", () => {
         name: TENANT,
         version: "1.0.0",
         display_name: "Tenant",
-        source: { kind: "local", server: { name: "@official/tenant-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "api_key",
@@ -330,7 +351,14 @@ describe("credential-proxy integration-resolver", () => {
         name: FORGE,
         version: "1.0.0",
         display_name: "Forge",
-        source: { kind: "local", server: { name: "@official/forge-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         variables: {
           schema: {
             type: "object",

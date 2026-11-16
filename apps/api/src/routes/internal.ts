@@ -13,7 +13,10 @@ import {
 } from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
+import { zipArtifact } from "@appstrate/core/zip";
+import { getLocalServer } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
+import { readPackageSnapshot } from "../services/package-files.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
@@ -51,8 +54,10 @@ import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
 } from "../services/integration-credentials-resolver.ts";
-import { readIntegrationManifestForRun } from "../services/integration-service.ts";
-import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
+import {
+  readIntegrationManifestForRun,
+  type ResolvedIntegrationVersionMap,
+} from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
   isIntegrationActive,
@@ -119,55 +124,51 @@ async function connectCallerOrNull(c: Context): Promise<ConnectCaller | null> {
 }
 
 /**
- * Authorise a bundle fetch against the connect run's grant. Replaces
- * `assertAgentReferencesMcpServer`, which has no agent to consult here.
- *
+ * Authorise a bundle fetch against the connect run's grant, which has no agent to consult.
  * Exact match on both axes, no ranges, no "latest":
- *   - the package must be THE mcp-server the launcher's resolver picked;
+ *   - the integration must be THE one the launcher built the spawn spec from;
  *   - a grant carrying a concrete version admits only that version;
- *   - a grant carrying `null` (system mcp-server) admits only the byte route's
- *     boot-registry short-circuit, so it refuses a `?version=` outright rather
- *     than letting the request reach the `package_versions` lookup, where the
- *     grant would have become "any version of this package".
+ *   - a grant carrying `null` (a system integration, or a draft still unpublished) admits only
+ *     the unversioned byte route, so it refuses a `?version=` outright rather than letting the
+ *     request reach the `package_versions` lookup, where the grant would have become "any
+ *     version of this integration".
  */
-function assertConnectGrantCoversMcpServer(
-  mcpServerId: string,
+function assertConnectGrantCoversIntegrationBundle(
+  integrationId: string,
   requestedVersion: string | undefined,
   caller: ConnectCaller,
 ): void {
   const { grant, connectId } = caller;
-  if (grant.mcpServerId !== mcpServerId) {
-    logger.warn("mcp-server bundle request rejected — not this connect run's server", {
+  if (grant.integrationId !== integrationId) {
+    logger.warn("integration bundle request rejected — not this connect run's integration", {
       connectId,
-      mcpServerId,
-      grantedMcpServerId: grant.mcpServerId,
-    });
-    throw notFound(`mcp-server '${mcpServerId}' is not the server this connect run resolved`);
-  }
-  if (grant.mcpServerVersion === null) {
-    if (requestedVersion) {
-      logger.warn("mcp-server bundle request rejected — system grant carries no version", {
-        connectId,
-        mcpServerId,
-        requestedVersion,
-      });
-      throw notFound(
-        `Version '${requestedVersion}' is not the version this connect run resolved for '${mcpServerId}'`,
-      );
-    }
-    return;
-  }
-  if (requestedVersion !== grant.mcpServerVersion) {
-    logger.warn("mcp-server bundle request rejected — version outside the grant", {
-      connectId,
-      mcpServerId,
-      requestedVersion: requestedVersion ?? null,
-      grantedVersion: grant.mcpServerVersion,
+      integrationId,
+      grantedIntegrationId: grant.integrationId,
     });
     throw notFound(
-      `Version '${requestedVersion ?? ""}' is not the version this connect run resolved for '${mcpServerId}'`,
+      `Integration '${integrationId}' is not the integration this connect run connects`,
     );
   }
+  assertBundleVersionPermitted(integrationId, grant.version, requestedVersion, { connectId });
+}
+
+/** The requested `?version=` must be exactly the permitted one (`null`: none may be named). */
+function assertBundleVersionPermitted(
+  integrationId: string,
+  permitted: string | null,
+  requested: string | undefined,
+  caller: Record<string, string>,
+): void {
+  if ((requested ?? null) === permitted) return;
+  logger.warn("integration bundle request rejected — version outside the authorised one", {
+    ...caller,
+    integrationId,
+    requestedVersion: requested ?? null,
+    permittedVersion: permitted,
+  });
+  throw notFound(
+    `Version '${requested ?? ""}' is not the version this run resolved for '${integrationId}'`,
+  );
 }
 
 /**
@@ -275,7 +276,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   /**
    * Pin: the running agent must declare this integration in
    * `dependencies.integrations` AND it must be ACTIVE in the run's
-   * space. Same guard used by /mcp-server-bundle and the
+   * space. Same guard used by /integration-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
    *
@@ -298,7 +299,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
-      logger.warn("Integration credentials request rejected — not declared by agent", {
+      logger.warn("Integration request rejected — not declared by agent", {
         runId,
         packageId,
         agentId: effective.id,
@@ -539,59 +540,71 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.body(null, 204);
   });
 
-  // GET /internal/mcp-server-bundle/:scope/:name
-  // Returns the mcp-server package's .afps bundle bytes (the runnable MCP
-  // server code). In AFPS a local-source integration references a SEPARATE
-  // mcp-server package via `source.server.name`; the sidecar fetches that
-  // package's bundle here before spawning a runner. Authorised by the same
-  // Bearer run-token as the credentials surface; additionally verifies the
-  // run's agent declares an ACTIVE integration that references this
-  // mcp-server, so a leaked run token can't enumerate arbitrary server source.
+  // GET /internal/integration-bundle/:scope/:name[?version=]
+  // Returns a LOCAL integration's own archive (manifest, INTEGRATION.md and the runnable server
+  // payload `server.entry_point` is relative to); the sidecar fetches it before spawning a
+  // runner. Authorised by the same Bearer run-token as the credentials surface; additionally
+  // verifies the run's agent declares this integration, active in the run's space, and that it
+  // is a local one — so a leaked run token can't enumerate arbitrary server source.
   //
-  // An ephemeral CONNECT run (`runAt: "link"` connect.tool login) reaches this
-  // endpoint too, and has no `runs` row and no agent for either half of that
-  // check to read. It authorises against its launcher-published grant instead
-  // — one mcp-server, one concrete version — which is strictly narrower than
-  // the manifest walk, never wider.
-  router.get(`/mcp-server-bundle/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const mcpServerId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    // Connect-run branch — the grant IS the authorization (there is no agent
-    // whose dependencies could be walked). Byte delivery below is shared
-    // verbatim with the run path; only the authorization differs.
+  // WHICH bytes: the one version the run froze (`runs.resolved_integration_versions`). The
+  // spawn spec names a published version in `server.version`, and `?version=` must equal it. A
+  // system integration is served from the boot registry, and an integration the run froze on its
+  // DRAFT (`dependency_overrides[id] = "draft"`) from the draft files; both carry no version, and
+  // `?version=` is refused for them. A run with no frozen entry for the integration gets a 404.
+  //
+  // An ephemeral CONNECT run (`runAt: "link"` connect.tool login) reaches this endpoint too and
+  // has no `runs` row and no agent to walk: it authorises against its launcher-published grant,
+  // strictly narrower than the walk.
+  router.get(`/integration-bundle/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const integrationId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const requestedVersion = c.req.query("version")?.trim() || undefined;
     const connect = await connectCallerOrNull(c);
     if (connect) {
-      assertConnectGrantCoversMcpServer(mcpServerId, c.req.query("version")?.trim(), connect);
-      return serveMcpServerBundle(c, mcpServerId, {
+      assertConnectGrantCoversIntegrationBundle(integrationId, requestedVersion, connect);
+      return serveIntegrationBundle(integrationId, requestedVersion, connect.grant.orgId, {
         connectId: connect.connectId,
-        orgId: connect.grant.orgId,
       });
     }
     const { runId, run } = await verifyRunToken(c);
-    await assertAgentReferencesMcpServer(mcpServerId, run, runId);
-    return serveMcpServerBundle(c, mcpServerId, { runId });
+    // Every launch path freezes each declared integration (`freezeRunSpawnDependencies`), so a
+    // missing entry is not "serve the draft" — it is a run that never resolved this integration.
+    const frozen = run.resolvedIntegrationVersions?.[integrationId];
+    if (!frozen) {
+      logger.warn("integration bundle request rejected — run froze no version for it", {
+        runId,
+        integrationId,
+      });
+      throw notFound(`Run has no resolved version for '${integrationId}'`);
+    }
+    await assertAgentDeclaresLocalIntegration(integrationId, run, runId, frozen);
+    assertBundleVersionPermitted(
+      integrationId,
+      frozen.source === "version" ? frozen.version : null,
+      requestedVersion,
+      { runId },
+    );
+    return serveIntegrationBundle(integrationId, requestedVersion, run.orgId, { runId });
   });
 
   /**
-   * Deliver an mcp-server package's bundle bytes. The "who may read what"
-   * decision has ALREADY happened — `assertAgentReferencesMcpServer` for a run
-   * token, `assertConnectGrantCoversMcpServer` for a connect token — so the
-   * two callers cannot drift on version pinning or the system short-circuit.
-   *
-   * `caller` is log attribution AND, for a connect token, the tenant scope the
-   * version lookup below is filtered by. The asymmetry is deliberate and is
-   * explained at that query.
+   * Deliver an integration's archive. The "who may read what" decision has ALREADY happened
+   * (`assertAgentDeclaresLocalIntegration` for a run token, the grant check for a connect token,
+   * and `assertBundleVersionPermitted` for both), so the two callers cannot drift on version
+   * pinning. `orgId` is the tenant scope: the version lookup binds it, and the draft's storage
+   * key carries it.
    */
-  async function serveMcpServerBundle(
-    c: Context,
-    mcpServerId: string,
-    caller: { runId: string } | { connectId: string; orgId: string },
+  async function serveIntegrationBundle(
+    integrationId: string,
+    version: string | undefined,
+    orgId: string,
+    caller: { runId: string } | { connectId: string },
   ): Promise<Response> {
-    // Resolve bytes: system package from in-memory map, local from S3
-    const sys = getSystemPackages().get(mcpServerId);
+    const sys = getSystemPackages().get(integrationId);
     if (sys?.zipBuffer) {
-      logger.info("mcp-server bundle delivered (system)", {
+      logger.info("integration bundle delivered (system)", {
         ...caller,
-        mcpServerId,
+        integrationId,
         bytes: sys.zipBuffer.length,
       });
       return new Response(Buffer.from(sys.zipBuffer), {
@@ -599,125 +612,104 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         headers: { "Content-Type": "application/zip" },
       });
     }
-    // The spawn resolver pins the CONCRETE version (from
-    // `source.server.version`) and the sidecar forwards it here as `?version=`,
-    // so the runnable bytes match the version's manifest the resolver read. The
-    // version is server-resolved at run kickoff (not caller-chosen); we serve it
-    // by exact match (yank-visibility already applied upstream). Past the system
-    // short-circuit above, an absent `?version=` is unanswerable rather than a
-    // request for "latest": serving the newest published version would skew
-    // the manifest from the bytes, so it fails loudly instead.
-    const requestedVersion = c.req.query("version")?.trim();
-    if (!requestedVersion) {
-      throw invalidRequest(
-        `Query parameter 'version' is required for '${mcpServerId}': send the concrete ` +
-          `version the run resolved at kickoff (the spawn spec's \`server.version\`). Only ` +
-          `system mcp-servers, served from the in-memory boot registry, may omit it.`,
-        "version",
-      );
-    }
-    // Tenant scope on the VERSION lookup itself — the same technique, on the
-    // same two tables, that `resolvePublishedManifest` uses (see
-    // `integration-service.ts`: "so the two reads can never skew across a
-    // concurrent delete/recreate of the package id"). A pre-check on `packages`
-    // followed by an unfiltered version read would be exactly the TOCTOU this
-    // avoids, which is why the filter is here and not in a separate guard.
-    //
-    // Only the CONNECT branch binds it, and that is not an oversight:
-    //   - the run path's org boundary is `assertAgentReferencesMcpServer`,
-    //     which walks the run's own agent + space. Binding `run.orgId` here as
-    //     well would be a second name for a boundary that path already holds,
-    //     and this endpoint's contract must not shift by one row.
-    //   - the connect path has no agent to walk. Its grant carries the org the
-    //     launcher's ORG-SCOPED resolver ran in, and this compares that against
-    //     an independently derived fact — the org owning the row being served,
-    //     read now rather than at grant time. `orgOrSystemFilter` admits system
-    //     packages (`org_id IS NULL`), matching the resolver that wrote the
-    //     grant, so a system mcp-server stays reachable.
-    //
-    // The join itself changes nothing for the run path: `package_versions
-    // .package_id` is `ON DELETE CASCADE` (schema/packages.ts), so every row
-    // has a parent and an unfiltered inner join drops none of them.
-    const tenantScope = "orgId" in caller ? caller.orgId : null;
+    // No version: the run froze the draft (or a connect run found nothing published). The draft's
+    // files are read at fetch time, so a draft edited after launch is served as edited.
+    if (!version) return serveDraftIntegrationBundle(integrationId, orgId, caller);
+    // Tenant scope on the VERSION lookup itself, the technique `resolvePublishedManifest` uses
+    // on the same two tables: a pre-check on `packages` followed by an unfiltered version read
+    // would be the TOCTOU this avoids.
     const [resolved] = await db
       .select({ version: packageVersions.version, integrity: packageVersions.integrity })
       .from(packageVersions)
       .innerJoin(packages, eq(packages.id, packageVersions.packageId))
       .where(
         and(
-          eq(packageVersions.packageId, mcpServerId),
-          eq(packageVersions.version, requestedVersion),
-          ...(tenantScope ? [orgOrSystemFilter(tenantScope)] : []),
+          eq(packageVersions.packageId, integrationId),
+          eq(packageVersions.version, version),
+          orgOrSystemFilter(orgId),
         ),
       )
       .limit(1);
     if (!resolved) {
-      throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
+      throw notFound(`Version '${version}' not found for '${integrationId}'`);
     }
     const bytes = await downloadVersionZipForExecution(
-      mcpServerId,
+      integrationId,
       resolved.version,
       resolved.integrity,
     );
-    if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
-    logger.info("mcp-server bundle delivered (storage)", {
+    if (!bytes) throw notFound(`Bundle bytes unavailable for '${integrationId}'`);
+    logger.info("integration bundle delivered (storage)", {
       ...caller,
-      mcpServerId,
+      integrationId,
       version: resolved.version,
       bytes: bytes.length,
     });
     return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });
   }
 
-  /**
-   * Authorise an mcp-server bundle fetch: the running agent must declare at
-   * least one integration (in `dependencies.integrations`) that (a) is
-   * active in the run's space AND (b) references this mcp-server via
-   * `source.server.name`. This keeps a leaked run token from enumerating
-   * arbitrary server source across the org.
-   */
-  async function assertAgentReferencesMcpServer(
-    mcpServerId: string,
-    run: {
-      packageId: string;
-      orgId: string;
-      spaceId: string;
-      versionRef: string | null;
-      resolvedIntegrationVersions: Record<
-        string,
-        { version: string | null; source: "version" | "draft" | "system" }
-      > | null;
-    },
-    runId: string,
-  ): Promise<void> {
-    // Enumerate the deps of the definition the run EXECUTES (pinned snapshot
-    // when `version_ref` is a concrete semver) — same rationale as
-    // `assertAgentDeclaresIntegration` above.
-    const effective = await getRunEffectiveAgent(run);
-    if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
-    const deps = asRecord(asRecord(effective.manifest).dependencies);
-    const integrations = asRecord(deps.integrations);
-    for (const integrationId of Object.keys(integrations)) {
-      // Same activation rule as everywhere else (an enabled row, or
-      // system integration auto-active with no row); skip inactive ones.
-      if (!(await isIntegrationActive(integrationId, run.spaceId))) continue;
-      // Read the integration manifest AT the version frozen for this run
-      // so the authz check sees the same `source.server.name` the spawn
-      // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
-      const res = await readIntegrationManifestForRun(
-        integrationId,
-        run.resolvedIntegrationVersions?.[integrationId],
-      );
-      if (!res.ok) continue;
-      const ref = getLocalServerRef(res.manifest);
-      if (ref?.name === mcpServerId) return;
-    }
-    logger.warn("mcp-server bundle request rejected — not referenced by agent", {
-      runId,
-      mcpServerId,
-      agentId: effective.id,
+  /** The draft files of an integration the org owns, zipped like a published archive. */
+  async function serveDraftIntegrationBundle(
+    integrationId: string,
+    orgId: string,
+    caller: { runId: string } | { connectId: string },
+  ): Promise<Response> {
+    const [row] = await db
+      .select({
+        id: packages.id,
+        type: packages.type,
+        orgId: packages.orgId,
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+      })
+      .from(packages)
+      .where(
+        and(
+          eq(packages.id, integrationId),
+          eq(packages.type, "integration"),
+          eq(packages.orgId, orgId),
+        ),
+      )
+      .limit(1);
+    if (!row) throw notFound(`Draft files unavailable for '${integrationId}'`);
+    // The explorer's reader, so the archive carries the same DB-authoritative `manifest.json`
+    // overlay every other draft reader sees — the one the spawn spec was built from.
+    const { files } = await readPackageSnapshot(row, {
+      kind: "draft",
+      snapshotId: null,
+      yanked: false,
     });
-    throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
+    const bytes = zipArtifact(files, 6);
+    logger.info("integration bundle delivered (draft)", {
+      ...caller,
+      integrationId,
+      bytes: bytes.length,
+    });
+    return new Response(Buffer.from(bytes), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }
+
+  /**
+   * {@link assertAgentDeclaresIntegration}, plus: the integration, read at the version the run
+   * froze, must be a LOCAL one with a server to run. Any other source has no archive to serve.
+   */
+  async function assertAgentDeclaresLocalIntegration(
+    integrationId: string,
+    run: { packageId: string; orgId: string; spaceId: string; versionRef: string | null },
+    runId: string,
+    frozen: ResolvedIntegrationVersionMap[string],
+  ): Promise<void> {
+    await assertAgentDeclaresIntegration(integrationId, run, runId);
+    const res = await readIntegrationManifestForRun(integrationId, frozen);
+    if (!res.ok || !getLocalServer(res.manifest)) {
+      logger.warn("integration bundle request rejected — not a local integration", {
+        runId,
+        integrationId,
+      });
+      throw notFound(`Integration '${integrationId}' is not a local integration with a server`);
+    }
   }
 
   return router;

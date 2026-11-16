@@ -57,18 +57,20 @@ const VALID_SKILL = {
  */
 const VALID_SKILL_MD = enc("---\nname: skill\ndescription: A test skill.\n---\nbody");
 
-/** A valid AFPS mcp-server manifest (MCPB shape + root identity). */
-const VALID_MCP_SERVER = {
-  manifest_version: "0.3",
+/** A valid local integration: the MCP server is declared inline and ships in the archive. */
+const VALID_LOCAL_INTEGRATION = {
   name: "@me/mcp",
   version: "1.0.0",
-  type: "mcp-server",
+  type: "integration",
   schema_version: "0.1",
-  display_name: "My MCP Server",
-  server: {
-    type: "node",
-    entry_point: "server/index.js",
-    mcp_config: { command: "node", args: ["server/index.js"] },
+  display_name: "My Local Integration",
+  source: {
+    kind: "local",
+    server: {
+      type: "node",
+      entry_point: "server/index.js",
+      mcp_config: { command: "node", args: ["server/index.js"] },
+    },
   },
 };
 
@@ -288,13 +290,13 @@ describe("validateBundle (AFPS)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("accepts a valid mcp-server dependency (MCPB manifest, _meta identity)", async () => {
+  it("accepts a local integration dependency carrying its server payload", async () => {
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
-      { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },
+      { ...VALID_AGENT, dependencies: { integrations: { "@me/mcp": "^1" } } },
       { "prompt.md": enc("p") },
     );
-    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, VALID_MCP_SERVER, {
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, VALID_LOCAL_INTEGRATION, {
       "server/index.js": enc("//"),
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
@@ -303,20 +305,14 @@ describe("validateBundle (AFPS)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("rejects an mcp-server with a corrupt root identity (unscoped name)", async () => {
-    // AFPS lifted the scoped identity to the manifest root. The schema's
-    // root `name` regex enforces `@scope/name`, so an unscoped value MUST be
-    // rejected.
-    const badMcp = {
-      ...VALID_MCP_SERVER,
-      name: "not-scoped",
-    };
+  it("rejects a local integration with a corrupt root identity (unscoped name)", async () => {
+    const bad = { ...VALID_LOCAL_INTEGRATION, name: "not-scoped" };
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
-      { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },
+      { ...VALID_AGENT, dependencies: { integrations: { "@me/mcp": "^1" } } },
       { "prompt.md": enc("p") },
     );
-    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, badMcp, {
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, bad, {
       "server/index.js": enc("//"),
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
@@ -327,17 +323,14 @@ describe("validateBundle (AFPS)", () => {
     );
   });
 
-  it("flags an mcp-server with no root type as unsupported", async () => {
-    // Without `type: "mcp-server"` at the root (AFPS §3.4), the package
-    // is genuinely unidentifiable and surfaces as UNSUPPORTED_TYPE.
-    const orphan = { ...VALID_MCP_SERVER } as Record<string, unknown>;
-    delete orphan.type;
+  it("flags an unknown package type as unsupported", async () => {
+    const unknown = { ...VALID_LOCAL_INTEGRATION, type: "widget" };
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
-      { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },
+      { ...VALID_AGENT, dependencies: { integrations: { "@me/mcp": "^1" } } },
       { "prompt.md": enc("p") },
     );
-    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, orphan, {
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, unknown, {
       "server/index.js": enc("//"),
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
@@ -454,7 +447,7 @@ describe("validateBundle (AFPS)", () => {
   // The conformance harness (L1.10/L1.11/L1.13) exercises these through the
   // loadBundle route; these tests pin the validateBundle()-level contract so
   // a regression in the shared companion-files helper that returned `null`
-  // for an entire type (e.g. mcp-server) would be caught by the unit suite
+  // for an entire type (e.g. integration) would be caught by the unit suite
   // independently of the conformance harness.
 
   it("flags an agent missing prompt.md with COMPANION_FILE_MISSING", async () => {
@@ -488,15 +481,15 @@ describe("validateBundle (AFPS)", () => {
     expect(issue?.severity).toBe("error");
   });
 
-  it("flags an mcp-server missing server.entry_point payload with COMPANION_FILE_MISSING", async () => {
-    // mcp-server manifest references `server/index.js` via entry_point, but
-    // the file is absent from the package (AFPS §3.4 requires the payload).
+  it("flags a local integration missing its source.server.entry_point payload with COMPANION_FILE_MISSING", async () => {
+    // The manifest references `server/index.js` via entry_point, but the file
+    // is absent from the package (AFPS §7.1: the integration carries its server).
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
-      { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },
+      { ...VALID_AGENT, dependencies: { integrations: { "@me/mcp": "^1" } } },
       { "prompt.md": enc("p") },
     );
-    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, VALID_MCP_SERVER);
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, VALID_LOCAL_INTEGRATION);
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
     const result = validateBundle(bundle);
     expect(result.valid).toBe(false);

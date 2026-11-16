@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the integration tool on tool events (#2233)
+
+- `buildToolStartProgress` and `buildToolResultProgress` take an optional `integration`
+  (`{ id, tool, title? }`) and put it in `data`: the integration's package id, the tool's name on
+  its server and, when the server gives one, its title. The Pi runner passes it for every tool an
+  integration serves; a harness tool (`output`, `publish_file`) carries none.
+- `readApiCallSurfaces(bundle, refs)` and `apiCallToolName(meta)` are exported from
+  `@appstrate/afps-runtime/resolvers`: the api_call surfaces of a run under their run-unique
+  namespaces, and the name each resolved tool carries. Both resolvers build their tools from
+  them, and the Pi runner pairs a resolved tool with its integration by that name.
+
 ### Removed — the stdout bridge (#2199)
 
 - **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`
@@ -36,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/afps-shared/output-schema`): an empty `output.schema` (`{}`) yields none, the
   same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
   `## Output Format` for every `outputSchema` it receives.
+
+### Removed — the `mcp-server` package type (BREAKING, #2220, `@afps-spec/schema` `^0.13.0`)
+
+- A bundle has no `mcp-server` members: a `local` integration member carries its own server
+  payload (`source.server`, entry point present in its archive — `checkCompanionFiles` now judges
+  a local integration and no longer an `mcp-server`). `DependencySection` is `"skills" |
+"integrations"` (the default `depTypes` of `buildBundleFromCatalog` follows), `validateBundle`
+  dispatches `agent | skill | integration`, and `LOCAL_SERVER_MISSING_ENTRY_POINT` replaces
+  `MCP_SERVER_MISSING_ENTRY_POINT`.
+- `UNAVAILABLE_INTEGRATION_REASONS`: `local_server_ref_missing`, `mcp_server_unresolved` and
+  `mcp_server_not_runnable` are replaced by `local_server_not_runnable`.
+- The `afps bundle` command is deleted with `@appstrate/core/mcp-server-bundle` it drove.
+- The conformance cases L1.12 / L1.13 use the inline local-integration shape.
 
 ### Changed — `fetchApiCall` refuses a target carrying userinfo (#2222)
 

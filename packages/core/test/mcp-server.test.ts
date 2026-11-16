@@ -1,94 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the mcp-server `_meta` accessors.
- *
- * AFPS (§3.4 / §11.2) lifted mcp-server identity (`name`, `type`,
- * `schema_version`, `dependencies`) from `_meta["dev.afps/mcp-server"]` to
- * the manifest root, so the previous `getMcpServerAfpsName` helper is gone.
- * The vendor extension under `_meta["dev.appstrate/mcp-server"]` (runtime
- * override) is unchanged.
+ * Unit tests for the local MCP server accessors, which read the INTEGRATION manifest
+ * (`source.server` + the Appstrate `_meta` keys on the manifest root).
  */
 
 import { describe, it, expect } from "bun:test";
+import type { IntegrationManifest } from "@afps-spec/schema";
 import {
   effectiveMcpServerType,
   getMcpServerRuntime,
   getMcpServerWorkspaceMount,
-  mcpServerManifestSchema,
   MCP_SERVER_WORKSPACE_META_KEY,
-  type McpServerManifest,
 } from "../src/mcp-server.ts";
+import { integrationManifestSchema } from "../src/integration.ts";
 
-function manifest(meta?: Record<string, unknown>): McpServerManifest {
+function manifest(
+  meta?: Record<string, unknown>,
+  server: Record<string, unknown> = {
+    type: "node",
+    entry_point: "server/index.ts",
+    mcp_config: { command: "node", args: ["server/index.ts"] },
+  },
+): IntegrationManifest {
   return {
-    manifest_version: "0.3",
-    name: "@me/toolkit-server",
+    name: "@me/toolkit",
     version: "1.0.0",
-    type: "mcp-server",
+    type: "integration",
     schema_version: "0.1",
-    server: { type: "node", entry_point: "./server.ts" },
+    source: { kind: "local", server },
     ...(meta ? { _meta: meta } : {}),
-  } as unknown as McpServerManifest;
+  } as unknown as IntegrationManifest;
 }
-
-function manifestWithUserConfig(userConfig: Record<string, unknown>): Record<string, unknown> {
-  return {
-    manifest_version: "0.3",
-    name: "@me/toolkit-server",
-    version: "1.0.0",
-    type: "mcp-server",
-    schema_version: "0.1",
-    server: {
-      type: "node",
-      entry_point: "./server.ts",
-      mcp_config: { command: "node", args: ["./server.ts"] },
-    },
-    user_config: userConfig,
-  };
-}
-
-// ─────────────────────────────────────────────
-// Local refine: user_config MCPB inner shape
-// ─────────────────────────────────────────────
-//
-// Upstream `@afps-spec/schema` types `user_config` as
-// `z.record(z.string(), z.unknown())` — any value passes. The local refine in
-// `mcp-server.ts` validates each entry against the MCPB inner shape.
-describe("mcpServerManifestSchema — user_config MCPB inner shape (local refine)", () => {
-  it("accepts a well-formed user_config entry", () => {
-    const r = mcpServerManifestSchema.safeParse(
-      manifestWithUserConfig({ foo: { type: "string", title: "Foo" } }),
-    );
-    expect(r.success).toBe(true);
-  });
-
-  it("rejects a user_config entry missing the required `type` field", () => {
-    const r = mcpServerManifestSchema.safeParse(manifestWithUserConfig({ foo: { title: "Foo" } }));
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(
-        r.error.issues.some(
-          (i) => i.path[0] === "user_config" && i.path[1] === "foo" && i.path.includes("type"),
-        ),
-      ).toBe(true);
-    }
-  });
-
-  it("rejects a user_config entry whose `type` is not in the MCPB enum", () => {
-    const r = mcpServerManifestSchema.safeParse(
-      manifestWithUserConfig({ foo: { type: "invalid_type", title: "Foo" } }),
-    );
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(
-        r.error.issues.some(
-          (i) => i.path[0] === "user_config" && i.path[1] === "foo" && i.path.includes("type"),
-        ),
-      ).toBe(true);
-    }
-  });
-});
 
 describe("getMcpServerWorkspaceMount", () => {
   it("returns undefined when _meta.workspace is absent (default: no workspace access)", () => {
@@ -188,30 +131,16 @@ describe("getMcpServerWorkspaceMount", () => {
   });
 });
 
-describe("mcpServerManifestSchema — _meta.workspace install-time validation", () => {
+describe("integrationManifestSchema — local server _meta install-time validation", () => {
   it("accepts a manifest with a valid workspace declaration", () => {
-    const m = {
-      ...manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace", access: "rw" } }),
-      server: {
-        type: "node",
-        entry_point: "./server.ts",
-        mcp_config: { command: "node", args: ["./server.ts"] },
-      },
-    };
-    const r = mcpServerManifestSchema.safeParse(m);
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace", access: "rw" } });
+    const r = integrationManifestSchema.safeParse(m);
     expect(r.success).toBe(true);
   });
 
   it("rejects a manifest with a malformed workspace declaration at install time", () => {
-    const m = {
-      ...manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "../escape" } }),
-      server: {
-        type: "node",
-        entry_point: "./server.ts",
-        mcp_config: { command: "node", args: ["./server.ts"] },
-      },
-    };
-    const r = mcpServerManifestSchema.safeParse(m);
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "../escape" } });
+    const r = integrationManifestSchema.safeParse(m);
     expect(r.success).toBe(false);
     if (!r.success) {
       expect(
@@ -224,22 +153,24 @@ describe("mcpServerManifestSchema — _meta.workspace install-time validation", 
 });
 
 describe("effectiveMcpServerType", () => {
-  it("prefers the _meta override over the MCPB server.type", () => {
+  it("prefers the _meta override over the source.server.type", () => {
     // The whole reason the helper exists: `server.type` says `node` because
-    // MCPB has no `bun`, and the package still runs under bun.
+    // the schema has no `bun`, and the package still runs under bun.
     const m = manifest({ "dev.appstrate/mcp-server": { runtime: "bun" } });
-    expect((m as unknown as { server: { type: string } }).server.type).toBe("node");
+    expect((m as unknown as { source: { server: { type: string } } }).source.server.type).toBe(
+      "node",
+    );
     expect(effectiveMcpServerType(m)).toBe("bun");
   });
 
-  it("falls back to the MCPB server.type when no override is declared", () => {
+  it("falls back to the source.server.type when no override is declared", () => {
     expect(effectiveMcpServerType(manifest())).toBe("node");
     expect(effectiveMcpServerType(manifest({ "dev.appstrate/mcp-server": {} }))).toBe("node");
   });
 
   it("falls back to server.type when the override is not a runtime we know", () => {
     // `_meta` is author-controlled jsonb. An unrecognised value is not a
-    // runtime, so it must not shadow the MCPB type — a caller that spawned on
+    // runtime, so it must not shadow the source.server.type — a caller that spawned on
     // it would exec an interpreter that does not exist.
     expect(
       effectiveMcpServerType(manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } })),
@@ -253,16 +184,21 @@ describe("effectiveMcpServerType", () => {
     // The SPA reads unvalidated DRAFT manifests: an author's typo must reach
     // the view as written rather than vanish. Narrowing this half to
     // `McpServerRuntime` would silently blank the field being edited.
-    const draft = { ...manifest(), server: { type: "nodejs", entry_point: "./server.ts" } };
-    expect(effectiveMcpServerType(draft as unknown as McpServerManifest)).toBe("nodejs");
+    expect(
+      effectiveMcpServerType(
+        manifest(undefined, { type: "nodejs", entry_point: "server/index.ts" }),
+      ),
+    ).toBe("nodejs");
   });
 
   it("is undefined when neither source declares a runtime", () => {
     // Not runnable. Every spawn caller fails closed on this.
-    const headless = { ...manifest(), server: { entry_point: "./server.ts" } };
-    expect(effectiveMcpServerType(headless as unknown as McpServerManifest)).toBeUndefined();
-    const blank = { ...manifest(), server: { type: "  ", entry_point: "./server.ts" } };
-    expect(effectiveMcpServerType(blank as unknown as McpServerManifest)).toBeUndefined();
+    expect(
+      effectiveMcpServerType(manifest(undefined, { entry_point: "server/index.ts" })),
+    ).toBeUndefined();
+    expect(
+      effectiveMcpServerType(manifest(undefined, { type: "  ", entry_point: "server/index.ts" })),
+    ).toBeUndefined();
   });
 });
 
@@ -281,14 +217,9 @@ describe("getMcpServerRuntime", () => {
   });
 
   it("rejects an unknown runtime override during manifest validation", () => {
-    const r = mcpServerManifestSchema.safeParse({
-      ...manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
-      server: {
-        type: "node",
-        entry_point: "./server.ts",
-        mcp_config: { command: "node", args: ["./server.ts"] },
-      },
-    });
+    const r = integrationManifestSchema.safeParse(
+      manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
+    );
     expect(r.success).toBe(false);
     if (!r.success) {
       expect(
@@ -301,19 +232,21 @@ describe("getMcpServerRuntime", () => {
     }
   });
 
-  it("rejects a runtime override incompatible with server.type", () => {
-    const r = mcpServerManifestSchema.safeParse({
-      ...manifest({ "dev.appstrate/mcp-server": { runtime: "bun" } }),
-      server: {
-        type: "python",
-        entry_point: "./server.py",
-        mcp_config: { command: "python3", args: ["./server.py"] },
-      },
-    });
+  it("rejects a runtime override incompatible with source.server.type", () => {
+    const r = integrationManifestSchema.safeParse(
+      manifest(
+        { "dev.appstrate/mcp-server": { runtime: "bun" } },
+        {
+          type: "python",
+          entry_point: "server/main.py",
+          mcp_config: { command: "python3", args: ["server/main.py"] },
+        },
+      ),
+    );
     expect(r.success).toBe(false);
     if (!r.success) {
       expect(r.error.issues.map((issue) => issue.message)).toContain(
-        "Runtime 'bun' requires server.type 'node'.",
+        "Runtime 'bun' requires source.server.type 'node'.",
       );
     }
   });

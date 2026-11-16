@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 /**
  * "Rechercher des runs…" — one shape for every table, not a list of matched fields.
  * `entity` is the caller's PLURAL label, lowercased on its first letter only so
- * "Serveurs MCP" does not become "serveurs mcp".
+ * "Clés API" does not become "clés api".
  */
 export function useSearchPlaceholder(entity: string): string {
   const { t } = useTranslation("common");

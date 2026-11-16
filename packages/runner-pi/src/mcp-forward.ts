@@ -7,11 +7,17 @@
  * CLI's remote MCP tools.
  */
 
-import type { AppstrateMcpClient, CallToolResult, Tool } from "@appstrate/mcp-transport";
+import {
+  readToolIntegration,
+  type AppstrateMcpClient,
+  type CallToolResult,
+  type Tool,
+} from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "./pi-tool-result.ts";
 import { unsafeSchema, type ExtensionFactory } from "./pi-sdk.ts";
 import { spillResourcesToWorkspace } from "./resource-spill.ts";
 import type { RuntimeEventEmitter } from "./runtime-event.ts";
+import { registerIntegrationTool } from "./tool-integration.ts";
 
 /**
  * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi
@@ -73,7 +79,7 @@ export type McpToolCallPlan =
 
 export interface McpToolForwardOptions {
   mcp: Pick<AppstrateMcpClient, "callTool" | "readResource">;
-  /** The descriptor the model sees. */
+  /** The descriptor the model sees; its host-stamped integration tool is recorded. */
   tool: Tool;
   /** The name called on the server. Default: `tool.name`. */
   upstreamName?: string;
@@ -92,7 +98,7 @@ export interface McpToolForwardOptions {
 export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFactory {
   const { mcp, tool, runId, emit } = opts;
   return (pi) => {
-    pi.registerTool({
+    registerIntegrationTool(pi, readToolIntegration(tool), {
       name: tool.name,
       label: tool.name,
       description: tool.description ?? `Integration tool: ${tool.name}`,

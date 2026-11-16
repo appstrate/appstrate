@@ -17,12 +17,10 @@ import {
   afpsJsonSchemaOverride,
   agentManifestObjectSchema as afpsAgentManifestObjectSchema,
   integrationManifestSchema as afpsIntegrationManifestSchema,
-  mcpServerManifestSchema as afpsMcpServerManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
 } from "@afps-spec/schema";
 import { agentManifestSchema, skillManifestSchema } from "../src/validation.ts";
 import { integrationManifestSchema } from "../src/integration.ts";
-import { mcpServerManifestSchema } from "../src/mcp-server.ts";
 
 // Bun-native pathing — `import.meta.dir` is the directory of this script.
 const OUTPUT_DIR = `${import.meta.dir}/../schema`;
@@ -53,14 +51,6 @@ const appstrateSchemas: {
     description: "Appstrate skill manifest — AFPS skill with relaxed optional metadata.",
     schema: skillManifestSchema as unknown as ObjectSchema,
     afps: afpsSkillManifestSchema as unknown as ObjectSchema,
-  },
-  {
-    filename: "mcp-server.schema.json",
-    title: "Appstrate MCP-Server Manifest",
-    description:
-      "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema. The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
-    schema: mcpServerManifestSchema as unknown as ObjectSchema,
-    afps: afpsMcpServerManifestSchema as unknown as ObjectSchema,
   },
   {
     filename: "integration.schema.json",

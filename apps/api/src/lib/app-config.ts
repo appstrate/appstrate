@@ -46,6 +46,9 @@ export function buildAppConfig(): AppConfig {
       // Surface ONLY the boolean — the token value stays server-side,
       // gated by timing-safe compare in /api/auth/bootstrap/redeem.
       bootstrapTokenPending: isBootstrapTokenPending(),
+      // A local MCP server needs an isolated runner: `RUN_ADAPTER=process` refuses every local
+      // spawn (see `requireRunnerIsolation`), docker and firecracker run them.
+      localIntegrations: env.RUN_ADAPTER !== "process",
     },
     ...(legalTerms && legalPrivacy
       ? {

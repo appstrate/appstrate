@@ -60,7 +60,6 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
       packages: {
         agent: [],
         skill: [],
-        "mcp-server": [],
         integration: [
           {
             id: "@acme/gmail",

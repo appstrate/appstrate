@@ -191,10 +191,10 @@ describe("OpenAPI response validation", () => {
   // ── Agent detail (auth + space-scoped) ───────────────────────
   // Detail endpoints carry richer projections than the list envelopes — cover
   // one here so the AgentDetail schema is exercised against a real response,
-  // including the AFPS dependency groups (skills / mcp_servers / integrations).
+  // including the AFPS dependency groups (skills / integrations).
 
   describe("GET /api/packages/agents/{scope}/{name} -> 200", () => {
-    it("agent detail response conforms to OpenAPI schema (incl. mcp_servers deps)", async () => {
+    it("agent detail response conforms to OpenAPI schema (incl. skill deps)", async () => {
       const pkg = await seedAgent({
         id: "@openapi-test/detail-agent",
         orgId: ctx.orgId,
@@ -204,9 +204,9 @@ describe("OpenAPI response validation", () => {
           version: "1.2.0",
           type: "agent",
           display_name: "Detail Agent",
-          description: "Agent with an mcp_server dependency",
+          description: "Agent with a skill dependency",
           dependencies: {
-            mcp_servers: { "@openapi-test/some-mcp": "1.0.0" },
+            skills: { "@openapi-test/some-skill": "1.0.0" },
           },
         },
       });
@@ -233,11 +233,6 @@ describe("OpenAPI response validation", () => {
 
       expect(result.valid).toBe(true);
       expect(result.extraFields).toEqual([]);
-      // The mcp_servers dependency declared in the manifest must surface in the
-      // detail response (regression guard: the mapper previously dropped it).
-      expect((body as any).dependencies.mcp_servers).toEqual([
-        { id: "@openapi-test/some-mcp", version: "1.0.0" },
-      ]);
     });
 
     it("each space item conforms to SpaceObject schema", async () => {

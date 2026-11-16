@@ -33,10 +33,10 @@ import { connect, createServer, type Server } from "node:net";
 const { readdir } = await import("node:fs/promises");
 const SOURCES = join(import.meta.dir, "..", "system-packages");
 const serverDir = (await readdir(SOURCES))
-  .filter((d) => d.startsWith("mcp-server-ssh-"))
+  .filter((d) => d.startsWith("integration-ssh-"))
   .sort()
   .at(-1);
-if (!serverDir) throw new Error("no mcp-server-ssh-* source directory found");
+if (!serverDir) throw new Error("no integration-ssh-* source directory found");
 
 const {
   handleRequest,
@@ -322,7 +322,7 @@ describe("handleRequest — protocol surface without any configuration", () => {
     const res = await handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     const listed = (res?.result as { tools: Array<{ name: string; description: string }> }).tools;
     const manifest = (await Bun.file(join(SOURCES, serverDir, "manifest.json")).json()) as {
-      tools: Array<{ name: string; description: string }>;
+      source: { server: { tools: Array<{ name: string; description: string }> } };
     };
     const byName = (ts: Array<{ name: string; description: string }>) =>
       Object.fromEntries(ts.map((t) => [t.name, t.description]));
@@ -334,7 +334,7 @@ describe("handleRequest — protocol surface without any configuration", () => {
       "ssh_read",
       "ssh_write_file",
     ]);
-    expect(byName(listed)).toEqual(byName(manifest.tools));
+    expect(byName(listed)).toEqual(byName(manifest.source.server.tools));
     expect(TOOLS).toHaveLength(5);
   });
 

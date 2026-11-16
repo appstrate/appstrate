@@ -71,13 +71,6 @@ export const ROUTE_ACCESS = {
   },
   "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 
-  "/mcp-servers": { anyOf: ["mcp-servers:read"], operations: ["listMcpServerPackages"] },
-  "/mcp-servers/:scope/:name": { anyOf: ["mcp-servers:read"], operations: ["getMcpServerPackage"] },
-  "/mcp-servers/:scope/:name/:version": {
-    anyOf: ["mcp-servers:read"],
-    operations: ["getMcpServerPackageVersionDetail"],
-  },
-
   "/catalogue": CATALOGUE,
   "/catalogue/:type": CATALOGUE,
 

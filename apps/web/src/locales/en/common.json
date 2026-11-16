@@ -214,7 +214,6 @@
   "apiError.integrity_mismatch": "This version already exists with different content.",
   "apiError.draft_overwrite": "This package has unpublished changes the import would overwrite.",
   "apiError.version_not_higher": "A higher version is already published: bump the version in the manifest, then import again.",
-  "apiError.archive_required": "An MCP server must be imported as an .afps or .zip archive.",
   "apiError.package_archive_unreadable": "This package's archive cannot be read: {{message}}",
   "apiError.version_artifact_unavailable": "The content of this published version can no longer be read: {{message}}",
   "apiError.post_install_failed": "The package was imported, but setting it up failed: {{message}}",
@@ -325,7 +324,6 @@
   "apiError.agent_missing_prompt": "The agent has no prompt.md file.",
   "apiError.agent_empty_prompt": "The agent's prompt is empty.",
   "apiError.skill_missing_skill_md": "The skill has no SKILL.md file.",
-  "apiError.mcp_server_missing_entry_point": "The MCP server's entry point is missing from the archive: {{message}}",
   "apiError.invalid_url": "Invalid GitHub URL.",
   "apiError.repo_too_large": "Repository too large for a direct import: {{message}}",
   "apiError.empty_path": "No files found at this location: {{message}}",
@@ -498,5 +496,6 @@
   "appearance.colorName.rose": "Rose",
   "appearance.colorName.cyan": "Cyan",
   "appearance.colorName.pink": "Pink",
-  "appearance.colorName.orange": "Orange"
+  "appearance.colorName.orange": "Orange",
+  "apiError.local_server_missing_entry_point": "The local MCP server’s entry point is missing from the integration’s files: {{message}}"
 }

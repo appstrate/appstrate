@@ -128,12 +128,10 @@ import {
   sameConnectionVariables,
 } from "../lib/connection-identity.ts";
 import {
-  getLocalServerRef,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   usesAutoProvisionedClient,
 } from "./integration-manifest-helpers.ts";
-import { fetchMcpServerManifest, readMcpServerTools } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   disableSchedules,
@@ -208,18 +206,26 @@ function lookupAuth(
   return auth;
 }
 
-/** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
-async function loadManifestOrThrow(
+/** The manifest connecting reads and its published version ({@link readIntegrationManifestForConnect}), or a 404. */
+async function loadConnectManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
-): Promise<IntegrationManifest> {
+): Promise<{ manifest: IntegrationManifest; version: string | null }> {
   const read = await readIntegrationManifestForConnect(scope, packageId);
-  if (read.ok) return read.manifest;
+  if (read.ok) return { manifest: read.manifest, version: read.version };
   throw notFound(
     read.reason === "no_usable_version"
       ? `Integration '${packageId}' has no usable published version to connect through: publish one`
       : `Integration '${packageId}' not found in this organization`,
   );
+}
+
+/** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
+async function loadManifestOrThrow(
+  scope: SpaceScope | OrgScope,
+  packageId: string,
+): Promise<IntegrationManifest> {
+  return (await loadConnectManifestOrThrow(scope, packageId)).manifest;
 }
 
 // ─────────────────────────────────────────────
@@ -3236,13 +3242,8 @@ export async function getIntegrationAuthStatuses(
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  // Local source: the referenced mcp-server's tools, best-effort (the resolver falls back).
-  const localRef = getLocalServerRef(manifest);
-  const mcpServer = localRef ? await fetchMcpServerManifest(localRef.name) : null;
-  const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
     integration: manifest,
-    mcpServerTools,
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);
@@ -3312,10 +3313,12 @@ export async function readIntegrationAuth(
   authKey: string,
 ): Promise<{
   manifest: IntegrationManifest;
+  /** The published version `manifest` was read from (`null`: system integration or draft). */
+  bundleVersion: string | null;
   auth: NonNullable<IntegrationManifest["auths"]>[string];
 }> {
-  const manifest = await loadManifestOrThrow(scope, packageId);
-  return { manifest, auth: lookupAuth(manifest, authKey) };
+  const { manifest, version } = await loadConnectManifestOrThrow(scope, packageId);
+  return { manifest, bundleVersion: version, auth: lookupAuth(manifest, authKey) };
 }
 
 // ─────────────────────────────────────────────

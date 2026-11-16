@@ -309,6 +309,7 @@ describe("/mcp — progress relay over SSE, end to end", () => {
     const host = new McpHost();
     await host.register({
       connection: { label: "work", accountId: null },
+      integrationId: "up",
       namespace: "up",
       client: wrapClient(upstream.client, { close: () => Promise.resolve() }),
     });

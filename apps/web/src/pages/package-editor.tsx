@@ -24,6 +24,7 @@ import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { AgentAppearanceFields } from "../components/agent-editor/agent-appearance-fields";
 import { SchemaFieldList } from "../components/agent-editor/schema-field-list";
 import { ResourceSection } from "../components/agent-editor/resource-section";
+import { usePackageFileIndex } from "../components/package-files/use-package-file-index";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
@@ -275,28 +276,20 @@ export function AgentDefinitionEditor({
   );
 }
 
-// ─── Package (Skill/MCP Server) Editor Inner Form ─────────────────────────
+// ─── Package (Skill) Editor Inner Form ─────────────────────────
 
 function PackageEditorInner({
-  type,
   initialState,
   packageId,
 }: {
-  type: "skill" | "mcp-server";
   initialState: EditorState;
   packageId: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const editor = usePackageEditor({ type, initialState, packageId, tab: "general" });
+  const editor = usePackageEditor({ type: "skill", initialState, packageId, tab: "general" });
 
   return (
-    <PackageEditorFrame
-      editor={editor}
-      tabs={[{ id: "general", label: t("editor.tabGeneral") }]}
-      descriptions={
-        type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
-      }
-    >
+    <PackageEditorFrame editor={editor} tabs={[{ id: "general", label: t("editor.tabGeneral") }]}>
       <MetadataSection value={editor.metadata} onChange={editor.onMetadataChange} />
     </PackageEditorFrame>
   );
@@ -320,6 +313,8 @@ function IntegrationEditorInner({
   canSync: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
+  const [localServerRefused, setLocalServerRefused] = useState(false);
   const editor = usePackageEditor({
     type: "integration",
     initialState,
@@ -327,13 +322,23 @@ function IntegrationEditorInner({
     tab,
     validate: (s) => {
       const source = getSource(s.manifest);
+      setLocalServerRefused(false);
       if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
         return { error: t("integrationEditor.source.errorRemoteUrl") };
+      }
+      if (source.kind === "local" && (!source.entryPoint.trim() || !source.command.trim())) {
+        setLocalServerRefused(true);
+        return { error: t("integrationEditor.source.errorLocalServer") };
       }
       return null;
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
+  // The saved draft's files: the local server's entry point is checked against them.
+  // Read only for a local source: nothing else checks files.
+  const isLocal = getSource(state.manifest).kind === "local";
+  const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
+  const serverFiles = fileIndex.data?.data.map((file) => file.path);
   const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
 
   // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
@@ -402,7 +407,13 @@ function IntegrationEditorInner({
       )}
 
       {activeTab === "source" && (
-        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+        <SourceSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          serverFiles={serverFiles}
+          // A refused save names the empty required fields of the Source tab.
+          showErrors={localServerRefused}
+        />
       )}
 
       {activeTab === "auths" && (
@@ -461,24 +472,11 @@ export function IntegrationDefinitionEditor({
   );
 }
 
-/**
- * A skill's or a local MCP server's definition, edited inside its settings.
- * Identité is the one form: a skill's SKILL.md and references, a server's code,
- * are files, and change in Explorer › Fichiers. `server`, `tools` and
- * `user_config` of a server are authored in the raw manifest, reached from
- * under the form like every other package's.
- */
-export function PackageDefinitionEditor({
-  type,
-  detail,
-}: {
-  type: "skill" | "mcp-server";
-  detail: Versioned<OrgPackageItemDetail>;
-}) {
+/** A skill's definition, edited inside its settings. Identité is the one form: SKILL.md and references are files, changed in Explorer › Fichiers. */
+export function PackageDefinitionEditor({ detail }: { detail: Versioned<OrgPackageItemDetail> }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <PackageEditorInner
-        type={type}
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
       />

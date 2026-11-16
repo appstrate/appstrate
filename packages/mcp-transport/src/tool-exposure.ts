@@ -16,11 +16,15 @@ import {
   sanitiseTextField,
   sanitiseToolDescriptor,
 } from "./sanitize.ts";
+import type { ToolIntegration } from "@appstrate/core/integration";
+import { TOOL_INTEGRATION_META_KEY } from "./tool-meta.ts";
 
 /** Why an upstream tool is not exposed by {@link exposeTool}. */
 export type ToolExposureExclusion = "schema_too_large_after_sanitisation" | "name_collision";
 
 export interface ToolExposureOptions {
+  /** Package id of the integration serving the tool (`@scope/name`). */
+  integrationId: string;
   namespace: string;
   /** Whether an exposed name is held already. */
   isTaken: (name: string) => boolean;
@@ -42,7 +46,30 @@ export function exposeTool(
   } catch {
     return { exclusion: "name_collision" };
   }
-  return { descriptor: exposedToolDescriptor(sanitised, opts.namespace, name) };
+  return {
+    descriptor: withToolIntegration(
+      exposedToolDescriptor(sanitised, opts.namespace, name),
+      opts.integrationId,
+      tool,
+    ),
+  };
+}
+
+/**
+ * `descriptor` stamped with the integration tool it exposes. Name and title are untrusted server
+ * text bound for the run log, hence sanitised; a name left empty stamps nothing.
+ */
+export function withToolIntegration(descriptor: Tool, integrationId: string, upstream: Tool): Tool {
+  const tool = sanitiseTextField(upstream.name, MAX_PARAMETER_DESCRIPTION_BYTES);
+  if (!tool) return descriptor;
+  const title = [upstream.title, upstream.annotations?.title]
+    .map((candidate) => sanitiseTextField(candidate, MAX_PARAMETER_DESCRIPTION_BYTES))
+    .find(Boolean);
+  const integration: ToolIntegration = { id: integrationId, tool, ...(title ? { title } : {}) };
+  return {
+    ...descriptor,
+    _meta: { ...descriptor._meta, [TOOL_INTEGRATION_META_KEY]: integration },
+  };
 }
 
 /**
