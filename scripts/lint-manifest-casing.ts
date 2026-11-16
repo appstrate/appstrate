@@ -181,6 +181,11 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName"],
     reason: PROFILE_DISPLAY_NAME,
   },
+  {
+    path: "apps/api/src/services/package-index.ts",
+    keys: ["displayName"],
+    reason: PROFILE_DISPLAY_NAME,
+  },
   { path: "apps/api/src/routes/welcome.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   {
     path: "apps/api/src/openapi/paths/welcome.ts",
