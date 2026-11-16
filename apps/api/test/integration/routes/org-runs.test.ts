@@ -19,6 +19,7 @@
  * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un                       |
  * | API key without a run-read scope           | —                                             | 403 (ceiling guard)                   |
  * | API key + `Appstrate-User` (end-user)      | —                                             | 403, malformed query included         |
+ * | member session, unknown query parameter    | —                                             | 400                                   |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
  * | any                                        | another organization                          | never; its path → 403                 |
  * | member session                             | own live personal space                       | the member's runs there               |
@@ -201,6 +202,43 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect([...ids(page1), ...ids(page2)].sort()).toEqual(
       sorted(r.unOwner!, r.unMember!, r.deuxMember!, r.defaultMember!),
     );
+  });
+
+  it("breaks a tie on start time by id, so offset pages never overlap", async () => {
+    const startedAt = new Date("2026-01-02T03:04:05.000Z");
+    const pkg = await seedPackage({
+      id: `@orgruns/tied-${crypto.randomUUID().slice(0, 8)}`,
+      orgId: owner.orgId,
+      homeSpaceId: un,
+      createdBy: owner.user.id,
+    });
+    const tied: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const run = await seedRun({
+        packageId: pkg.id,
+        orgId: owner.orgId,
+        spaceId: un,
+        userId: owner.user.id,
+        status: "success",
+        startedAt,
+      });
+      tied.push(run.id);
+    }
+    const query = `?end_date=${encodeURIComponent(startedAt.toISOString())}&limit=1`;
+    const paged: string[] = [];
+    for (const offset of [0, 1, 2]) {
+      const page = await list(session(member), `${query}&offset=${offset}`);
+      expect(page.total).toBe(3);
+      paged.push(...ids(page));
+    }
+    expect(new Set(paged).size).toBe(3);
+    expect(paged.sort()).toEqual(tied.sort());
+  });
+
+  it("refuses an unknown query parameter", async () => {
+    const res = await app.request(path(`?spaceId=${un}`), { headers: session(member) });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
   });
 
   it("narrows to the caller's own runs with user=me, even where they read all", async () => {

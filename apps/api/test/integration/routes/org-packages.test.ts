@@ -3,18 +3,21 @@
 /**
  * The package indexes spanning the spaces of an organization:
  * `GET /api/orgs/{orgId}/agents` and `GET /api/orgs/{orgId}/packages/{skills|integrations|mcp-servers}`.
- * Each is the single-space index once per space the caller reaches with the
- * type's sight there, one row per (package, space) where it is active.
+ * Each lists the single-space index's rows of every space the caller reaches
+ * with the type's sight there, one row per (package, space) where it is active.
  *
  * | credential                                  | space (member's role)                                             | rows |
  * | ------------------------------------------- | ----------------------------------------------------------------- | ---- |
- * | member session                              | Un (`agents:read`, `runs:read-all`, `skills:read`, `integrations:read`) | agent A with its dependencies and every running run; skill S1; integration I1 |
+ * | member session                              | Un (`agents:read`, `agents:run`, `runs:read-all`, `skills:read`, `integrations:read`) | agent A with its dependencies and every running run; skill S1; integration I1 |
  * | member session                              | Deux (`agents:run` only)                                          | agents A and B, summary rows, own running run only; skill S2 not listed |
  * | member session                              | Trois (`skills:read`, `integrations:read`, `mcp-servers:read`)    | agent C not listed; skill S3; integration I2; MCP server M1 |
  * | member session                              | Fermé (`closed`, not joined)                                      | nothing |
  * | owner session                               | every team space (preset `admin`)                                 | every row |
  * | API key pinned to Un, scopes `agents:read`  | Un only                                                           | agent A in Un |
+ * | API key pinned to Deux, scopes `mcp-servers:read` | Deux only, which grants no `mcp-servers:read`               | empty list |
+ * | chat loopback bearer, ceiling `agents:run`  | Un (`agents:read` capped away), Deux                              | summary rows everywhere |
  * | API key without the type's read in scopes   | —                                                                 | 403 (ceiling guard) |
+ * | member session, unknown query parameter     | —                                                                 | 400 |
  * | API key + `Appstrate-User` (end-user)       | —                                                                 | 403 |
  * | API key of this organization                | another organization's path                                       | 403 |
  */
@@ -39,6 +42,7 @@ import {
   seedSpaceRole,
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 
@@ -122,7 +126,13 @@ describe("package indexes across the organization's spaces", () => {
       trois: await space("Trois"),
       ferme: await space("Fermé"),
     };
-    await join(s.un, ["agents:read", "runs:read-all", "skills:read", "integrations:read"]);
+    await join(s.un, [
+      "agents:read",
+      "agents:run",
+      "runs:read-all",
+      "skills:read",
+      "integrations:read",
+    ]);
     await join(s.deux, ["agents:run"]);
     await join(s.trois, ["skills:read", "integrations:read", "mcp-servers:read"]);
 
@@ -197,13 +207,67 @@ describe("package indexes across the organization's spaces", () => {
     expect(await keys("packages/skills", session(owner))).toEqual(["s1@un", "s2@deux", "s3@trois"]);
   });
 
-  it("answers 200 with an empty list where no space admits the list", async () => {
+  it("orders the rows as the single-space index, a package's spaces side by side", async () => {
+    const res = await app.request(path("agents"), { headers: session(owner) });
+    const body = (await res.json()) as { data: Row[] };
+    const seeded = body.data.filter((row) => row.id.startsWith(`${SCOPE}/`));
+    const [first, second] = [s.un, s.deux].sort() as [string, string];
+    expect(seeded.map((row) => [row.id, row.spaceId])).toEqual([
+      [id("a"), first],
+      [id("a"), second],
+      [id("b"), s.deux],
+      [id("c"), s.trois],
+      [id("d"), s.ferme],
+    ]);
+  });
+
+  it("answers 200 with an empty list where no reached space admits the list", async () => {
+    // Pinned to Deux, where the member holds `agents:run` only: the ceiling
+    // passes, the one space reached grants no `mcp-servers:read`.
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: s.deux,
+      createdBy: member.user.id,
+      scopes: ["mcp-servers:read"],
+    });
     const res = await app.request(path("packages/mcp-servers"), {
-      headers: session(await memberContext(owner, "member")),
+      headers: { Authorization: `Bearer ${key.rawKey}` },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: Row[] };
-    expect(body.data.filter((row) => row.id.startsWith(`${SCOPE}/`))).toEqual([]);
+    expect(((await res.json()) as { data: Row[] }).data).toEqual([]);
+  });
+
+  it("serves summary rows to a credential whose ceiling omits agents:read", async () => {
+    const token = mintMcpLoopbackToken({
+      userId: member.user.id,
+      email: member.user.email,
+      name: member.user.name,
+      orgId: owner.orgId,
+      orgRole: "member",
+      permissions: ["agents:run", "runs:read"],
+    });
+    const agents = await rows("agents", {
+      Authorization: `Bearer ${token}`,
+      "X-Org-Id": owner.orgId,
+    });
+    expect(Object.keys(agents).sort()).toEqual(["a@deux", "a@un", "b@deux"]);
+    // Un grants `agents:read`, `agents:run` and `runs:read-all`; the ceiling
+    // keeps `agents:run` alone of them.
+    expect(agents["a@un"]!.dependencies).not.toHaveProperty("skills");
+    expect(agents["a@un"]!.running_runs).toBe(1);
+  });
+
+  it("refuses an unknown query parameter", async () => {
+    for (const list of [
+      "agents",
+      "packages/skills",
+      "packages/integrations",
+      "packages/mcp-servers",
+    ]) {
+      const res = await app.request(path(`${list}?spaceId=${s.un}`), { headers: session(member) });
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+    }
   });
 
   it("bounds a space-pinned API key to its space", async () => {
@@ -227,7 +291,12 @@ describe("package indexes across the organization's spaces", () => {
       scopes: ["runs:read"],
     });
     const headers = { Authorization: `Bearer ${key.rawKey}` };
-    for (const list of ["agents", "packages/skills", "packages/integrations"]) {
+    for (const list of [
+      "agents",
+      "packages/skills",
+      "packages/integrations",
+      "packages/mcp-servers",
+    ]) {
       expect((await app.request(path(list), { headers })).status).toBe(403);
     }
   });

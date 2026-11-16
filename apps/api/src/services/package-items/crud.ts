@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, ne, desc, sql } from "drizzle-orm";
+import { eq, and, or, ne, desc, inArray, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages } from "@appstrate/db/schema";
+import { spacePackages, packages, spaces } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -281,14 +281,27 @@ function integrationIndexFields(manifest: IntegrationManifest) {
   };
 }
 
-/** List the items of a type this space RUNS — the activation rule, per type. */
-export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
+/**
+ * List the items of a type each of `spaceIds` RUNS — the activation rule, per
+ * type — one row per (package, space) carrying its `spaceId`, in ONE statement
+ * whatever the number of spaces: each space is joined to its own placement row.
+ * Ordered system first, then newest first, then by package id and space id: one
+ * space's list keeps that order, and a package active in several spaces has its
+ * rows side by side.
+ */
+export async function listOrgItems(
+  orgId: string,
+  cfg: PackageTypeConfig,
+  spaceIds: readonly string[],
+) {
+  if (spaceIds.length === 0) return [];
   // The index lists the active set only ({@link activeHereSql}, shared with the
   // hints and the run gate); placed-but-off packages live in the space library.
   // `draftContent` is not projected: the mapper never reads it.
   const dataQuery = db
     .select({
       id: packages.id,
+      spaceId: spaces.id,
       orgId: packages.orgId,
       type: packages.type,
       source: packages.source,
@@ -302,7 +315,8 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
       lockVersion: packages.lockVersion,
     })
     .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
     .where(
       and(
         orgOrSystemFilter(orgId),
@@ -314,6 +328,8 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
     .orderBy(
       sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
       desc(packages.createdAt),
+      packages.id,
+      spaces.id,
     );
 
   // The catalog page and the usage counts are independent reads over the same
@@ -325,6 +341,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
     return {
       id: row.id,
       orgId: row.orgId,
+      spaceId: row.spaceId,
       name: getPackageDisplayName(row),
       description: m.description ?? null,
       // The two fields an INDEX page needs that a name and a description do not

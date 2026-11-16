@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context } from "hono";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packages,
-  runs,
-  spaceMembers,
-  spacePackages,
-  spaceRoles,
-  spaces,
-} from "@appstrate/db/schema";
+import { packages, runs, spacePackages, spaces } from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
@@ -38,24 +31,12 @@ import type { PackageHome } from "@appstrate/shared-types";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
-import { callerPermissions, type Permission } from "./permissions.ts";
+import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import {
-  callerOrgRole,
-  callerPersonalOwnerId,
-  effectiveInSpace,
-  personaFor,
-  personaMemberships,
-} from "./view-as.ts";
-import {
-  customRoleOn,
-  MEMBERSHIP_COLUMNS,
-  memberFromJoin,
-  membershipOn,
-  resolveSpaceRole,
-} from "./space-role.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
+import { callerReachableSpaces } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -65,17 +46,7 @@ import { placementRowJoin } from "../services/package-placement.ts";
  */
 export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
-/**
- * Does this permission set read an agent's content — its prompt, its stored
- * input? `agents:read`; `agents:run` alone sees what the launch form needs.
- * Every projection of agent content, in one space or per space of a list
- * spanning several, asks this one predicate.
- */
-export function readsAgentContent(permissions: ReadonlySet<string>): boolean {
-  return permissions.has("agents:read");
-}
-
-/** {@link readsAgentContent}, negated, for the request's own space. */
+/** `readsAgentContent`, negated, for the request's own space. */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
   return !readsAgentContent(callerPermissions(c));
 }
@@ -176,63 +147,32 @@ export async function packageAccessSpaces(c: Context<AppEnv>, foreign?: ForeignO
   return pending;
 }
 
-/** The read itself — {@link packageAccessSpaces} is the memo in front of it. */
+/**
+ * The read itself — {@link packageAccessSpaces} is the memo in front of it: the
+ * caller's reach (`callerReachableSpaces`, one pin rule for every read spanning
+ * spaces), or, for an end-user token, which holds no org role, its own space
+ * with its fixed allowlist.
+ */
 async function resolvePackageAccessSpaces(
   c: Context<AppEnv>,
   orgId: string,
   orgRole: OrgRole,
 ): Promise<PackageAccessSpace[]> {
-  const callerId = callerPersonalOwnerId(c, orgId);
-  const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
-  const persona = personaFor(c, orgId);
-  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
-  // preview (the overlay replaces them) or for an end-user token (no org role).
-  const joined = await db
+  if (!c.get("endUser") || c.get("orgRole")) return callerReachableSpaces(c, orgId, orgRole);
+  const spaceId = c.get("credentialSpaceId");
+  if (spaceId === undefined) return [];
+  const [space] = await db
     .select({
-      space: {
-        id: spaces.id,
-        name: spaces.name,
-        isDefault: spaces.isDefault,
-        visibility: spaces.visibility,
-        defaultRole: spaces.defaultRole,
-        ownerUserId: spaces.ownerUserId,
-      },
-      ...MEMBERSHIP_COLUMNS,
+      id: spaces.id,
+      name: spaces.name,
+      isDefault: spaces.isDefault,
+      visibility: spaces.visibility,
+      defaultRole: spaces.defaultRole,
+      ownerUserId: spaces.ownerUserId,
     })
     .from(spaces)
-    .leftJoin(spaceMembers, membershipOn(tokenOnly || persona ? null : c.get("user").id))
-    .leftJoin(spaceRoles, customRoleOn)
-    .where(
-      and(
-        eq(spaces.orgId, orgId),
-        c.get("authMethod") === "api_key" || c.get("endUser")
-          ? eq(spaces.id, c.get("spaceId"))
-          : undefined,
-        // Someone else's personal space is never even LOADED. `resolveSpaceRole`
-        // would drop it anyway, but with one personal space per member this
-        // query would otherwise grow with the organization's headcount on
-        // every catalog read (RBAC spec §3.6).
-        callerId === null
-          ? isNull(spaces.ownerUserId)
-          : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
-      ),
-    );
-  const overlay = personaMemberships(persona);
-  return joined.flatMap((row) => {
-    const { space } = row;
-    if (tokenOnly) {
-      return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
-    }
-    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
-    const ref = resolveSpaceRole(orgRole, space, member, callerId);
-    if (!ref) return [];
-    return [
-      {
-        ...space,
-        permissions: effectiveInSpace(c, ref),
-      },
-    ];
-  });
+    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)));
+  return space ? [{ ...space, permissions: callerPermissions(c) }] : [];
 }
 
 /**

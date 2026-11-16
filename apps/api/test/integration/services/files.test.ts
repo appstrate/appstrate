@@ -48,9 +48,6 @@ import {
   createFileFromUpload,
   createFileFromStream,
   getFileForActor,
-  listFilesForActor,
-  fileReadGrant,
-  type ListFilesFilters,
   materializeRunUploads,
   cleanupExpiredFiles,
   detachOrDeleteContainedFiles,
@@ -61,6 +58,7 @@ import {
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { listFilesIn } from "../../helpers/files.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 
 /** Run `fn` with an env var temporarily overridden (cache reset around it). */
@@ -75,21 +73,6 @@ async function withEnv(key: string, value: string, fn: () => Promise<void>): Pro
     else process.env[key] = prev;
     _resetCacheForTesting();
   }
-}
-
-/** The one-space gallery, as `GET /api/files` calls it. */
-function listFilesIn(
-  scope: { orgId: string; spaceId: string },
-  actor: Actor,
-  filters: ListFilesFilters,
-  permissions: ReadonlySet<string>,
-) {
-  return listFilesForActor(
-    scope.orgId,
-    [fileReadGrant(scope.spaceId, permissions)],
-    actor,
-    filters,
-  );
 }
 
 const app = getTestApp();

@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lists spanning spaces — `listOrgRuns`, `listOrgSchedules`, `listOrgFiles`
- * — through `invoke_operation`, with real minted MCP instance tokens. The rules
- * live in the services (the truth tables are in `test/integration/routes/
- * org-{runs,schedules,files}.test.ts`), so this door must answer what the REST
- * door answers:
+ * The lists spanning spaces — `listOrgRuns`, `listOrgSchedules`, `listOrgFiles`,
+ * `listOrgAgents`, `listOrgSkills` — through `invoke_operation`, with real
+ * minted MCP instance tokens. The rules live in the services (the truth tables
+ * are in `test/integration/routes/org-{runs,schedules,files,packages}.test.ts`),
+ * so this door must answer what the REST door answers:
  *
  *   - an organization-bound token, whichever space the call names to enter,
  *     reads every space of the caller's reach, each by its own role;
- *   - a space-bound token reads that space only.
+ *   - a space-bound token reads that space only, and the package reach behind
+ *     `home_*` is that space only too;
+ *   - an organization-bound token on a space's endpoint reads that space only.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -29,6 +31,7 @@ import {
   seedSchedule,
   seedSpace,
   seedSpaceMember,
+  seedSpacePackage,
   seedSpaceRole,
 } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
@@ -48,7 +51,11 @@ const OPERATIONS = {
   listOrgRuns: "runs",
   listOrgSchedules: "schedules",
   listOrgFiles: "files",
+  listOrgAgents: "agents",
+  listOrgSkills: "packages/skills",
 } as const;
+/** The rows this file seeds: run, schedule and file ids, and its own packages' ids. */
+const seeded = (id: string) => !id.startsWith("@") || id.startsWith("@mcporgreads/");
 type Operation = keyof typeof OPERATIONS;
 
 describe("lists spanning spaces through invoke_operation", () => {
@@ -60,9 +67,9 @@ describe("lists spanning spaces through invoke_operation", () => {
   let ids: Record<(typeof OPERATIONS)[Operation], { un: string[]; deux: string[] }>;
 
   /**
-   * One agent of the owner's per space with a schedule, a run of the owner's
-   * and a run of the member's (both fired by the schedule), each run with one
-   * output file.
+   * One agent and one skill of the owner's per space, both active there; the
+   * agent with a schedule, a run of the owner's and a run of the member's (both
+   * fired by the schedule), each run with one output file.
    */
   async function seedSpaceRows(spaceId: string) {
     const pkg = await seedPackage({
@@ -71,6 +78,9 @@ describe("lists spanning spaces through invoke_operation", () => {
       homeSpaceId: spaceId,
       createdBy: owner.user.id,
     });
+    await seedSpacePackage(spaceId, pkg.id);
+    const skill = await seedSkill(`skill-${crypto.randomUUID().slice(0, 8)}`, spaceId);
+    await seedSpacePackage(spaceId, skill);
     const schedule = await seedSchedule({
       packageId: pkg.id,
       orgId: owner.orgId,
@@ -78,6 +88,8 @@ describe("lists spanning spaces through invoke_operation", () => {
       userId: owner.user.id,
     });
     const rows = {
+      agent: pkg.id,
+      skill,
       schedule: schedule.id,
       runs: {} as Record<string, string>,
       files: {} as Record<string, string>,
@@ -115,6 +127,18 @@ describe("lists spanning spaces through invoke_operation", () => {
     return rows;
   }
 
+  async function seedSkill(name: string, homeSpaceId: string): Promise<string> {
+    const pkg = await seedPackage({
+      id: `@mcporgreads/${name}`,
+      orgId: owner.orgId,
+      type: "skill",
+      homeSpaceId,
+      createdBy: owner.user.id,
+      draftManifest: { name: `@mcporgreads/${name}`, version: "0.1.0", type: "skill" },
+    });
+    return pkg.id;
+  }
+
   async function mintToken(ctx: TestContext, resource: string): Promise<string> {
     const registered = await app.request("/api/auth/oauth2/register", {
       method: "POST",
@@ -146,6 +170,19 @@ describe("lists spanning spaces through invoke_operation", () => {
     token: string,
     spaceId?: string,
   ): Promise<string[]> {
+    return (await invokeRows(operation, endpoint, token, spaceId))
+      .map((row) => row.id)
+      .filter(seeded)
+      .sort();
+  }
+
+  /** The rows `invoke` reads the ids of. */
+  async function invokeRows(
+    operation: Operation,
+    endpoint: string,
+    token: string,
+    spaceId?: string,
+  ): Promise<Array<{ id: string; spaceId: string; home_space_id?: string | null }>> {
     const res = await app.request(endpoint, {
       method: "POST",
       headers: {
@@ -174,10 +211,10 @@ describe("lists spanning spaces through invoke_operation", () => {
     expect(envelope.result?.isError, content[0]!.text).toBeFalsy();
     const { status, body } = JSON.parse(content[0]!.text) as {
       status: number;
-      body: { data: Array<{ id: string }> };
+      body: { data: Array<{ id: string; spaceId: string; home_space_id?: string | null }> };
     };
     expect(status).toBe(200);
-    return body.data.map((row) => row.id).sort();
+    return body.data;
   }
 
   async function rest(operation: Operation): Promise<string[]> {
@@ -185,7 +222,10 @@ describe("lists spanning spaces through invoke_operation", () => {
       headers: { Cookie: member.cookie },
     });
     expect(res.status).toBe(200);
-    return ((await res.json()) as { data: Array<{ id: string }> }).data.map((row) => row.id).sort();
+    return ((await res.json()) as { data: Array<{ id: string }> }).data
+      .map((row) => row.id)
+      .filter(seeded)
+      .sort();
   }
 
   beforeEach(async () => {
@@ -198,15 +238,31 @@ describe("lists spanning spaces through invoke_operation", () => {
     member = await memberContext(owner, "member");
     un = (await seedSpace({ orgId: owner.orgId, name: "Un", visibility: "closed" })).id;
     deux = (await seedSpace({ orgId: owner.orgId, name: "Deux", visibility: "closed" })).id;
-    // MCP access in both spaces. Un: every run and file, and its schedules.
-    // Deux: own runs and files only, and no `schedules:read`.
+    // MCP access in both spaces. Un: every run and file, its schedules, its
+    // agents in full. Deux: own runs and files only, no `schedules:read`, its
+    // agents as summaries. Both read their skills.
     const readAll = await seedSpaceRole({
       orgId: owner.orgId,
-      permissions: ["mcp:read", "mcp:invoke", "runs:read-all", "files:read", "schedules:read"],
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "runs:read-all",
+        "files:read",
+        "schedules:read",
+        "agents:read",
+        "skills:read",
+      ],
     });
     const readOwn = await seedSpaceRole({
       orgId: owner.orgId,
-      permissions: ["mcp:read", "mcp:invoke", "runs:read", "files:read"],
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "runs:read",
+        "files:read",
+        "agents:run",
+        "skills:read",
+      ],
     });
     for (const [spaceId, role] of [
       [un, readAll],
@@ -225,6 +281,8 @@ describe("lists spanning spaces through invoke_operation", () => {
       runs: { un: [inUn.runs.owner!, inUn.runs.member!], deux: [inDeux.runs.member!] },
       files: { un: [inUn.files.owner!, inUn.files.member!], deux: [inDeux.files.member!] },
       schedules: { un: [inUn.schedule], deux: [] },
+      agents: { un: [inUn.agent], deux: [inDeux.agent] },
+      "packages/skills": { un: [inUn.skill], deux: [inDeux.skill] },
     };
   });
 
@@ -257,7 +315,7 @@ describe("lists spanning spaces through invoke_operation", () => {
     const trois = (await seedSpace({ orgId: owner.orgId, name: "Trois", visibility: "closed" })).id;
     const noMcp = await seedSpaceRole({
       orgId: owner.orgId,
-      permissions: ["runs:read-all", "files:read", "schedules:read"],
+      permissions: ["runs:read-all", "files:read", "schedules:read", "agents:read", "skills:read"],
     });
     await seedSpaceMember({
       spaceId: trois,
@@ -272,6 +330,8 @@ describe("lists spanning spaces through invoke_operation", () => {
       runs: [inTrois.runs.owner!, inTrois.runs.member!],
       files: [inTrois.files.owner!, inTrois.files.member!],
       schedules: [inTrois.schedule],
+      agents: [inTrois.agent],
+      "packages/skills": [inTrois.skill],
     };
     for (const operation of Object.keys(OPERATIONS) as Operation[]) {
       const viaMcp = await invoke(operation, endpoint, token, un);
@@ -304,4 +364,47 @@ describe("lists spanning spaces through invoke_operation", () => {
     const envelope = JSON.parse(await res.text()) as JsonRpcEnvelope;
     expect(JSON.stringify(envelope)).toContain("unknown_space");
   });
+  it("reads the agent index of each space by the role held there, in one answer", async () => {
+    const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    const rows = await invokeRows("listOrgAgents", `/api/mcp/o/${owner.orgId}`, token, un);
+    const bySpace = new Map(
+      rows
+        .filter((row) => seeded(row.id))
+        .map((row) => [row.spaceId, row as { dependencies?: Record<string, unknown> }]),
+    );
+    // `agents:read` in Un: the full row. `agents:run` alone in Deux: a summary.
+    expect(bySpace.get(un)!.dependencies).toHaveProperty("skills");
+    expect(bySpace.get(deux)!.dependencies).not.toHaveProperty("skills");
+  });
+
+  it("computes home_* over the token's pinned space only", async () => {
+    // Homed in Un, where the member holds a role, and active in Deux too.
+    const shared = await seedSkill("shared", un);
+    await seedSpacePackage(deux, shared);
+    const sharedIn = (rows: Awaited<ReturnType<typeof invokeRows>>, spaceId: string) =>
+      rows.find((row) => row.id === shared && row.spaceId === spaceId)!;
+
+    const orgToken = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    const orgRows = await invokeRows("listOrgSkills", `/api/mcp/o/${owner.orgId}`, orgToken, deux);
+    expect(sharedIn(orgRows, deux).home_space_id).toBe(un);
+
+    // Bound to Deux, the token reaches no role in Un: the home is not named.
+    const spaceToken = await mintToken(member, getMcpSpaceResourceUri(owner.orgId, deux));
+    const pinnedRows = await invokeRows(
+      "listOrgSkills",
+      `/api/mcp/o/${owner.orgId}/s/${deux}`,
+      spaceToken,
+    );
+    expect(pinnedRows.every((row) => row.spaceId === deux)).toBe(true);
+    expect(sharedIn(pinnedRows, deux).home_space_id).toBeNull();
+  });
+
+  for (const operation of Object.keys(OPERATIONS) as Operation[]) {
+    it(`${operation}: bounds an organization-bound token on a space's endpoint to that space`, async () => {
+      const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+      expect(await invoke(operation, `/api/mcp/o/${owner.orgId}/s/${deux}`, token)).toEqual(
+        [...ids[OPERATIONS[operation]].deux].sort(),
+      );
+    });
+  }
 });

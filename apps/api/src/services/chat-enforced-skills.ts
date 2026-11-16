@@ -32,9 +32,7 @@ export async function listEnforcedChatSkills(
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .leftJoin(packageVersions, eq(packageVersions.id, packageDistTags.versionId))
-    .where(
-      and(activePackagesFilter({ orgId, spaceId }, "skill"), eq(spacePackages.chatEnforced, true)),
-    )
+    .where(and(activePackagesFilter({ orgId }, "skill"), eq(spacePackages.chatEnforced, true)))
     .orderBy(packages.id);
 
   return rows.map(({ id, version, manifest }) => {

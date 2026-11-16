@@ -385,10 +385,10 @@ export interface ScheduleWireDto {
 
 export type EnrichedSchedule = ScheduleWireDto & {
   /**
-   * Display name of the scheduled agent (manifest `display_name`, else `name`
-   * — the rule of `EnrichedRun.agent_name`). Null when the package is gone.
+   * Display name of the scheduled agent: its draft manifest's `display_name`,
+   * else its package id — the name the package catalog shows.
    */
-  agent_name: string | null;
+  agent_name: string;
   /** Display name of the actor (member or end-user) the schedule runs as. */
   actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */

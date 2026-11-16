@@ -81,9 +81,12 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "List schedules across the organization's spaces",
       description:
-        "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An end-user is refused with `403`.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
-      responses: scheduleListResponses,
+        "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...scheduleListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
     },
   },
   "/api/agents/{scope}/{name}/schedules": {

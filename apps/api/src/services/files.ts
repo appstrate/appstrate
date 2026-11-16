@@ -54,6 +54,7 @@ import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
+import type { SpaceGrant } from "../lib/permissions.ts";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
@@ -1233,7 +1234,7 @@ export async function getFileForActor(
     )
     .limit(1);
   if (!row) return null;
-  const grant = fileReadGrant(scope.spaceId, permissions);
+  const readAll = canReadEveryRun(permissions);
 
   if (row.runId) {
     // Run container: the file inherits its run's read-ACL, so resolving it by
@@ -1244,7 +1245,7 @@ export async function getFileForActor(
     // invariant in `lib/run-visibility.ts` says why the two agree.
     const run = await getRun(scope, row.runId);
     if (!run) return null;
-    if (!grant.readAll && !ownsRun(actor, run)) return null;
+    if (!readAll && !ownsRun(actor, run)) return null;
   } else if (row.chatSessionId) {
     // Chat container: sessions are per-dashboard-user; only the owner reads.
     if (actor.type !== "user") return null;
@@ -1269,13 +1270,13 @@ export async function getFileForActor(
     // widened by `read-all`: it was creator-only in its container and deletion
     // never opens it. This intentionally also narrows a run-origin detached
     // upload to creator-only — least surprise.
-    const supervises = row.purpose === "agent_output" && grant.readAll;
+    const supervises = row.purpose === "agent_output" && readAll;
     if (!isFileCreator(row, actor) && !supervises) return null;
   }
 
   const capabilities = getFileCapabilities(row, actor, {
     visible: true,
-    canManage: grant.manage,
+    canManage: managesFiles(permissions),
     creatorCanManage: opts.creatorCanManage,
   });
   return { row: row as FileRow, capabilities };
@@ -1446,31 +1447,18 @@ async function chatContextFileFilter(
   )!;
 }
 
-/**
- * What the caller reads of ONE space's files, from their effective set there
- * (one per space holding `files:read`): a gallery spanning spaces decides each
- * row by its own space. `readAll` is `runs:read-all` (the supervision arms),
- * `manage` is `files:delete` (the `keep` / `delete` capabilities).
- */
-interface FileReadGrant {
-  spaceId: string;
-  readAll: boolean;
-  manage: boolean;
-}
-
-export function fileReadGrant(spaceId: string, permissions: ReadonlySet<string>): FileReadGrant {
-  return {
-    spaceId,
-    readAll: canReadEveryRun(permissions),
-    manage: permissions.has("files:delete"),
-  };
+/** Does this permission set keep or delete another member's file? `files:delete`. */
+function managesFiles(permissions: ReadonlySet<string>): boolean {
+  return permissions.has("files:delete");
 }
 
 /**
  * The file gallery of `orgId` across the spaces of `grants`, with
  * container-inherited visibility (D7 — consistent with `getFileForActor`),
- * decided per row by its space's grant. Powers `GET /api/files` (one grant, the
- * request's space) and `GET /api/orgs/{orgId}/files`.
+ * decided per row by its space's grant: `runs:read-all` there opens the
+ * supervision arms, `files:delete` there the `keep` / `delete` capabilities.
+ * Powers `GET /api/files` (one grant, the request's space) and
+ * `GET /api/orgs/{orgId}/files`.
  *
  *  - A dashboard `user` (member) sees the run-contained files of the runs it may
  *    read — the whole space with `runs:read-all`, else its own runs — plus
@@ -1487,7 +1475,7 @@ export function fileReadGrant(spaceId: string, permissions: ReadonlySet<string>)
  */
 export async function listFilesForActor(
   orgId: string,
-  grants: readonly FileReadGrant[],
+  grants: readonly SpaceGrant[],
   actor: Actor,
   filters: ListFilesFilters,
   opts: { creatorCanManage?: boolean } = {},
@@ -1496,15 +1484,13 @@ export async function listFilesForActor(
   if (grants.length === 0) return { ...listResponse([], { hasMore: false }), limit };
   const fetchLimit = limit + 1;
   const spaceIds = grants.map((g) => g.spaceId);
-  const supervised = grants.filter((g) => g.readAll).map((g) => g.spaceId);
+  const supervised = grants.filter((g) => canReadEveryRun(g.permissions)).map((g) => g.spaceId);
 
   const conditions: SQL[] = [
     eq(files.orgId, orgId),
+    inArray(files.spaceId, spaceIds),
     actor.type === "end_user"
-      ? and(
-          inArray(files.spaceId, spaceIds),
-          actorScopeFilter(actor, { userId: files.userId, endUserId: files.endUserId }),
-        )!
+      ? actorScopeFilter(actor, { userId: files.userId, endUserId: files.endUserId })
       : // Members — the supervision arms, then ownership. Losing a container
         // never widens a row (a detached `user_upload` was creator-only in its
         // chat/run origin and stays so; a detached `agent_output` stays exactly
@@ -1538,7 +1524,7 @@ export async function listFilesForActor(
                 )!,
               ]
             : []),
-          and(inArray(files.spaceId, spaceIds), eq(files.userId, actor.id))!,
+          eq(files.userId, actor.id),
         )!,
   ];
   if (filters.purpose) conditions.push(eq(files.purpose, filters.purpose));
@@ -1584,7 +1570,7 @@ export async function listFilesForActor(
     .orderBy(desc(files.createdAt), desc(files.id))
     .limit(fetchLimit);
 
-  const managed = new Set(grants.filter((g) => g.manage).map((g) => g.spaceId));
+  const managed = new Set(grants.filter((g) => managesFiles(g.permissions)).map((g) => g.spaceId));
   const { creatorCanManage } = opts;
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {

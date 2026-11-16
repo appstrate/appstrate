@@ -55,7 +55,6 @@ import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifes
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
-import { runReadGrant } from "../../../src/lib/run-visibility.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
@@ -151,7 +150,7 @@ async function renameBumpingStamp(scheduleId: string): Promise<void> {
 function listSchedulesIn(scope: SpaceScope, actor: Actor) {
   return listSchedules(
     scope.orgId,
-    [runReadGrant(scope.spaceId, new Set(["runs:read-all"]))],
+    [{ spaceId: scope.spaceId, permissions: new Set(["runs:read-all"]) }],
     actor,
   );
 }

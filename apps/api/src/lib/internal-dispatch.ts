@@ -31,6 +31,7 @@
  *   dispatched request still runs the full auth pipeline + RBAC.
  */
 
+import type { Context } from "hono";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 /** Lower-case so it round-trips through `Headers` (which lower-cases names). */
@@ -60,4 +61,26 @@ export function isInternalDispatch(headers: Headers): boolean {
   const candidate = Buffer.from(value, "utf8");
   if (candidate.length !== DISPATCH_TOKEN_BYTES.length) return false;
   return timingSafeEqual(candidate, DISPATCH_TOKEN_BYTES);
+}
+
+/**
+ * The `c.env` key of an in-process dispatch confined to one space: the
+ * space-pinned MCP endpoint (`/api/mcp/o/:org/s/:space`) re-entering a route
+ * for a credential that pins none (an organization's token, a session). Only
+ * `dispatchInProcess` passes an env holding it — a network request's env is
+ * the server's, which has no such key — so it cannot be forged. Read by `callerReachableSpaces`
+ * alone: it bounds what a read spanning spaces reaches, nothing else.
+ */
+const DISPATCH_SPACE_PIN = Symbol("appstrate.dispatchSpacePin");
+
+/** The `app.fetch` env of a dispatch confined to `spaceId`. */
+export function dispatchSpacePinEnv(spaceId: string): Record<symbol, string> {
+  return { [DISPATCH_SPACE_PIN]: spaceId };
+}
+
+/** The space this request is a dispatch confined to, if it is one. */
+export function dispatchSpacePin(c: Context): string | undefined {
+  const env = c.env as Record<symbol, unknown> | undefined;
+  const pin = env?.[DISPATCH_SPACE_PIN];
+  return typeof pin === "string" ? pin : undefined;
 }

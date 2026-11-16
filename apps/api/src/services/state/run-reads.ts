@@ -8,6 +8,8 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
+import type { SpaceGrant } from "../../lib/permissions.ts";
+import { runReadCondition } from "../../lib/run-visibility.ts";
 import { markRunNotificationsRead, notifyRunFinished } from "./notifications.ts";
 
 // --- Run read state ---
@@ -176,37 +178,52 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
   return updated.length;
 }
 
+/** A count per package, per space: `counts.get(spaceId)?.get(packageId)`. */
+export type CountsBySpace = Map<string, Map<string, number>>;
+
+/** Fold `(spaceId, packageId, count)` rows into {@link CountsBySpace}; a row with no package is dropped. */
+export function countsBySpace(
+  rows: readonly { spaceId: string; packageId: string | null; count: number }[],
+): CountsBySpace {
+  const counts: CountsBySpace = new Map();
+  for (const { spaceId, packageId, count: value } of rows) {
+    if (!packageId) continue;
+    const bySpace = counts.get(spaceId) ?? new Map<string, number>();
+    bySpace.set(packageId, value);
+    counts.set(spaceId, bySpace);
+  }
+  return counts;
+}
+
 /**
- * Unread runs per agent for the caller — the agent index's `unread_count`.
- * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
- * the count spans the runs `GET /api/runs?unread=true` lists, never one the
- * caller can no longer open.
+ * Unread runs per agent for the caller in each space of `grants`, in one
+ * statement — the agent index's `unread_count`. Each space counts the runs its
+ * own grant reads (`runReadCondition`), so the count spans the runs
+ * `GET /api/runs?unread=true` lists there, never one the caller can no longer
+ * open.
  */
 export async function getUnreadRunCountsByAgent(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   actor: Actor,
-  visibility?: SQL,
-): Promise<Record<string, number>> {
+): Promise<CountsBySpace> {
+  if (grants.length === 0) return new Map();
   const rows = await db
-    .select({ packageId: runs.packageId, count: count() })
+    .select({ spaceId: runs.spaceId, packageId: runs.packageId, count: count() })
     .from(runReads)
     .innerJoin(runs, eq(runs.id, runReads.runId))
     .where(
-      scopedWhere(runReads, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [
-          recipientFilter(actor),
-          isNull(runReads.readAt),
-          ...(visibility ? [visibility] : []),
-        ],
-      }),
+      and(
+        eq(runReads.orgId, orgId),
+        inArray(
+          runReads.spaceId,
+          grants.map((g) => g.spaceId),
+        ),
+        recipientFilter(actor),
+        isNull(runReads.readAt),
+        runReadCondition(grants, actor),
+      ),
     )
-    .groupBy(runs.packageId);
-
-  const result: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.packageId) result[row.packageId] = row.count;
-  }
-  return result;
+    .groupBy(runs.spaceId, runs.packageId);
+  return countsBySpace(rows);
 }

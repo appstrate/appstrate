@@ -34,15 +34,13 @@ import {
   createFileFromUpload,
   createFileFromStream,
   getFileForActor,
-  listFilesForActor,
-  fileReadGrant,
-  type ListFilesFilters,
   deleteFile,
   setOrgFileStorageLimit,
   streamFileContent,
 } from "../../../src/services/files.ts";
 import { assignWorkspaceNames } from "../../../src/services/run-file-naming.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
+import { listFilesIn } from "../../helpers/files.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 
 type Scope = { orgId: string; spaceId: string };
@@ -128,21 +126,6 @@ function publishStream(scope: Scope, runId: string, name: string, content: strin
     mime: "text/plain",
     body: new Blob([new TextEncoder().encode(content)]).stream(),
   });
-}
-
-/** The one-space gallery, as `GET /api/files` calls it. */
-function listFilesIn(
-  scope: { orgId: string; spaceId: string },
-  actor: Actor,
-  filters: ListFilesFilters,
-  permissions: ReadonlySet<string>,
-) {
-  return listFilesForActor(
-    scope.orgId,
-    [fileReadGrant(scope.spaceId, permissions)],
-    actor,
-    filters,
-  );
 }
 
 /** A member holding no grant beyond the resource itself — reads its own runs. */

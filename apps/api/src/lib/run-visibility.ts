@@ -18,8 +18,8 @@
  * ownership question — which is why the file surfaces test whichever of the
  * two they already have loaded rather than joining back to the other.
  *
- * One semantic, five shapes: the read-all test itself; per-space grants and
- * the WHERE fragment over them, for the queries listing one space or several;
+ * One semantic, five shapes: the read-all test itself; the WHERE fragment over
+ * per-space grants, for the queries listing one space or several;
  * the one-space WHERE fragment, `undefined` when nothing narrows; an
  * ownership test for a loaded row; and the assertion that turns it into the
  * 404 a handler throws. Nothing re-derives ownership on its own.
@@ -32,8 +32,7 @@ import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
-import { readsAgentContent } from "./package-access.ts";
-import { callerPermissions } from "./permissions.ts";
+import { callerPermissions, type SpaceGrant } from "./permissions.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -45,29 +44,6 @@ import type { AppEnv } from "../types/index.ts";
  */
 export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
   return permissions.has("runs:read-all");
-}
-
-/** Which runs of ONE space the caller reads: all of them, or their own. */
-export interface RunReach {
-  spaceId: string;
-  readAll: boolean;
-}
-
-/**
- * What the caller reads of ONE space's runs, from their effective set there: a
- * run list spanning spaces decides each row by its own space, never by the
- * request's. `agentInput` is {@link readsAgentContent} there.
- */
-export interface RunReadGrant extends RunReach {
-  agentInput: boolean;
-}
-
-export function runReadGrant(spaceId: string, permissions: ReadonlySet<string>): RunReadGrant {
-  return {
-    spaceId,
-    readAll: canReadEveryRun(permissions),
-    agentInput: readsAgentContent(permissions),
-  };
 }
 
 /** The guard on every surface `runs:read` opens, built from the tuple
@@ -94,18 +70,20 @@ function ownRunsFilter(actor: Actor): SQL {
 }
 
 /**
- * WHERE fragment for the runs `grants` open: every run of a space read in full,
- * the actor's own elsewhere — or everywhere when `ownOnly` (`?user=me`). No
- * grant (or no actor where one is needed), no row. The many-space twin of
- * {@link runVisibilityFilter}: every query spanning spaces narrows through it.
+ * WHERE fragment for the runs `grants` open: every run of a space whose grant
+ * reads them all ({@link canReadEveryRun}), the actor's own elsewhere — or
+ * everywhere when `ownOnly` (`?user=me`). No grant (or no actor where one is
+ * needed), no row. The many-space twin of {@link runVisibilityFilter}: every
+ * query spanning spaces narrows through it.
  */
 export function runReadCondition(
-  grants: readonly RunReach[],
+  grants: readonly SpaceGrant[],
   actor: Actor | null,
   ownOnly = false,
 ): SQL {
-  const everyRun = grants.filter((g) => g.readAll && !ownOnly).map((g) => g.spaceId);
-  const ownRuns = grants.filter((g) => !g.readAll || ownOnly).map((g) => g.spaceId);
+  const readAll = (g: SpaceGrant) => !ownOnly && canReadEveryRun(g.permissions);
+  const everyRun = grants.filter(readAll).map((g) => g.spaceId);
+  const ownRuns = grants.filter((g) => !readAll(g)).map((g) => g.spaceId);
   const reach: SQL[] = [];
   if (everyRun.length) reach.push(inArray(runs.spaceId, everyRun));
   if (ownRuns.length && actor) {
@@ -115,16 +93,11 @@ export function runReadCondition(
 }
 
 /**
- * WHERE fragment narrowing `runs` to what `actor` may read with `permissions`,
- * its effective set in one space; `undefined` = no narrowing.
+ * WHERE fragment narrowing `runs` to what the caller may read in the request's
+ * own space; `undefined` = no narrowing.
  */
-export function runVisibilityIn(permissions: ReadonlySet<string>, actor: Actor): SQL | undefined {
-  return canReadEveryRun(permissions) ? undefined : ownRunsFilter(actor);
-}
-
-/** {@link runVisibilityIn} for the request's own space. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  return runVisibilityIn(callerPermissions(c), getActor(c));
+  return canReadEveryRun(callerPermissions(c)) ? undefined : ownRunsFilter(getActor(c));
 }
 
 /**

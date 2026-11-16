@@ -75,11 +75,12 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 }
 
 /**
- * The agent name every surface shows: the manifest's `display_name`, else its
- * `name`. One rule for the run snapshot (`runs.agent_name`) and the schedule
- * listings (`EnrichedSchedule.agent_name`).
+ * The agent name a run freezes (`runs.agent_name`): the executed manifest's
+ * `display_name`, else its `name`. Read off the manifest alone, because the
+ * snapshot outlives the package row; a surface naming a live package row reads
+ * `getPackageDisplayName` instead.
  */
-export function agentDisplayName(
+function agentDisplayName(
   manifest: { display_name?: unknown; name?: unknown } | null,
 ): string | null {
   if (!manifest) return null;

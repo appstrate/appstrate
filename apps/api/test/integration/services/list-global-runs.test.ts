@@ -30,7 +30,7 @@ function listSpaceRuns(
 ) {
   return listGlobalRuns(
     scope.orgId,
-    [{ spaceId: scope.spaceId, readAll: true, agentInput: false }],
+    [{ spaceId: scope.spaceId, permissions: new Set(["runs:read-all"]) }],
     options,
   );
 }

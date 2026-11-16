@@ -48,6 +48,16 @@ export function parseListPagination(
   };
 }
 
+/**
+ * Refuse a query parameter outside `known` with a 400 naming it: a misspelled
+ * filter must not read as a list that was narrowed.
+ */
+export function assertKnownQuery(c: Context, known: readonly string[]): void {
+  for (const name of Object.keys(c.req.queries())) {
+    if (!known.includes(name)) throw invalidRequest(`Unknown query parameter '${name}'`, name);
+  }
+}
+
 /** Slice an in-memory array into a page + report `total` / `hasMore`. */
 export function paginate<T>(
   items: readonly T[],

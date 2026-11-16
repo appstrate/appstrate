@@ -921,15 +921,10 @@
         "operationId": "listOrgAgents",
         "tags": ["Agents"],
         "summary": "List agents across the organization's spaces",
-        "description": "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, grouped by space. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An end-user is refused with `403`.",
+        "description": "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           }
         ],
         "responses": {
@@ -1024,6 +1019,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3040,15 +3038,10 @@
         "operationId": "listOrgRuns",
         "tags": ["Runs"],
         "summary": "List runs across the organization's spaces",
-        "description": "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
+        "description": "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           },
           {
             "name": "user",
@@ -5264,15 +5257,10 @@
         "operationId": "listOrgSchedules",
         "tags": ["Schedules"],
         "summary": "List schedules across the organization's spaces",
-        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An end-user is refused with `403`.",
+        "description": "Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           }
         ],
         "responses": {
@@ -5309,6 +5297,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19064,15 +19055,10 @@
         "operationId": "listOrgSkills",
         "tags": ["Packages"],
         "summary": "List skills across the organization's spaces",
-        "description": "Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "description": "Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           }
         ],
         "responses": {
@@ -19136,6 +19122,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -19147,18 +19136,13 @@
     },
     "/api/orgs/{orgId}/packages/integrations": {
       "get": {
-        "operationId": "listOrgIntegrations",
+        "operationId": "listOrgIntegrationPackages",
         "tags": ["Packages"],
         "summary": "List integration packages across the organization's spaces",
-        "description": "Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "description": "Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           }
         ],
         "responses": {
@@ -19196,6 +19180,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -19210,15 +19197,10 @@
         "operationId": "listOrgMcpServerPackages",
         "tags": ["Packages"],
         "summary": "List MCP-server packages across the organization's spaces",
-        "description": "Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.",
+        "description": "Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           }
         ],
         "responses": {
@@ -19255,6 +19237,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -26941,12 +26926,7 @@
         "description": "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
         "parameters": [
           {
-            "name": "orgId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/OrgIdPath"
           },
           {
             "name": "purpose",
@@ -32942,6 +32922,15 @@
           "format": "uuid"
         }
       },
+      "OrgIdPath": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "description": "Organization ID — the organization a list spanning its spaces reads.",
+        "schema": {
+          "type": "string"
+        }
+      },
       "SseOrgId": {
         "name": "orgId",
         "in": "query",
@@ -35413,8 +35402,8 @@
             "format": "date-time"
           },
           "agent_name": {
-            "type": ["string", "null"],
-            "description": "Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists."
+            "type": "string",
+            "description": "Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows."
           },
           "actor_name": {
             "type": ["string", "null"],

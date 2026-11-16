@@ -7,10 +7,24 @@ import { invalidRequest } from "./errors.ts";
 import { parseListPagination } from "./list-query.ts";
 import { parseRunListFilters } from "./run-list-filters.ts";
 
-/** The closed set `GET /api/runs?user=` accepts. One member, for now. */
+/** The closed set a run list's `?user=` accepts: `me`, the caller's own runs. */
 const USER_FILTERS = ["me"] as const;
-/** `?unread=` on `GET /api/runs`: a boolean, so `true` or `false`. */
+/** `?unread=` on a run list: a boolean, so `true` or `false`. */
 const UNREAD_FILTERS = ["true", "false"] as const;
+
+/** Every query parameter {@link parseGlobalRunListQuery} reads. */
+export const RUN_LIST_QUERY_PARAMETERS = [
+  "user",
+  "kind",
+  "unread",
+  "status",
+  "q",
+  "start_date",
+  "end_date",
+  "chat_session_id",
+  "limit",
+  "offset",
+] as const;
 
 /**
  * Read a query parameter whose accepted values are a closed set.
@@ -44,13 +58,12 @@ function closedSetQuery<T extends string>(
 }
 
 /**
- * The query of a run list spanning a space or an organization: `user`, `kind`,
- * `unread`, `status`, `q`, `start_date`, `end_date`, `chat_session_id` and the
- * page. `user`, `kind` and `status` are closed sets: an unrecognised value is a
- * 400, not a dropped filter. `limit`/`offset` deliberately keep their
- * `.catch()` defaults — a bad page size returns the first page, which narrows
- * rather than widens, and callers paging by `Link` headers never construct
- * them by hand.
+ * The query of a run list spanning a space or an organization: the parameters
+ * {@link RUN_LIST_QUERY_PARAMETERS} names. `user`, `kind` and `status` are
+ * closed sets: an unrecognised value is a 400, not a dropped filter. Absent,
+ * `limit`/`offset` are 20 and 0; supplied, a value outside their range is a
+ * 400 (`parseListPagination`) — a page other than the one asked would read as
+ * the list.
  */
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,

@@ -22,13 +22,8 @@ import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict, internalError, type ResolutionFieldError } from "../lib/errors.ts";
-import {
-  runVisibilityFilter,
-  assertRunVisible,
-  requireRunsRead,
-  runReadGrant,
-} from "../lib/run-visibility.ts";
-import { callerPermissions } from "../lib/permissions.ts";
+import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
+import { callerSpaceGrant } from "../lib/permissions.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -456,12 +451,10 @@ export function createRunsRouter() {
   // are `parseGlobalRunListQuery`'s, shared with `GET /api/orgs/{orgId}/runs`.
   router.get("/runs", requireRunsRead, async (c) => {
     const filters = parseGlobalRunListQuery(c);
-    const scope = getSpaceScope(c);
-    const result = await listGlobalRuns(
-      scope.orgId,
-      [runReadGrant(scope.spaceId, callerPermissions(c))],
-      { ...filters, actor: getActor(c) },
-    );
+    const result = await listGlobalRuns(getSpaceScope(c).orgId, [callerSpaceGrant(c)], {
+      ...filters,
+      actor: getActor(c),
+    });
     setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
     return c.json(result);
   });

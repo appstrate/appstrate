@@ -1920,9 +1920,9 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
       agent_name: {
-        type: ["string", "null"],
+        type: "string",
         description:
-          "Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists.",
+          "Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows.",
       },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },

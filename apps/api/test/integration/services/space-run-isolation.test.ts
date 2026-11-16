@@ -126,14 +126,22 @@ describe("Cross-space run isolation (service layer)", () => {
         status: "running",
       });
 
-      const countsA = await getRunningRunCounts({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-      });
-      expect(countsA[agentId]).toBe(1);
+      const readAll = new Set(["runs:read-all"]);
+      const actor = { type: "user" as const, id: ctx.user.id };
+      const countsA = await getRunningRunCounts(
+        ctx.orgId,
+        [{ spaceId: ctx.defaultSpaceId, permissions: readAll }],
+        actor,
+      );
+      expect(countsA.get(ctx.defaultSpaceId)?.get(agentId)).toBe(1);
+      expect(countsA.has(spaceBId)).toBe(false);
 
-      const countsB = await getRunningRunCounts({ orgId: ctx.orgId, spaceId: spaceBId });
-      expect(countsB[agentId]).toBe(2);
+      const countsB = await getRunningRunCounts(
+        ctx.orgId,
+        [{ spaceId: spaceBId, permissions: readAll }],
+        actor,
+      );
+      expect(countsB.get(spaceBId)?.get(agentId)).toBe(2);
     });
   });
 

@@ -10,10 +10,16 @@
  * keeps the row; only `withdrawPlacement` deletes it.
  */
 
-import { eq, and, exists, sql } from "drizzle-orm";
+import { eq, and, exists, inArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
+import {
+  spacePackages,
+  packages,
+  packageDistTags,
+  packageVersions,
+  spaces,
+} from "@appstrate/db/schema";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_ENFORCED_CHAT_SKILLS,
@@ -25,7 +31,7 @@ import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
-import type { SpaceScope } from "../lib/scope.ts";
+import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 import { ApiError } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -418,7 +424,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * an ephemeral shadow. Expects the `spacePackages` join of {@link activeHereSql},
  * which index pages, hints and the run gate all share.
  */
-export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
+export function activePackagesFilter(scope: OrgScope, type: PackageType) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
@@ -429,8 +435,8 @@ export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
 
 /**
  * ORDER BY for the TWO reads below — {@link listActivePackages}, which the
- * per-type index pages draw from, and `listActivePackageHints`, the capped
- * caller-context list: system first, then by id. One function so an index and
+ * agent index and the served skills draw from, and `listActivePackageHints`,
+ * the capped caller-context list: system first, then by id. One function so an index and
  * the hints the model is handed for it cannot rank the SAME active set
  * differently.
  *
@@ -445,25 +451,37 @@ function packageListingOrder() {
 }
 
 /**
- * List every package of one `type` this space runs ({@link activePackagesFilter}):
- * what can be launched from here. Placed-but-off packages belong to the library
- * (`services/package-library.ts`). The projection omits `draft_content`, which
- * an index card never reads; `latestVersionId` answers {@link isPublished}.
+ * List every package of one `type` each of `spaceIds` runs
+ * ({@link activePackagesFilter}): what can be launched from there, one row per
+ * (package, space) carrying its `spaceId` — ONE statement whatever the number
+ * of spaces, each space joined to its own placement row. Placed-but-off
+ * packages belong to the library (`services/package-library.ts`). The
+ * projection omits `draft_content`, which an index card never reads;
+ * `latestVersionId` answers {@link isPublished}. Ordered by
+ * {@link packageListingOrder}, then by space id: one space's list is in that
+ * order, and a package active in several spaces has its rows side by side.
  */
-export async function listActivePackages(scope: SpaceScope, type: PackageType) {
+export async function listActivePackages(
+  orgId: string,
+  spaceIds: readonly string[],
+  type: PackageType,
+) {
+  if (spaceIds.length === 0) return [];
   return db
     .select({
       id: packages.id,
+      spaceId: spaces.id,
       type: packages.type,
       draftManifest: packages.draftManifest,
       source: packages.source,
       latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
-    .where(activePackagesFilter(scope, type))
-    .orderBy(...packageListingOrder());
+    .where(activePackagesFilter({ orgId }, type))
+    .orderBy(...packageListingOrder(), spaces.id);
 }
 
 // ---------------------------------------------------------------------------

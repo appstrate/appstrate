@@ -89,10 +89,6 @@ describe("persona-sensitive call sites", () => {
           "`callerSpaceAccess` / `callerSpaceAccessById`, the persona-aware accessors",
         ],
         [
-          "apps/api/src/lib/package-access.ts",
-          "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",
-        ],
-        [
           "apps/api/src/routes/realtime.ts",
           "SSE runs outside the pipeline; it overlays explicitly",
         ],

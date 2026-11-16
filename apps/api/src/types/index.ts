@@ -73,6 +73,15 @@ export type AppEnv = {
       Promise<import("../lib/package-access.ts").PackageAccessSpace[]>
     >;
     /**
+     * Per-request memo of `callerReachableSpaces`, keyed by organization and
+     * role: a list spanning spaces and the package reach behind it read one
+     * resolution. Owned by `lib/reachable-spaces.ts`; nothing else writes it.
+     */
+    reachableSpacesCache?: Map<
+      string,
+      Promise<import("../lib/reachable-spaces.ts").ReachableSpace[]>
+    >;
+    /**
      * Validated role preview: the persona whose reach answers this request
      * instead of the caller's own (`lib/view-as.ts`), set before any
      * `permissions` write. `user` and `orgRole` stay REAL — a persona restricts

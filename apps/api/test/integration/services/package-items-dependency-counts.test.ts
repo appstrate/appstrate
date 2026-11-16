@@ -105,7 +105,7 @@ describe("package-items dependency counts", () => {
     });
 
     it("matches the legacy JS count for every listed item", async () => {
-      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, ctx.defaultSpaceId);
+      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [ctx.defaultSpaceId]);
       const oracle = await legacyCountMap(ctx.orgId);
 
       expect(items.length).toBe(3);
@@ -140,7 +140,7 @@ describe("package-items dependency counts", () => {
         }),
       });
 
-      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, ctx.defaultSpaceId);
+      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [ctx.defaultSpaceId]);
       const byId = new Map(items.map((i) => [i.id, i.used_by_agents]));
       expect(byId.get("@depcount/unused-skill")).toBe(0);
       expect(byId.get("@depcount/shared-skill")).toBe(2);
@@ -169,7 +169,9 @@ describe("package-items dependency counts", () => {
         }),
       });
 
-      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE["mcp-server"], ctx.defaultSpaceId);
+      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE["mcp-server"], [
+        ctx.defaultSpaceId,
+      ]);
       const oracle = await legacyCountMap(ctx.orgId);
       const row = items.find((i) => i.id === "@depcount/mcp-one");
       expect(row?.used_by_agents).toBe(oracle.get("@depcount/mcp-one") ?? 0);
@@ -191,7 +193,7 @@ describe("package-items dependency counts", () => {
         draftManifest: null,
       });
 
-      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, ctx.defaultSpaceId);
+      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [ctx.defaultSpaceId]);
       const byId = new Map(items.map((i) => [i.id, i.used_by_agents]));
       expect(byId.get("@depcount/shared-skill")).toBe(2);
     });

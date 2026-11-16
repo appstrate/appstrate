@@ -348,19 +348,12 @@ const mcpServerPackageListResponses = {
  */
 function orgPackageIndexDescription(noun: string, single: string, permission: string): string {
   return (
-    `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. ` +
+    `Read-only index of the ${noun} of every space of the organization where the caller holds \`${permission}\`: the rows of \`${single}\` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. ` +
     "Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. " +
     "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. " +
-    "No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`."
+    "No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`."
   );
 }
-
-const orgIdPathParameter = {
-  name: "orgId",
-  in: "path",
-  required: true,
-  schema: { type: "string" },
-};
 
 export const packagesPaths = {
   "/api/orgs/{orgId}/packages/skills": {
@@ -369,13 +362,16 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List skills across the organization's spaces",
       description: orgPackageIndexDescription("skills", "GET /api/packages/skills", "skills:read"),
-      parameters: [orgIdPathParameter],
-      responses: skillListResponses,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...skillListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
     },
   },
   "/api/orgs/{orgId}/packages/integrations": {
     get: {
-      operationId: "listOrgIntegrations",
+      operationId: "listOrgIntegrationPackages",
       tags: ["Packages"],
       summary: "List integration packages across the organization's spaces",
       description: orgPackageIndexDescription(
@@ -383,8 +379,11 @@ export const packagesPaths = {
         "GET /api/packages/integrations",
         "integrations:read",
       ),
-      parameters: [orgIdPathParameter],
-      responses: integrationPackageListResponses,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...integrationPackageListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
     },
   },
   "/api/orgs/{orgId}/packages/mcp-servers": {
@@ -397,8 +396,11 @@ export const packagesPaths = {
         "GET /api/packages/mcp-servers",
         "mcp-servers:read",
       ),
-      parameters: [orgIdPathParameter],
-      responses: mcpServerPackageListResponses,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
+      responses: {
+        ...mcpServerPackageListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
     },
   },
   "/api/packages/import-bundle": {

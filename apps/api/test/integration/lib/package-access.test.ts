@@ -370,13 +370,13 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
     await seedPackageShare(otherId, SKILL);
     expect(await placedInSql(otherId, SKILL)).toBe(true);
 
-    const index = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
+    const index = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [otherId]);
     expect(index.map((item) => item.id)).not.toContain(SKILL);
 
     // And the switch is what puts it there — the positive control without
     // which the assertion above would pass on any refusal at all.
     await seedSpacePackage(otherId, SKILL);
-    const afterActivation = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
+    const afterActivation = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [otherId]);
     expect(afterActivation.map((item) => item.id)).toContain(SKILL);
   });
 });

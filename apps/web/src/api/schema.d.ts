@@ -3150,7 +3150,7 @@ export interface paths {
         };
         /**
          * List agents across the organization's spaces
-         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, grouped by space. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An end-user is refused with `403`.
+         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgAgents"];
         put?: never;
@@ -3320,9 +3320,9 @@ export interface paths {
         };
         /**
          * List integration packages across the organization's spaces
-         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.
+         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
-        get: operations["listOrgIntegrations"];
+        get: operations["listOrgIntegrationPackages"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3340,7 +3340,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages across the organization's spaces
-         * @description Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.
+         * @description Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgMcpServerPackages"];
         put?: never;
@@ -3360,7 +3360,7 @@ export interface paths {
         };
         /**
          * List skills across the organization's spaces
-         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, grouped by space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An end-user is refused with `403`.
+         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgSkills"];
         put?: never;
@@ -3380,7 +3380,7 @@ export interface paths {
         };
         /**
          * List runs across the organization's spaces
-         * @description Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.
+         * @description Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.
          */
         get: operations["listOrgRuns"];
         put?: never;
@@ -3400,7 +3400,7 @@ export interface paths {
         };
         /**
          * List schedules across the organization's spaces
-         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An end-user is refused with `403`.
+         * @description Read-only list of the schedules of every space of the organization where the caller holds `schedules:read`, oldest first. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. The run counters (`running_runs`, `last_run_number`, `unread_count`) follow the row's space: they span every run of the schedule where the caller holds `runs:read-all` there, the caller's own runs otherwise. No `X-Space-Id`: the organization is the path's. A caller who reads schedules in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgSchedules"];
         put?: never;
@@ -7440,8 +7440,8 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            /** @description Display name of the scheduled agent (manifest display_name, else name). Null when the package no longer exists. */
-            agent_name: string | null;
+            /** @description Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows. */
+            agent_name: string;
             /** @description Display name of the schedule actor */
             actor_name: string | null;
             /** @enum {string|null} */
@@ -8060,6 +8060,8 @@ export interface components {
         IfMatchRequired: string;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
+        /** @description Organization ID — the organization a list spanning its spaces reads. */
+        OrgIdPath: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
         SseOrgId: string;
         /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
@@ -20290,7 +20292,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20379,6 +20382,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -20483,7 +20487,8 @@ export interface operations {
             };
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20830,12 +20835,13 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    listOrgIntegrations: {
+    listOrgIntegrationPackages: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20857,6 +20863,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -20866,7 +20873,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20888,6 +20896,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -20897,7 +20906,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -20950,6 +20960,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -20977,7 +20988,8 @@ export interface operations {
             };
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -21019,7 +21031,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orgId: string;
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
             };
             cookie?: never;
         };
@@ -21041,6 +21054,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

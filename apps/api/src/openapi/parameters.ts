@@ -59,6 +59,13 @@ export const parameters = {
       "Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key).",
     schema: { type: "string", format: "uuid" },
   },
+  OrgIdPath: {
+    name: "orgId",
+    in: "path" as const,
+    required: true,
+    description: "Organization ID — the organization a list spanning its spaces reads.",
+    schema: { type: "string" },
+  },
   SseOrgId: {
     name: "orgId",
     in: "query" as const,

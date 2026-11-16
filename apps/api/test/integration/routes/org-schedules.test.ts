@@ -21,6 +21,7 @@
  * | API key pinned to Un, scopes `schedules:read`| Un only, ceiling applied                              | Un        | 1 (own run)    |
  * | API key without `schedules:read` in scopes   | —                                                     | 403 (ceiling guard) | —    |
  * | API key + `Appstrate-User` (end-user)        | —                                                     | 403       | —              |
+ * | member session, unknown query parameter      | —                                                     | 400       | —              |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling            | ceiling without `runs:read-all` → Un counts own run only | |
  * | any                                          | another organization                                  | never; its path → 403 | — |
  *
@@ -54,7 +55,7 @@ const app = getTestApp();
 interface ListedSchedule {
   id: string;
   spaceId: string;
-  agent_name: string | null;
+  agent_name: string;
   running_runs: number;
 }
 
@@ -167,6 +168,31 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     expect(byId.get(sched.deux!)!.spaceId).toBe(s.deux);
     // The agent's display name rides on the row, whatever space places it.
     expect(byId.get(sched.deux!)!.agent_name).toBe(`Agent of ${s.deux}`);
+  });
+
+  it("names the agent by its package id when its manifest carries no display_name", async () => {
+    const pkgId = `@orgsched/bare-${crypto.randomUUID().slice(0, 8)}`;
+    await seedPackage({
+      id: pkgId,
+      orgId: owner.orgId,
+      homeSpaceId: s.un,
+      createdBy: owner.user.id,
+      draftManifest: { name: pkgId, version: "0.1.0", type: "agent" },
+    });
+    const bare = await seedSchedule({
+      packageId: pkgId,
+      orgId: owner.orgId,
+      spaceId: s.un,
+      userId: owner.user.id,
+    });
+    const { body } = await list({ Cookie: member.cookie });
+    expect(body.data.find((row) => row.id === bare.id)!.agent_name).toBe(pkgId);
+  });
+
+  it("refuses an unknown query parameter", async () => {
+    const res = await app.request(path(`?spaceId=${s.un}`), { headers: { Cookie: member.cookie } });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
   });
 
   it("serves the owner every schedule of every team space, private included", async () => {
