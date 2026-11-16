@@ -8,7 +8,8 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
  * opens its workspaces, it does not switch to it); one column, the organization above its
  * workspaces, on a phone or with a single organization. You are always in a workspace, never
  * in an organization alone, so org + workspace are applied together. The current context
- * keeps the tinted fill, the check and the only gear; the explored one is the highlighted row.
+ * keeps the tinted fill and the check; the explored one is the highlighted row. Every row leads
+ * to its own settings, entering its organization or space first.
  */
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -80,7 +81,12 @@ function AddRow({
   );
 }
 
-/** A pickable row: the pick on the left, and on the current one the gear to its settings. */
+/**
+ * A pickable row: the pick on the left, the gear to its settings on the right. The gear shows on
+ * the row pointed at or focused, and stays on the current one and wherever nothing hovers
+ * (`pinned`). `onPick` replaces the link's own navigation, for settings of another context that
+ * is entered first.
+ */
 function PickerRow({
   rowClassName,
   settings,
@@ -89,11 +95,11 @@ function PickerRow({
   ...pick
 }: ComponentProps<"button"> & {
   rowClassName?: string | false;
-  settings?: { to: string; label: string };
+  settings?: { to: string; label: string; pinned: boolean; onPick?: () => void };
   onNavigate: () => void;
 }) {
   return (
-    <div className={cn("hover:bg-accent flex items-center rounded-md", rowClassName)}>
+    <div className={cn("group hover:bg-accent flex items-center rounded-md", rowClassName)}>
       <button
         type="button"
         className={cn(
@@ -105,9 +111,17 @@ function PickerRow({
       {settings && (
         <Link
           to={settings.to}
-          onClick={onNavigate}
+          onClick={(event) => {
+            if (!settings.onPick) return onNavigate();
+            event.preventDefault();
+            settings.onPick();
+          }}
           aria-label={settings.label}
-          className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+          title={settings.label}
+          className={cn(
+            "text-muted-foreground hover:text-foreground shrink-0 p-2",
+            !settings.pinned && "hidden group-focus-within:block group-hover:block",
+          )}
         >
           <Settings size={15} />
         </Link>
@@ -234,6 +248,20 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const maySpaceWrite = isExploringElsewhere
     ? !!orgs.find((org) => org.id === exploredId)?.permissions.includes("spaces:write")
     : can("spaces:write");
+  /** The settings of another organization: switch there, then open them. */
+  const openOrgSettings = (orgId: string) =>
+    requestScopeChange(() => {
+      switchOrg(orgId);
+      navigate("/org-settings");
+      closeSwitcherAndSidebar();
+    });
+  /** The settings of another space: enter it (and its organization), then open them. */
+  const openSpaceSettings = (orgId: string, spaceId: string) =>
+    requestScopeChange(() => {
+      enterSpace(orgId, spaceId);
+      navigate("/workspace-settings");
+      closeSwitcherAndSidebar();
+    });
   /** « Nouvel espace » of another organization: switch there, then open its creation. */
   const createSpaceElsewhere = () =>
     requestScopeChange(() => {
@@ -346,9 +374,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   return (
                     // Opens this organization's workspaces beside it. It does NOT switch: you
                     // are always in a workspace, so the pick is only complete one column to the
-                    // right. The gear is on the current org only: it configures what you are IN,
-                    // and switching org first is one honest click rather than a shortcut that
-                    // silently changes context.
+                    // right. Its gear does switch: the settings it opens are this organization's.
                     <PickerRow
                       key={org.id}
                       data-testid={`org-item-${org.id}`}
@@ -358,14 +384,12 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         isExplored && "bg-accent",
                         isCurrent && "bg-primary/10 hover:bg-primary/10",
                       )}
-                      settings={
-                        isCurrent
-                          ? {
-                              to: "/org-settings",
-                              label: t("switcher.orgSettings", { org: org.name }),
-                            }
-                          : undefined
-                      }
+                      settings={{
+                        to: "/org-settings",
+                        label: t("switcher.settingsOf", { name: org.name }),
+                        pinned: isCurrent || mobilePresentation,
+                        onPick: isCurrent ? undefined : () => openOrgSettings(org.id),
+                      }}
                       onNavigate={closeSwitcherAndSidebar}
                     >
                       <IdentityTile {...orgTile(org)} className="size-6" />
@@ -445,10 +469,14 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
                         rowClassName={isCurrent && "bg-primary/10 hover:bg-primary/10"}
                         settings={
-                          isCurrent
+                          enterable
                             ? {
                                 to: "/workspace-settings",
-                                label: t("workspaceSettings.pageTitle", { ns: "settings" }),
+                                label: t("switcher.settingsOf", { name: spaceLabel(space, t) }),
+                                pinned: isCurrent || mobilePresentation,
+                                onPick: isCurrent
+                                  ? undefined
+                                  : () => openSpaceSettings(exploredId ?? currentOrg.id, space.id),
                               }
                             : undefined
                         }

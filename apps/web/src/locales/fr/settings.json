@@ -987,7 +987,6 @@
   "models.generation.levels.high": "Élevé",
   "models.generation.levels.xhigh": "Très élevé",
   "models.generation.levels.max": "Maximum",
-  "workspaceSettings.pageTitle": "Paramètres de l'espace de travail",
   "workspaceSettings.sectionGeneral": "Espace de travail",
   "unifiedSettings.organizationSelector": "Choisir une organisation",
   "unifiedSettings.workspaceSelector": "Choisir un espace de travail",

@@ -12,7 +12,7 @@
   "switcher.workspacesColumn": "Espaces de travail",
   "switcher.searchPlaceholder": "Rechercher…",
   "switcher.searchAriaLabel": "Rechercher une organisation ou un espace de travail",
-  "switcher.orgSettings": "Paramètres de {{org}}",
+  "switcher.settingsOf": "Paramètres de {{name}}",
   "switcher.role.owner": "Propriétaire",
   "switcher.role.admin": "Administrateur",
   "switcher.role.member": "Membre",
