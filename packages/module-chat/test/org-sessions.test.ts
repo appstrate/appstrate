@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Chat sessions, served at `/api/orgs/:orgId/chat/*`: the one kind of conversation.
  *
