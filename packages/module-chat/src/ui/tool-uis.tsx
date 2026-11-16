@@ -508,7 +508,9 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
 function CallOAuthConnectCard({
   part,
   ...card
-}: { part: { providerMetadata?: unknown } } & React.ComponentProps<typeof OAuthConnectCard>) {
+}: { part: { providerMetadata?: unknown; args?: unknown } } & React.ComponentProps<
+  typeof OAuthConnectCard
+>) {
   return <OAuthConnectCard {...card} spaceId={callSpaceOf(part)} />;
 }
 
