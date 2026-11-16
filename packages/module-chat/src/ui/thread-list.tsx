@@ -402,8 +402,9 @@ function ConversationRow({
         onClick={() => select?.(session.id)}
         size={spaceLine ? "lg" : "default"}
         // Room for the fixed-width right slot below, which is absolutely
-        // positioned and would otherwise sit on top of a long title.
-        className="pr-16"
+        // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
+        // ring themselves in `--space-tile-ring`: the row's background in each of its states.
+        className="pr-16 [--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]"
       >
         {spaceLine ? (
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
