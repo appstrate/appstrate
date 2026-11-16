@@ -207,7 +207,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   if (loading) {
     return (
       <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
-        <Skeleton className="size-8 shrink-0 rounded-md" />
+        <Skeleton className="size-10 shrink-0 rounded-lg" />
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-3 w-20" />
@@ -326,7 +326,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-md" />
+          <IdentityTile {...orgTile(currentOrg)} className="size-10 rounded-lg" />
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
             <span className="truncate font-semibold">{currentOrg.name}</span>
