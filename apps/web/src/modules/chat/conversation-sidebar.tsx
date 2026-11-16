@@ -42,7 +42,7 @@ import type {
 import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth } from "./use-panel-width";
-import { useMediaQuery } from "./use-media-query";
+import { useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 

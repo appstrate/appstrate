@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useState, useEffect, useId, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  ArrowDown,
   Braces,
   Copy,
   Check,
@@ -21,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -46,7 +47,7 @@ import {
 } from "./log-utils";
 import { PackageIcon } from "./package-icon";
 import { ItemList } from "./item-list";
-import { Waiting } from "./loading-skeletons";
+import { JournalRowsSkeleton } from "./loading-skeletons";
 import { EmptyState } from "./page-states";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { RunStatusBadge } from "./status-badge";
@@ -60,6 +61,11 @@ import {
 } from "../lib/platform-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
+import { useMediaQuery } from "../hooks/use-media-query";
+import { useFillHeight } from "../hooks/use-fill-height";
+
+/** From this width the inspector stands beside the list; below, it opens in a sheet. */
+const INSPECTOR_BESIDE = "(min-width: 1024px)";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -289,6 +295,73 @@ function ToolResult({ entry }: { entry: ToolExecutionEntry }) {
   );
 }
 
+/**
+ * One journal row: its icon, the event, then its duration and (on request) its time. The type
+ * is drawn by the icon alone and spoken by assistive technology.
+ */
+export function LogRow({
+  entry,
+  integrations,
+  showTimestamp,
+  open,
+  inspectorId,
+  onToggle,
+}: {
+  entry: ExecutionEntry;
+  integrations: JournalIntegrations;
+  showTimestamp: boolean;
+  open: boolean;
+  inspectorId: string;
+  onToggle: () => void;
+}) {
+  const { t, i18n } = useTranslation("agents");
+  const duration =
+    entry.kind === "tool" && entry.durationMs !== undefined
+      ? formatDuration(entry.durationMs)
+      : null;
+  const time = showTimestamp ? formatTimestamp(entry.createdAt, i18n.language) : null;
+  return (
+    <button
+      type="button"
+      className={cn(
+        "hover:bg-muted/50 flex w-full cursor-pointer items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors",
+        open && "bg-muted/40",
+      )}
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls={open ? inspectorId : undefined}
+    >
+      <span className="sr-only">{t(`log.type.${journalType(entry)}`)}</span>
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+        {entry.kind === "tool" ? (
+          <ToolStatus status={entry.status} />
+        ) : (
+          <ExecutionEntryIcon entry={entry} />
+        )}
+      </span>
+      <span
+        className={cn(
+          "text-foreground min-w-0 flex-1",
+          entry.kind === "tool" ? "flex items-center gap-1.5" : "break-words whitespace-pre-wrap",
+          entry.level && levelColors[entry.level],
+        )}
+      >
+        {entry.kind === "tool" ? (
+          <ToolCallEvent entry={entry} integrations={integrations} />
+        ) : (
+          entry.message
+        )}
+      </span>
+      {(duration || time) && (
+        <span className="text-muted-foreground flex shrink-0 gap-3 text-xs leading-5 whitespace-nowrap tabular-nums">
+          {duration && <span>{duration}</span>}
+          {time && <span className="font-mono">{time}</span>}
+        </span>
+      )}
+    </button>
+  );
+}
+
 interface LogViewerProps {
   entries: ExecutionEntry[];
   integrations: JournalIntegrations;
@@ -296,12 +369,16 @@ interface LogViewerProps {
   isLoading?: boolean;
   /** Terminal failures open with the causal event near the middle of the journal. */
   focusError?: boolean;
+  /** New entries can still arrive: a reader away from the end is offered a way back to it. */
+  live?: boolean;
   headerActions?: ReactNode;
+  /** The open row, which a first positioning brings into view. */
   selectedEntryId?: string | null;
+  /** `null` closes the open row: its re-click, the inspector's close, the sheet's dismissal. */
   onSelectEntry: (entryId: string | null) => void;
   /** Read once at mount: the caller keys the viewer on it to apply a new focus. */
   initialFocus?: JournalOverviewFilter;
-  /** The open row's inspector, drawn beside the list inside the journal's card. */
+  /** The open row's inspector: beside the list from `lg`, in a sheet below. */
   inspector?: ReactNode;
 }
 
@@ -335,6 +412,7 @@ export function LogViewer({
   integrations,
   isLoading = false,
   focusError = false,
+  live = false,
   headerActions,
   selectedEntryId,
   onSelectEntry,
@@ -343,7 +421,11 @@ export function LogViewer({
 }: LogViewerProps) {
   const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const positionedRef = useRef(false);
+  const fillHeight = useFillHeight(cardRef);
+  const inspectorBeside = useMediaQuery(INSPECTOR_BESIDE);
+  const inspectorId = useId();
 
   const [autoScroll, setAutoScroll] = useState(true);
   const { copied, copy } = useCopyToClipboard();
@@ -435,7 +517,7 @@ export function LogViewer({
   const virtualizer = useVirtualizer({
     count: visibleEntries.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 34,
+    estimateSize: () => 40,
     overscan: 10,
   });
 
@@ -447,17 +529,20 @@ export function LogViewer({
   useEffect(() => {
     if (visibleEntries.length === 0) return;
     if (!positionedRef.current) {
-      let errorIndex = -1;
-      if (focusError) {
+      // The open row (a reload, a shared link) first, then the causal error, else the end.
+      let anchor = selectedEntryId
+        ? visibleEntries.findIndex((entry) => entry.id === selectedEntryId)
+        : -1;
+      if (anchor < 0 && focusError) {
         for (let index = visibleEntries.length - 1; index >= 0; index -= 1) {
           if (journalLevel(visibleEntries[index]!) === "error") {
-            errorIndex = index;
+            anchor = index;
             break;
           }
         }
       }
-      virtualizer.scrollToIndex(errorIndex >= 0 ? errorIndex : visibleEntries.length - 1, {
-        align: errorIndex >= 0 ? "center" : "end",
+      virtualizer.scrollToIndex(anchor >= 0 ? anchor : visibleEntries.length - 1, {
+        align: anchor >= 0 ? "center" : "end",
       });
       positionedRef.current = true;
       return;
@@ -465,7 +550,7 @@ export function LogViewer({
     if (autoScroll) {
       virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
     }
-  }, [visibleEntries, autoScroll, focusError, virtualizer]);
+  }, [visibleEntries, autoScroll, focusError, selectedEntryId, virtualizer]);
 
   // Disable auto-scroll when user scrolls up
   useEffect(() => {
@@ -502,6 +587,13 @@ export function LogViewer({
     void copy(text);
   };
 
+  const followLatest = () => {
+    setAutoScroll(true);
+    if (visibleEntries.length > 0) {
+      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+    }
+  };
+
   const clearJournalFilters = () => {
     setQuery("");
     setLevelFilters([]);
@@ -510,9 +602,7 @@ export function LogViewer({
     setDisplay([]);
   };
 
-  const journalGrid = showTimestamps
-    ? "grid-cols-[7rem_10rem_minmax(22rem,1fr)_6rem]"
-    : "grid-cols-[10rem_minmax(22rem,1fr)_6rem]";
+  const besideList = inspectorBeside && !!inspector;
 
   return (
     <div className="min-w-0">
@@ -530,12 +620,7 @@ export function LogViewer({
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
                 checked={autoScroll}
-                onCheckedChange={(checked) => {
-                  setAutoScroll(checked);
-                  if (checked && visibleEntries.length > 0) {
-                    virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
-                  }
-                }}
+                onCheckedChange={(checked) => (checked ? followLatest() : setAutoScroll(false))}
               >
                 {t("log.autoScroll")}
               </DropdownMenuCheckboxItem>
@@ -544,142 +629,122 @@ export function LogViewer({
         }
       />
 
-      {/* The journal's own card, like a table's: the event list and, when a row is open, its
-          inspector beside it — the toolbar above stays on the page. */}
+      {/* The journal's own card: the event list and, from `lg` when a row is open, its
+          inspector beside it. It ends where the page does, and its list scrolls inside it. */}
       <div
+        ref={cardRef}
         className={cn(
-          "bg-card grid min-w-0 overflow-hidden rounded-lg border",
-          inspector && "lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]",
+          "bg-card flex min-w-0 overflow-hidden rounded-lg border",
+          besideList ? "flex-row" : "flex-col",
         )}
+        style={besideList ? { height: fillHeight } : { maxHeight: fillHeight }}
       >
-        <div className="min-w-0 overflow-x-auto">
-          <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
-            <div
-              className={cn(
-                "border-border bg-muted/40 text-muted-foreground grid items-center gap-4 border-b px-4 py-2 text-xs font-semibold tracking-wide uppercase",
-                journalGrid,
-              )}
-            >
-              {showTimestamps && <span>{t("log.timestamp")}</span>}
-              <span>{t("log.filterType")}</span>
-              <span>{t("log.columnEvent")}</span>
-              <span>{t("run.infoDuration")}</span>
-            </div>
-
-            <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
-              {isLoading && entries.length === 0 ? (
-                <Waiting>
-                  <div className="flex flex-col gap-2 p-4">
-                    {Array.from({ length: 8 }, (_, i) => (
-                      <Skeleton key={i} className="h-8 w-full" />
-                    ))}
-                  </div>
-                </Waiting>
-              ) : visibleEntries.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  {entries.length === 0 ? (
-                    <EmptyState compact icon={ScrollText} message={t("log.empty")} />
-                  ) : (
-                    <EmptyState
-                      compact
-                      icon={SearchX}
-                      message={t("log.noMatches")}
-                      hint={t("log.noMatchesHint")}
+        <div className="relative flex min-h-0 min-w-0 flex-[2] flex-col">
+          {/* Virtualized rows mount as the list scrolls: a polite live region (the implicit
+              value of `log`) would announce them as new events, so it is turned off. */}
+          <div
+            ref={scrollRef}
+            role="log"
+            aria-live="off"
+            aria-label={t("log.listLabel")}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
+            {isLoading && entries.length === 0 ? (
+              <JournalRowsSkeleton />
+            ) : visibleEntries.length === 0 ? (
+              <div className="flex h-full items-center justify-center py-10">
+                {entries.length === 0 ? (
+                  <EmptyState compact icon={ScrollText} message={t("log.empty")} />
+                ) : (
+                  <EmptyState
+                    compact
+                    icon={SearchX}
+                    message={t("log.noMatches")}
+                    hint={t("log.noMatchesHint")}
+                  >
+                    {hasActiveQueryOrFilters && (
+                      <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
+                        {t("common:toolbar.clearAll")}
+                      </Button>
+                    )}
+                  </EmptyState>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  height: virtualizer.getTotalSize(),
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualizer.getVirtualItems().map((virtualRow) => {
+                  const entry = visibleEntries[virtualRow.index]!;
+                  const open = selectedEntryId === entry.id;
+                  return (
+                    <div
+                      key={entry.id}
+                      data-index={virtualRow.index}
+                      ref={virtualizer.measureElement}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
                     >
-                      {hasActiveQueryOrFilters && (
-                        <Button variant="ghost" size="sm" onClick={clearJournalFilters}>
-                          {t("common:toolbar.clearAll")}
-                        </Button>
-                      )}
-                    </EmptyState>
-                  )}
-                </div>
-              ) : (
-                <div
-                  style={{
-                    height: virtualizer.getTotalSize(),
-                    width: "100%",
-                    position: "relative",
-                  }}
-                >
-                  {virtualizer.getVirtualItems().map((virtualRow) => {
-                    const entry = visibleEntries[virtualRow.index]!;
-                    const isSelected = selectedEntryId === entry.id;
-                    return (
-                      <div
-                        key={entry.id}
-                        data-index={virtualRow.index}
-                        ref={virtualizer.measureElement}
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${virtualRow.start}px)`,
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className={cn(
-                            "hover:bg-muted/50 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
-                            journalGrid,
-                            isSelected && "bg-muted/40",
-                          )}
-                          onClick={() => onSelectEntry(isSelected ? null : entry.id)}
-                          aria-pressed={isSelected}
-                        >
-                          {showTimestamps && (
-                            <span className="text-muted-foreground font-mono text-xs">
-                              {formatTimestamp(entry.createdAt, i18n.language)}
-                            </span>
-                          )}
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="flex size-4 shrink-0 items-center justify-center">
-                              {entry.kind === "tool" ? (
-                                <ToolStatus status={entry.status} />
-                              ) : (
-                                <ExecutionEntryIcon entry={entry} />
-                              )}
-                            </span>
-                            <span className="text-muted-foreground truncate text-xs">
-                              {t(`log.type.${journalType(entry)}`)}
-                            </span>
-                          </span>
-                          <span
-                            className={cn(
-                              "text-foreground min-w-0",
-                              entry.kind === "tool"
-                                ? "flex items-center gap-1.5"
-                                : "break-words whitespace-pre-wrap",
-                              entry.level && levelColors[entry.level],
-                            )}
-                          >
-                            {entry.kind === "tool" ? (
-                              <ToolCallEvent entry={entry} integrations={integrations} />
-                            ) : (
-                              entry.message
-                            )}
-                          </span>
-                          <span className="text-muted-foreground text-right text-xs tabular-nums">
-                            {entry.kind === "tool" && entry.durationMs !== undefined
-                              ? formatDuration(entry.durationMs)
-                              : ""}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                      <LogRow
+                        entry={entry}
+                        integrations={integrations}
+                        showTimestamp={showTimestamps}
+                        open={open}
+                        inspectorId={inspectorId}
+                        onToggle={() => onSelectEntry(open ? null : entry.id)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
+          {live && !autoScroll && visibleEntries.length > 0 && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute right-3 bottom-3 shadow-md"
+              onClick={followLatest}
+            >
+              <ArrowDown />
+              {t("log.jumpToLatest")}
+            </Button>
+          )}
         </div>
-        {inspector && (
-          <aside className="border-border min-w-0 border-t lg:border-t-0 lg:border-l">
+        {besideList && (
+          <aside
+            id={inspectorId}
+            className="border-border flex min-h-0 min-w-80 flex-1 flex-col border-l"
+          >
             {inspector}
           </aside>
         )}
       </div>
+
+      {!inspectorBeside && (
+        <Sheet open={!!inspector} onOpenChange={(open) => !open && onSelectEntry(null)}>
+          <SheetContent
+            id={inspectorId}
+            side="right"
+            aria-describedby={undefined}
+            // The inspector's header carries the one close control, as beside the list.
+            showCloseButton={false}
+            className="flex w-[min(92vw,32rem)] flex-col gap-0 p-0 sm:max-w-none"
+          >
+            <SheetTitle className="sr-only">{t("log.inspectorTitle")}</SheetTitle>
+            {inspector}
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -698,7 +763,7 @@ export function LogEntryInspector({
   const label = entry.kind === "tool" ? toolLabel(entry, t) : undefined;
 
   return (
-    <div className="flex h-full min-h-[400px] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="border-border flex h-14 shrink-0 items-center gap-3 border-b px-4">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("log.inspectorTitle")}</h2>
         <Button

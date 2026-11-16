@@ -2,9 +2,11 @@
 
 /**
  * The journal's two empty bodies: a run that logged nothing says so plainly,
- * and only a journal whose filters hide every event offers to clear them. A
- * tool row is named by the integration tool it reached, and the inspector reads
- * a call of the platform's `recall_memory` as the memories it returned.
+ * and only a journal whose filters hide every event offers to clear them. A row
+ * draws its type as an icon and says it to assistive technology, its metadata
+ * after the event. A tool row is named by the integration tool it reached, and
+ * the inspector reads a call of the platform's `recall_memory` as the memories
+ * it returned.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -15,7 +17,9 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { LogEntryInspector, LogViewer, ToolCallEvent } = await import("../log-viewer.tsx");
+const { LogEntryInspector, LogRow, LogViewer, ToolCallEvent } = await import("../log-viewer.tsx");
+const { formatTimestamp } = await import("../log-utils.ts");
+const { formatDuration } = await import("../../lib/format-duration.ts");
 const { render } = await import("../../test/render.tsx");
 const agentsFr = (await import("../../locales/fr/agents.json")).default;
 const commonFr = (await import("../../locales/fr/common.json")).default;
@@ -58,6 +62,86 @@ describe("LogViewer — an empty journal", () => {
     expect(html).toContain(agentsFr["log.noMatches"]);
     expect(html).toContain(commonFr["toolbar.clearAll"]);
     expect(html).not.toContain(agentsFr["log.empty"]);
+  });
+});
+
+describe("LogViewer — the list", () => {
+  it("is a named log that does not announce rows mounting as it scrolls", () => {
+    const html = render(
+      <LogViewer entries={[message]} integrations={integrations} onSelectEntry={() => {}} />,
+    );
+    expect(html).toContain('role="log"');
+    expect(html).toContain('aria-live="off"');
+    expect(html).toContain(`aria-label="${agentsFr["log.listLabel"]}"`);
+  });
+
+  it("draws rows on their way, not the empty state, while the journal is read", () => {
+    const html = render(
+      <LogViewer entries={[]} integrations={integrations} isLoading onSelectEntry={() => {}} />,
+    );
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain(agentsFr["log.empty"]);
+  });
+});
+
+describe("LogRow — one event per line", () => {
+  const search: ToolExecutionEntry = {
+    id: "tool:call-9",
+    kind: "tool",
+    tool: "acme_docs__search",
+    status: "success",
+    durationMs: 1200,
+    createdAt: "2026-07-01T10:00:00.000Z",
+  };
+  const row = (entry: ExecutionEntry, options: { open?: boolean; showTimestamp?: boolean } = {}) =>
+    render(
+      <LogRow
+        entry={entry}
+        integrations={integrations}
+        showTimestamp={options.showTimestamp ?? false}
+        open={options.open ?? false}
+        inspectorId="journal-inspector"
+        onToggle={() => {}}
+      />,
+    );
+  const count = (html: string, needle: string) => html.split(needle).length - 1;
+
+  it("draws no type word, and says the type to assistive technology", () => {
+    for (const [entry, type] of [
+      [message, agentsFr["log.type.message"]],
+      [search, agentsFr["log.type.tool"]],
+    ] as const) {
+      const html = row(entry);
+      expect(html).toContain(`<span class="sr-only">${type}</span>`);
+      expect(count(html, type)).toBe(1);
+    }
+  });
+
+  it("puts a tool's duration after the event, and its time only on request", () => {
+    const duration = formatDuration(1200);
+    const time = formatTimestamp(search.createdAt, "fr");
+    const html = row(search);
+    expect(html.indexOf(duration)).toBeGreaterThan(html.indexOf("acme_docs__search"));
+    expect(html).not.toContain(time);
+    const timed = row(search, { showTimestamp: true });
+    expect(timed.indexOf(time)).toBeGreaterThan(timed.indexOf(duration));
+  });
+
+  it("gives a message its time on request, and no duration", () => {
+    const time = formatTimestamp(message.createdAt, "fr");
+    const html = row(message, { showTimestamp: true });
+    expect(html.indexOf(time)).toBeGreaterThan(html.indexOf(message.message));
+    expect(row(message)).not.toContain(time);
+  });
+
+  it("says whether its inspector is open, and points at it only then", () => {
+    const closed = row(search);
+    expect(closed).toContain('aria-expanded="false"');
+    expect(closed).not.toContain("aria-controls");
+    const open = row(search, { open: true });
+    expect(open).toContain('aria-expanded="true"');
+    expect(open).toContain('aria-controls="journal-inspector"');
+    expect(open).not.toContain("aria-pressed");
   });
 });
 

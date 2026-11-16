@@ -211,12 +211,34 @@ function MemoryTabBlocks() {
   );
 }
 
-/** A run's journal: its toolbar (with the actions menu), then its own card and tinted head. */
+/**
+ * A run journal's rows on their way, shaped like its rows: the leading icon, the event's line,
+ * the trailing metadata.
+ */
+export function JournalRowsSkeleton() {
+  return (
+    <Waiting>
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className="flex h-10 items-center gap-3 px-4">
+          <Skeleton className="size-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className={cn("h-3.5", LINE_WIDTHS[i % 5])} />
+          </div>
+          <Skeleton className="h-3 w-10 shrink-0" />
+        </div>
+      ))}
+    </Waiting>
+  );
+}
+
+/** A run's journal: its toolbar (with the actions menu), then its own card of rows. */
 function JournalTabBlocks() {
   return (
     <>
       <ToolbarBlocks action />
-      <TableBlocks framed tintedHead />
+      <Card className="overflow-hidden">
+        <JournalRowsSkeleton />
+      </Card>
     </>
   );
 }
@@ -394,14 +416,13 @@ function ToolbarBlocks({
  * `DataTable`'s head and rows: in its own card on a page, frameless (the head ruled above and
  * below) on an integrated surface.
  */
-function TableBlocks({ framed, tintedHead = false }: { framed: boolean; tintedHead?: boolean }) {
+function TableBlocks({ framed }: { framed: boolean }) {
   const body = (
     <>
       <div
         className={cn(
           "border-border flex h-10 items-center px-3",
           framed ? "border-b" : "border-y",
-          tintedHead && "bg-muted/40",
         )}
       >
         <Skeleton className="h-3 w-1/3" />
