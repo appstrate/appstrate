@@ -88,8 +88,8 @@ export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> 
 }
 
 /**
- * Only agents have a run state and a run action, which runs in the row's space. `spanning`: an
- * index across spaces, each row naming its space.
+ * Only agents have a run state and a run action, which runs in one of the row's spaces.
+ * `spanning`: an index across spaces, each row naming its spaces.
  */
 export function usePackageColumns(holds: PackageType, spanning = false): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
@@ -135,7 +135,7 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
         <span className="relative z-10">
           <RunAgentButton
             packageId={item.id}
-            spaceId={item.spaceId}
+            spaceIds={item.spaceIds}
             variant="ghost"
             size="icon"
             className="text-muted-foreground hover:text-primary size-7"

@@ -29,7 +29,7 @@ import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
 import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
-import { cardItemKey, type CardItem } from "../lib/package-card-item";
+import type { CardItem } from "../lib/package-card-item";
 
 const NO_FILTERS: FilterSpec[] = [];
 
@@ -82,7 +82,7 @@ export interface PackageCollectionProps {
   extraFilters?: FilterSpec[];
   /** Whether an agent card offers its run button. A catalogue's cannot. */
   cardRun?: boolean;
-  /** The list spans several spaces: each card names its row's space. */
+  /** The list spans several spaces: each card names its row's spaces. */
   spanning?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
@@ -257,7 +257,7 @@ export function PackageCollection({
                 />
                 <CardGrid
                   items={section.items}
-                  itemKey={cardItemKey}
+                  itemKey={(item) => item.id}
                   renderCard={(item) => (
                     <PackageCard
                       {...item}
@@ -276,7 +276,7 @@ export function PackageCollection({
       ) : (
         <CardGrid
           items={shown}
-          itemKey={cardItemKey}
+          itemKey={(item) => item.id}
           renderCard={(item) => (
             <PackageCard
               {...item}

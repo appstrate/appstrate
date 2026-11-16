@@ -17,7 +17,7 @@ import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
 import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
-import { cardItemKey, packageCardItem } from "../lib/package-card-item";
+import { packageCardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
@@ -107,12 +107,8 @@ export function IntegrationsPage() {
     [active, query, origins, execution, protocols],
   );
   const filtering = query.trim() !== "" || origins.length > 0 || protocols.length > 0;
-  // An integration placed in several spaces is a row per space when the list spans them: the
-  // counts name integrations.
-  const integrationCount = (rows: readonly { id: string }[]) =>
-    new Set(rows.map((row) => row.id)).size;
   const countOf = (value: IntegrationExecution) =>
-    integrationCount(active.filter((row) => integrationExecution(row.source_kind) === value));
+    active.filter((row) => integrationExecution(row.source_kind) === value).length;
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning).filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
@@ -219,7 +215,7 @@ export function IntegrationsPage() {
           label={t("integrations.tableLabel")}
           columns={columns}
           rows={shown}
-          rowKey={cardItemKey}
+          rowKey={(integration) => integration.id}
           rowHref={(integration) =>
             linkInSpace(packageDetailPath("integration", integration.id), integration.spaceId)
           }
@@ -231,7 +227,7 @@ export function IntegrationsPage() {
       ) : (
         <CardGrid
           items={shown}
-          itemKey={cardItemKey}
+          itemKey={(integration) => integration.id}
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
@@ -239,7 +235,7 @@ export function IntegrationsPage() {
               meta={
                 connectionCount &&
                 t("connections.connectionCount", {
-                  count: connectionCount(integration.id, integration.spaceId),
+                  count: connectionCount(integration.id, integration.spaceIds),
                 })
               }
             />
@@ -251,11 +247,7 @@ export function IntegrationsPage() {
         />
       )}
       <ListFooter
-        count={
-          isLoading || error
-            ? undefined
-            : t("integrations.count", { count: integrationCount(shown) })
-        }
+        count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
       {importing && canCreate && (

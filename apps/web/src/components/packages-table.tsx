@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
 import { useSpaceLink } from "../hooks/use-current-space";
-import { cardItemKey, type CardItem } from "../lib/package-card-item";
+import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
 
 export function PackagesTable({
@@ -43,7 +43,7 @@ export function PackagesTable({
       label={label ?? t("list.tableLabel")}
       columns={columns}
       rows={items}
-      rowKey={cardItemKey}
+      rowKey={(item) => item.id}
       rowHref={
         rowAction
           ? undefined

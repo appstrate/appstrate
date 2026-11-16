@@ -22,7 +22,7 @@ describe("connectionCounter", () => {
       ],
       "org_a",
     );
-    expect(count("@appstrate/gmail", "spc_here")).toBe(3);
+    expect(count("@appstrate/gmail", ["spc_here"])).toBe(3);
   });
 
   it("counts in the row's space: another space of the org keeps only the org-scoped ones", () => {
@@ -38,8 +38,25 @@ describe("connectionCounter", () => {
       },
     ];
     const count = connectionCounter(groups, "org_a");
-    expect(count("@appstrate/slack", "spc_here")).toBe(1);
-    expect(count("@appstrate/slack", "spc_elsewhere")).toBe(2);
+    expect(count("@appstrate/slack", ["spc_here"])).toBe(1);
+    expect(count("@appstrate/slack", ["spc_elsewhere"])).toBe(2);
+  });
+
+  it("counts a connection once across the spaces of a row listed for several", () => {
+    const groups = [
+      {
+        source_id: "@appstrate/slack",
+        connections: [
+          connection("org_a", null),
+          connection("org_a", "spc_here"),
+          connection("org_a", "spc_elsewhere"),
+          connection("org_a", "spc_third"),
+        ],
+      },
+    ];
+    expect(
+      connectionCounter(groups, "org_a")("@appstrate/slack", ["spc_here", "spc_elsewhere"]),
+    ).toBe(3);
   });
 
   it("is 0 for an integration with nothing usable there", () => {
@@ -47,12 +64,12 @@ describe("connectionCounter", () => {
       [{ source_id: "@acme/crm", connections: [connection("org_b", null)] }],
       "org_a",
     );
-    expect(count("@acme/crm", "spc_here")).toBe(0);
-    expect(count("@acme/unknown", "spc_here")).toBe(0);
+    expect(count("@acme/crm", ["spc_here"])).toBe(0);
+    expect(count("@acme/unknown", ["spc_here"])).toBe(0);
   });
 
   it("counts nothing before the org is known", () => {
     const groups = [{ source_id: "@acme/crm", connections: [connection("org_a", null)] }];
-    expect(connectionCounter(groups, null)("@acme/crm", "spc_here")).toBe(0);
+    expect(connectionCounter(groups, null)("@acme/crm", ["spc_here"])).toBe(0);
   });
 });

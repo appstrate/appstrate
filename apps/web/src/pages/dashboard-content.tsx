@@ -21,7 +21,7 @@ import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
 import { RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
-import { agentCardItem, cardItemKey } from "../lib/package-card-item";
+import { agentCardItem } from "../lib/package-card-item";
 import { grantedInSomeSpace } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useSpaceAction } from "../hooks/use-space-action";
@@ -190,8 +190,8 @@ function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning:
       {agents.map((agent) => {
         const item = agentCardItem(agent);
         return (
-          // Spanning, a card names its space; its run acts there.
-          <div key={cardItemKey(item)} className="w-[19rem] shrink-0">
+          // Spanning, a card names its spaces; its run acts in one of them.
+          <div key={item.id} className="w-[19rem] shrink-0">
             <PackageCard {...item} showSpace={spanning} headingLevel={3} />
           </div>
         );

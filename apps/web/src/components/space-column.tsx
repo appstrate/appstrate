@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { SpaceNameOf } from "./space-name";
+import { SpaceNamesOf } from "./space-name";
 import type { DataColumn } from "./data-table";
 
 /** The « Espace » column of a list spanning spaces; none otherwise. Spread into a column set. */
-export function useSpaceColumn<T extends { spaceId?: string }>(spanning: boolean): DataColumn<T>[] {
+export function useSpaceColumn<T extends { spaceId?: string; spaceIds?: string[] }>(
+  spanning: boolean,
+): DataColumn<T>[] {
   const { t } = useTranslation(["common"]);
   if (!spanning) return [];
   return [
@@ -14,7 +16,13 @@ export function useSpaceColumn<T extends { spaceId?: string }>(spanning: boolean
       header: t("table.column.space"),
       width: 120,
       elastic: true,
-      cell: (row) => <SpaceNameOf spaceId={row.spaceId} className="text-muted-foreground" />,
+      // A package index holds a row once for every space listing it; any other row has one space.
+      cell: (row) => (
+        <SpaceNamesOf
+          spaceIds={row.spaceIds ?? (row.spaceId ? [row.spaceId] : [])}
+          className="text-muted-foreground"
+        />
+      ),
     },
   ];
 }

@@ -16,7 +16,7 @@ import { useSpaceLink } from "../hooks/use-current-space";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
-import { SpaceNameOf } from "./space-name";
+import { SpaceNamesOf } from "./space-name";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -30,6 +30,7 @@ const KEYWORD_PILL = "bg-background text-muted-foreground shrink-0 px-2 text-[0.
 export function PackageCard({
   id,
   spaceId,
+  spaceIds,
   displayName,
   description,
   type,
@@ -51,7 +52,7 @@ export function PackageCard({
   onOpen,
   headingLevel = 2,
 }: CardItem & {
-  /** Name the item's space on the card: a list spanning spaces (like `FileTile`'s). */
+  /** Name the item's spaces on the card: a list spanning spaces (like `FileTile`'s). */
   showSpace?: boolean;
   /**
    * Whether an agent card offers to run it. False in the catalogue: a package
@@ -130,7 +131,7 @@ export function PackageCard({
               {type === "agent" && showRun && (
                 <RunAgentButton
                   packageId={id}
-                  spaceId={spaceId}
+                  spaceIds={spaceIds}
                   variant="ghost"
                   size="icon"
                   className="text-muted-foreground hover:text-primary size-7"
@@ -152,7 +153,7 @@ export function PackageCard({
                   v{version}
                 </UIBadge>
               )}
-              {showSpace && <SpaceNameOf spaceId={spaceId} />}
+              {showSpace && <SpaceNamesOf spaceIds={spaceIds ?? []} />}
               {showSpace && meta && <span aria-hidden>·</span>}
               {meta}
             </div>

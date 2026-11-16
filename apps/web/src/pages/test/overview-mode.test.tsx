@@ -68,7 +68,7 @@ const SPACES = [
   space("spc_b", ["runs:read", "schedules:read", "files:read", "agents:read", "skills:read"]),
 ];
 
-/** The same agent, active in both spaces: two rows, one per placement. */
+/** The same agent, active in both spaces: the org route's two rows, one per space. */
 const agent = (spaceId: string) => ({
   id: "@acme/reporter",
   spaceId,
@@ -264,45 +264,41 @@ describe("the agent index in the mode", () => {
   const seed = (queryClient: QueryClient) =>
     queryClient.setQueryData(["agents", "org_1", "across-spaces"], AGENTS);
 
-  it("asks the org route only, and draws one row per placement linking into its space", () => {
+  /** The table's body rows. */
+  const rowsOf = (html: string) => html.split("<tr").slice(2);
+
+  it("asks the org route only, and draws an agent of two spaces once, naming both", () => {
     const { html, asked } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed);
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
+    expect(rowsOf(html)).toHaveLength(1);
+    // The row opens in its first space, the working one here.
     expect(html).toContain('href="/agents/@acme/reporter"');
-    expect(html).toContain('href="/agents/@acme/reporter?enterSpace=spc_b"');
-    // The « Espace » column names each row's space.
+    expect(html).not.toContain("enterSpace=");
+    // The « Espace » column names the first space and counts the other, named in its title.
     expect(html).toContain(">Espace<");
-    expect(html).toContain("Studio");
+    expect(html).toMatch(/title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span>/);
+    expect(html).toContain("1 élément");
   });
 
-  /** The table's body rows, by the space each one links into. */
-  const rowsOf = (html: string) => html.split("<tr").slice(2);
-  const runIn = (html: string, row: (tr: string) => boolean) =>
-    rowsOf(html)
-      .filter(row)
-      .every((tr) => tr.includes('aria-label="Lancer"'));
-
-  it("offers a row's run where the row's space grants it, whatever the working space grants", () => {
-    const { html } = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed);
-    const there = (tr: string) => tr.includes("enterSpace=spc_b");
+  it("offers a row's run where one of its spaces grants it, whatever the working space grants", () => {
+    const run = (spaces: typeof SPACES) =>
+      renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, spaces).html.includes(
+        'aria-label="Lancer"',
+      );
+    const without = (space: (typeof SPACES)[number]) => ({
+      ...space,
+      permissions: space.permissions.filter((p) => p !== "agents:run"),
+    });
     // spc_a grants `agents:run`, spc_b does not.
-    expect(runIn(html, (tr) => !there(tr))).toBe(true);
+    expect(run(SPACES)).toBe(true);
+    // Granted in the other space only: the run follows the row's spaces, not the working one.
     expect(
-      rowsOf(html)
-        .filter(there)
-        .some((tr) => tr.includes('aria-label="Lancer"')),
-    ).toBe(false);
-    // The same placements with the grants swapped: the run follows the row, not the working space.
-    const swapped = [
-      { ...SPACES[0]!, permissions: SPACES[0]!.permissions.filter((p) => p !== "agents:run") },
-      { ...SPACES[1]!, permissions: [...SPACES[1]!.permissions, "agents:run"] },
-    ];
-    const other = renderIn(true, <PackageIndexPage type="agent" />, "/agents", seed, swapped).html;
-    expect(runIn(other, there)).toBe(true);
-    expect(
-      rowsOf(other)
-        .filter((tr) => !there(tr))
-        .some((tr) => tr.includes('aria-label="Lancer"')),
-    ).toBe(false);
+      run([
+        without(SPACES[0]!),
+        { ...SPACES[1]!, permissions: [...SPACES[1]!.permissions, "agents:run"] },
+      ]),
+    ).toBe(true);
+    expect(run([without(SPACES[0]!), SPACES[1]!])).toBe(false);
   });
 
   it("offers no write while the space listing has not answered: it appears once, never flips", () => {
@@ -336,7 +332,7 @@ describe("the agent index in the mode", () => {
 });
 
 describe("the skill index in the mode", () => {
-  it("asks the org route of its type and links each placement into its space", () => {
+  it("asks the org route of its type and draws a skill of two spaces once", () => {
     const { html, asked } = renderIn(true, <PackageIndexPage type="skill" />, "/skills", (qc) =>
       qc.setQueryData(
         ["packages", "skills", "org_1", "across-spaces"],
@@ -345,7 +341,8 @@ describe("the skill index in the mode", () => {
     );
     expect(asked("packages")).toEqual([["packages", "skills", "org_1", "across-spaces"]]);
     expect(html).toContain('href="/skills/@acme/crm"');
-    expect(html).toContain('href="/skills/@acme/crm?enterSpace=spc_b"');
+    expect(html).not.toContain("enterSpace=");
+    expect(html).toContain("1 élément");
     expect(html).toContain("data-page-actions-trigger");
   });
 });
@@ -374,21 +371,19 @@ describe("the integration index in the mode", () => {
     });
   };
 
-  it("draws a card per placement, naming its space and counting the connections there", () => {
+  it("draws an integration of two spaces once, naming both and counting each connection once", () => {
     const { html, asked } = renderIn(true, <IntegrationsPage />, "/integrations", seed);
     expect(asked("packages")).toEqual([["packages", "integrations", "org_1", "across-spaces"]]);
     expect(html).toContain('href="/integrations/@acme/crm"');
-    expect(html).toContain('href="/integrations/@acme/crm?enterSpace=spc_b"');
+    expect(html).not.toContain("enterSpace=");
+    // The org-scoped connection reaches both spaces and counts once.
     expect(html).toMatch(
-      /title="Studio">Studio<\/span><\/span><span aria-hidden="true">·<\/span>1 connexion/,
-    );
-    expect(html).toMatch(
-      /title="spc_b">spc_b<\/span><\/span><span aria-hidden="true">·<\/span>2 connexions/,
+      /title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span><\/span><span aria-hidden="true">·<\/span>2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
 
-  it("counts integrations, not their placements", () => {
+  it("counts integrations, not the spaces they are active in", () => {
     const { html } = renderIn(true, <IntegrationsPage />, "/integrations", seed);
     expect(html).toContain("1 intégration");
     expect(html).not.toContain("2 intégrations");
@@ -527,18 +522,19 @@ describe("the dashboard in the mode", () => {
     ]);
   });
 
-  it("draws an agent once per space, each card and run linking into its space", () => {
+  it("draws an agent of two spaces once, and each run linking into its space", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
-    expect(html).toContain('href="/agents/@acme/reporter?enterSpace=spc_b"');
-    expect(html).toContain('href="/agents/@acme/reporter"');
+    expect(html.match(/href="\/agents\/@acme\/reporter(\?[^"]*)?"/g)).toEqual([
+      'href="/agents/@acme/reporter"',
+    ]);
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_b?enterSpace=spc_b"');
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_a"');
   });
 
-  it("offers the assistant, and an agent's run on the card of the space that grants it", () => {
+  it("offers the assistant, and an agent's run on its card where a space grants it", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
     expect(html).toContain("Demander à l’IA");
-    // Two cards of the same agent; only spc_a grants `agents:run`.
+    // One card for the agent of two spaces; only spc_a grants `agents:run`.
     expect(html.match(/aria-label="Lancer"/g)).toHaveLength(1);
     // Out of the mode, a working space that reads runs offers the assistant and the agent's run.
     const here = renderIn(

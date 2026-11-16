@@ -16,11 +16,12 @@ export function useMyConnections() {
 }
 
 /**
- * The caller's own connections of an integration in a space of the current org: an index row's
- * own space, which a list spanning spaces varies. `undefined` until the account list answers (or
+ * The caller's own connections of an integration in spaces of the current org: an index row's
+ * own (several where the list spans them). `undefined` until the account list answers (or
  * when it fails): a caller must not read that as 0.
  */
-export function useConnectionCounts(): ((sourceId: string, spaceId: string) => number) | undefined {
+export function useConnectionCounts():
+  ((sourceId: string, spaceIds: readonly string[]) => number) | undefined {
   const { data: groups } = useMyConnections();
   const orgId = useCurrentOrgId();
   return useMemo(() => (groups ? connectionCounter(groups, orgId) : undefined), [groups, orgId]);

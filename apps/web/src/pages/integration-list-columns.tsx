@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
+import type { InSpaces } from "../lib/across-spaces";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
 import { useSpaceColumn } from "../components/space-column";
@@ -14,18 +15,20 @@ import { integrationProtocol } from "../lib/integration-collection";
 
 /**
  * One comparable integration fact per column. `connectionCount` is the caller's own connections
- * of an integration in a row's space (`useConnectionCounts`); `undefined` while unknown, drawn as
- * « — ». `spanning`: an index across spaces, each row naming its space.
+ * of an integration in a row's spaces (`useConnectionCounts`); `undefined` while unknown, drawn as
+ * « — ». `spanning`: an index across spaces, each row naming its spaces.
  */
+type IntegrationRow = InSpaces<IntegrationIndexItem>;
+
 export function useIntegrationListColumns(
-  connectionCount: ((sourceId: string, spaceId: string) => number) | undefined,
+  connectionCount: ((sourceId: string, spaceIds: readonly string[]) => number) | undefined,
   spanning: boolean,
-): DataColumn<IntegrationIndexItem>[] {
+): DataColumn<IntegrationRow>[] {
   const { t } = useTranslation("settings");
-  const spaceColumn = useSpaceColumn<IntegrationIndexItem>(spanning);
-  const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
+  const spaceColumn = useSpaceColumn<IntegrationRow>(spanning);
+  const origin = useCatalogueOriginColumn<IntegrationRow>(useOrg().currentOrg?.name ?? "");
   // Remote tab only: API or MCP.
-  const protocol = useCatalogueProtocolColumn<IntegrationIndexItem>((integration) =>
+  const protocol = useCatalogueProtocolColumn<IntegrationRow>((integration) =>
     integrationProtocol(integration.source_kind),
   );
 
@@ -63,7 +66,7 @@ export function useIntegrationListColumns(
       width: 112,
       align: "end",
       cell: (integration) => {
-        const count = connectionCount?.(integration.id, integration.spaceId);
+        const count = connectionCount?.(integration.id, integration.spaceIds);
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
             {count ?? "—"}

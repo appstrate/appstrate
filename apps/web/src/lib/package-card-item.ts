@@ -10,6 +10,8 @@ export interface CardItem {
   id: string;
   /** The space whose index lists the row; its link enters that space when it is not the current one (`useSpaceLink`). Absent off an index (the catalogue). */
   spaceId?: string;
+  /** Every space whose index lists it, `spaceId` first (`onePerPackage`): where its actions may act. */
+  spaceIds?: string[];
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -34,15 +36,11 @@ export interface CardItem {
   meta?: ReactNode;
 }
 
-/** A row's identity: a list spanning spaces holds a package once per space. */
-export function cardItemKey(item: Pick<CardItem, "id" | "spaceId">): string {
-  return item.spaceId ? `${item.spaceId}:${item.id}` : item.id;
-}
-
-export function agentCardItem(agent: AgentListItem): CardItem {
+export function agentCardItem(agent: AgentListItem & { spaceIds?: string[] }): CardItem {
   return {
     id: agent.id,
     spaceId: agent.spaceId,
+    spaceIds: agent.spaceIds,
     displayName: agent.display_name ?? agent.id,
     description: agent.description ?? null,
     type: "agent",
@@ -59,6 +57,7 @@ export function agentCardItem(agent: AgentListItem): CardItem {
 interface PackageIndexRow {
   id: string;
   spaceId: string;
+  spaceIds?: string[];
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -74,6 +73,7 @@ export function packageCardItem(row: PackageIndexRow, type: PackageType): CardIt
   return {
     id: row.id,
     spaceId: row.spaceId,
+    spaceIds: row.spaceIds,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

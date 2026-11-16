@@ -10,24 +10,29 @@ import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
+import { SpacePickerModal } from "./space-picker-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { packageDetailQueryOptions, usePackageDetail } from "../hooks/use-packages";
 import { useActInSpace, useRowSpaceGrants } from "../hooks/use-space-action";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useSpaces } from "../hooks/use-spaces";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { agentHasInput, runInputOpens } from "../lib/run-input";
 
+const NO_SPACES: readonly string[] = [];
+
 interface RunAgentButtonProps {
   packageId: string;
   /**
-   * The space of the row that offers the run (a list spanning spaces): its grants decide whether
-   * the run is offered, and a click enters it as the working space before running, so the
-   * launch, its input form and the run page all are that space's. The working space when absent.
+   * The spaces of the index row that offers the run: the run is offered where one grants it, and
+   * a click enters that space as the working space before running, so the launch, its input
+   * form and the run page all are that space's. Several granting it (a list spanning spaces),
+   * the click asks « Dans quel espace ? ». The working space when absent or empty.
    */
-  spaceId?: string;
+  spaceIds?: readonly string[];
   /** When provided, skips the lazy fetch (detail page case). */
   detail?: AgentDetail;
   version?: string;
@@ -49,7 +54,7 @@ interface RunAgentButtonProps {
 
 export function RunAgentButton({
   packageId,
-  spaceId,
+  spaceIds = NO_SPACES,
   detail: providedDetail,
   version,
   disabled,
@@ -62,14 +67,21 @@ export function RunAgentButton({
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const grants = useRowSpaceGrants();
-  const canRun = grants(spaceId, "agents:run");
+  const { data: spaces } = useSpaces();
+  const runnableIn = spaceIds.filter((id) => grants(id, "agents:run"));
+  const canRun = spaceIds.length > 0 ? runnableIn.length > 0 : grants(undefined, "agents:run");
+  const [asking, setAsking] = useState(false);
+  // Where the run goes: the only space granting it, else the one the reader picked.
+  const [picked, setPicked] = useState<string>();
+  const spaceId = runnableIn.length === 1 ? runnableIn[0] : picked;
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
   const actInSpace = useActInSpace();
-  // A row of another space than the working one: the detail query below reads the working
-  // space, so nothing it holds is this row's until a click enters the row's space.
-  const elsewhere = !!spaceId && spaceId !== workingSpaceId;
+  // A row of another space than the working one (or of several, none picked yet): the detail
+  // query below reads the working space, so nothing it holds is this row's until a click enters
+  // the row's space.
+  const elsewhere = spaceIds.length > 0 && spaceId !== workingSpaceId;
   const launcher = useRunLauncher(packageId);
   const [inputOpen, setInputOpen] = useState(false);
 
@@ -109,7 +121,12 @@ export function RunAgentButton({
     e.preventDefault();
     e.stopPropagation();
 
-    const target = spaceId ?? workingSpaceId;
+    if (spaceIds.length > 0 && runnableIn.length > 1) setAsking(true);
+    else runIn(spaceId);
+  };
+
+  const runIn = (rowSpaceId: string | undefined) => {
+    const target = rowSpaceId ?? workingSpaceId;
     const start = () => {
       // Detail already available (provided, or cached from a previous click in this space).
       if (detail) {
@@ -124,7 +141,7 @@ export function RunAgentButton({
       );
     };
     // In the row's space: the requests `start` sends read the working space when they leave.
-    if (spaceId) actInSpace(spaceId, start);
+    if (rowSpaceId) actInSpace(rowSpaceId, start);
     else start();
   };
 
@@ -186,6 +203,18 @@ export function RunAgentButton({
           agent={detail}
           onSubmit={(input) => launcher.launch({ input, version: runVersion })}
           isPending={launcher.isPending}
+        />
+      )}
+
+      {asking && (
+        <SpacePickerModal
+          spaces={(spaces ?? []).filter((space) => runnableIn.includes(space.id))}
+          onPick={(id) => {
+            setAsking(false);
+            setPicked(id);
+            runIn(id);
+          }}
+          onClose={() => setAsking(false)}
         />
       )}
 

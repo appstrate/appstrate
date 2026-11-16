@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
 import { useViewer } from "../hooks/use-auth";
-import { useSpaces } from "../hooks/use-spaces";
+import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel } from "../lib/space-label";
 
@@ -55,4 +55,25 @@ export function SpaceNameOf({
   const { data: spaces } = useSpaces();
   const space = spaces?.find((s) => s.id === spaceId);
   return space ? <SpaceName space={space} {...props} /> : null;
+}
+
+/**
+ * The spaces of a row listed once for several (`onePerPackage`): the first named, the others
+ * counted (« +2 »), their names in `title`.
+ */
+export function SpaceNamesOf({
+  spaceIds,
+  ...props
+}: { spaceIds: readonly string[] } & Omit<Parameters<typeof SpaceName>[0], "space" | "children">) {
+  const labelOf = useSpaceLabelOf();
+  const others = spaceIds.slice(1).flatMap((id) => labelOf(id) ?? []);
+  return (
+    <SpaceNameOf spaceId={spaceIds[0]} {...props}>
+      {others.length > 0 && (
+        <span className="shrink-0 tabular-nums" title={others.join(", ")}>
+          +{others.length}
+        </span>
+      )}
+    </SpaceNameOf>
+  );
 }
