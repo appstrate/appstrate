@@ -37,7 +37,7 @@ export function creationFields(created: Created): ConversationCreation {
 }
 
 /** Writes `restricted` on the session detail and on every cached list row of the conversation. */
-export function writeRestricted(queryClient: QueryClient, id: string, restricted: boolean): void {
+function writeRestricted(queryClient: QueryClient, id: string, restricted: boolean): void {
   queryClient.setQueryData<SessionHistory | null>(sessionQueryKey(id), (prev) =>
     prev ? { ...prev, restricted } : prev,
   );
