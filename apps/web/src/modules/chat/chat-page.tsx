@@ -24,6 +24,10 @@ import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authori
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { otherSpaceFileContext } from "../../lib/file-link";
+import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
@@ -32,10 +36,16 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
-import { useChatScope, useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import {
+  useChatCan,
+  useChatCanIn,
+  useChatScope,
+  useChatTransport,
+  useChatTranslate,
+  useLeaveConversationOnScopeChange,
+} from "./use-chat-runtime";
 import { renderSpaces } from "./render-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
-import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
   useModelProviderCredentials,
@@ -90,7 +100,11 @@ export function ChatModulePage() {
   const translate = useChatTranslate();
   // The mode decides which sessions the page serves: wait for the listing that tells it.
   const { known } = useChatScope();
-  const { can } = usePermissions();
+  // What an organization session may do is judged over the spaces it acts in, not the working one.
+  const can = useChatCan();
+  const canIn = useChatCanIn();
+  // A conversation belongs to the scope that opened it: changing the scope starts a new one.
+  useLeaveConversationOnScopeChange(conversationId ?? null);
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
@@ -121,9 +135,13 @@ export function ChatModulePage() {
   // File services the module consumes instead of reimplementing: the typed
   // download (reports failures with a toast) and the typed image preview.
   const downloadFile = useFileDownload();
+  // A file of another space (a call of an organization session) is read in its own.
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
   const onDownloadFile = useCallback(
-    (id: string, name: string) => void downloadFile(id, name),
-    [downloadFile],
+    (id: string, name: string, spaceId?: string) =>
+      void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
+    [downloadFile, orgId, currentSpaceId],
   );
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge. The chat composer stages files through
@@ -142,7 +160,8 @@ export function ChatModulePage() {
   // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
-  if (!known) return null;
+  // The mode decides which sessions the page serves: until it is known the page holds its shape.
+  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
   return (
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={onConversationChange}>
@@ -168,6 +187,7 @@ export function ChatModulePage() {
               uploadFile={uploadFile}
               t={translate}
               can={can}
+              canIn={canIn}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}

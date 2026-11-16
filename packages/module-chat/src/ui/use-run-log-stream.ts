@@ -28,7 +28,7 @@
 import { useEffect, useState } from "react";
 import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useCanIn, useChatTransport } from "./runtime-context.ts";
 import {
   requestInSpace,
   buildRunSseUrl,
@@ -134,10 +134,11 @@ export function useRunLogStream(
   spaceId?: string,
 ): RunLogStream {
   const transport = useChatTransport();
-  // `chat:read` implies neither the run reads nor the file read below.
-  const { can } = useChatHost();
-  const readsRuns = canReadRuns(can);
-  const readsFiles = can("files:read");
+  // `chat:read` implies neither the run reads nor the file read below, and they are judged where
+  // the run ran: the call's space, not the working one.
+  const canIn = useCanIn();
+  const readsRuns = canReadRuns((permission) => canIn(spaceId, permission));
+  const readsFiles = canIn(spaceId, "files:read");
   const [logs, setLogs] = useState<RunLogLine[]>([]);
   const [status, setStatus] = useState<RunStatus | undefined>(
     isTerminalStatus(initialStatus) ? initialStatus : undefined,

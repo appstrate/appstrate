@@ -40,10 +40,10 @@ export interface SessionSummary {
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 /**
- * The session list of ONE scope (`chatScopeKey`: a space, or the organization). Sessions are
- * space-scoped rows and `GET /api/chat/sessions` REQUIRES `X-Space-Id`, so the scope belongs in
- * the key twice over: a key without it would serve another space's list from cache, and would stay
- * disabled forever instead of refetching when the space store resolves.
+ * The session list of ONE scope (`chatScopeKey`: a space, or the organization). The scope belongs
+ * in the key twice over: a key without it would serve another scope's list from cache, and a
+ * space's list would stay disabled forever instead of refetching when the space store resolves
+ * (its key is null until then).
  */
 export function sessionsQueryKey(scopeKey: string | null): readonly unknown[] {
   return [...SESSIONS_QUERY_KEY, scopeKey];

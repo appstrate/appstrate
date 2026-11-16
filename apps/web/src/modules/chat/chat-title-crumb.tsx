@@ -5,7 +5,7 @@
  * "Chat / <conversation>" inside one (the parent links back to a new conversation). The name
  * is a plain segment; renaming lives in the conversation's settings dialog.
  *
- * While sessions load a skeleton slot reserves the space; an unknown (deleted) conversation
+ * While sessions load (or cannot be asked yet, `pending`) a skeleton slot reserves the space; an unknown (deleted) conversation
  * publishes "Chat" alone rather than a made-up name.
  */
 
@@ -15,14 +15,21 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
 
-export function ChatTitleCrumb({ conversationId }: { conversationId: string | null }) {
+export function ChatTitleCrumb({
+  conversationId,
+  pending = false,
+}: {
+  conversationId: string | null;
+  /** The sessions cannot be asked yet (the scope they are read in is not known): the slot is reserved. */
+  pending?: boolean;
+}) {
   const { t } = useTranslation(["chat", "common"]);
   const { data: sessions, isLoading } = useSessions();
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   const title = session ? (session.title ?? t("threads.new")) : null;
 
   // `isLoading`: the read is off without a space, and would wait forever.
-  const loading = conversationId !== null && isLoading;
+  const loading = conversationId !== null && (pending || isLoading);
 
   const chat = t("common:products.chat");
   usePageBreadcrumb(

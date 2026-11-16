@@ -67,7 +67,11 @@ export function useFiles(filters: FileListFilters = {}) {
     "get",
     "/api/orgs/{orgId}/files",
     { params: { path: { orgId: across.orgId ?? "" }, query } },
-    { enabled: spanning && across.enabled && filters.enabled !== false },
+    {
+      enabled: spanning && across.enabled && filters.enabled !== false,
+      // The SSE stream carries the working space only: a list spanning spaces polls.
+      refetchInterval: across.refetchInterval,
+    },
   );
   return spanning ? inOrg : inSpace;
 }

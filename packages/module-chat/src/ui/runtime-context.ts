@@ -111,15 +111,19 @@ export function useSelectConversation(): SelectConversation | null {
  * module-chat, so the host injects an opener and the chat delegates to it.
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
+ *
+ * `spaceId` names the file's space when it is not the working space (a file a call of an
+ * organization session produced elsewhere): the host reads it there. The download and the image
+ * hook below take it the same way.
  */
-export type OpenFile = (file: { id: string; name: string }) => void;
+export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
 
 /**
  * The host's authenticated file download (typed API client + user-facing
  * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
  * would swallow failures the shell's implementation reports.
  */
-export type DownloadFile = (id: string, name: string) => void;
+export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
@@ -130,7 +134,7 @@ export type DownloadFile = (id: string, name: string) => void;
  * Call it like any hook: unconditionally, at the top of a component (see
  * `FileImageThumbnail`, which exists precisely so the call site is stable).
  */
-export type UseFileImageSrc = (id: string) => string | null | undefined;
+export type UseFileImageSrc = (id: string, spaceId?: string) => string | null | undefined;
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
@@ -169,6 +173,12 @@ export interface ChatHost {
   t: ChatTranslate;
   can: ChatCan;
   /**
+   * The caller's grant in one NAMED space, for what a call of an organization session did there
+   * (its run, its files): `can` answers for the scope as a whole. Absent in a mount that has no
+   * space listing: the working scope's `can` then answers.
+   */
+  canIn?: ChatCanIn;
+  /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
    * credential would fix names no link to add one. `undefined` until the
@@ -196,9 +206,13 @@ export interface ChatHost {
 
 /**
  * The caller's grants, resolved by the shell. The chat asks for the exact
- * permission each endpoint it calls guards on and holds no RBAC of its own.
+ * permission each endpoint it calls guards on and holds no RBAC of its own. In an organization
+ * scope the shell answers "some space where the chat may act grants it".
  */
 export type ChatCan = (permission: string) => boolean;
+
+/** {@link ChatCan} in one named space. */
+export type ChatCanIn = (spaceId: string, permission: string) => boolean;
 
 const ChatHostContext = createContext<ChatHost | null>(null);
 
@@ -215,4 +229,14 @@ export function useChatHost(): ChatHost {
     throw new Error("module-chat: no host services injected (render inside <ChatPage>)");
   }
   return host;
+}
+
+/**
+ * The grant a card judges where its call acted: in `spaceId` when the call named one (an
+ * organization session), else the scope's own. Judging a run or a file read in the working space
+ * would refuse what the call's space grants, and grant what it refuses.
+ */
+export function useCanIn(): (spaceId: string | undefined, permission: string) => boolean {
+  const { can, canIn } = useChatHost();
+  return (spaceId, permission) => (spaceId && canIn ? canIn(spaceId, permission) : can(permission));
 }

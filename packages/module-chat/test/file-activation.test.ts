@@ -32,4 +32,26 @@ describe("fileActivation", () => {
     expect(downloads).toEqual([["file_2", "data.csv"]]);
     expect(activation.label).toBe("file.downloadOf");
   });
+
+  it("carries the file's space to the opener and to the download, when it is not the working one", () => {
+    const opened: Parameters<OpenFile>[] = [];
+    const downloads: Array<[string, string, string | undefined]> = [];
+    const file = { id: "file_3", name: "out.md", spaceId: "spc_b" };
+
+    fileActivation(
+      file,
+      (...args) => opened.push(args),
+      () => {},
+      t,
+    ).onActivate();
+    fileActivation(
+      file,
+      null,
+      (id, name, spaceId) => downloads.push([id, name, spaceId]),
+      t,
+    ).onActivate();
+
+    expect(opened).toEqual([[{ id: "file_3", name: "out.md", spaceId: "spc_b" }]]);
+    expect(downloads).toEqual([["file_3", "out.md", "spc_b"]]);
+  });
 });

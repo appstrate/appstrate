@@ -31,11 +31,16 @@ const SPACE_LISTS = Object.keys(LIST_ROUTE) as SpaceList[];
 /** Whether a space's effective permission set admits something. */
 type Admits = (permissions: readonly string[]) => boolean;
 
+/** A space admits a route where one of its permissions opens it. */
+const routeAdmits =
+  (path: RoutePath): Admits =>
+  (permissions) => {
+    const access = ROUTE_ACCESS[path];
+    return "anyOf" in access && access.anyOf.some((permission) => permissions.includes(permission));
+  };
+
 /** A space admits a list where its permissions open the list's route. */
-export const listAdmits =
-  (list: SpaceList): Admits =>
-  (permissions) =>
-    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some((permission) => permissions.includes(permission));
+export const listAdmits = (list: SpaceList): Admits => routeAdmits(LIST_ROUTE[list]);
 
 interface ListedSpace {
   id: string;
@@ -176,12 +181,46 @@ export function holdsOverview(path: RoutePath | undefined): boolean {
   return path === undefined || ofList(path) || spansSpaces(path) || !belongsToSpace(path);
 }
 
-/** In the mode, a list's route opens where a space admits the list, whatever the working space grants. */
-export function overviewListVerdict(
+/**
+ * In the mode, a route that spans spaces opens where some space admits it, whatever the working
+ * space grants: a list's route (its rows are every space's) and a route serving the organization
+ * (`spansSpaces`: the chat). `undefined` for any other route, which the working space decides.
+ */
+export function overviewRouteVerdict(
   path: RoutePath,
   spaces: readonly ListedSpace[] | undefined,
 ): "granted" | "denied" | undefined {
   const list = listOf(path);
-  if (!list) return undefined;
-  return (spaces ?? []).some(admittedIn(listAdmits(list))) ? "granted" : "denied";
+  const admits: Admits | undefined = list
+    ? listAdmits(list)
+    : spansSpaces(path)
+      ? routeAdmits(path)
+      : undefined;
+  if (!admits) return undefined;
+  return (spaces ?? []).some(admittedIn(admits)) ? "granted" : "denied";
+}
+
+/**
+ * The permissions the chat's tool surface needs in a space for an organization session to act
+ * there (the backend's acting set): the chat itself, and the MCP the session calls through.
+ */
+const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+
+/**
+ * What an organization session may do, as the module's `can` reads it: `permission` holds in some
+ * space where the chat may act (held with a role, the acting permissions granted there). The
+ * working space's grants do not decide: the session acts in the spaces the caller names.
+ */
+export function grantedInSomeActingSpace(
+  spaces: readonly ListedSpace[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+  permission: string,
+): boolean {
+  return (
+    spacesWhere(
+      spaces,
+      orgPermissions,
+      (can) => CHAT_ACTING_PERMISSIONS.every(can) && can(permission),
+    ).length > 0
+  );
 }

@@ -3,7 +3,13 @@
 /** The chat scope: the route, the headers and the cache key every chat call derives from it. */
 
 import { describe, expect, it } from "bun:test";
-import { chatBase, chatHeaders, chatPath, chatScopeKey } from "../src/ui/scope.ts";
+import {
+  chatBase,
+  chatHeaders,
+  chatPath,
+  chatScopeKey,
+  transportForSession,
+} from "../src/ui/scope.ts";
 import {
   deleteSession,
   fetchSessionsPage,
@@ -105,5 +111,35 @@ describe("the session routes of an organization scope", () => {
     const request = requestAnswering();
     await fetchSkills(transportOver(request, space));
     expect(request.calls[0]!.path).toBe("/api/packages/skills");
+  });
+});
+
+describe("a write on a session of the organization's list", () => {
+  it("goes through the session's own mount: a space session to its space, an organization session to the organization's", async () => {
+    const request = requestAnswering();
+    const transport = transportOver(request, org, headers);
+
+    const inSpace = transportForSession(transport, { spaceId: "spc_b" });
+    await renameSession(inSpace, "chs_1", "Titre");
+    await deleteSession(inSpace, "chs_1");
+    await deleteSession(transportForSession(transport, { spaceId: null }), "chs_2");
+
+    expect(request.calls.map((c) => c.path)).toEqual([
+      "/api/chat/sessions/chs_1",
+      "/api/chat/sessions/chs_1",
+      "/api/orgs/org_1/chat/sessions/chs_2",
+    ]);
+    // The space session names its own space, whatever the working one is; its body is kept.
+    const [rename, del, orgDelete] = request.calls;
+    expect(new Headers(rename!.init?.headers).get("X-Space-Id")).toBe("spc_b");
+    expect(new Headers(rename!.init?.headers).get("Content-Type")).toBe("application/json");
+    expect(rename!.init?.body).toBe(JSON.stringify({ title: "Titre" }));
+    expect(new Headers(del!.init?.headers).get("X-Space-Id")).toBe("spc_b");
+    expect(new Headers(orgDelete!.init?.headers).has("X-Space-Id")).toBe(false);
+  });
+
+  it("leaves a space's transport as it is", () => {
+    const transport = transportOver(requestAnswering(), space, headers);
+    expect(transportForSession(transport, { spaceId: "spc_a" })).toBe(transport);
   });
 });

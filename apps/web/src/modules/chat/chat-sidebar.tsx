@@ -13,13 +13,19 @@ import {
   ChatTransportProvider,
   SelectConversationProvider,
 } from "@appstrate/module-chat/ui";
-import { usePermissions } from "../../hooks/use-permissions";
+import { ChatSidebarSkeleton } from "../../components/loading-skeletons";
 import { useActInSpace } from "../../hooks/use-space-action";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { ChatTitleCrumb } from "./chat-title-crumb";
 import { conversationOpening } from "./chat-transport";
 import { renderSpaces } from "./render-spaces";
-import { useChatScope, useChatTransport, useChatTranslate } from "./use-chat-runtime";
+import {
+  useChatCan,
+  useChatCanIn,
+  useChatScope,
+  useChatTransport,
+  useChatTranslate,
+} from "./use-chat-runtime";
 
 export function ChatSidebar() {
   // Layout sits above the chat's routes, so match here instead of `useParams`.
@@ -27,7 +33,8 @@ export function ChatSidebar() {
   const navigate = useNavigate();
   const transport = useChatTransport();
   const t = useChatTranslate();
-  const { can } = usePermissions();
+  const can = useChatCan();
+  const canIn = useChatCanIn();
   const { scope, known } = useChatScope();
   const { choose } = useOverviewMode();
   const actInSpace = useActInSpace();
@@ -46,7 +53,15 @@ export function ChatSidebar() {
     [navigate, scope, actInSpace, choose],
   );
 
-  if (!known) return null;
+  // The list waits for the mode like the page: its shape, and the trail's slot, hold meanwhile.
+  if (!known) {
+    return (
+      <>
+        <ChatTitleCrumb conversationId={conversationId} pending />
+        <ChatSidebarSkeleton />
+      </>
+    );
+  }
   return (
     <ChatTransportProvider value={transport}>
       <SelectConversationProvider value={select}>
@@ -55,6 +70,7 @@ export function ChatSidebar() {
           activeId={conversationId}
           t={t}
           can={can}
+          canIn={canIn}
           renderSpaces={renderSpaces}
         />
       </SelectConversationProvider>

@@ -57,12 +57,15 @@ import type { ToolPhase } from "./tool-result.ts";
  * in-app preview; without one (embedded mounts) it falls back to the
  * authenticated download.
  */
-function FileChips({ files }: { files: ChatRunFile[] }) {
+function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string }) {
   if (files.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
       {files.map((file) => (
-        <FileAttachment key={file.id} file={{ id: file.id, name: file.name, mime: file.mime }} />
+        <FileAttachment
+          key={file.id}
+          file={{ id: file.id, name: file.name, mime: file.mime, spaceId }}
+        />
       ))}
     </div>
   );
@@ -199,8 +202,8 @@ export function ChatRunProgressCard({
     if (!autoPresentEligible || !openFile || !runId || !autoPresented) return;
     if (hasAutoPresented.current) return;
     hasAutoPresented.current = true;
-    openFile({ id: autoPresented.id, name: autoPresented.name });
-  }, [autoPresentEligible, openFile, autoPresented, runId]);
+    openFile({ id: autoPresented.id, name: autoPresented.name, ...(spaceId && { spaceId }) });
+  }, [autoPresentEligible, openFile, autoPresented, runId, spaceId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.
@@ -298,7 +301,7 @@ export function ChatRunProgressCard({
           page of at most 100 rows and this card does not page; a run that
           produced more says so rather than showing a silently short list. */}
       <div className="relative z-10">
-        <FileChips files={files} />
+        <FileChips files={files} spaceId={spaceId} />
         {producedFilesTruncated ? (
           <p className="text-muted-foreground px-3 pb-2 text-xs">{t("run.filesTruncated")}</p>
         ) : null}

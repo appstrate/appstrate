@@ -27,9 +27,13 @@ import { RunRow } from "../../components/run-row";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { useSpacesFor } from "../../hooks/use-space-action";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
+import { ACROSS_SPACES_POLL_MS } from "../../lib/across-spaces";
+import { otherSpaceFileContext } from "../../lib/file-link";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type {
@@ -118,7 +122,7 @@ function PanelState({ children }: { children: ReactNode }) {
  * The file's frame IS the panel: its header replaces the panel's. Its X closes
  * the panel, or goes back to the file list the file was opened from.
  */
-function ShownFile({
+export function ShownFile({
   file,
   backToList,
   onClose,
@@ -128,11 +132,14 @@ function ShownFile({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const { data, isLoading, error } = useFile(file.id);
+  // A file of another space (an organization conversation's) is read, copied and downloaded there.
+  const context = otherSpaceFileContext(file.spaceId, useCurrentOrgId(), useCurrentSpaceId());
+  const { data, isLoading, error } = useFile(file.id, context);
 
   return (
     <FileArtifact
       fileId={file.id}
+      context={context}
       file={data}
       isLoading={isLoading}
       error={error}
@@ -146,7 +153,7 @@ function ShownFile({
   );
 }
 
-function ConversationRuns({
+export function ConversationRuns({
   conversationId,
   active,
 }: {
@@ -178,7 +185,11 @@ function ConversationRuns({
         query: filters,
       },
     },
-    { enabled: chatScope.kind === "organization" && ready },
+    {
+      enabled: chatScope.kind === "organization" && ready,
+      // The SSE stream carries the working space only: runs of the others are polled.
+      refetchInterval: ACROSS_SPACES_POLL_MS,
+    },
   );
   const query = chatScope.kind === "organization" ? inOrg : inSpace;
 
@@ -234,7 +245,7 @@ function ConversationFiles({
           key={file.id}
           type="button"
           className="hover:bg-muted/40 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
-          onClick={() => onSelect({ id: file.id, name: file.name })}
+          onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
         >
           <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
             <MimeIcon mime={file.mime} className="text-muted-foreground size-4" />

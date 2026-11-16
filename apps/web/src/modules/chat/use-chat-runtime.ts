@@ -2,15 +2,26 @@
 
 /** Host-provided chat inputs, shared by the sidebar list and the page thread. Must not import `@appstrate/module-chat/ui` (entry chunk). */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ChatScope } from "@appstrate/module-chat/ui";
 import { useTranslation } from "react-i18next";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { chatTransport } from "./chat-transport";
+import { usePermissions } from "../../hooks/use-permissions";
+import { useRowSpaceGrants } from "../../hooks/use-space-action";
+import { useSpaces } from "../../hooks/use-spaces";
+import { grantedInSomeActingSpace } from "../../lib/space-lists";
+import {
+  chatScopeId,
+  chatTransport,
+  conversationOfPath,
+  scopeChangeLeavesConversation,
+  type ChatPlace,
+} from "./chat-transport";
 
 /**
  * Scoping headers + the UI language (server defaults to fr without it), read at
@@ -73,4 +84,50 @@ export function useChatTranslate() {
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
     [t],
   );
+}
+
+/**
+ * The grants the chat module reads as its own: the working space's in a space, and in «Vue
+ * d'ensemble» "some space where the chat may act grants it" (an organization session acts in the
+ * spaces the caller names, never in the working one the overview merely keeps).
+ */
+export function useChatCan() {
+  const { can } = usePermissions();
+  const { scope } = useChatScope();
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return useCallback(
+    (permission: string) =>
+      scope.kind === "space"
+        ? can(permission)
+        : grantedInSomeActingSpace(spaces, orgPermissions, permission),
+    [scope.kind, can, spaces, orgPermissions],
+  );
+}
+
+/** The caller's grant in a named space: what a call of an organization session did there. */
+export function useChatCanIn() {
+  return useRowSpaceGrants();
+}
+
+/**
+ * Drops to a new conversation when the chat's scope changes under an open one (the switcher
+ * entering or leaving «Vue d'ensemble», or another space): see `scopeChangeLeavesConversation`.
+ * The one place for every way the scope changes. Silent until the scope is known.
+ */
+export function useLeaveConversationOnScopeChange(conversationId: string | null): void {
+  const { scope, known } = useChatScope();
+  const spaceId = useCurrentSpaceId();
+  const navigate = useNavigate();
+  const scopeId = known ? chatScopeId(scope, spaceId) : null;
+  const seen = useRef<ChatPlace | null>(null);
+  useEffect(() => {
+    if (!scopeId) return;
+    const place = { scopeId, conversationId };
+    const live = conversationOfPath(window.location.pathname);
+    if (scopeChangeLeavesConversation(seen.current, place, live)) {
+      navigate("/chat", { replace: true });
+    }
+    seen.current = place;
+  }, [scopeId, conversationId, navigate]);
 }

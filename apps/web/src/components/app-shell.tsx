@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LibraryBig, Menu, PanelLeft, Plus, Settings, type LucideIcon } from "lucide-react";
+import { LibraryBig, Menu, PanelLeft, Settings, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavOrg } from "@/components/nav-org";
 import { NavUser } from "@/components/nav-user";
@@ -11,6 +11,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { ProductTabs } from "@/components/product-tabs";
 import { HeaderSlotOutlet } from "@/components/shell-header-slots";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
+import { ChatSidebarSkeleton } from "@/components/loading-skeletons";
 import { SidebarCredits } from "@/components/sidebar-credits";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
@@ -25,13 +26,10 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSkeleton,
   SidebarTrigger,
   useSidebar,
 } from "@appstrate/ui/components/sidebar";
@@ -44,39 +42,6 @@ const SETTINGS_ENTRY = SETTINGS_INDEX.organization;
 const ChatSidebar = lazy(() =>
   import("../modules/chat/chat-sidebar").then((m) => ({ default: m.ChatSidebar })),
 );
-
-/**
- * The conversation list's shape, drawn while its permissions and chunk load:
- * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws.
- */
-function ChatSidebarSkeleton() {
-  const { t } = useTranslation("chat");
-  return (
-    <>
-      <SidebarGroup className="pb-0">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton disabled tooltip={t("threads.new")}>
-              <Plus />
-              <span>{t("threads.new")}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
-        <SidebarMenu>
-          {Array.from({ length: 5 }, (_, i) => (
-            <SidebarMenuItem key={i}>
-              <SidebarMenuSkeleton />
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
-    </>
-  );
-}
 
 /** A footer entry opening an overlay; on screen already, it is a plain current-page marker. */
 function OverlayEntry({

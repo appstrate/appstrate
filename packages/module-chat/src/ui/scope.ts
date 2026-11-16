@@ -40,3 +40,27 @@ export function chatScopeKey(
   if (transport.scope.kind === "organization") return `org:${transport.scope.orgId}`;
   return transport.getHeaders()["X-Space-Id"] ?? null;
 }
+
+/**
+ * `transport` for one LISTED session. The organization's list holds both kinds and each is
+ * written through its own mount: an organization session through the organization's (the
+ * transport as is), a space session through `/api/chat/*` entered in its own space, which the
+ * organization's mount does not serve (404). One place, so every per-session call from a list row
+ * takes the same route.
+ */
+export function transportForSession(
+  transport: ChatTransport,
+  session: { spaceId: string | null },
+): ChatTransport {
+  const { spaceId } = session;
+  if (transport.scope.kind !== "organization" || spaceId === null) return transport;
+  return {
+    ...transport,
+    scope: { kind: "space" },
+    request: (path, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("X-Space-Id", spaceId);
+      return transport.request(path, { ...init, headers });
+    },
+  };
+}

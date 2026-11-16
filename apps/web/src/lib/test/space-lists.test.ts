@@ -8,12 +8,13 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
+  grantedInSomeActingSpace,
   grantedInSomeSpace,
   grantsInRowSpace,
   holdsOverview,
   listAdmits,
   overviewLapsed,
-  overviewListVerdict,
+  overviewRouteVerdict,
   overviewOffered,
   spaceChoice,
   spacesWhere,
@@ -117,16 +118,57 @@ describe("holdsOverview", () => {
   });
 });
 
-describe("overviewListVerdict", () => {
+describe("overviewRouteVerdict", () => {
   it("opens a list where some space admits it, and says nothing of other routes", () => {
-    expect(overviewListVerdict("/files", TWO)).toBe("granted");
-    expect(overviewListVerdict("/schedules", TWO)).toBe("denied");
-    expect(overviewListVerdict("/agents", TWO)).toBe("denied");
-    expect(overviewListVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])])).toBe(
+    expect(overviewRouteVerdict("/files", TWO)).toBe("granted");
+    expect(overviewRouteVerdict("/schedules", TWO)).toBe("denied");
+    expect(overviewRouteVerdict("/agents", TWO)).toBe("denied");
+    expect(overviewRouteVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])])).toBe(
       "granted",
     );
-    expect(overviewListVerdict("/", TWO)).toBeUndefined();
-    expect(overviewListVerdict("/agents/:scope/:name", TWO)).toBeUndefined();
+    expect(overviewRouteVerdict("/", TWO)).toBeUndefined();
+    expect(overviewRouteVerdict("/agents/:scope/:name", TWO)).toBeUndefined();
+  });
+});
+
+describe("overviewRouteVerdict on the chat", () => {
+  it("opens the chat where some space admits it, whatever the working space grants", () => {
+    const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read"])];
+    expect(overviewRouteVerdict("/chat", spaces)).toBe("granted");
+    expect(overviewRouteVerdict("/chat/:conversationId", spaces)).toBe("granted");
+  });
+
+  it("refuses it where no space admits it", () => {
+    expect(overviewRouteVerdict("/chat", TWO)).toBe("denied");
+    expect(overviewRouteVerdict("/chat", [space("spc_closed", ["chat:read"], "none")])).toBe(
+      "denied",
+    );
+  });
+});
+
+describe("grantedInSomeActingSpace", () => {
+  const acting = ["chat:write", "chat:read", "mcp:read"];
+  const spaces = [
+    // The working space may read files but is no place the chat acts.
+    space("spc_a", ["chat:read", "files:read"]),
+    space("spc_b", [...acting, "skills:read"]),
+  ];
+
+  it("judges a permission in the spaces where the chat may act, not in the others", () => {
+    expect(grantedInSomeActingSpace(spaces, [], "skills:read")).toBe(true);
+    expect(grantedInSomeActingSpace(spaces, [], "files:read")).toBe(false);
+    expect(grantedInSomeActingSpace(spaces, [], "chat:write")).toBe(true);
+  });
+
+  it("counts the org-level grants, and nothing before the listing answers", () => {
+    expect(grantedInSomeActingSpace(spaces, ["files:read"], "files:read")).toBe(true);
+    expect(grantedInSomeActingSpace(undefined, [], "chat:write")).toBe(false);
+  });
+
+  it("holds nothing where the acting set is incomplete", () => {
+    expect(
+      grantedInSomeActingSpace([space("spc_c", ["chat:write", "chat:read"])], [], "chat:read"),
+    ).toBe(false);
   });
 });
 

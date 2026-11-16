@@ -3210,7 +3210,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`. A session id that belongs to a space session is a 404. Reads no `X-Space-Id` (a 400 when sent); admitted when some reachable space grants `chat:write`. Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A session id that belongs to a space session is a 404. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamOrgChat"];
         delete?: never;
@@ -3227,8 +3227,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the skills the space enforces in chat
-         * @description The skills the spaces where the caller holds `chat:write` impose on their chat conversations, one entry per package (the union over those spaces). Names only — the content is never returned here. Sorted by id. Reads no `X-Space-Id`; admitted when some reachable space grants `chat:write`.
+         * List the skills the spaces of an organization session enforce in chat
+         * @description The skills the spaces an organization session may act in impose on its conversations, one entry per package (the union over the acting set: the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). Names only — the content is never returned here. Sorted by id. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential pinned to a space is refused (403).
          */
         get: operations["listOrgChatEnforcedSkills"];
         put?: never;
@@ -3248,7 +3248,7 @@ export interface paths {
         };
         /**
          * List chat sessions
-         * @description List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Reads no `X-Space-Id`; admitted when some reachable space grants `chat:read`. Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.
+         * @description List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Ignores `X-Space-Id` (like every `/api/orgs/{orgId}` route); admitted when some reachable space grants `chat:read`. A credential pinned to a space is refused (403). Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.
          */
         get: operations["listOrgChatSessions"];
         put?: never;
@@ -20854,7 +20854,7 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the session may act in could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20902,7 +20902,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the space's enforced skills could not be loaded. RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the enforced skills of the spaces the session may act in could not be loaded. RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -20920,7 +20920,7 @@ export interface operations {
                 limit?: number;
                 /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
                 q?: string;
-                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
+                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's listed sessions is a 400. */
                 startingAfter?: string;
             };
             header?: never;

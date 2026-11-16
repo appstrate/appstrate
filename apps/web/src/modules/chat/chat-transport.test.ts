@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { chatTransport, conversationOpening } from "./chat-transport";
+import {
+  chatScopeId,
+  chatTransport,
+  conversationOfPath,
+  conversationOpening,
+  scopeChangeLeavesConversation,
+} from "./chat-transport";
 
 const realFetch = globalThis.fetch;
 const RealRequest = globalThis.Request;
@@ -64,5 +70,54 @@ describe("conversationOpening", () => {
     expect(conversationOpening(org, "chs_2", null)).toEqual({ kind: "here" });
     expect(conversationOpening(org, null, null)).toEqual({ kind: "here" });
     expect(conversationOpening({ kind: "space" }, "chs_1", "spc_b")).toEqual({ kind: "here" });
+  });
+});
+
+describe("chatScopeId", () => {
+  it("tells the organization from each space", () => {
+    expect(chatScopeId({ kind: "organization", orgId: "org_1" }, "spc_a")).toBe("org:org_1");
+    expect(chatScopeId({ kind: "space" }, "spc_a")).toBe("spc_a");
+    expect(chatScopeId({ kind: "space" }, null)).toBeNull();
+  });
+});
+
+describe("scopeChangeLeavesConversation", () => {
+  const open = { scopeId: "spc_a", conversationId: "chs_1" };
+
+  it("drops an open conversation when the scope changes under it", () => {
+    for (const scopeId of ["org:org_1", "spc_b"]) {
+      expect(scopeChangeLeavesConversation(open, { ...open, scopeId }, "chs_1")).toBe(true);
+    }
+  });
+
+  it("drops a conversation not yet saved too: its turn route is fixed when it is created", () => {
+    const draft = { scopeId: "spc_a", conversationId: null };
+    expect(scopeChangeLeavesConversation(draft, { ...draft, scopeId: "org:org_1" }, null)).toBe(
+      true,
+    );
+  });
+
+  it("leaves a pick in the list alone: it changes the scope and the conversation together", () => {
+    // The router still renders the old conversation; the address already names the picked one.
+    expect(
+      scopeChangeLeavesConversation(open, { scopeId: "spc_b", conversationId: "chs_1" }, "chs_9"),
+    ).toBe(false);
+    expect(
+      scopeChangeLeavesConversation(open, { scopeId: "spc_b", conversationId: "chs_9" }, "chs_9"),
+    ).toBe(false);
+  });
+
+  it("does nothing while the scope holds, or before the first place is known", () => {
+    expect(scopeChangeLeavesConversation(open, open, "chs_1")).toBe(false);
+    expect(scopeChangeLeavesConversation(null, open, "chs_1")).toBe(false);
+  });
+});
+
+describe("conversationOfPath", () => {
+  it("reads the conversation an address names", () => {
+    expect(conversationOfPath("/chat/chs_1")).toBe("chs_1");
+    expect(conversationOfPath("/chat/chs_1/")).toBe("chs_1");
+    expect(conversationOfPath("/chat")).toBeNull();
+    expect(conversationOfPath("/runs")).toBeNull();
   });
 });

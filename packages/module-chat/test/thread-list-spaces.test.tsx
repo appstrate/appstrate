@@ -23,7 +23,11 @@ const sessions: SessionSummary[] = [
   { ...base, id: "chs_3", title: "Fresh", spaceId: null, space_ids: [] },
 ];
 
-function render(scope: ChatScope, withSeam = true): string {
+function render(
+  scope: ChatScope,
+  withSeam = true,
+  canIn?: (spaceId: string, permission: string) => boolean,
+): string {
   const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }), scope);
   const qc = new QueryClient();
   qc.setQueryData<SessionsCache>(sessionsQueryKey(chatScopeKey(transport)), {
@@ -39,6 +43,7 @@ function render(scope: ChatScope, withSeam = true): string {
               activeId={null}
               t={(key) => key}
               can={() => true}
+              canIn={canIn}
               renderSpaces={
                 withSeam ? (ids) => <i data-spaces={ids.join(",")}>spaces</i> : undefined
               }
@@ -71,5 +76,12 @@ describe("the conversation list's space line", () => {
 
   it("draws none without the host's rendering", () => {
     expect(render(org, false)).not.toContain("threads.overview");
+  });
+
+  it("judges a space session's row actions in its own space, an organization session's by the scope", () => {
+    const html = render(org, true, (spaceId) => spaceId === "spc_b");
+    // `spc_a`'s session may not be written by the caller there: only the two organization rows delete.
+    expect(html.match(/aria-label="common:btn\.delete"/g)).toHaveLength(2);
+    expect(html.match(/aria-label="threads\.settings\.openFor"/g)).toHaveLength(2);
   });
 });

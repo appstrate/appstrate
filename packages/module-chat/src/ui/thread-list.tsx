@@ -67,6 +67,7 @@ import {
   useChatTransport,
   useSelectConversation,
   type ChatCan,
+  type ChatCanIn,
   type ChatTranslate,
   type RenderSpaces,
 } from "./runtime-context.ts";
@@ -79,7 +80,7 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
-import { chatScopeKey } from "./scope.ts";
+import { chatScopeKey, transportForSession } from "./scope.ts";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
 
@@ -160,11 +161,14 @@ export function ChatConversationList({
   activeId,
   t,
   can,
+  canIn,
   renderSpaces,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  /** The caller's grants in a named space: judges a space session's row actions where it lives. */
+  canIn?: ChatCanIn;
   /** Names spaces: given, the list of an organization scope shows each session's space. */
   renderSpaces?: RenderSpaces;
 }) {
@@ -190,8 +194,11 @@ export function ChatConversationList({
   const now = useNowTick();
   const list = sessions ?? [];
   const groups = searching ? [] : groupSessionsByDate(list, new Date(now));
-  // Rename and delete are writes; a reader also gets its own empty copy.
+  // Starting a conversation is a write, as are rename and delete; a reader also gets its own empty copy.
   const canWrite = can("chat:write");
+  // A row's actions are judged where its session lives: a space session's in its space.
+  const canWriteRow = (s: SessionSummary) =>
+    s.spaceId !== null && canIn ? canIn(s.spaceId, "chat:write") : canWrite;
   const hasAny = (base.data?.length ?? 0) > 0;
   const showSearch = hasAny || input !== "";
 
@@ -203,7 +210,7 @@ export function ChatConversationList({
       unread={s.unread && s.id !== activeId}
       now={now}
       t={t}
-      canWrite={canWrite}
+      canWrite={canWriteRow(s)}
       spaceLine={spaceLine ? (renderSpaces ?? null) : null}
     />
   );
@@ -377,7 +384,7 @@ function ConversationRow({
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await deleteSession(transport, session.id);
+      await deleteSession(transportForSession(transport, session), session.id);
     } catch {
       // Not a `useMutation`, so the app's mutation cache does not toast it: say it in the dialog.
       setDeleteFailed(true);
@@ -594,7 +601,7 @@ function ConversationSettingsDialog({
     setSaving(true);
     setFailed(false);
     try {
-      await renameSession(transport, session.id, next);
+      await renameSession(transportForSession(transport, session), session.id, next);
       await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
       onClose();
     } catch {

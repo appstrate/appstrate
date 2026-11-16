@@ -23,7 +23,8 @@ export function buildScopingHeaders(
 }
 
 /** An org route (`/api/orgs/{orgId}/…`) names the organization in its path and no space. */
-const isOrgRoute = (url: string) => new URL(url, "http://local").pathname.startsWith("/api/orgs/");
+export const isOrgRoute = (url: string) =>
+  new URL(url, "http://local").pathname.startsWith("/api/orgs/");
 
 /**
  * The scoping headers a request still lacks. One that names another org (a reader

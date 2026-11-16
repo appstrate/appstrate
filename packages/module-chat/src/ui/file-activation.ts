@@ -16,12 +16,12 @@ import type { OpenFile, DownloadFile, ChatTranslate } from "./runtime-context.ts
 import { UNNAMED_FILE } from "./run-events.ts";
 
 export function fileActivation(
-  file: { id: string; name: string },
+  file: { id: string; name: string; spaceId?: string },
   opener: OpenFile | null,
   download: DownloadFile,
   t: ChatTranslate,
 ): { onActivate: () => void; label: string } {
-  const { id, name } = file;
+  const { id, name, spaceId } = file;
   // The bare fallback only feeds the download filename, and MUST stay
   // untranslated: this string is what the browser saves the file as, so a
   // localized value would put «Fichier sans nom» on one reader's disk and
@@ -29,7 +29,10 @@ export function fileActivation(
   // placeholder instead, so the sentence stays grammatical in every language.
   const fileName = name || UNNAMED_FILE;
   const labelName = name || t("file.unnamed");
-  const onActivate = opener ? () => opener({ id, name: fileName }) : () => download(id, fileName);
+  // `spaceId` rides only when the file is elsewhere: a file of the working space names none.
+  const onActivate = opener
+    ? () => opener({ id, name: fileName, ...(spaceId && { spaceId }) })
+    : () => download(id, fileName, spaceId);
   const label = opener
     ? t("file.previewOf", { name: labelName })
     : t("file.downloadOf", { name: labelName });

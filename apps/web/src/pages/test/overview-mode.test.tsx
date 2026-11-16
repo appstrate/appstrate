@@ -616,4 +616,37 @@ describe("the gate", () => {
     expect(html).toContain("attente");
     expect(html).not.toContain("ouvert");
   });
+
+  describe("the chat, which serves the organization in the mode", () => {
+    const chatGate = (
+      <RouteGate path="/chat/:conversationId" pending={<p>attente</p>}>
+        <p>ouvert</p>
+      </RouteGate>
+    );
+    // The working space (spc_a) reads no chat; spc_b does.
+    const chatSpaces = [SPACES[0]!, space("spc_b", ["chat:read", "runs:read"])];
+    const withChat = (features: Record<string, boolean>, on: boolean) => {
+      const config = window.__APP_CONFIG__;
+      window.__APP_CONFIG__ = { ...config, features: { ...config.features, ...features } };
+      try {
+        return renderIn(on, chatGate, "/chat/chs_1", () => {}, chatSpaces).html;
+      } finally {
+        window.__APP_CONFIG__ = config;
+      }
+    };
+
+    it("opens a conversation where another space admits the chat", () => {
+      expect(withChat({ chat: true }, true)).toContain("ouvert");
+    });
+
+    it("judges it by the working space out of the mode", () => {
+      expect(withChat({ chat: true }, false)).not.toContain("ouvert");
+    });
+
+    it("keeps the page absent where the module is not loaded, whatever a space admits", () => {
+      const html = withChat({}, true);
+      expect(html).not.toContain("ouvert");
+      expect(html).toContain("Cette page n'existe pas ici.");
+    });
+  });
 });

@@ -169,8 +169,8 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 /** The space a call of an organization session acted in, named by the host; nothing in a space. */
 function CallSpace({ args }: { args: unknown }) {
   const { renderSpaces } = useChatHost();
-  const spaceId = callSpaceId(args);
-  if (useChatTransport()?.scope.kind !== "organization" || !renderSpaces || !spaceId) return null;
+  const spaceId = useCallSpaceId(args);
+  if (!renderSpaces || !spaceId) return null;
   return (
     <span className="text-muted-foreground flex max-w-40 min-w-0 shrink-0 items-center text-xs">
       {renderSpaces([spaceId])}
@@ -349,8 +349,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   // An organization session's call names the space the run ran in: the card reads and links there.
-  const spaceId =
-    useChatTransport()?.scope.kind === "organization" ? callSpaceId(props.args) : undefined;
+  const spaceId = useCallSpaceId(props.args);
   return (
     <ChatRunProgressCard
       runId={runId}
@@ -389,7 +388,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       const offer = extractAuthOffers(result)[0];
       if (offer || phase !== "success") {
         return (
-          <OAuthConnectCard
+          <CallOAuthConnectCard
+            args={args}
             authUrl={offer?.authUrl}
             state={offer?.state}
             // The session route returns no `packageId`; the call's own path
@@ -499,9 +499,22 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-/** The space a tool call named (`space_id`): where it acted, in an organization session. */
-function callSpaceId(args: unknown): string | undefined {
-  return stringArg(asRecordOrNull(args) ?? undefined, "space_id");
+/**
+ * The space a tool call named (`space_id`): where it acted, in an organization session. A space
+ * session's calls act in the working space, which they do not name.
+ */
+function useCallSpaceId(args: unknown): string | undefined {
+  const organization = useChatTransport()?.scope.kind === "organization";
+  return organization ? stringArg(asRecordOrNull(args) ?? undefined, "space_id") : undefined;
+}
+
+/** The connect card of a call: it reads the integration where the call acted. */
+function CallOAuthConnectCard({
+  args,
+  ...card
+}: { args: unknown } & React.ComponentProps<typeof OAuthConnectCard>) {
+  const spaceId = useCallSpaceId(args);
+  return <OAuthConnectCard {...card} spaceId={spaceId} />;
 }
 
 export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
@@ -558,8 +571,9 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
     <>
       <RunLaunchCard {...props} />
       {extractRunAndWaitAuthOffers(props).map((offer) => (
-        <OAuthConnectCard
+        <CallOAuthConnectCard
           key={offer.authUrl}
+          args={props.args}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

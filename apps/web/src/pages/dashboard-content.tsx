@@ -24,7 +24,7 @@ import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { grantedInSomeSpace } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
@@ -67,7 +67,8 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant names no space; its chat door opens in one, which « Vue d'ensemble » asks for.
+ * assistant names no space: its chat door opens as it is (in « Vue d'ensemble » an organization
+ * session acting across spaces), offered where some space opens the chat.
  */
 export function DashboardHeader({
   firstName,
@@ -77,7 +78,7 @@ export function DashboardHeader({
   runningCount?: number;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const chat = useSpaceAction({ route: "/chat" });
+  const chat = useSpacesFor({ route: "/chat" });
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [assistOpen, setAssistOpen] = useState(false);
@@ -89,9 +90,7 @@ export function DashboardHeader({
 
   const openChat = () => {
     setAssistOpen(false);
-    chat.run(() =>
-      navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) }),
-    );
+    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
   };
 
   const copyCodingAgentSetup = async () => {
@@ -159,7 +158,6 @@ export function DashboardHeader({
           </div>
         </Modal>
       )}
-      {chat.picker}
     </>
   );
 }

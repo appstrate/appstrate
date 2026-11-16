@@ -172,6 +172,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
+  /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
+  canIn?: ChatHost["canIn"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -198,6 +200,7 @@ export function ChatPage({
   uploadFile,
   t,
   can,
+  canIn,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -300,6 +303,7 @@ export function ChatPage({
       useFileImageSrc,
       t,
       can,
+      canIn,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -313,6 +317,7 @@ export function ChatPage({
       useFileImageSrc,
       t,
       can,
+      canIn,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -452,8 +457,8 @@ const Conversation = memo(function Conversation({
   const history = useQuery({
     queryKey: sessionQueryKey(scopeKey, id),
     queryFn: () => loadHistory(transport!, id),
-    // `GET /api/chat/sessions/:id` requires `X-Space-Id`; without one the
-    // request is a guaranteed 400, so wait for the host's space instead.
+    // The scope key is the gate: a space route is entered through `X-Space-Id`, so before the
+    // host's space store resolves the key is null and the read waits, instead of a guaranteed 400.
     enabled: persistedAtMount && !!scopeKey && !!transport,
     staleTime: Infinity,
     gcTime: 0,
