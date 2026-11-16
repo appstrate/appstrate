@@ -38,7 +38,7 @@ export function RunExecutionView({
     entryId === null ? entryParam.close() : entryParam.open(entryId);
 
   // Laid on the page like every list tab: the viewer draws its toolbar, then its own card
-  // holding the event list and, when a row is open, the inspector.
+  // holding the event list; the open row's inspector opens in a sheet.
   return (
     <LogViewer
       key={initialFilter ?? "all"}

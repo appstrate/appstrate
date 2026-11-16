@@ -66,7 +66,6 @@ import {
 } from "../lib/platform-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
-import { LG_AND_UP, useMediaQuery } from "../hooks/use-media-query";
 import { useFillHeight } from "../hooks/use-fill-height";
 
 interface EntryLook {
@@ -460,7 +459,7 @@ interface LogViewerProps {
   onSelectEntry: (entryId: string | null) => void;
   /** Read once at mount: the caller keys the viewer on it to apply a new focus. */
   initialFocus?: JournalOverviewFilter;
-  /** The open row's inspector: beside the list from `lg`, in a sheet below. */
+  /** The open row's inspector, drawn in a sheet over the page. */
   inspector?: ReactNode;
 }
 
@@ -506,8 +505,6 @@ export function LogViewer({
   const cardRef = useRef<HTMLDivElement>(null);
   const positionedRef = useRef(false);
   const fillHeight = useFillHeight(cardRef);
-  // From `lg` the inspector stands beside the list; below, it opens in a sheet.
-  const inspectorBeside = useMediaQuery(LG_AND_UP);
   const inspectorId = useId();
 
   const [autoScroll, setAutoScroll] = useState(true);
@@ -720,8 +717,6 @@ export function LogViewer({
     setDisplay([]);
   };
 
-  const besideList = inspectorBeside && !!inspector;
-
   return (
     <div className="min-w-0">
       <ListToolbar
@@ -747,17 +742,13 @@ export function LogViewer({
         }
       />
 
-      {/* The journal's own card: the event list and, from `lg` when a row is open, its
-          inspector beside it. It ends where the page does, and its list scrolls inside it. */}
+      {/* The journal's own card: it ends where the page does, and its list scrolls inside it. */}
       <div
         ref={cardRef}
-        className={cn(
-          "bg-card flex min-w-0 overflow-hidden rounded-lg border",
-          besideList ? "flex-row" : "flex-col",
-        )}
-        style={besideList ? { height: fillHeight } : { maxHeight: fillHeight }}
+        className="bg-card flex min-w-0 flex-col overflow-hidden rounded-lg border"
+        style={{ maxHeight: fillHeight }}
       >
-        <div className="relative flex min-h-0 min-w-0 flex-[2] flex-col">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Virtualized rows mount as the list scrolls: a polite live region (the implicit
               value of `log`) would announce them as new events, so it is turned off. */}
           <div
@@ -848,31 +839,21 @@ export function LogViewer({
             </Button>
           )}
         </div>
-        {besideList && (
-          <aside
-            id={inspectorId}
-            className="border-border flex min-h-0 min-w-80 flex-1 flex-col border-l"
-          >
-            {inspector}
-          </aside>
-        )}
       </div>
 
-      {!inspectorBeside && (
-        <Sheet open={!!inspector} onOpenChange={(open) => !open && onSelectEntry(null)}>
-          <SheetContent
-            id={inspectorId}
-            side="right"
-            aria-describedby={undefined}
-            // The inspector's header carries the one close control, as beside the list.
-            showCloseButton={false}
-            className="flex w-[min(92vw,32rem)] flex-col gap-0 p-0 sm:max-w-none"
-          >
-            <SheetTitle className="sr-only">{t("log.inspectorTitle")}</SheetTitle>
-            {inspector}
-          </SheetContent>
-        </Sheet>
-      )}
+      <Sheet open={!!inspector} onOpenChange={(open) => !open && onSelectEntry(null)}>
+        <SheetContent
+          id={inspectorId}
+          side="right"
+          aria-describedby={undefined}
+          // The inspector's header carries the one close control.
+          showCloseButton={false}
+          className="flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+        >
+          <SheetTitle className="sr-only">{t("log.inspectorTitle")}</SheetTitle>
+          {inspector}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
