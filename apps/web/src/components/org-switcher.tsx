@@ -206,7 +206,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   // The trigger's own box (avatar + name), so the column does not move when the org lands.
   if (loading) {
     return (
-      <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
+      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX[variant])} aria-hidden>
         <Skeleton className="mr-1 size-8 shrink-0 rounded-lg" />
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-3.5 w-28" />
@@ -282,10 +282,13 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     : currentSpace
       ? spaceLabel(currentSpace, t)
       : undefined;
-  // The space's tile is a badge on the organization's, ringed in the trigger's own background.
+  // The space's tile is a badge on the organization's, ringed in the trigger's own background,
+  // which the ring follows on hover and while the panel is open.
   const badge = cn(
-    "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
-    variant === "mobile" ? "ring-background" : "ring-sidebar",
+    "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2 transition-[box-shadow]",
+    variant === "mobile"
+      ? "ring-background group-hover/trigger:ring-accent group-data-[state=open]/trigger:ring-accent"
+      : "ring-sidebar group-hover/trigger:ring-sidebar-accent group-data-[state=open]/trigger:ring-sidebar-accent",
   );
   const spaceBadge: ReactNode = overview.on ? (
     <OverviewTile className={badge} />
@@ -323,7 +326,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
           })}
           className={cn(
-            "flex items-center gap-2 rounded-md px-1.5 text-sm transition-colors",
+            "group/trigger flex items-center gap-2 rounded-lg px-2 text-sm transition-colors",
             TRIGGER_BOX[variant],
             variant === "mobile"
               ? "hover:bg-accent data-[state=open]:bg-accent"
