@@ -73,7 +73,7 @@ function AddRow({
           event.preventDefault();
           onPick();
         }}
-        className="text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-2.5 rounded-md p-2 text-sm"
+        className="text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm"
       >
         <span className="flex size-6 shrink-0 items-center justify-center">
           <Plus size={15} />
@@ -106,7 +106,7 @@ function PickerRow({
       <button
         type="button"
         className={cn(
-          "flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60",
+          "flex min-w-0 flex-1 items-center justify-start gap-2.5 px-2 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-60",
           className,
         )}
         {...pick}
@@ -122,7 +122,7 @@ function PickerRow({
           aria-label={settings.label}
           title={settings.label}
           className={cn(
-            "text-muted-foreground hover:text-foreground shrink-0 p-2",
+            "text-muted-foreground hover:text-foreground shrink-0 px-2 py-1.5",
             !settings.pinned && "hidden group-focus-within:block group-hover:block",
           )}
         >
@@ -376,7 +376,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
           <div className={cn("grid", stacked ? "grid-cols-1" : "grid-cols-2")}>
             <div className="flex min-h-0 flex-col p-2">
               <ColumnHeader label={t("switcher.orgsColumn")} />
-              <div className={cn(!mobilePresentation && LIST_BOX)}>
+              <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
                 {shownOrgs.map((org) => {
                   const isCurrent = org.id === currentOrg.id;
                   const isExplored = org.id === exploredId;
@@ -440,10 +440,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
-                <div className={cn(!mobilePresentation && LIST_BOX)}>
+                <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
                   {/* Not a space: a mode over the working space, set apart above them. */}
                   {offersOverview && (
-                    <div className="mb-1 border-b pb-1">
+                    <div className="border-b pb-1">
                       <PickerRow
                         data-testid="space-item-overview"
                         aria-current={overviewCurrent || undefined}
