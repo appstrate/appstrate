@@ -154,7 +154,7 @@ describe("fetchOrThrow", () => {
       return Response.json({ ok: true });
     }) as unknown as typeof fetch;
 
-    const response = await fetchOrThrow("http://localhost/api/chat/sessions", {
+    const response = await fetchOrThrow("http://localhost/api/orgs/org_1/chat/sessions", {
       headers: { "X-Space-Id": "spc_a" },
     });
 
@@ -170,7 +170,7 @@ describe("fetchOrThrow", () => {
         422,
       )) as unknown as typeof fetch;
 
-    const error = await fetchOrThrow("http://localhost/api/chat/sessions/chs_1", {
+    const error = await fetchOrThrow("http://localhost/api/orgs/org_1/chat/sessions/chs_1", {
       method: "PATCH",
     }).catch((e: unknown) => e);
 

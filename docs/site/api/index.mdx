@@ -110,7 +110,7 @@ Some also return `total` or `limit`. The style depends on the resource, and the 
 | Style    | Parameters                                                  | Used by                                                                                                     |
 | -------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Offset   | `limit`, `offset`                                           | `/api/runs`, `/api/agents/{scope}/{name}/runs`, `/api/schedules/{id}/runs`, `/api/integrations`             |
-| Cursor   | `limit`, `startingAfter` (and `endingBefore` for end-users) | `/api/end-users`, `/api/files`, `/api/notifications`, `/api/webhooks/{id}/deliveries`, `/api/chat/sessions` |
+| Cursor   | `limit`, `startingAfter` (and `endingBefore` for end-users) | `/api/end-users`, `/api/files`, `/api/notifications`, `/api/webhooks/{id}/deliveries`, `/api/orgs/{orgId}/chat/sessions` |
 | Sequence | `since`, `limit`                                            | `/api/runs/{id}/logs`                                                                                       |
 
 `limit` defaults to 20 on most lists (50 for an agent's runs, 100 for integrations and chat sessions, 1000 for run logs) and is capped at 100 (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.

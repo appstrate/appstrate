@@ -88,7 +88,7 @@ function refused<P extends { status: number }>(problem: P): APICallError {
   const responseBody = JSON.stringify(problem);
   return new APICallError({
     message: responseBody,
-    url: "/api/chat",
+    url: "/api/orgs/org_1/chat",
     requestBodyValues: undefined,
     statusCode: problem.status,
     responseBody,

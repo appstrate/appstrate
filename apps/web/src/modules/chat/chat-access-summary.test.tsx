@@ -9,9 +9,9 @@
  *    `false` for a set still in flight, which is indistinguishable from a
  *    denial — a summary that painted then would tell every user, on every hard
  *    reload, that the assistant may do nothing;
- *  - the label is the standing that actually governs the chat. Sessions are
- *    space-scoped rows (RBAC spec §5), so the SPACE role is the specific
- *    answer and the org role is the fallback for a caller standing in none.
+ *  - the verdicts judge the spaces the chat ACTS in, not the working space the
+ *    shell stands in; the label names the working space's role, with the org
+ *    role as the fallback for a caller standing in none.
  *
  * The capability verdicts themselves are `chat-access.test.ts` — pure, and
  * asserted there rather than through markup this renderer cannot produce.
@@ -26,7 +26,10 @@ const SPACE_ID = "spc_a";
 
 // The stores read `localStorage` at module init, so it exists before the
 // dynamic imports below pull them in.
-installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+installFakeStorage({
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { pathname: "/", origin: "http://localhost" },
+});
 
 const { ChatAccessSummary, ChatCapabilityList } = await import("./chat-access-summary.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
@@ -84,6 +87,8 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
 function summary(options: {
   seedSpaces: boolean;
   spaceRole?: { kind: "preset" | "custom"; key: string; name: string } | null;
+  /** Extra rows of the space listing, beside the working space. */
+  otherSpaces?: ReturnType<typeof spaceFixture>[];
 }): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   qc.setQueryData(
@@ -103,7 +108,11 @@ function summary(options: {
     qc.setQueryData(
       $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
         .queryKey,
-      { object: "list", data: [spaceFixture(options.spaceRole ?? null)], hasMore: false },
+      {
+        object: "list",
+        data: [spaceFixture(options.spaceRole ?? null), ...(options.otherSpaces ?? [])],
+        hasMore: false,
+      },
     );
   }
 
@@ -136,8 +145,7 @@ describe("the chat access summary", () => {
   });
 
   it("labels itself with the caller's role in THIS space", () => {
-    // Chat sessions are space-scoped rows, so the space role is the standing
-    // that governs the conversation.
+    // The working space's role is the specific standing the label names.
     const html = summary({
       seedSpaces: true,
       spaceRole: { kind: "preset", key: "operator", name: "operator" },
@@ -168,6 +176,26 @@ describe("the chat access summary", () => {
       spaceRole: { kind: "preset", key: "operator", name: "operator" },
     });
     expect(html).toContain(i18n.t("chat:access.roleLine", { org, space }));
+  });
+
+  it("judges the spaces the chat acts in, not the working space", () => {
+    // The working space grants no chat permission; another one does, so the assistant can act.
+    const runAgents = i18n.t("chat:access.capability.runAgents");
+    const granted = i18n.t("chat:access.granted");
+    const acting = {
+      ...spaceFixture({ kind: "preset", key: "operator", name: "operator" }),
+      id: "spc_b",
+      isDefault: false,
+      permissions: ["chat:write", "chat:read", "mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+    };
+    const withActing = summary({ seedSpaces: true, spaceRole: null, otherSpaces: [acting] });
+    const without = summary({ seedSpaces: true, spaceRole: null });
+    const row = (html: string) =>
+      [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)]
+        .map((m) => m[1]!)
+        .find((li) => li.includes(runAgents))!;
+    expect(row(withActing)).toContain(granted);
+    expect(row(without)).not.toContain(granted);
   });
 
   it("lists the capabilities under the caller's role once permissions are known", () => {

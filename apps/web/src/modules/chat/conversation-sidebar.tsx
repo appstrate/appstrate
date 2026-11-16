@@ -129,7 +129,7 @@ export function ShownFile({
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
-  // A file of another space (an organization conversation's) is read, copied and downloaded there.
+  // A file of another space (a conversation's) is read, copied and downloaded there.
   const context = otherSpaceFileContext(file.spaceId, useCurrentOrgId(), useCurrentSpaceId());
   const { data, isLoading, error } = useFile(file.id, context);
 

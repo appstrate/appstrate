@@ -154,7 +154,7 @@ describe("chat sessions", () => {
   });
 
   describe("GET …/sessions?spaceId=", () => {
-    it("lists the conversations that touched the space, whatever else they touched", async () => {
+    it("lists the conversations that touched the space, whatever else they touched, and those that touched none", async () => {
       const a = await createSession(ctx, { spaceId: ctx.defaultSpaceId });
       const b = await createSession(ctx, { spaceId: spaceB });
       const both = await createSession(ctx, { spaceId: spaceB });
@@ -165,13 +165,32 @@ describe("chat sessions", () => {
         new Set([a.id, b.id, both.id, overview.id]),
       );
       expect(new Set(await listSessionIds(ctx, `?spaceId=${spaceB}`))).toEqual(
-        new Set([b.id, both.id]),
+        new Set([b.id, both.id, overview.id]),
       );
       expect(new Set(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`))).toEqual(
-        new Set([a.id, both.id]),
+        new Set([a.id, both.id, overview.id]),
       );
       const dto = (await (await orgCall(ctx, `/sessions/${both.id}`)).json()) as SessionDto;
       expect([...dto.space_ids].sort()).toEqual([ctx.defaultSpaceId, spaceB].sort());
+    });
+
+    it("also lists a conversation that touched no space: it holds no space's data", async () => {
+      const untouched = await createSession(ctx);
+      const inB = await createSession(ctx, { spaceId: spaceB });
+      expect(new Set(await listSessionIds(ctx, `?spaceId=${spaceB}`))).toEqual(
+        new Set([inB.id, untouched.id]),
+      );
+      expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([untouched.id]);
+      // Its first act decides: once it touched B, it leaves the other spaces' lists.
+      await touch(untouched.id, spaceB);
+      expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([]);
+      // The cursor is validated within the same filtered set.
+      const fresh = await createSession(ctx);
+      const res = await orgCall(
+        ctx,
+        `/sessions?spaceId=${ctx.defaultSpaceId}&startingAfter=${fresh.id}`,
+      );
+      expect(res.status).toBe(200);
     });
 
     it("pages within the filtered set: the cursor is valid there only", async () => {
@@ -236,6 +255,33 @@ describe("chat sessions", () => {
     await db.delete(spaces).where(eq(spaces.id, closed));
     expect((await orgCall(member, `/sessions/${session.id}`)).status).toBe(200);
     expect(await listSessionIds(member)).toContain(session.id);
+  });
+
+  describe("a conversation that touched a space the author cannot read", () => {
+    // Resume answers 204 (nothing to resume) rather than 404 — the same answer as a
+    // conversation that has no row yet; what matters is that it never replays a stream.
+    const routes: [string, string, string, number][] = [
+      ["get", "GET", "", 404],
+      ["rename", "PATCH", "", 404],
+      ["delete", "DELETE", "", 404],
+      ["mark read", "PUT", "/read", 404],
+      ["stop", "POST", "/stop", 404],
+      ["resume stream", "GET", "/stream", 204],
+    ];
+    it.each(routes)("%s of a hidden conversation", async (_name, method, suffix, status) => {
+      const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" }))
+        .id;
+      const member = await memberContext(ctx, "member", "operator");
+      const session = await createSession(member, { title: "Hidden" });
+      await touch(session.id, closed);
+      const res = await orgCall(member, `/sessions/${session.id}${suffix}`, {
+        method,
+        ...(method === "PATCH" ? { body: JSON.stringify({ title: "x" }) } : {}),
+      });
+      expect(res.status).toBe(status);
+      const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, session.id));
+      expect(row?.title).toBe("Hidden");
+    });
   });
 
   it("excludes a conversation whose touched space the role cannot read chats in", async () => {

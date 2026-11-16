@@ -5,6 +5,10 @@
  * "Chat / <conversation>" inside one (the parent links back to a new conversation). The name
  * is a plain segment; renaming lives in the conversation's settings dialog.
  *
+ * The name comes from the conversation list while it holds the row (renames and the first title land
+ * there live) and from the conversation itself otherwise: a conversation belongs to the organization,
+ * so one opened from outside the list's space filter keeps its name.
+ *
  * While sessions load (or cannot be asked yet, `pending`) a skeleton slot reserves the space; an unknown (deleted) conversation
  * publishes "Chat" alone rather than a made-up name.
  */
@@ -12,8 +16,11 @@
 import { useTranslation } from "react-i18next";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { $api } from "@/api/client";
+import { useCurrentOrgId } from "@/hooks/use-org";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
+import { resolveCrumbTitle } from "./chat-crumb-title";
 
 export function ChatTitleCrumb({
   conversationId,
@@ -25,11 +32,20 @@ export function ChatTitleCrumb({
 }) {
   const { t } = useTranslation(["chat", "common"]);
   const { data: sessions, isLoading } = useSessions();
-  const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
-  const title = session ? (session.title ?? t("threads.new")) : null;
+  const orgId = useCurrentOrgId();
+  const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
+  // Asked only once the list has answered without the row (the same query as the info panel's).
+  const detail = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/chat/sessions/{id}",
+    { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
+    { enabled: !!orgId && !!conversationId && !pending && !isLoading && !listed },
+  );
+  const title = resolveCrumbTitle(listed, detail.data, t("threads.new"));
 
   // `isLoading`: the read is off without a space, and would wait forever.
-  const loading = conversationId !== null && (pending || isLoading);
+  const loading =
+    conversationId !== null && (pending || isLoading || (!listed && detail.isLoading));
 
   const chat = t("common:products.chat");
   usePageBreadcrumb(

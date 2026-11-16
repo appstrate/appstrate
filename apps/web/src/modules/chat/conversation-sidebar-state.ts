@@ -5,7 +5,7 @@ export type ConversationSidebarTab = "runs" | "files" | "info";
 export interface SidebarFile {
   id: string;
   name: string;
-  /** The file's space when it is not the working one (an organization conversation's file elsewhere). */
+  /** The file's space when it is not the working one (a conversation's file elsewhere). */
   spaceId?: string;
 }
 

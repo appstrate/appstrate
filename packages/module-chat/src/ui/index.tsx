@@ -14,7 +14,7 @@
  *    assistant turn on finalize). The client never persists; it only reads
  *    history to seed `useChat` and renders the live stream.
  *  - Mid-inference reload resumes live tokens via `useChat({ resume: true })` →
- *    `GET /api/chat/sessions/:id/stream`.
+ *    `GET /api/orgs/:orgId/chat/sessions/:id/stream`.
  */
 
 import {
@@ -743,14 +743,11 @@ function ConversationInner({
   const generating = chat.status === "submitted" || chat.status === "streaming";
   const wasGenerating = useRef(false);
   useEffect(() => {
-    // A conversation belongs to the list under the filter that names the space it touched:
-    // « Vue d'ensemble » holds them all, and a space's list those that touched it. A row not yet
-    // there joins the list only when it belongs to it; a row already there is patched wherever it is.
-    const inFilter = turnSpace === (filterSpaceId ?? undefined);
+    // A conversation that touched no space is listed under every filter, so its row is created
+    // in the open one; once the turn touches spaces, the list refetch decides where it stays.
     if (generating) {
       queryClient.setQueryData<SessionsCache>(sessionsQueryKey(filterSpaceId), (prev) => {
         const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
-        if (!existing && !inFilter) return prev;
         const row: SessionSummary = {
           ...(existing ?? {
             id,

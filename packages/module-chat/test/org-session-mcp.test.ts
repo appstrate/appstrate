@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An organization session's loopback bearer against the REAL organization MCP
+ * A conversation's loopback bearer against the REAL organization MCP
  * endpoint (`/api/mcp/o/:org`).
  *
  * The bearer is a CEILING, not a grant: its permission list is the union of the
@@ -129,7 +129,7 @@ beforeEach(async () => {
   });
 });
 
-describe("an organization session's loopback bearer on /api/mcp/o/:org", () => {
+describe("a conversation's loopback bearer on /api/mcp/o/:org", () => {
   it("carries a permission only one space grants, without lending it to another", async () => {
     // The ceiling holds `agents:write` (Gestion's admin) though the default space's operator lacks it.
     expect(presetPermissions("operator")).not.toContain("agents:write");

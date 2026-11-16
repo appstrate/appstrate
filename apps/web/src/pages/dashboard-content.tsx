@@ -67,8 +67,8 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant names no space: its chat door opens as it is (in « Vue d'ensemble » an organization
- * session acting across spaces), offered where some space opens the chat.
+ * assistant names no space: its chat door opens as it is (in « Vue d'ensemble » a conversation
+ * acting across spaces), offered where some space opens the chat.
  */
 export function DashboardHeader({
   firstName,

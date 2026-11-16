@@ -15,8 +15,8 @@ const HEADER = { "X-Org-Id": "org_1" };
 const SESSIONS_LIST_KEY = ["chat", "sessions"];
 const detailKey = (id: string) => [
   "get",
-  "/api/chat/sessions/{id}",
-  { params: { path: { id }, header: HEADER } },
+  "/api/orgs/{orgId}/chat/sessions/{id}",
+  { params: { path: { orgId: "org_1", id } } },
 ];
 const filesForSessionKey = (id: string) => [
   "get",
@@ -49,19 +49,12 @@ describe("matchesChatSessionQuery", () => {
     expect(matchesChatSessionQuery(FILES_GALLERY_KEY, "chs_a")).toBe(false);
   });
 
-  it("reaches an organization conversation's detail and files the same way", () => {
-    const orgDetail = (id: string) => [
-      "get",
-      "/api/orgs/{orgId}/chat/sessions/{id}",
-      { params: { path: { orgId: "org_1", id } } },
-    ];
+  it("reaches the conversation's files through the organization route too", () => {
     const orgFiles = (id: string) => [
       "get",
       "/api/orgs/{orgId}/files",
       { params: { path: { orgId: "org_1" }, query: { context_chat_session_id: id } } },
     ];
-    expect(matchesChatSessionQuery(orgDetail("chs_a"), "chs_a")).toBe(true);
-    expect(matchesChatSessionQuery(orgDetail("chs_b"), "chs_a")).toBe(false);
     expect(matchesChatSessionQuery(orgFiles("chs_a"), "chs_a")).toBe(true);
     expect(matchesChatSessionQuery(orgFiles("chs_b"), "chs_a")).toBe(false);
   });

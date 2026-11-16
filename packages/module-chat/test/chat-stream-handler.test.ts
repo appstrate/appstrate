@@ -1408,7 +1408,7 @@ describe("handleChatStream", () => {
     });
   });
 
-  describe("an organization session turn", () => {
+  describe("a turn across the acting set", () => {
     let spaceB: string;
     /** Reached for reading the chat and the tools, but never chatted in: outside the acting set. */
     let spaceC: string;
@@ -1603,7 +1603,7 @@ describe("handleChatStream", () => {
       });
     });
 
-    it("refuses a turn on an organization session that touched a space its author no longer reads", async () => {
+    it("refuses a turn on a conversation that touched a space its author no longer reads", async () => {
       const sessionId = mintSessionId();
       await ensureSession(sessionId, ctx.orgId, ctx.user.id, []);
       await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB });

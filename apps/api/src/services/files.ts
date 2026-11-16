@@ -1334,7 +1334,7 @@ export async function resolveChatAttachment(
 
   // The attachment resolves in the space it belongs to, which must be one the
   // caller may attach in: a file or upload of any other space is as absent as a
-  // missing one, whichever kind of session asks.
+  // missing one.
   const [owner] = fileId
     ? await db
         .select({ spaceId: files.spaceId })

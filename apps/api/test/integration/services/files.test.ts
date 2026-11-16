@@ -608,8 +608,8 @@ describe("files service + routes", () => {
   });
 
   it("does not reveal a conversation's context from another space", async () => {
-    // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
-    // ownership: the SAME user asking from another space resolves nothing.
+    // A file belongs to the space it was created in, so the SAME user asking
+    // for the conversation's files from another space resolves nothing.
     const sessionId = `chs_${crypto.randomUUID()}`;
     await db.insert(chatSessions).values({
       id: sessionId,
@@ -1361,7 +1361,7 @@ describe("files service + routes", () => {
     // The session's runs are read in the listed spaces only.
     expect(await ids(grants.slice(0, 1))).toEqual(new Set([first.id]));
 
-    // Someone else's organization session resolves nothing.
+    // Someone else's conversation resolves nothing.
     const stranger = await createTestUser({ email: "org-session-stranger@docs.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     expect(

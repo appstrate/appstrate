@@ -5,7 +5,8 @@
  * act, as a section of the conversation's Info tab. Lives in the SHELL
  * (everything it reads is host state). A role preview (`X-View-As`) needs no
  * logic here: `/api/orgs` and `/api/spaces` already answer AS the persona; the
- * summary only marks it.
+ * summary only marks it. The verdicts judge the spaces the chat acts in (as the page does), not
+ * the working space the shell happens to stand in; the role line names the working one.
  */
 
 import { useTranslation } from "react-i18next";
@@ -14,16 +15,18 @@ import { usePackageAuthoringEnabled } from "@appstrate/module-chat/package-autho
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { roleI18nKey, useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
+import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { spaceRoleLabel } from "../../hooks/use-roles";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useViewAs } from "../../stores/view-as-store";
+import { useChatActingSpaceIds, useChatCan } from "./use-chat-runtime";
 import { resolveChatCapabilities, type ResolvedChatCapability } from "./chat-access";
 
 export function ChatAccessSummary() {
   const { t } = useTranslation(["chat", "settings"]);
-  const { can, ready, orgRole } = usePermissions();
-  const spaceGrant = useCurrentSpaceGrant();
+  const { ready, orgRole } = usePermissions();
+  const can = useChatCan();
+  const actingSpaceIds = useChatActingSpaceIds();
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
@@ -35,7 +38,10 @@ export function ChatAccessSummary() {
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
   const roleLabel = spaceRole ?? orgRoleLabel;
-  const capabilities = resolveChatCapabilities({ can, spaceGrant, authoring });
+  const spaceGrants = (spaces ?? [])
+    .filter((space) => actingSpaceIds.includes(space.id))
+    .map(({ permissions, personal, access }) => ({ permissions, personal, access }));
+  const capabilities = resolveChatCapabilities({ can, spaceGrants, authoring });
   const RoleIcon = persona ? EyeIcon : ShieldIcon;
 
   return (

@@ -2,7 +2,7 @@
 
 /**
  * Session-delete file teardown — the storage-accounting contract of
- * `DELETE /api/chat/sessions/:id`.
+ * `DELETE /api/orgs/:orgId/chat/sessions/:id`.
  *
  * The route runs the file teardown (`cleanupSessionFiles`, wired to the
  * platform's `detachOrDeleteContainedFiles`) and the `chat_sessions` row
@@ -107,7 +107,7 @@ describe("chat session delete — file teardown", () => {
     const [, ...pathParts] = file.storageKey.split("/");
     const inBucketKey = pathParts.join("/");
 
-    // Mirror the DELETE /api/chat/sessions/:id route: teardown + session-row
+    // Mirror the DELETE /api/orgs/:orgId/chat/sessions/:id route: teardown + session-row
     // delete in ONE transaction (the tx threaded into the teardown).
     await db.transaction(async (tx) => {
       await detachOrDeleteContainedFiles({ chatSessionId: sessionId }, tx);

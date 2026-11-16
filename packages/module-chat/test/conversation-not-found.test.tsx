@@ -2,7 +2,7 @@
 
 /**
  * A URL naming a conversation the caller does not have (deleted, or someone
- * else's): the page says so and mounts NO composer. `POST /api/chat` creates a
+ * else's): the page says so and mounts NO composer. `POST /api/orgs/:orgId/chat` creates a
  * session for any id it does not know, so a composer there re-created the
  * deleted conversation under its old id on the first send.
  */

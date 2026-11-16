@@ -118,7 +118,7 @@ describe("the chat while the mode is not known", () => {
   });
 });
 
-describe("the conversation panel of an organization conversation", () => {
+describe("the conversation panel", () => {
   const spaces = [
     space("spc_a", ["chat:read", "chat:write", "mcp:read", "runs:read"]),
     space("spc_b", ["chat:read", "chat:write", "mcp:read", "runs:read"]),

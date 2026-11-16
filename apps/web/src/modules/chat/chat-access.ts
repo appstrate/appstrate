@@ -20,8 +20,8 @@ import type { GateablePermission } from "../../hooks/use-permissions";
 export interface ChatAccessContext {
   /** The caller's org ∪ space effective set, as `usePermissions().can`. */
   can: (permission: GateablePermission) => boolean;
-  /** The caller's standing in the current space; `undefined` while it loads. */
-  spaceGrant: SpaceGrant | undefined;
+  /** The caller's standing in each space the chat acts in; empty while they load. */
+  spaceGrants: readonly SpaceGrant[];
   /** The composer's package-authoring switch. */
   authoring: boolean;
 }
@@ -73,10 +73,13 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (ctx, turn) => turn.invokes && ctx.can("integrations:connect"),
   },
   {
-    // Not the raw grant: a personal-space owner may activate without it.
+    // Not the raw grant: a personal-space owner may activate without it. Held when some space
+    // the chat acts in allows it.
     id: "activateIntegrations",
     labelKey: "access.capability.activateIntegrations",
-    held: (ctx, turn) => turn.invokes && maySetPackageActive(ctx.spaceGrant, "integration", true),
+    held: (ctx, turn) =>
+      turn.invokes &&
+      ctx.spaceGrants.some((grant) => maySetPackageActive(grant, "integration", true)),
   },
   {
     id: "schedule",

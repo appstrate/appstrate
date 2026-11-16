@@ -1774,7 +1774,7 @@ if (existsSync(modulesDir)) {
 }
 
 // 4d. Workspace-package module routes (`packages/module-<name>/src/**`). These
-//     are modules too (e.g. module-chat mounts /api/chat) and their openApiPaths
+//     are modules too (e.g. module-chat mounts /api/orgs/:orgId/chat) and their openApiPaths
 //     are now collected into the validated spec (see lib/module-openapi.ts), so
 //     their code routes must be scanned here to keep Code ⊆ Spec balanced.
 const workspaceModulesDir = join(REPO_ROOT, "packages");

@@ -94,8 +94,7 @@ export interface ChatAttachmentRequest {
   uri: string;
   /**
    * The spaces the attachment may resolve in, each with the caller's effective
-   * permission set there: the session's own space, or for an organization
-   * session every space the caller may chat in. The attachment resolves in the
+   * permission set there: every space the caller may chat in (the acting set). The attachment resolves in the
    * space its file (or upload) belongs to, which must be one of these; a
    * permission set decides how wide a container ACL reads there — with
    * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,

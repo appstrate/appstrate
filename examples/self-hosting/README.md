@@ -579,7 +579,7 @@ producers are `/api/realtime/*`, the chat stream (via the AI SDK's own
   `gzip_types` excludes it by default; if you enable compression in Traefik or
   Caddy, confirm `text/event-stream` is not in the compressed set.
 - **Traefik**: responses are not buffered unless you configure the `buffering`
-  middleware. If you do, it must not apply to `/api/chat`, `/api/realtime` or
+  middleware. If you do, it must not apply to the chat routes (`/api/orgs/*/chat`), `/api/realtime` or
   the run-log endpoints.
 
 Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —

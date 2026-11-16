@@ -1068,7 +1068,7 @@ describe("realtime SSE routes (integration)", () => {
       await opened.body?.cancel();
     });
 
-    it("withholds chat frames from a role without chat:read, as `/api/chat/*` does", async () => {
+    it("withholds chat frames from a role without chat:read, as the chat routes do", async () => {
       const noChat = await seedSpaceRole({
         orgId: ctx.orgId,
         key: "sse-no-chat",

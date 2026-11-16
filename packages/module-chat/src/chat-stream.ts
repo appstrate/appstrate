@@ -536,7 +536,7 @@ export async function handleChatStream(
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
     // The spaces an attachment may resolve in, each under the caller's set there: the
-    // session's own, or the acting set. The container ACL reads as wide as
+    // acting set. The container ACL reads as wide as
     // the caller does: an `appfile://` the user picked from the gallery — which
     // `runs:read-all` widens to the whole space's run outputs — must still resolve when
     // they attach it. Picker and attach answer the same set.

@@ -38,7 +38,7 @@ beforeEach(async () => {
   const owner = await createTestContext({ orgSlug: "chat-authoring-ceiling" });
   const builder = await memberContext(owner, "member", "builder");
 
-  // The set `c.get("permissions")` holds on the builder's own `/api/chat`
+  // The set `c.get("permissions")` holds on the builder's own `/api/orgs/:orgId/chat`
   // request — read from the platform, not written down here.
   const listed = await app.request("/api/spaces", {
     headers: { Cookie: builder.cookie, "X-Org-Id": builder.orgId },

@@ -28,10 +28,8 @@ function context(
   const held = new Set(permissions);
   return {
     can: (permission) => held.has(permission),
-    spaceGrant:
-      space === undefined
-        ? undefined
-        : { permissions, personal: false, access: "member", ...space },
+    spaceGrants:
+      space === undefined ? [] : [{ permissions, personal: false, access: "member", ...space }],
     authoring,
   };
 }
@@ -88,7 +86,7 @@ describe("the capability table", () => {
   });
 
   it("grants nothing to a caller holding nothing", () => {
-    // Includes the space-less case: `spaceGrant: undefined` is "not loaded",
+    // Includes the space-less case: an empty `spaceGrants` is "not loaded",
     // which must read as no, never as yes.
     expect(Object.values(verdicts(context([])))).toEqual(ROW_IDS.map(() => false));
   });
@@ -238,6 +236,18 @@ describe("activating an integration", () => {
     expect(verdicts(context(CONVERSES, { personal: false })).activateIntegrations).toBe(false);
   });
 
+  it("is granted when ONE of the spaces the chat acts in allows it", () => {
+    const ctx = context(CONVERSES);
+    const refused: SpaceGrant = { permissions: [], personal: false, access: "member" };
+    const allowed: SpaceGrant = {
+      permissions: [INTEGRATION_ACTIVATE_PERMISSION],
+      personal: false,
+      access: "member",
+    };
+    expect(verdicts({ ...ctx, spaceGrants: [refused] }).activateIntegrations).toBe(false);
+    expect(verdicts({ ...ctx, spaceGrants: [refused, allowed] }).activateIntegrations).toBe(true);
+  });
+
   it("is granted in the caller's PERSONAL space WITHOUT that permission", () => {
     // RBAC spec §3.6: ownership is the authorization there, so the route skips
     // the activation grant. It matters for a GUEST, who holds `operator` in
@@ -310,7 +320,7 @@ describe("reaching the API at all", () => {
 describe("a caller who may read the chat but not write to it", () => {
   it("is shown no capability at all, whatever else they hold", () => {
     // The `viewer` preset: `chat:read` and `mcp:read`, no `chat:write`. The
-    // turn itself (`POST /api/chat`) needs `chat:write`, so the assistant
+    // turn itself (`POST /api/orgs/:orgId/chat`) needs `chat:write`, so the assistant
     // never gets the message that would make it act.
     const viewer = verdicts(
       context(["chat:read", "mcp:read", "runs:read", "files:read", "agents:read"], {}),

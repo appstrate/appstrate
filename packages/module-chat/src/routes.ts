@@ -31,7 +31,19 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, exists, ilike, inArray, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  ilike,
+  inArray,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
 import {
@@ -156,19 +168,19 @@ const openableBy = (scope: SessionScope): SQL =>
     sessionVisible(scope.readable),
   )!;
 
-/** The sessions that touched `spaceId`. */
-const touching = (spaceId: string): SQL =>
-  exists(
+/**
+ * The sessions a space filter lists: those that touched `spaceId`, and those that touched
+ * no space at all — a conversation that has acted nowhere holds no space's data, so it
+ * belongs to every filter until its first act decides.
+ */
+const listedUnderSpace = (spaceId: string): SQL => {
+  const touches = (extra?: SQL) =>
     db
       .select({ one: sql`1` })
       .from(chatSessionSpaces)
-      .where(
-        and(
-          eq(chatSessionSpaces.sessionId, chatSessions.id),
-          eq(chatSessionSpaces.spaceId, spaceId),
-        ),
-      ),
-  );
+      .where(and(eq(chatSessionSpaces.sessionId, chatSessions.id), extra));
+  return or(exists(touches(eq(chatSessionSpaces.spaceId, spaceId))), notExists(touches()))!;
+};
 
 async function findOwnedSession(id: string, scope: SessionScope): Promise<SessionRow | undefined> {
   const [session] = await db
@@ -330,13 +342,16 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
     list: async (c: Context<ChatEnv>) => {
       const scope = sessionScope(c);
       const limit = parseListLimit(c, { defaultLimit: SESSIONS_PAGE_SIZE });
-      // `?spaceId=` keeps the conversations that touched that space, which the caller
+      // `?spaceId=` keeps the conversations that touched that space or none, in a space the caller
       // must read: a space outside their reach is refused, like any unknown filter value.
       const spaceId = c.req.query("spaceId");
       if (spaceId !== undefined && !scope.readable.includes(spaceId)) {
         throw invalidRequest("spaceId must be a space you can read chats in", "spaceId");
       }
-      const listed = and(openableBy(scope), spaceId === undefined ? undefined : touching(spaceId))!;
+      const listed = and(
+        openableBy(scope),
+        spaceId === undefined ? undefined : listedUnderSpace(spaceId),
+      )!;
       const conditions: SQL[] = [listed];
       // `?q=` narrows by title; blank = no filter. Untitled rows never match
       // (`NULL ILIKE …` is not true). The cursor stays any row of the filtered list.
