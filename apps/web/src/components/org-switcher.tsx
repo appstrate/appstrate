@@ -282,19 +282,18 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     : currentSpace
       ? spaceLabel(currentSpace, t)
       : undefined;
-  // The space's tile is a badge on the organization's, ringed in the trigger's own background,
-  // which the ring follows on hover and while the panel is open.
-  const badge = cn(
-    "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2 transition-[box-shadow]",
-    variant === "mobile"
-      ? "ring-background group-hover/trigger:ring-accent group-data-[state=open]/trigger:ring-accent"
-      : "ring-sidebar group-hover/trigger:ring-sidebar-accent group-data-[state=open]/trigger:ring-sidebar-accent",
-  );
-  const spaceBadge: ReactNode = overview.on ? (
-    <OverviewTile className={badge} />
-  ) : currentSpace ? (
-    <IdentityTile {...spaceTile(currentSpace, viewer)} className={badge} />
-  ) : null;
+  // The space's tile is a badge on the organization's, ringed in the trigger's background.
+  // « Vue d'ensemble » is no space: no badge, its name on the second line says it.
+  const spaceBadge: ReactNode =
+    currentSpace && !overview.on ? (
+      <IdentityTile
+        {...spaceTile(currentSpace, viewer)}
+        className={cn(
+          "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
+          variant === "mobile" ? "ring-background" : "ring-sidebar",
+        )}
+      />
+    ) : null;
   const spaceName: ReactNode = currentContextLabel ? (
     <span className="truncate" title={currentContextLabel}>
       {currentContextLabel}
@@ -326,11 +325,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
           })}
           className={cn(
-            "group/trigger flex items-center gap-2 rounded-lg px-2 text-sm transition-colors",
+            // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
+            "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
             TRIGGER_BOX[variant],
-            variant === "mobile"
-              ? "hover:bg-accent data-[state=open]:bg-accent"
-              : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
           {/* The organization's tile, the space's as a badge on its corner. */}
@@ -347,7 +344,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               <span className="text-muted-foreground flex min-w-0 text-xs">{spaceName}</span>
             )}
           </span>
-          <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
+          <ChevronsUpDown className="text-muted-foreground group-hover/trigger:text-foreground group-data-[state=open]/trigger:text-foreground size-3.5 shrink-0 transition-colors" />
         </button>
       </PopoverTrigger>
       <PopoverContent

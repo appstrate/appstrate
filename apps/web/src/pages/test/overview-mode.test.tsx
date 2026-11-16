@@ -201,14 +201,14 @@ describe("the switcher", () => {
     );
   });
 
-  it("puts its tile in the space's slot, in the sidebar and the phone header alike", () => {
+  it("names the mode under the organization without a space badge, in the sidebar and the phone header alike", () => {
     for (const variant of ["brand", "mobile"] as const) {
-      expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(
-        'data-testid="overview-tile"',
-      );
-      expect(renderIn(false, <OrgSwitcher variant={variant} />).html).not.toContain(
-        'data-testid="overview-tile"',
-      );
+      const on = renderIn(true, <OrgSwitcher variant={variant} />).html;
+      expect(on).toContain('title="Vue d\'ensemble"');
+      expect(on).not.toContain("-bottom-1");
+      const off = renderIn(false, <OrgSwitcher variant={variant} />).html;
+      expect(off).toContain('title="Studio"');
+      expect(off).toContain("-bottom-1");
     }
   });
 });
