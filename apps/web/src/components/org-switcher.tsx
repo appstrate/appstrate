@@ -207,7 +207,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   if (loading) {
     return (
       <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
-        <Skeleton className="size-10 shrink-0 rounded-lg" />
+        <Skeleton className="mr-1 size-8 shrink-0 rounded-lg" />
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-3 w-20" />
@@ -282,18 +282,22 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     : currentSpace
       ? spaceLabel(currentSpace, t)
       : undefined;
-  const spaceName: ReactNode = overview.on ? (
-    <>
-      <OverviewTile className="size-[18px] rounded-[5px]" />
-      <span className="truncate">{overviewLabel}</span>
-    </>
+  // The space's tile is a badge on the organization's, ringed in the trigger's own background.
+  const badge = cn(
+    "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
+    variant === "mobile" ? "ring-background" : "ring-sidebar",
+  );
+  const spaceBadge: ReactNode = overview.on ? (
+    <OverviewTile className={badge} />
   ) : currentSpace ? (
-    <>
-      <IdentityTile {...spaceTile(currentSpace, viewer)} className="size-[18px] rounded-[5px]" />
-      <span className="truncate">{spaceLabel(currentSpace, t)}</span>
-    </>
+    <IdentityTile {...spaceTile(currentSpace, viewer)} className={badge} />
+  ) : null;
+  const spaceName: ReactNode = currentContextLabel ? (
+    <span className="truncate" title={currentContextLabel}>
+      {currentContextLabel}
+    </span>
   ) : (
-    spacesPending && <Skeleton className="h-3 w-16" />
+    spacesPending && <Skeleton className="mt-0.5 h-3 w-16" />
   );
 
   return (
@@ -326,14 +330,18 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
           )}
         >
-          <IdentityTile {...orgTile(currentOrg)} className="size-10 rounded-lg" />
+          {/* The organization's tile, the space's as a badge on its corner. */}
+          <span className="relative mr-1 shrink-0">
+            <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
+            {spaceBadge}
+          </span>
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-            <span className="truncate font-semibold">{currentOrg.name}</span>
+            <span className="truncate font-semibold" title={currentOrg.name}>
+              {currentOrg.name}
+            </span>
             {spaceName && (
-              <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                {spaceName}
-              </span>
+              <span className="text-muted-foreground flex min-w-0 text-xs">{spaceName}</span>
             )}
           </span>
           <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
