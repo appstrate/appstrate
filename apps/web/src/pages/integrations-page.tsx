@@ -47,7 +47,6 @@ import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceAction } from "../hooks/use-space-action";
-import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
@@ -60,7 +59,6 @@ export function IntegrationsPage() {
   // index route every type page asks, not the management listing.
   const { data: active = [], isLoading, error } = usePackageList("integration", spanning);
   const connectionCount = useConnectionCounts();
-  const spaceLabelOf = useSpaceLabelOf();
   const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "protocol"]);
@@ -237,7 +235,7 @@ export function IntegrationsPage() {
           renderCard={(integration) => (
             <PackageCard
               {...packageCardItem(integration, "integration")}
-              spaceName={spanning ? spaceLabelOf(integration.spaceId) : undefined}
+              showSpace={spanning}
               meta={
                 connectionCount &&
                 t("connections.connectionCount", {

@@ -16,6 +16,7 @@ import { formatDateField } from "../lib/format-date";
 import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
 import { SkeletonLine } from "./skeleton-line";
+import { SpaceNameOf } from "./space-name";
 
 function MimePlaceholder({ mime }: { mime: string }) {
   return (
@@ -41,7 +42,7 @@ export function FileTile({
   onKeep,
   onPreview,
   showRunLink,
-  spaceName,
+  spaceId,
 }: {
   file: FileDto;
   isKeepPending: boolean;
@@ -51,7 +52,7 @@ export function FileTile({
   onPreview: (file: FileDto) => void;
   showRunLink?: boolean;
   /** Where it lives, in a list spanning spaces. */
-  spaceName?: string;
+  spaceId?: string;
 }) {
   const { t } = useTranslation(["files", "common"]);
   const { preview, download } = file.capabilities;
@@ -99,12 +100,10 @@ export function FileTile({
           <span aria-hidden>·</span>
           <span>{formatDateField(file.createdAt, "datetime")}</span>
           <ExpiryBadge expiresAt={file.expiresAt} />
-          {spaceName && (
+          {spaceId && (
             <>
               <span aria-hidden>·</span>
-              <span className="truncate" title={spaceName}>
-                {spaceName}
-              </span>
+              <SpaceNameOf spaceId={spaceId} />
             </>
           )}
         </CardDescription>

@@ -2,11 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { Modal } from "./modal";
-import { useViewer } from "../hooks/use-auth";
-import { spaceTile } from "../lib/identity-tile-props";
-import { spaceLabel } from "../lib/space-label";
+import { SpaceName } from "./space-name";
 
 interface PickableSpace {
   id: string;
@@ -51,8 +48,6 @@ export function SpacePickerList({
   spaces: readonly PickableSpace[];
   onPick: (spaceId: string) => void;
 }) {
-  const { t } = useTranslation(["common", "settings"]);
-  const viewer = useViewer();
   return (
     <div className="flex flex-col gap-1">
       {spaces.map((space) => (
@@ -63,8 +58,7 @@ export function SpacePickerList({
           className="h-auto w-full justify-start gap-3 px-2 py-2"
           onClick={() => onPick(space.id)}
         >
-          <IdentityTile {...spaceTile(space, viewer)} className="size-7 rounded-md" />
-          <span className="truncate">{spaceLabel(space, t)}</span>
+          <SpaceName space={space} size="md" />
         </Button>
       ))}
     </div>

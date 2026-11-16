@@ -25,7 +25,7 @@ import { agentCardItem, cardItemKey } from "../lib/package-card-item";
 import { grantedInSomeSpace } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useSpaceAction } from "../hooks/use-space-action";
-import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
+import { useSpaces } from "../hooks/use-spaces";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
@@ -181,7 +181,6 @@ function MetricCard({
 
 function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning: boolean }) {
   const { t } = useTranslation("common");
-  const spaceLabelOf = useSpaceLabelOf();
   return (
     <div
       className="no-scrollbar scroll-fade-x scroll-buttons-x flex gap-3 overflow-x-auto pb-1"
@@ -193,11 +192,7 @@ function RecentAgents({ agents, spanning }: { agents: AgentListItem[]; spanning:
         return (
           // Spanning, a card names its space; its run acts there.
           <div key={cardItemKey(item)} className="w-[19rem] shrink-0">
-            <PackageCard
-              {...item}
-              spaceName={spanning ? spaceLabelOf(agent.spaceId) : undefined}
-              headingLevel={3}
-            />
+            <PackageCard {...item} showSpace={spanning} headingLevel={3} />
           </div>
         );
       })}

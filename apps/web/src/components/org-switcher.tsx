@@ -36,6 +36,7 @@ import { useSidebar } from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { NEW_SPACE_PARAM } from "./space-create-modal";
+import { SpaceName } from "./space-name";
 
 function ColumnHeader({ label }: { label: string }) {
   return (
@@ -491,9 +492,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         }
                         onNavigate={closeSwitcherAndSidebar}
                       >
-                        <IdentityTile {...spaceTile(space, viewer)} className="size-6" />
-                        <span className="flex max-w-[65%] shrink-0 items-center gap-1.5 text-sm font-medium">
-                          <span className="truncate">{spaceLabel(space, t)}</span>
+                        <SpaceName
+                          space={space}
+                          size="md"
+                          className="max-w-[65%] shrink-0 font-medium"
+                        >
                           {space.isDefault && (
                             <Star
                               size={12}
@@ -504,7 +507,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                               <title>{t("switcher.defaultSpace")}</title>
                             </Star>
                           )}
-                        </span>
+                        </SpaceName>
                         <RowRole>
                           {enterable
                             ? space.role && spaceRoleLabel(space.role, t)

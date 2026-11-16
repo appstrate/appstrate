@@ -29,7 +29,6 @@ import { useUrlModal } from "../hooks/use-url-modal";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { fileContextHeader, fileReaderPath, otherSpaceFileContext } from "../lib/file-link";
 
 export function DocumentListPanel({
@@ -71,7 +70,6 @@ export function DocumentListPanel({
   const navigate = useNavigate();
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
-  const spaceLabelOf = useSpaceLabelOf();
 
   // A file of another space is read, kept and deleted in its own, named on the request
   // (`?org=…&space=…` for the reader), without switching. Its `capabilities` are already its
@@ -158,7 +156,7 @@ export function DocumentListPanel({
                 file={doc}
                 isKeepPending={pendingKeepId === doc.id}
                 showRunLink={showRunLink?.(doc)}
-                spaceName={spanning ? spaceLabelOf(doc.spaceId) : undefined}
+                spaceId={spanning ? doc.spaceId : undefined}
                 onPreview={openPreview}
                 onDownload={onDownload}
                 onKeep={onKeep}

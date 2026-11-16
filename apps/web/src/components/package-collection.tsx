@@ -30,7 +30,6 @@ import type { ListState } from "../lib/list-params";
 import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
 import { cardItemKey, type CardItem } from "../lib/package-card-item";
-import { useSpaceLabelOf } from "../hooks/use-spaces";
 
 const NO_FILTERS: FilterSpec[] = [];
 
@@ -140,8 +139,6 @@ export function PackageCollection({
   const origins = list.values("origin", PACKAGE_ORIGINS);
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
   const searchPlaceholder = useSearchPlaceholder(entity);
-  const spaceLabelOf = useSpaceLabelOf();
-  const spaceNameOf = (item: CardItem) => (spanning ? spaceLabelOf(item.spaceId) : undefined);
 
   const shown = narrowPackages(items ?? [], {
     query,
@@ -264,7 +261,7 @@ export function PackageCollection({
                   renderCard={(item) => (
                     <PackageCard
                       {...item}
-                      spaceName={spaceNameOf(item)}
+                      showSpace={spanning}
                       showRun={cardRun}
                       onOpen={rowAction ? () => rowAction(item) : undefined}
                     />
@@ -283,7 +280,7 @@ export function PackageCollection({
           renderCard={(item) => (
             <PackageCard
               {...item}
-              spaceName={spaceNameOf(item)}
+              showSpace={spanning}
               showRun={cardRun}
               onOpen={rowAction ? () => rowAction(item) : undefined}
             />

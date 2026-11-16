@@ -380,10 +380,10 @@ describe("the integration index in the mode", () => {
     expect(html).toContain('href="/integrations/@acme/crm"');
     expect(html).toContain('href="/integrations/@acme/crm?enterSpace=spc_b"');
     expect(html).toMatch(
-      /title="Studio">Studio<\/span><span aria-hidden="true">·<\/span>1 connexion/,
+      /title="Studio">Studio<\/span><\/span><span aria-hidden="true">·<\/span>1 connexion/,
     );
     expect(html).toMatch(
-      /title="spc_b">spc_b<\/span><span aria-hidden="true">·<\/span>2 connexions/,
+      /title="spc_b">spc_b<\/span><\/span><span aria-hidden="true">·<\/span>2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
