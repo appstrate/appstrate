@@ -65,12 +65,17 @@ const notificationObject = {
       },
     }),
     notificationOf("agent_message", {
-      required: ["packageId", "title", "message"],
+      required: ["packageId", "agent_name", "title", "message"],
       properties: {
         packageId: {
           type: ["string", "null"],
           description:
             "The agent of the run that sent it; null when the run no longer references its agent.",
+        },
+        agent_name: {
+          type: ["string", "null"],
+          description:
+            "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted).",
         },
         title: { type: "string", description: "Headline the agent wrote (`notify` tool)." },
         message: { type: "string", description: "Body the agent wrote (`notify` tool)." },

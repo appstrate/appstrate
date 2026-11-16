@@ -121,6 +121,7 @@ describe("NotificationContent", () => {
         runId: "run_4",
         payload: {
           packageId: PACKAGE_ID,
+          agent_name: "Worker (stamped)",
           title: "Factures prêtes",
           message: "12 factures attendent votre relecture.",
         },
@@ -134,6 +135,28 @@ describe("NotificationContent", () => {
     // The sender is named by the agent's display name, and the row opens the run.
     expect(html).toContain("Message de Worker");
     expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
+  });
+
+  it("names the sender of an `agent_message` from an unlisted agent by the name stamped on its run", () => {
+    const html = renderList([
+      {
+        id: "n9",
+        type: "agent_message",
+        runId: "run_6",
+        payload: {
+          packageId: "@inline/r-1",
+          agent_name: "Contrôle des factures",
+          title: "Terminé",
+          message: "Rien à signaler.",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Message de Contrôle des factures");
+    expect(html).not.toContain("Message de @inline");
+    expect(html).toContain('href="/agents/@inline/r-1/runs/run_6"');
   });
 
   it("titles an `agent_message` row without a payload by its agent's label", () => {

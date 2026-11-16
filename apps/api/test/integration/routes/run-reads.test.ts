@@ -395,12 +395,31 @@ describe("Run read state (per-recipient)", () => {
 
     it("also marks the message its agent sent read (`agent_message`)", async () => {
       const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
-      await createAgentMessageNotifications(
-        scope(),
-        { id: run.id, packageId: run.packageId },
-        [{ type: "user", id: ctx.user.id }],
-        { title: "t", message: "m" },
-      );
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
+
+      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
+
+      expect(await bellCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("marks an inline run's `agent_message` read, though the run holds no read state", async () => {
+      const inlineId = `@inline/r-${crypto.randomUUID()}`;
+      await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
+      const run = await seedRun({
+        packageId: inlineId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        status: "running",
+        userId: ctx.user.id,
+      });
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
       expect(await bellCount(authHeaders(ctx))).toBe(1);
 
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);

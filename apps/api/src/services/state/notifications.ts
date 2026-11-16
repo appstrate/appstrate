@@ -125,12 +125,13 @@ export async function markRunNotificationsRead(
  */
 export async function createAgentMessageNotifications(
   scope: SpaceScope,
-  run: { id: string; packageId: string | null },
+  run: { id: string; packageId: string | null; agentName: string | null },
   recipients: Actor[],
   message: { title: string; message: string },
 ): Promise<number> {
   const payload: NotificationPayloads["agent_message"] = toPgSafe({
     packageId: run.packageId,
+    agent_name: run.agentName,
     title: message.title,
     message: message.message,
   });
