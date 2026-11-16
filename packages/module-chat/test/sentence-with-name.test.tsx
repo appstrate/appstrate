@@ -14,7 +14,9 @@ describe("sentenceWithNode", () => {
     const html = renderToStaticMarkup(
       <div className="flex">{sentenceWithNode(t, "limit", <b>Studio</b>)}</div>,
     );
-    expect(html).toBe('<div class="flex"><span>Limiter à <b>Studio</b></span></div>');
+    expect(html).toBe(
+      '<div class="flex"><span>Limiter à <span class="inline-flex max-w-full align-middle"><b>Studio</b></span></span></div>',
+    );
   });
 
   it("keeps the space after the node", () => {
@@ -23,7 +25,9 @@ describe("sentenceWithNode", () => {
         {sentenceWithNode((_k, o) => `${o?.name} limitée`, "x", <b>S</b>)}
       </div>,
     );
-    expect(html).toContain("<span><b>S</b> limitée</span>");
+    expect(html).toContain(
+      '<span><span class="inline-flex max-w-full align-middle"><b>S</b></span> limitée</span>',
+    );
   });
 });
 

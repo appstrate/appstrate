@@ -23,13 +23,17 @@ export function sentenceWithName(t: ChatTranslate, key: string, name: string): R
   );
 }
 
-/** {@link sentenceWithName} where the name is a node (a space's tile and name, as the host renders it). */
+/**
+ * {@link sentenceWithName} where the name is a node (a space's tile and name, as the host renders it).
+ * The node sits in an inline-flex box: the host's markup is block-level and would otherwise start
+ * a line of its own.
+ */
 export function sentenceWithNode(t: ChatTranslate, key: string, node: ReactNode): ReactNode {
   const [before, after = ""] = t(key, { name: NAME_SLOT }).split(NAME_SLOT);
   return (
     <span>
       {before}
-      {node}
+      <span className="inline-flex max-w-full align-middle">{node}</span>
       {after}
     </span>
   );
