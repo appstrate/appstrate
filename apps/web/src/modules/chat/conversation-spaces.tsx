@@ -25,7 +25,7 @@ import { useSpacesOf } from "../../hooks/use-spaces";
 import { spaceLabel } from "../../lib/space-label";
 
 /** Tiles drawn in the trigger before the rest is counted. */
-export const VISIBLE_SPACE_TILES = 3;
+const VISIBLE_SPACE_TILES = 3;
 
 type SpaceListed = Parameters<typeof SpaceTile>[0]["space"];
 
