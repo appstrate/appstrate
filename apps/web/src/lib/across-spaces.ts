@@ -45,15 +45,19 @@ export type InSpaces<T> = T & { spaceIds: string[] };
 /**
  * One row per package of an index. The org routes answer one row per (package, space) where the
  * package is active; a list shows the package once and names its spaces. A row's spaces follow
- * `spaceOrder` (the reader's space listing), the first being the row's own `spaceId`: where its
- * link opens. `sum`: the per-space counters added up; every other field is the first space's.
+ * `spaceOrder` (the reader's space listing), the package's home (`home_space_id`) first when it is
+ * one of them. The first is the row's own `spaceId`: where its link opens. `sum`: the per-space
+ * counters added up; every other field is the first space's.
  */
-export function onePerPackage<T extends { id: string; spaceId: string }>(
+export function onePerPackage<
+  T extends { id: string; spaceId: string; home_space_id?: string | null },
+>(
   rows: readonly T[],
   spaceOrder: readonly string[],
   sum: readonly (keyof T)[] = [],
 ): InSpaces<T>[] {
-  const rank = (spaceId: string) => {
+  const rank = (spaceId: string, home: string | null | undefined) => {
+    if (spaceId === home) return -1;
     const index = spaceOrder.indexOf(spaceId);
     return index < 0 ? spaceOrder.length : index;
   };
@@ -64,7 +68,9 @@ export function onePerPackage<T extends { id: string; spaceId: string }>(
     else byPackage.set(row.id, [row]);
   }
   return [...byPackage.values()].map((listed) => {
-    const ordered = [...listed].sort((a, b) => rank(a.spaceId) - rank(b.spaceId));
+    const ordered = [...listed].sort(
+      (a, b) => rank(a.spaceId, a.home_space_id) - rank(b.spaceId, b.home_space_id),
+    );
     const totals = Object.fromEntries(
       sum.map((key) => [key, ordered.reduce((total, row) => total + (Number(row[key]) || 0), 0)]),
     );

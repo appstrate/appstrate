@@ -416,6 +416,7 @@ export async function listActivePackages(
       type: packages.type,
       draftManifest: packages.draftManifest,
       source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
       latestVersionId: packageDistTags.versionId,
     })
     .from(packages)

@@ -29,7 +29,11 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { readAgentAppearance, type PackageType } from "@appstrate/core/validation";
 import type { AgentManifest } from "../types/index.ts";
 import { readsAgentContent, type SpaceGrant } from "../lib/permissions.ts";
-import { homeWireForCaller, type PackageAccessSpace } from "../lib/package-access.ts";
+import {
+  homeWireForCaller,
+  visibleHomeSpaceId,
+  type PackageAccessSpace,
+} from "../lib/package-access.ts";
 import { isPublished, listActivePackages } from "./space-packages.ts";
 import { getRunningRunCounts } from "./state/runs.ts";
 import { getUnreadRunCountsByAgent } from "./state/run-reads.ts";
@@ -41,7 +45,12 @@ import { CONFIG_BY_TYPE } from "./package-items/config.ts";
  * grant there: whether a row is a summary and which runs its counters span
  * follow the row's space, never the request's.
  */
-export async function listAgentIndex(orgId: string, grants: readonly SpaceGrant[], actor: Actor) {
+export async function listAgentIndex(
+  orgId: string,
+  grants: readonly SpaceGrant[],
+  actor: Actor,
+  accessible: PackageAccessSpace[],
+) {
   const permissions = new Map(grants.map((g) => [g.spaceId, g.permissions]));
   const [rows, runningCounts, unreadCounts] = await Promise.all([
     listActivePackages(orgId, [...permissions.keys()], "agent"),
@@ -57,6 +66,7 @@ export async function listAgentIndex(orgId: string, grants: readonly SpaceGrant[
     return {
       id: row.id,
       spaceId: row.spaceId,
+      home_space_id: visibleHomeSpaceId(row, accessible),
       ...appearance,
       display_name: manifest.display_name,
       description: manifest.description,

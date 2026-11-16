@@ -84,7 +84,7 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
  * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
- * `PackageHome`). ONE
+ * `PackageHome`); `AgentListItem` carries `home_space_id` alone. ONE
  * definition: the server computes all four in one place (`homeWireForCaller`),
  * and four hand-copied descriptions drifted the moment the contract changed.
  */
@@ -1002,9 +1002,11 @@ export const schemas = {
       "version",
       "published",
       "spaceId",
+      "home_space_id",
     ],
     properties: {
       id: { type: "string" },
+      home_space_id: PACKAGE_HOME_PROPERTIES.home_space_id,
       spaceId: {
         type: "string",
         pattern: SPACE_ID_RE.source,

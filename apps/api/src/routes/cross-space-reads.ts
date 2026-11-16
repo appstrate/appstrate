@@ -115,7 +115,11 @@ export function createCrossSpaceReadsRouter() {
   router.get(
     "/:orgId/agents",
     ...readAcrossSpaces(packageSightPermissions("agent"), [], async (c, orgId, grants) =>
-      c.json(listResponse(await listAgentIndex(orgId, grants, getActor(c)))),
+      c.json(
+        listResponse(
+          await listAgentIndex(orgId, grants, getActor(c), await packageAccessSpaces(c)),
+        ),
+      ),
     ),
   );
 

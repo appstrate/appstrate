@@ -12,6 +12,8 @@ export interface CardItem {
   spaceId?: string;
   /** Every space whose index lists it, `spaceId` first (`onePerPackage`): where its actions may act. */
   spaceIds?: string[];
+  /** The package's home space when the reader reaches it, `null` when withheld; undefined off an index (the catalogue). */
+  homeSpaceId?: string | null;
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -41,6 +43,7 @@ export function agentCardItem(agent: AgentListItem & { spaceIds?: string[] }): C
     id: agent.id,
     spaceId: agent.spaceId,
     spaceIds: agent.spaceIds,
+    homeSpaceId: agent.home_space_id,
     displayName: agent.display_name ?? agent.id,
     description: agent.description ?? null,
     type: "agent",
@@ -58,6 +61,7 @@ interface PackageIndexRow {
   id: string;
   spaceId: string;
   spaceIds?: string[];
+  home_space_id?: string | null;
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -74,6 +78,7 @@ export function packageCardItem(row: PackageIndexRow, type: PackageType): CardIt
     id: row.id,
     spaceId: row.spaceId,
     spaceIds: row.spaceIds,
+    homeSpaceId: row.home_space_id,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

@@ -195,7 +195,12 @@ export function createAgentsRouter() {
   router.get("/", requireAgentRead, async (c) => {
     return c.json(
       listResponse(
-        await listAgentIndex(getSpaceScope(c).orgId, [callerSpaceGrant(c)], getActor(c)),
+        await listAgentIndex(
+          getSpaceScope(c).orgId,
+          [callerSpaceGrant(c)],
+          getActor(c),
+          await packageAccessSpaces(c),
+        ),
       ),
     );
   });

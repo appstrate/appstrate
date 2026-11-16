@@ -72,6 +72,7 @@ const SPACES = [
 const agent = (spaceId: string) => ({
   id: "@acme/reporter",
   spaceId,
+  home_space_id: "spc_a",
   source: "local" as const,
   version: "1.0.0",
   description: "Rapporte",
@@ -106,7 +107,7 @@ const packageRow = (spaceId: string, extra: Record<string, unknown> = {}) => ({
   updatedAt: "2026-09-05T10:00:00Z",
   used_by_agents: 0,
   auto_installed: false,
-  home_space_id: null,
+  home_space_id: "spc_a",
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
@@ -274,9 +275,9 @@ describe("the agent index in the mode", () => {
     // The row opens in its first space, the working one here.
     expect(html).toContain('href="/agents/@acme/reporter"');
     expect(html).not.toContain("enterSpace=");
-    // The « Espace » column names the first space and counts the other, named in its title.
+    // The « Espace » column names the home and counts the other, named in the badge's label.
     expect(html).toContain(">Espace<");
-    expect(html).toMatch(/title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span>/);
+    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b"/);
     expect(html).toContain("1 élément");
   });
 
@@ -378,7 +379,7 @@ describe("the integration index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
     expect(html).toMatch(
-      /title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span><\/span><span aria-hidden="true">·<\/span>.*?2 connexions/,
+      /title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });

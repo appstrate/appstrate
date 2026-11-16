@@ -750,6 +750,16 @@ async function refuseHomeAuthority(
   throw forbidden(detail);
 }
 
+/** The home's id when the caller reaches that space, `null` otherwise (never the raw column). */
+export function visibleHomeSpaceId(
+  pkg: { homeSpaceId: string | null },
+  accessible: readonly { id: string }[],
+): string | null {
+  return pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId)
+    ? pkg.homeSpaceId
+    : null;
+}
+
 /**
  * The `home_*` fields EVERY package read emits — one contract, computed once,
  * for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the library
@@ -787,13 +797,11 @@ export function homeWireForCaller(
   home_deletable: boolean;
   home_shareable: boolean;
 } {
-  const reached =
-    pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
   const system = isSystemPackageRow(pkg);
   const holds = (action: "write" | "delete" | "share") =>
     !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, action));
   return {
-    home_space_id: reached ? pkg.homeSpaceId : null,
+    home_space_id: visibleHomeSpaceId(pkg, accessible),
     home_writable: holds("write"),
     home_deletable: holds("delete"),
     home_shareable: holds("share"),
