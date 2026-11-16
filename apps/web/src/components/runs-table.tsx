@@ -16,7 +16,6 @@ export function RunsTable({
   error,
   empty,
   banner,
-  surface,
 }: {
   runs: EnrichedRun[];
   /** From {@link useRunColumns}, minus whatever the reader hid. */
@@ -31,7 +30,6 @@ export function RunsTable({
   empty: ReactNode;
   /** Pinned above the first row (e.g. a scheduled next run). */
   banner?: ReactNode;
-  surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["agents"]);
   const linkInSpace = useSpaceLink();
@@ -50,7 +48,6 @@ export function RunsTable({
       error={error}
       empty={empty}
       banner={banner}
-      surface={surface}
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`
       // would 404: that row stays static rather than leading nowhere.

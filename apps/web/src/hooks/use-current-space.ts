@@ -6,8 +6,6 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { ENTER_SPACE_PARAM, linkedSpacePath, linkedSpaceStep } from "../lib/across-spaces";
 import {
-  agentModelKeys,
-  agentProxyKeys,
   agentsKeys,
   packageKeys,
   paginatedRunsKeys,
@@ -15,7 +13,6 @@ import {
   runKeys,
   scheduleKeys,
   spansSpaces,
-  versionKeys,
 } from "../lib/query-keys";
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
@@ -48,17 +45,12 @@ const SPACE_SCOPED_KEYS = new Set<string>(
     packageKeys.all,
     agentsKeys.all,
     persistenceKeys.all,
-    agentModelKeys.all,
-    agentProxyKeys.all,
     runKeys.all,
     runKeys.logsAll,
     paginatedRunsKeys.all,
     scheduleKeys.listAll,
     scheduleKeys.detailAll,
     scheduleKeys.runsAll,
-    versionKeys.detailAll,
-    versionKeys.listAll,
-    versionKeys.infoAll,
   ].map(([root]) => root),
 );
 

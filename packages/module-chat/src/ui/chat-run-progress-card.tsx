@@ -6,11 +6,12 @@
  * is even known — so the card keeps a constant two-line height with no
  * transient placeholder swap.
  *
- * Line 1: the package name. Line 2: the run's own log-tool output (rows the sink
- * tags `event='log'`, i.e. the agent's explicit `log` runtime tool — NOT runtime
- * lifecycle or tool-call breadcrumbs), streamed live over the run's SSE channel
- * (`useRunLogStream`) and paced one at a time (`useLogTicker`, ≥500ms each) with
- * a fade/slide animation so a burst reads as a sequence rather than a flash.
+ * Line 1: the package name. Line 2: the run's own log-tool output (the
+ * `event='log'` rows the platform writes for the agent's explicit `log` tool
+ * of `@appstrate/platform` — NOT runtime lifecycle or tool-call breadcrumbs),
+ * streamed live over the run's SSE channel (`useRunLogStream`) and paced one
+ * at a time (`useLogTicker`, ≥500ms each) with a fade/slide animation so a
+ * burst reads as a sequence rather than a flash.
  * Before the first log the line reads `run.starting` (still starting), then
  * `run.running` once running; once terminal it settles on the final outcome. A
  * leading status glyph (centered across both lines) shows the run state; the
@@ -234,7 +235,7 @@ export function ChatRunProgressCard({
       <button
         type="button"
         aria-label={t("run.details")}
-        className="hover:bg-muted/40 absolute inset-0 z-0 rounded-lg"
+        className="hover:bg-muted/50 absolute inset-0 z-0 rounded-lg"
         onClick={() => setOpen(true)}
       />
       <div className="pointer-events-none relative z-10 flex items-center gap-2 px-3 py-2">

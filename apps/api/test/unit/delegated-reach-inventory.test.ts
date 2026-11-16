@@ -195,16 +195,16 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
-  getMcpServerBundle: {
+  getIntegrationBundle: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
   getOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
-  getRunHistory: { category: "internal", reason: "verifyRunToken" },
   heartbeatRemoteRun: { category: "internal", reason: "verifyRunSignature" },
   ingestRunEvent: { category: "internal", reason: "verifyRunSignature" },
+  internalRunToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  internalRunToolsMcpPost: { category: "internal", reason: "verifyRunToken" },
   publishRunFile: { category: "internal", reason: "verifyRunUploadSignature" },
-  recallMemories: { category: "internal", reason: "verifyRunToken" },
   refreshIntegrationCredentials: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
@@ -215,6 +215,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiResponses: { category: "internal", reason: "verifyRunToken" },
+  runToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  runToolsMcpPost: { category: "internal", reason: "verifyRunSignature, remote-origin runs" },
 
   // handler-guarded — the permission is checked inside the handler (or by a
   // guard the route table cannot read) against the ceiling-applied permission set.
@@ -230,10 +232,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   createIntegrationPackageVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
-  },
-  createMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
   },
   createSkillVersion: {
     category: "handler-guarded",
@@ -262,14 +260,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   deleteIntegrationPackageVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:delete in home space",
-  },
-  deleteMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
-  },
-  deleteMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
   },
   deleteSkill: {
     category: "handler-guarded",
@@ -328,10 +318,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
   },
-  restoreMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
-  },
   restoreSkillVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: skills:write in home space",
@@ -374,10 +360,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   updateIntegrationPackage: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
-  },
-  updateMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
   },
   updateSkill: {
     category: "handler-guarded",

@@ -281,7 +281,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
-  // more-specific `/runs/:runId/events` path wins — mirrors the
+  // more-specific `/runs/:id/events` path wins — mirrors the
   // production wiring in `apps/api/src/index.ts`.
   app.route("/api", createRunsEventsRouter());
   // Runner-facing remote-run creation (`POST /api/runs/remote` + sink

@@ -268,6 +268,12 @@ export interface AppConfigFeatures {
    * pending-state boolean.
    */
   bootstrapTokenPending: boolean;
+  /**
+   * The run adapter can isolate a runner process (`RUN_ADAPTER` is not `process`), so an
+   * integration whose source is a local MCP server can actually run. The SPA flags those as
+   * unavailable here when false.
+   */
+  localIntegrations: boolean;
   [key: string]: boolean;
 }
 
@@ -291,7 +297,7 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill, mcp-server, or integration dependency with optional metadata. */
+/** A reference to a skill or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
@@ -582,8 +588,6 @@ export interface AgentListItem extends BasePackageListItem {
   dependencies: {
     /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
-    /** Withheld from a summary read — `agents:run` without `agents:read`. */
-    mcp_servers?: Record<string, string>;
     integrations: Record<string, string>;
   };
   running_runs: number;
@@ -626,11 +630,6 @@ export interface AgentDetail {
       description?: string;
       home_writable: boolean;
     }[];
-    /**
-     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
-     * Composition too: withheld from a summary read, with `skills`.
-     */
-    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
@@ -814,8 +813,8 @@ export interface OrgPackageItem extends BasePackageListItem {
 export interface IntegrationIndexItem extends OrgPackageItem {
   /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
   source_kind: "local" | "remote" | "none";
-  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
-  server: { name: string; version: string } | null;
+  /** `source.server` of a `local` integration — its runtime type and entry point. `null` otherwise. */
+  server: { type: string; entry_point: string } | null;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
@@ -1266,6 +1265,13 @@ export interface SpaceInfo {
   /** Preset the implicit members of an `open` space hold. */
   default_role: "admin" | "builder" | "operator" | "viewer";
   /**
+   * Whether members may use the space's connections through the credential proxy outside a
+   * run (REST without `X-Run-Id`, MCP `search_integration_tools` /
+   * `call_integration_tool`). `false` closes that
+   * door for every role; runs keep their connections. Always `true` on a personal space.
+   */
+  credential_proxy_open: boolean;
+  /**
    * Whether this is one member's personal space (RBAC spec §3.6). Reached by
    * its owner alone — organization owners and admins included — takes no other
    * members, always `private`, and only its name is editable. The owner is
@@ -1342,7 +1348,7 @@ export interface SpacePackage {
 
 /**
  * Per-space resolved run-config returned by
- * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+ * `GET /api/spaces/{id}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.

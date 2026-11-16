@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
@@ -34,11 +33,8 @@ export function OAuthClientActions({
   const [rotateConfirmOpen, setRotateConfirmOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  function handleUpdate(body: { disabled: boolean } | { isFirstParty: boolean }, done: string) {
-    updateMutation.mutate(
-      { params: { path: { clientId: client.clientId } }, body },
-      { onSuccess: () => toast.success(done) },
-    );
+  function handleUpdate(body: { disabled: boolean } | { isFirstParty: boolean }) {
+    updateMutation.mutate({ params: { path: { clientId: client.clientId } }, body });
   }
 
   function handleRotate() {
@@ -57,10 +53,7 @@ export function OAuthClientActions({
     deleteMutation.mutate(
       { params: { path: { clientId: client.clientId } } },
       {
-        onSuccess: () => {
-          setDeleteConfirmOpen(false);
-          toast.success(t("oauthClients.deleted"));
-        },
+        onSuccess: () => setDeleteConfirmOpen(false),
       },
     );
   }
@@ -87,15 +80,7 @@ export function OAuthClientActions({
         ? t("oauthClients.removeFirstParty")
         : t("oauthClients.makeFirstParty"),
       icon: ShieldCheck,
-      onSelect: () =>
-        handleUpdate(
-          { isFirstParty: !client.isFirstParty },
-          t(
-            client.isFirstParty
-              ? "oauthClients.firstPartyDisabled"
-              : "oauthClients.firstPartyEnabled",
-          ),
-        ),
+      onSelect: () => handleUpdate({ isFirstParty: !client.isFirstParty }),
       disabled: updateMutation.isPending,
       hidden: !canWrite,
     },
@@ -103,11 +88,7 @@ export function OAuthClientActions({
       id: "toggle-disabled",
       label: client.disabled ? t("oauthClients.enable") : t("oauthClients.disable"),
       icon: Power,
-      onSelect: () =>
-        handleUpdate(
-          { disabled: !client.disabled },
-          t(client.disabled ? "oauthClients.enabled" : "oauthClients.disabled"),
-        ),
+      onSelect: () => handleUpdate({ disabled: !client.disabled }),
       disabled: updateMutation.isPending,
       hidden: !canWrite,
     },
@@ -144,6 +125,7 @@ export function OAuthClientActions({
         title={t("oauthClients.rotateConfirmTitle")}
         description={t("oauthClients.rotateConfirm")}
         variant="default"
+        confirmLabel={t("oauthClients.rotate")}
         isPending={rotateMutation.isPending}
         onConfirm={handleRotate}
       />
@@ -162,6 +144,7 @@ export function OAuthClientActions({
         onClose={() => setDeleteConfirmOpen(false)}
         title={t("oauthClients.deleteConfirmTitle")}
         description={t("oauthClients.deleteConfirm")}
+        confirmLabel={t("common:btn.delete")}
         isPending={deleteMutation.isPending}
         onConfirm={handleDelete}
       />

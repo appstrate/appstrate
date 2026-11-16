@@ -9,6 +9,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { useShallow } from "zustand/react/shallow";
 import { breadcrumbStore, visibleTrail } from "@/stores/breadcrumb-store";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { useOverlayPath } from "@/lib/modal-route";
 import {
@@ -52,6 +53,7 @@ export function ShellBreadcrumb() {
     useShallow((s) => visibleTrail(s, overlayOpen)),
   );
   const canReach = useCanReach();
+  useDocumentTitle(entries);
 
   return (
     <Breadcrumb

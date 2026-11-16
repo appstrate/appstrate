@@ -195,16 +195,6 @@
             "type": "string"
           }
         },
-        "mcp_servers": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
         "integrations": {
           "type": "object",
           "propertyNames": {
@@ -440,19 +430,6 @@
     "timeout": {
       "type": "number",
       "exclusiveMinimum": 0
-    },
-    "runtime_tools": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "output",
-          "log",
-          "note",
-          "pin",
-          "publish_file"
-        ]
-      }
     }
   },
   "required": [

@@ -19,13 +19,16 @@ import type { ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Narrow projection of the `runs` row used for signature verification +
- * event dispatch on `POST /api/runs/:runId/events`.
+ * event dispatch on `POST /api/runs/:id/events`.
  */
 export interface RunSinkContext {
   id: string;
   orgId: string;
   spaceId: string;
   packageId: string;
+  /** The run's actor (`runs.user_id` / `runs.end_user_id`): whose memories and slots its tools write. */
+  userId: string | null;
+  endUserId: string | null;
   runOrigin: "platform" | "remote";
   sinkSecretEncrypted: string;
   sinkExpiresAt: Date | null;

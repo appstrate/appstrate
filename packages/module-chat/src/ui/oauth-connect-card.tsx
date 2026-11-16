@@ -33,7 +33,8 @@
  * No state may change the card's height: the transcript must never jump.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
@@ -49,7 +50,7 @@ import {
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { useChatHeaders, useChatHost } from "./runtime-context.ts";
+import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import {
@@ -63,6 +64,12 @@ import {
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
+/** What the card reads of `GET /api/integrations/{packageId}`. */
+interface IntegrationRead {
+  manifest?: { display_name?: string; icon?: string };
+  auths?: Array<{ ready?: boolean }>;
+}
+
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
 
 /**
@@ -70,7 +77,7 @@ type Phase = "idle" | "pending" | "done" | "connected" | "error";
  * `packageId` arrives. Returns a cleanup fn (always — even on the no-op path).
  */
 function watchConnectionSse(
-  getHeaders: (() => Record<string, string>) | null,
+  getHeaders: (() => Record<string, string>) | undefined,
   packageId: string | undefined,
   onHit: () => void,
 ): () => void {
@@ -135,57 +142,59 @@ export function OAuthConnectCard({
   expiresAt?: string;
 }) {
   const aui = useAui();
-  const getHeaders = useChatHeaders();
+  const transport = useChatTransport();
   const { can, t } = useChatHost();
   // Without `integrations:read` the chip keeps the bare package id.
   const readsIntegration = can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
-  const [meta, setMeta] = useState<ResumeMeta | null>(null);
   const [expired, setExpired] = useState(() => isOfferExpired(expiresAt));
   const resumed = useRef(false);
-  const label = meta?.name ?? packageId ?? t("connect.integrationFallback");
 
-  // Fetch the integration's display name + icon once so the connect button and
-  // the resume chip can show its brand instead of the bare `@scope/name` id.
-  useEffect(() => {
-    if (!packageId || !readsIntegration) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/integrations/${encodePackageIdPath(packageId)}`, {
-          headers: getHeaders?.() ?? {},
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        const body = (await res.json()) as {
-          manifest?: { display_name?: string; icon?: string };
-          auths?: Array<{ ready?: boolean }>;
-        };
-        setMeta({
-          packageId,
-          name: body.manifest?.display_name,
-          icon: typeof body.manifest?.icon === "string" ? body.manifest.icon : undefined,
-        });
-        // Already usable at mount (e.g. a reloaded conversation whose OAuth
-        // completed earlier): show the connected state, not the button. Use the
-        // server-authoritative `ready` flag — an expired/needs-reconnection
-        // connection is NOT ready, so the button correctly stays. Don't resume —
-        // that already happened in the original turn.
-        const connected = body.auths?.some((a) => a.ready) ?? false;
-        if (connected && !resumed.current) {
-          resumed.current = true;
-          setPhase("connected");
-        }
-      } catch {
-        // Non-fatal: chip falls back to the package id, no brand icon.
-      }
-    })();
-    return () => {
-      cancelled = true;
+  // The integration's display name + icon, so the connect button and the resume chip show its
+  // brand instead of the bare `@scope/name` id. Under the shell's typed key for
+  // `GET /api/integrations/{packageId}`: its detail reads and this one are one cache entry. A
+  // failed read is not fatal: the chip falls back to the package id, no brand icon.
+  const { orgId, spaceId } = orgSpaceFromHeaders(transport?.getHeaders());
+  const integration = useQuery({
+    queryKey: [
+      "get",
+      "/api/integrations/{packageId}",
+      {
+        params: {
+          path: { packageId: packageId ?? "" },
+          header: { "X-Org-Id": orgId, "X-Space-Id": spaceId },
+        },
+      },
+    ],
+    queryFn: async (): Promise<IntegrationRead> =>
+      (await transport!.request(`/api/integrations/${encodePackageIdPath(packageId!)}`)).json(),
+    enabled: !!packageId && readsIntegration && !!transport && !!orgId && !!spaceId,
+  });
+  const meta = useMemo<ResumeMeta | null>(() => {
+    const manifest = integration.data?.manifest;
+    if (!packageId || !manifest) return null;
+    return {
+      packageId,
+      name: manifest.display_name,
+      icon: typeof manifest.icon === "string" ? manifest.icon : undefined,
     };
-  }, [packageId, getHeaders, readsIntegration]);
+  }, [packageId, integration.data]);
+  const label = meta?.name ?? packageId ?? t("connect.integrationFallback");
+  // Already usable when first read (e.g. a reloaded conversation whose OAuth completed earlier):
+  // show the connected state, not the button — by the server-authoritative `ready` flag, since
+  // an expired/needs-reconnection connection is NOT ready. No resume: it happened in the
+  // original turn. Decided on the FIRST answer only: a later refetch (a connection landing
+  // now) must reach the listeners below, which own the resume.
+  const [firstReadSeen, setFirstReadSeen] = useState(false);
+  if (!firstReadSeen && integration.data) {
+    setFirstReadSeen(true);
+    if (phase === "idle" && integration.data.auths?.some((a) => a.ready)) setPhase("connected");
+  }
+  useEffect(() => {
+    if (phase === "connected") resumed.current = true;
+  }, [phase]);
 
   const complete = useCallback(
     (ok: boolean, error?: string) => {
@@ -253,13 +262,13 @@ export function OAuthConnectCard({
 
     const stopListening = listenConnectCompletion(card, onCompletion, window);
 
-    const closeSse = watchConnectionSse(getHeaders, packageId, () => waiter.connected());
+    const closeSse = watchConnectionSse(transport?.getHeaders, packageId, () => waiter.connected());
 
     return () => {
       stopListening();
       closeSse();
     };
-  }, [phase, state, packageId, getHeaders, waiter, complete]);
+  }, [phase, state, packageId, transport, waiter, complete]);
 
   // Flip to the expired state when the session lapses, so the button never
   // outlives its link; `start` re-checks for anything the timer misses.

@@ -90,3 +90,14 @@ export const ETAG_RESPONSE_HEADERS = {
   ...STD_RESPONSE_HEADERS,
   ETag: { $ref: "#/components/headers/ETag" },
 } as const;
+
+/** RFC 9209 `Proxy-Status` of a platform proxy's answer. */
+export const PROXY_STATUS_HEADER = {
+  "Proxy-Status": {
+    description:
+      "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. " +
+      "`appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. " +
+      "Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+    schema: { type: "string", example: "appstrate; received-status=401" },
+  },
+} as const;

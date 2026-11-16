@@ -597,7 +597,7 @@ describe("personal model credentials — routes", () => {
         headers: jsonHeaders(member),
         body: JSON.stringify({ providerId: OAUTH_PROVIDER, owner_type: "user" }),
       });
-      expect(mint.status).toBe(200);
+      expect(mint.status).toBe(201);
       const { id } = (await mint.json()) as { id: string };
 
       const foreignRead = await app.request(`${PAIRINGS}/${id}`, {
@@ -667,7 +667,7 @@ describe("personal model credentials — routes", () => {
           credentialId: ownId,
         }),
       });
-      expect(own.status).toBe(200);
+      expect(own.status).toBe(201);
     });
   });
 });

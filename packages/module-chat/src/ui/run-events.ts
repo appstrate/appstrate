@@ -226,6 +226,32 @@ export function parseLogListResponse(body: unknown): RunLogLine[] {
   return out;
 }
 
+/** Same page ceiling as the web's `useRunLogs`: ~20k rows against pathological runs. */
+export const RUN_LOG_PAGE_CAP = 20;
+
+/**
+ * Walk the run's log pages (`hasMore` + `since=<last id>`) to the end so the
+ * tail (final output) is never cut off by the page size. `fetchPage` returns
+ * the parsed envelope body, or undefined on any failure. Each page is handed to
+ * `onPage` as it lands. Resolves "failed" if any page failed, else "ok".
+ */
+export async function readRunLogPages(
+  fetchPage: (since: number | undefined) => Promise<unknown | undefined>,
+  onPage: (lines: RunLogLine[]) => void,
+): Promise<"ok" | "failed"> {
+  let since: number | undefined;
+  for (let page = 0; page < RUN_LOG_PAGE_CAP; page++) {
+    const body = await fetchPage(since);
+    if (body === undefined) return "failed";
+    const lines = parseLogListResponse(body);
+    onPage(lines);
+    const last = lines[lines.length - 1];
+    if (asRecordOrNull(body)?.hasMore !== true || !last) return "ok";
+    since = last.id;
+  }
+  return "ok";
+}
+
 /**
  * Merge incoming log lines into the existing list: dedup by `id` (the SSE tail
  * and the history fetch overlap), keep ascending `id` order. Stable + pure so
@@ -318,10 +344,10 @@ export interface VisibleLogEntry {
 /**
  * The ordered sequence of the agent's own log-tool output — the queue the run
  * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
- * those come from the agent's explicit `log` runtime tool (sink tags them so),
- * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
- * `type='progress'` but keep `event='progress'`), nor `output`/`file`/system
- * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
+ * the platform writes them for the agent's explicit `log` tool
+ * (`@appstrate/platform`), never for the auto-emitted runtime lifecycle /
+ * tool-call breadcrumbs (which share `type='progress'` but keep
+ * `event='progress'`), nor `output`/`file`/system rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
  * the most recent line; `id` doubles as the React key the line animates on.
  */
 export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[] {
@@ -432,12 +458,11 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
  * (`event='document'`) is read.
  *
  * These frames are publications, i.e. files the agent PRODUCED: the only
- * emitters are the `publish_file` runtime tool and the end-of-run
+ * emitters are the `publish_file` harness tool and the end-of-run
  * `outputs/` sweep. Input files a run merely consumed never appear here, so
  * this list is exactly the population the auto-present rule counts.
  *
- * Historical frames carry extra fields (notably the retired `presentation`);
- * only the known keys are read, so a legacy line parses like any other.
+ * Only the known keys are read; any other field of a frame is ignored.
  */
 export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile[] {
   const out: ChatRunFile[] = [];

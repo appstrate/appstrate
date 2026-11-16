@@ -215,7 +215,7 @@ describe("routeOf", () => {
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",
     );
-    expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/@acme/gmail#settings")).toBe("/integrations/:scope/:name");
     expect(routeOf("/integrations/new/mcp?package=@acme/gmail")).toBe("/integrations/new/mcp");
   });
 

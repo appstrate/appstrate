@@ -126,20 +126,24 @@ export interface IntegrationRequirement {
 }
 
 /**
- * The requirement of a credential-proxy call. No agent selects anything: every declared auth
- * serves, no scope is required, and the call needs a connection.
+ * The requirement of a credential-proxy call: the call needs a connection. A call that names no
+ * tool selects nothing, so every declared auth serves it and it requires no scope. A call naming
+ * the tool it runs selects that tool, as an agent selecting it would: only the auths serving it
+ * are candidates, and the scopes its `tools_policy` entry requires apply.
  */
 export function proxyRequirement(
   integrationId: string,
   manifest: IntegrationManifest,
+  tool?: string,
 ): IntegrationRequirement {
   return {
     integrationId,
     manifest,
     hasSelectedTools: true,
-    agentTools: [],
+    agentTools: tool !== undefined ? [tool] : [],
     agentScopes: [],
     required: true,
+    ...(tool !== undefined ? { effectiveTools: [tool] } : {}),
   };
 }
 

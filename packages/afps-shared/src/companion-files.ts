@@ -31,7 +31,7 @@ export type CompanionViolationReason =
   | "SKILL_INVALID_FRONTMATTER_NAME"
   | "SKILL_MISSING_FRONTMATTER_DESCRIPTION"
   | "SKILL_INVALID_FRONTMATTER_DESCRIPTION"
-  | "MCP_SERVER_MISSING_ENTRY_POINT";
+  | "LOCAL_SERVER_MISSING_ENTRY_POINT";
 
 /**
  * Structured error type for callers that want to translate companion-file
@@ -112,9 +112,9 @@ function resolveArchivePath(files: CompanionFileSource, declared: string): strin
  *   - `skill` → `SKILL.md` present at root, with a YAML frontmatter `name`
  *     (§3.3). Missing `description` is tolerated — this is the LOADER gate;
  *     the producer rule is {@link checkSkillMarkdown}.
- *   - `mcp-server` → file at `manifest.server.entry_point` present in the
- *     archive (§3.4 "self-contained — every runtime dep bundled").
- *   - `integration` → no required companion (§3.5).
+ *   - `integration` with a `local` source → file at `source.server.entry_point`
+ *     present in the archive (§7.1: the integration archive carries its own
+ *     server payload). Any other source: no required companion (§3.5).
  *   - any other type → no check (caller validates manifest shape).
  *
  * The caller is responsible for throwing whatever error class fits its
@@ -122,7 +122,7 @@ function resolveArchivePath(files: CompanionFileSource, declared: string): strin
  * runtime loader).
  */
 export function checkCompanionFiles(
-  manifest: { type?: unknown; server?: unknown } & Record<string, unknown>,
+  manifest: { type?: unknown; source?: unknown } & Record<string, unknown>,
   files: CompanionFileSource,
 ): CompanionFileViolation | null {
   const type = manifest.type;
@@ -165,37 +165,37 @@ export function checkCompanionFiles(
     return null;
   }
 
-  if (type === "mcp-server") {
-    const server = manifest.server as { entry_point?: unknown } | undefined;
-    const entryPoint = server?.entry_point;
+  if (type === "integration") {
+    const source = manifest.source as
+      { kind?: unknown; server?: { entry_point?: unknown } } | undefined;
+    if (source?.kind !== "local") return null;
+    const entryPoint = source.server?.entry_point;
     if (typeof entryPoint !== "string" || entryPoint.length === 0) {
       // Manifest schema validation reports this — surface a structured
       // violation here too so callers that skip schema validation still
       // catch it.
       return {
-        reason: "MCP_SERVER_MISSING_ENTRY_POINT",
-        message: "mcp-server manifest must declare server.entry_point",
+        reason: "LOCAL_SERVER_MISSING_ENTRY_POINT",
+        message: "local integration must declare source.server.entry_point",
       };
     }
-    // MCPB manifests conventionally write the entry point relative-explicit
+    // The entry point is conventionally written relative-explicit
     // (`./server.js`), while archive entries are stored flat (`server.js`).
-    // Both spellings name the same file, so resolve either — an exact
-    // `has(entryPoint)` rejected every package in this repo's own
-    // `system-packages/` tree when imported through `POST /api/packages/import`,
-    // while the on-disk system-package loader accepted them. One archive, two
-    // verdicts, depending on which door it came through.
+    // Both spellings name the same file, so resolve either — one archive must
+    // get one verdict whichever door (HTTP import, on-disk system-package
+    // loader) it comes through.
     if (!resolveArchivePath(files, entryPoint)) {
       return {
-        reason: "MCP_SERVER_MISSING_ENTRY_POINT",
-        message: `mcp-server archive missing server.entry_point payload: ${entryPoint}`,
+        reason: "LOCAL_SERVER_MISSING_ENTRY_POINT",
+        message: `local integration archive missing source.server.entry_point payload: ${entryPoint}`,
         path: entryPoint,
       };
     }
     return null;
   }
 
-  // `integration` and unknown/missing types: no companion-file requirement
-  // here. The caller's manifest schema check rejects unsupported types.
+  // Unknown/missing types: no companion-file requirement here. The caller's
+  // manifest schema check rejects unsupported types.
   return null;
 }
 

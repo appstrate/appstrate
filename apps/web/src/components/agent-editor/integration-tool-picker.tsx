@@ -8,6 +8,9 @@
  * to an explicit array. "Select none" is allowed in a draft, but publish/import refuse it
  * (`no_tools_selected`) and a run aborts at sidecar boot; `tools.noneNotice` says so.
  * The `required` flag (§4.4) above it: set, a run refuses to start without a connection.
+ *
+ * The platform's own integration (`isPlatformEntry`) has neither: it binds no connection, so
+ * there is nothing to require, and its empty selection is not written to the manifest.
  */
 
 import { toggleValue } from "../../lib/toggle-value";
@@ -44,6 +47,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
+import { isPlatformEntry } from "./utils";
 import { TextSkeleton } from "../loading-skeletons";
 
 interface IntegrationToolPickerProps {
@@ -58,7 +62,7 @@ const DEFAULT_AUTH_KEY = "__default__";
 export function IntegrationToolPicker(props: IntegrationToolPickerProps) {
   return (
     <>
-      <RequiredIntegrationToggle {...props} />
+      {!isPlatformEntry(props.entry) && <RequiredIntegrationToggle {...props} />}
       <IntegrationToolPanel {...props} />
     </>
   );
@@ -103,7 +107,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
   if (!detail) {
     return (
-      <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
+      <div className="bg-muted/40 text-muted-foreground mt-2 rounded-lg border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.detailUnavailable")}
       </div>
     );
@@ -284,21 +288,21 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
-        <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
+        <div className="bg-muted/40 mt-2 flex flex-col gap-3 rounded-lg border p-3">
           {wildcardControl}
         </div>
       );
     }
     return (
-      <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
+      <div className="bg-muted/40 text-muted-foreground mt-2 rounded-lg border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.noCatalog")}
       </div>
     );
   }
 
   return (
-    <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
-      {selectsNothing && (
+    <div className="bg-muted/40 mt-2 flex flex-col gap-3 rounded-lg border p-3">
+      {selectsNothing && !isPlatformEntry(entry) && (
         <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}
         </p>

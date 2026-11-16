@@ -4,6 +4,7 @@ import { and, eq, inArray, ne, type AnyColumn, type SQL } from "drizzle-orm";
 import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spacePackages, spaces } from "@appstrate/db/schema";
+import { findCause } from "./error-cause.ts";
 import { notFound } from "./errors.ts";
 import { logger } from "./logger.ts";
 
@@ -130,20 +131,12 @@ export function isUuid(value: string): boolean {
 }
 
 /**
- * True when `err`, or any error up to 5 levels down its `cause` chain, matches.
- * The walk is what makes the predicates below usable: Drizzle wraps the driver
- * error in a `DrizzleQueryError` whose own `code` is undefined, on both the
- * Tier-0 embedded driver (PGlite) and a real server (postgres.js).
+ * True when `err`, or an error down its `cause` chain, matches. The walk is what makes the
+ * predicates below usable: Drizzle wraps the driver error in a `DrizzleQueryError` whose own
+ * `code` is undefined, on both the Tier-0 embedded driver (PGlite) and a real server (postgres.js).
  */
 function someCause(err: unknown, match: (e: Record<string, unknown>) => boolean): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current !== "object") break;
-    const node = current as Record<string, unknown>;
-    if (match(node)) return true;
-    current = node.cause;
-  }
-  return false;
+  return findCause(err, match) !== undefined;
 }
 
 /** True when any error in the `cause` chain carries one of the SQLSTATE codes. */

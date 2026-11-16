@@ -94,8 +94,8 @@ describe("isSpaceEnterable", () => {
 describe("droppedOnSpaceSwitch", () => {
   const runs = (spanning = false) =>
     spanning
-      ? paginatedRunsKeys.acrossSpaces("org_1", null, null, null, false, "", 15, 0)
-      : paginatedRunsKeys.list("org_1", "spc_a", "/runs", null, null, null, false, "", 15, 0);
+      ? paginatedRunsKeys.acrossSpaces("org_1", null, null, null, false, "", 15)
+      : paginatedRunsKeys.list("org_1", "spc_a", "/runs", null, null, null, false, "", 15);
 
   it("drops the current space's run, schedule, agent and package lists", () => {
     expect(droppedOnSpaceSwitch(runs())).toBe(true);
@@ -115,7 +115,6 @@ describe("droppedOnSpaceSwitch", () => {
       false,
       "across-spaces",
       15,
-      0,
     );
     expect(droppedOnSpaceSwitch(searched)).toBe(true);
   });

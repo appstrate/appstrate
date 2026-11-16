@@ -13,7 +13,6 @@ export function PackagesTable({
   columns,
   rowAction,
   label,
-  surface,
   ...state
 }: {
   tableId: string;
@@ -29,7 +28,6 @@ export function PackagesTable({
   /** What the table lists, for assistive technology; a package list by default. */
   label?: string;
   /** `integrated` where the table already sits on a panel. */
-  surface?: "framed" | "integrated";
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
   const linkInSpace = useSpaceLink();
@@ -51,7 +49,6 @@ export function PackagesTable({
       }
       rowAction={rowAction}
       rowLabel={(item) => item.displayName}
-      surface={surface}
       {...state}
     />
   );

@@ -4,19 +4,22 @@
 // nothing is written here — the next turn carries the selection. The skills the
 // space imposes are listed first, locked: no selection removes them.
 
-import { useState } from "react";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
+import { Badge, badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
+import {
+  DEFAULT_SKILL_SELECTION,
+  injectsSkills,
+  MAX_PINNED_SKILLS,
+  type ChatSkillSelection,
+} from "../skills.ts";
 import {
   fetchSkills,
   ownPins,
@@ -25,7 +28,7 @@ import {
   togglePinned,
 } from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
-import { useChatHost, type GetHeaders } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -37,27 +40,86 @@ const MODE_COPY: Record<ChatSkillMode, { label: string; hint: string }> = {
 const MODES = Object.keys(MODE_COPY) as ChatSkillMode[];
 
 interface SkillsPickerProps {
-  getHeaders: GetHeaders | undefined;
+  transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
+  /** Opened from the composer's "+" menu or the chip, never by a trigger of its own. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** The popover anchors to this: the composer's tools row. */
+  children: ReactNode;
 }
 
-export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerProps) {
+/** Skills in use this turn (the space's imposed ones + the chosen ones), as the old trigger badge counted. */
+function useSkillsInUse(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
+  const enforcedQuery = useEnforcedSkills(transport);
+  const enforcedIds = new Set((enforcedQuery.data ?? []).map((skill) => skill.packageId));
+  const pinned = ownPins(selection.pinnedSkills, enforcedIds);
+  const inUse =
+    (enforcedQuery.data?.length ?? 0) + (injectsSkills(selection.skillMode) ? pinned.length : 0);
+  return { inUse, loading: enforcedQuery.isLoading };
+}
+
+/**
+ * The composer chip for a non-default skill selection; it reopens the picker.
+ * Its count hangs on the enforced read: a skeleton holds the slot meanwhile,
+ * not a chip in its default look.
+ */
+export function SkillsChip({
+  transport,
+  selection,
+  onClick,
+}: {
+  transport: ChatTransport | undefined;
+  selection: ChatSkillSelection;
+  onClick: () => void;
+}) {
+  const { t } = useChatHost();
+  const { inUse, loading } = useSkillsInUse(transport, selection);
+  const isDefault =
+    selection.skillMode === DEFAULT_SKILL_SELECTION.skillMode &&
+    selection.pinnedSkills.length === 0;
+  if (isDefault) return null;
+  if (loading) return <Skeleton className="h-7 w-24 rounded-full" />;
+  return (
+    <button
+      type="button"
+      data-testid="skills-picker-trigger"
+      aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
+      onClick={onClick}
+      className={cn(
+        badgeVariants({ variant: "secondary" }),
+        "text-muted-foreground h-7 shrink-0 gap-1.5 px-2.5 py-0 font-normal",
+      )}
+    >
+      <BookOpenIcon className="size-3.5" />
+      <span>{inUse > 0 ? t("skills.chip", { n: inUse }) : t("skills.label")}</span>
+    </button>
+  );
+}
+
+export function SkillsPicker({
+  transport,
+  selection,
+  onChange,
+  open,
+  onOpenChange,
+  children,
+}: SkillsPickerProps) {
   const { t, can } = useChatHost();
-  const [open, setOpen] = useState(false);
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  const readable = !!spaceId && can("skills:read");
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
+  const readable = !!spaceId && !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the space scopes it.
     queryKey: ["packages", "skills", { consumer: "chat" }, spaceId],
-    queryFn: () => fetchSkills(getHeaders),
+    queryFn: () => fetchSkills(transport!.request),
     enabled: readable,
     staleTime: 60_000,
   });
   const skills = catalogue.data ?? [];
-  const enforcedQuery = useEnforcedSkills(getHeaders);
+  const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // A disabled query stays `isPending` forever; unreadable reads as "nothing".
@@ -70,56 +132,14 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
   const rows = skillPickerRows(skills, pinned, enforcedIds);
   // `auto` keeps the chosen skills but does not use them: the list is inert.
   const choosing = injectsSkills(selection.skillMode);
-  const inUse = enforced.length + (choosing ? pinned.length : 0);
 
   const togglePin = (packageId: string) => {
     onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
   };
 
-  // The trigger's tone and badge hang on the enforced read: no default look while it is on its way.
-  // `isLoading`, not `isPending` — a disabled query stays pending forever.
-  if (enforcedQuery.isLoading) return <Skeleton className="size-8 rounded-lg" />;
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              data-testid="skills-picker-trigger"
-              // The badge count is painted; a screen reader gets it here.
-              aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
-              className={cn(
-                "relative size-8 shrink-0 rounded-lg",
-                choosing || enforced.length > 0
-                  ? "text-primary hover:text-primary"
-                  : "text-muted-foreground",
-              )}
-            >
-              <BookOpenIcon />
-              {inUse > 0 && (
-                <span
-                  aria-hidden="true"
-                  className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-4 font-medium"
-                >
-                  {inUse}
-                </span>
-              )}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-72 text-xs">
-          <p className="font-medium">{t("skills.title")}</p>
-          <p className="text-muted-foreground mt-0.5">
-            {t(MODE_COPY[selection.skillMode].label)}
-            {enforced.length > 0 && ` · ${t("skills.enforcedCount", { n: enforced.length })}`}
-            {choosing && pinned.length > 0 && ` · ${t("skills.chosen", { n: pinned.length })}`}
-          </p>
-        </TooltipContent>
-      </Tooltip>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverAnchor asChild>{children}</PopoverAnchor>
 
       <PopoverContent
         side="top"

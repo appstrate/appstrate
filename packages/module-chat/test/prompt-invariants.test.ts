@@ -13,6 +13,7 @@ import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -83,11 +84,7 @@ describe("full persona invariants", () => {
   });
 
   it("keeps inline manifests concise while allowing exact complete overrides", () => {
-    expect(FULL).toContain("PARTIAL canonical AFPS agent");
-    expect(FULL).toMatch(/Defaults apply ONLY to absent top-level fields/);
-    expect(FULL).toContain("runtime_tools: []");
-    expect(FULL).toMatch(/override EVERY field/);
-    expect(FULL).toContain("complete strict `output.schema`");
+    expect(FULL).toContain(INLINE_MANIFEST_RULE);
   });
 
   it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
@@ -144,7 +141,7 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
     expect(FULL).toContain("`activatePackage`");
-    expect(FULL).toContain("`POST /api/spaces/{spaceId}/packages`");
+    expect(FULL).toContain("`POST /api/spaces/{id}/packages`");
     expect(FULL).toContain('{ "packageId": "<that integration id>" }');
     expect(FULL).not.toContain("activateIntegration");
     expect(FULL).toMatch(/report the refusal with its error and stop/);
@@ -311,6 +308,24 @@ describe("caller-context prompt hygiene", () => {
     expect(contextText(identity, CONTEXT_OPTS)).toContain("Reply in the user's language (fr)");
   });
 
+  it("renders a needs_reconnection connection as needing its owner's reconnection", () => {
+    const out = contextText(
+      {
+        connections: [
+          {
+            integration_package_id: "@appstrate/gmail",
+            name: "Gmail",
+            source: "own",
+            needs_reconnection: true,
+          },
+          { integration_package_id: "@appstrate/clickup", name: "ClickUp", source: "own" },
+        ],
+      },
+      CONTEXT_OPTS,
+    );
+    expect(out).toMatch(/Gmail[^,]*needs reconnection by its owner/);
+    expect(out).not.toMatch(/ClickUp[^,]*needs reconnection/);
+  });
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
@@ -368,7 +383,7 @@ describe("the persona without inline composition", () => {
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');
-    expect(REDUCED).not.toContain("PARTIAL canonical AFPS agent");
+    expect(REDUCED).not.toContain(INLINE_MANIFEST_RULE);
     expect(REDUCED).not.toContain("Give EVERY inline run a task-specific identity");
     expect(REDUCED).not.toContain("runInline");
   });
@@ -611,16 +626,11 @@ describe("the persona of a turn that can look but not act", () => {
 });
 
 describe("the persona and package authoring", () => {
-  const CREATES = "To create a package — an agent, a skill, an integration or a local MCP server";
+  const CREATES = "To create a package — an agent, a skill or an integration";
   const FORBIDS = "Do not create, import or modify any package";
 
   it("teaches creating every package type on a write on any one of them", () => {
-    for (const write of [
-      "agents:write",
-      "skills:write",
-      "integrations:write",
-      "mcp-servers:write",
-    ]) {
+    for (const write of ["agents:write", "skills:write", "integrations:write"]) {
       const prompt = promptFor([...MCP, write]);
       expect(prompt).toContain(CREATES);
       expect(prompt).toContain("`import_package_file`");

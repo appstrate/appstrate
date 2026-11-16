@@ -49,7 +49,6 @@ const AGENT = "@mig0041/agent";
 
 const integrationManifest = localIntegrationManifest({
   name: INTEGRATION,
-  serverName: "@mig0041/svc-server",
   version: "1.0.0",
   auths: {
     primary: {

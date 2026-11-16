@@ -6,6 +6,7 @@ import { runs, runReads, organizationMembers, packages } from "@appstrate/db/sch
 import { scopedWhere, type DbOrTx, type Tx } from "../../lib/db-helpers.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { RunStatus } from "@appstrate/core/run-status";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { SpaceGrant } from "../../lib/permissions.ts";
@@ -27,64 +28,41 @@ function recipientFilter(actor: Actor): SQL {
 }
 
 /**
- * Who a finished run is for: the member or end-user who launched it, or — an
- * actor-less run (owner-less org / system schedule) — the org's owners and
- * admins. An actor-less run is readable only with `runs:read-all` (RBAC spec
- * §3.4), which is why those are its recipients, and it bounds the row count.
+ * Who a run is for — the recipients of its read state and of every notification
+ * about it (`notifyRunFinished`, and the agent's own `notify` tool,
+ * `createAgentMessageNotifications`). `null` when the run does not exist in
+ * `scope`, otherwise the run and its recipients, possibly none:
+ *  - the member or end-user who launched it;
+ *  - an actor-less run (owner-less org / system schedule) → the org's owners
+ *    and admins. An actor-less run is readable only with `runs:read-all` (RBAC
+ *    spec §3.4), which is why those are its recipients, and it bounds the row
+ *    count.
+ *
+ * `run.ephemeral` is `packages.ephemeral` (chat, playground, direct inline
+ * call); a null join (shadow package already gone) is not ephemeral. The
+ * recipients are the same either way: what an ephemeral run skips is the
+ * automatic fan-out (`recordRunFinished`), not a message its agent chose to
+ * send.
  *
  * Bounded race: a member removed between this read and the insert gets a row
  * they can no longer see (org context refuses a non-member), reaped with the
  * org. Re-validating at insert time would narrow the window, not close it.
  */
-async function runRecipients(
-  scope: SpaceScope,
-  run: { userId: string | null; endUserId: string | null },
-  executor: DbOrTx,
-): Promise<Actor[]> {
-  if (run.userId) return [{ type: "user", id: run.userId }];
-  if (run.endUserId) return [{ type: "end_user", id: run.endUserId }];
-  const admins = await executor
-    .select({ userId: organizationMembers.userId })
-    .from(organizationMembers)
-    .where(
-      and(
-        eq(organizationMembers.orgId, scope.orgId),
-        inArray(organizationMembers.role, ["owner", "admin"]),
-      ),
-    );
-  return admins.map((m) => ({ type: "user", id: m.userId }));
-}
-
-/**
- * Record a freshly finished run: unread for each recipient, and notified when
- * the run needs attention (`notifyRunFinished` decides). Every writer of a
- * terminal run calls it on the transaction that writes the terminal status
- * (`finalizeRun`, `createFailedRun`): a client that sees the run finished finds
- * its read state, so opening it marks it read. The primary key makes a re-fire
- * a no-op.
- *
- * An ephemeral run (chat, playground, direct inline call) records nothing: its
- * result is already in front of the caller. Keyed on `packages.ephemeral`; a
- * null join (shadow package already gone) records it.
- *
- * Best-effort: it runs in a transaction of its own (a savepoint inside the
- * caller's), and a failure is logged, never thrown — it costs a missing unread
- * dot and bell entry, never the run's terminal status.
- */
-export async function recordRunFinished(
+export async function resolveRunRecipients(
   scope: SpaceScope,
   runId: string,
   executor: DbOrTx = db,
-): Promise<void> {
-  await executor
-    .transaction((tx) => writeRunFinished(scope, runId, tx))
-    .catch((err) => {
-      logger.error("run read-state fan-out failed", { runId, err: getErrorMessage(err) });
-    });
-}
-
-async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx): Promise<void> {
-  const [run] = await executor
+): Promise<{
+  run: {
+    id: string;
+    packageId: string | null;
+    agentName: string | null;
+    status: RunStatus;
+    ephemeral: boolean;
+  };
+  recipients: Actor[];
+} | null> {
+  const [row] = await executor
     .select({
       userId: runs.userId,
       endUserId: runs.endUserId,
@@ -103,14 +81,62 @@ async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx):
       }),
     )
     .limit(1);
-  if (!run || run.packageEphemeral === true) return;
+  if (!row) return null;
+  const run = {
+    id: runId,
+    packageId: row.packageId,
+    agentName: row.agentName,
+    status: row.status,
+    ephemeral: row.packageEphemeral === true,
+  };
+  if (row.userId) return { run, recipients: [{ type: "user", id: row.userId }] };
+  if (row.endUserId) return { run, recipients: [{ type: "end_user", id: row.endUserId }] };
+  const admins = await executor
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.orgId, scope.orgId),
+        inArray(organizationMembers.role, ["owner", "admin"]),
+      ),
+    );
+  return { run, recipients: admins.map((m) => ({ type: "user", id: m.userId })) };
+}
 
-  const recipients = await runRecipients(scope, run, executor);
-  if (recipients.length === 0) return;
+/**
+ * Record a freshly finished run: unread for each recipient, and notified when
+ * the run needs attention (`notifyRunFinished` decides). Every writer of a
+ * terminal run calls it on the transaction that writes the terminal status
+ * (`finalizeRun`, `createFailedRun`): a client that sees the run finished finds
+ * its read state, so opening it marks it read. The primary key makes a re-fire
+ * a no-op.
+ *
+ * An ephemeral run records nothing: its result is already in front of the
+ * caller, so it is neither unread nor announced.
+ *
+ * Best-effort: it runs in a transaction of its own (a savepoint inside the
+ * caller's), and a failure is logged, never thrown — it costs a missing unread
+ * dot and bell entry, never the run's terminal status.
+ */
+export async function recordRunFinished(
+  scope: SpaceScope,
+  runId: string,
+  executor: DbOrTx = db,
+): Promise<void> {
+  await executor
+    .transaction((tx) => writeRunFinished(scope, runId, tx))
+    .catch((err) => {
+      logger.error("run read-state fan-out failed", { runId, err: getErrorMessage(err) });
+    });
+}
+
+async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx): Promise<void> {
+  const target = await resolveRunRecipients(scope, runId, executor);
+  if (!target || target.run.ephemeral || target.recipients.length === 0) return;
   await executor
     .insert(runReads)
     .values(
-      recipients.map((r) => ({
+      target.recipients.map((r) => ({
         runId,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
@@ -119,12 +145,7 @@ async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx):
       })),
     )
     .onConflictDoNothing();
-  await notifyRunFinished(
-    scope,
-    { id: runId, packageId: run.packageId, agentName: run.agentName, status: run.status },
-    recipients,
-    executor,
-  );
+  await notifyRunFinished(scope, target.run, target.recipients, executor);
 }
 
 /**

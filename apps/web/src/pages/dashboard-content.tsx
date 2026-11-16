@@ -10,12 +10,12 @@ import i18n from "../i18n";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
 import { ArrowRight, Bot, MessageSquareText, Copy, LayoutDashboard, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
 import { ChoiceCard } from "../components/choice-card";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { ScheduleStateBadges } from "../components/schedule-status-badge";
 import { PackageCard } from "../components/package-card";
 import { CardList } from "../components/card-list";
@@ -107,23 +107,30 @@ export function DashboardHeader({
             ? t("dashboard.greeting", { name: firstName })
             : t("dashboard.greetingAnonymous")
         }
-        titleClassName="text-3xl font-bold tracking-tight"
+        variant="collection"
         breadcrumbs={[{ label: t("common:nav.dashboard") }]}
-        actions={
-          <Button type="button" variant="outline" onClick={() => setAssistOpen(true)}>
-            <Sparkles />
-            {t("dashboard.askAi.title")}
-          </Button>
+        description={
+          runningCount === undefined ? (
+            <SkeletonLine className="w-56 text-sm" />
+          ) : (
+            <span className="block first-letter:uppercase">
+              {t("dashboard.subtitle", { date, count: runningCount })}
+            </span>
+          )
         }
-      >
-        {runningCount === undefined ? (
-          <SkeletonLine className="mt-1 w-56 text-sm" />
-        ) : (
-          <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
-            {t("dashboard.subtitle", { date, count: runningCount })}
-          </p>
-        )}
-      </PageHeader>
+        actions={
+          <PageActionsMenu
+            actions={[
+              {
+                id: "ask-ai",
+                label: t("dashboard.askAi.title"),
+                icon: Sparkles,
+                onSelect: () => setAssistOpen(true),
+              },
+            ]}
+          />
+        }
+      />
 
       {assistOpen && (
         <Modal
@@ -169,7 +176,7 @@ function MetricCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("flex min-h-32 flex-col justify-between rounded-xl p-4", className)}>
+    <Card className={cn("flex min-h-32 flex-col justify-between p-4", className)}>
       <span className="text-muted-foreground text-xs font-medium">{label}</span>
       <div>
         <p className="text-3xl font-semibold tabular-nums">{value}</p>
@@ -239,7 +246,7 @@ function DashboardScheduleRow({
     // A schedule of another space (« Vue d'ensemble ») names it: the detail enters it.
     <Link
       to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
-      className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
+      className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
     >
       <PackageIcon
         type="agent"

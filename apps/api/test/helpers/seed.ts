@@ -31,7 +31,6 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
-import { mcpServerManifest } from "./integration-manifests.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
@@ -223,44 +222,6 @@ export async function seedPackageVersion(
     })
     .returning();
   return version!;
-}
-
-// ─── MCP Servers ──────────────────────────────────────────
-
-type McpServerInsert = {
-  /** Scoped AFPS id (`@scope/name`) an integration's `server_name` references. */
-  id: string;
-  orgId: string | null;
-  version?: string;
-  serverType?: "node" | "python" | "binary" | "uv";
-  entryPoint?: string;
-  /** The space that HOMES it — one of the two placements. */
-  homeSpaceId?: string;
-};
-
-/**
- * Seed an `mcp-server` package AND the published version that goes with it —
- * the pair the integration spawn resolver needs to turn a `server_name`
- * reference into a spawn spec. Seeding only the package leaves the reference
- * unresolvable, which is a different (and easy to seed by accident) fixture.
- */
-export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
-  const version = overrides.version ?? "1.0.0";
-  const manifest = mcpServerManifest({
-    name: overrides.id,
-    version,
-    serverType: overrides.serverType ?? "node",
-    entryPoint: overrides.entryPoint ?? "./server.js",
-  });
-  await seedPackage({
-    id: overrides.id,
-    orgId: overrides.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: manifest,
-    ...(overrides.homeSpaceId ? { homeSpaceId: overrides.homeSpaceId } : {}),
-  });
-  await seedPackageVersion({ packageId: overrides.id, version, manifest });
 }
 
 // ─── Runs ─────────────────────────────────────────────────

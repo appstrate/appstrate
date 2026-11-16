@@ -14,13 +14,11 @@ import {
   findUnevaluableExpressions,
   findConnectionlessVariables,
   findUnexposedDefaultTools,
-  type IntegrationManifest,
+  findRuntimeBinding,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
-import { asRecord } from "@appstrate/core/safe-json";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import { validationFailed } from "../../lib/errors.ts";
-import { getLocalServerRef } from "../integration-manifest-helpers.ts";
 
 // ─────────────────────────────────────────────
 // Package type configuration
@@ -28,7 +26,7 @@ import { getLocalServerRef } from "../integration-manifest-helpers.ts";
 
 export interface PackageTypeConfig {
   type: PackageType;
-  storageFolder: "agents" | "skills" | "integrations" | "mcp-servers";
+  storageFolder: "agents" | "skills" | "integrations";
   /**
    * How this type names ONE of its packages in a message a user reads ("Skill
    * '@acme/x' not found", "Skill was modified concurrently").
@@ -51,7 +49,7 @@ export interface PackageTypeConfig {
    * in the ZIP can only go stale. Every write of such a package's tree drops it
    * before uploading.
    *
-   * For `integration` / `mcp-server` it IS the editor's storage sink
+   * For `integration` it IS the editor's storage sink
    * (`storageFileName`, `routes/packages.ts`) and the bundle's portable
    * manifest, so it is stored like any other file.
    *
@@ -61,20 +59,6 @@ export interface PackageTypeConfig {
    * option each writer computes for itself is an agreement nothing enforces.
    */
   manifestIsStoredFile: boolean;
-}
-
-/** A package has one type: an integration naming ITSELF as its mcp-server can never resolve. */
-function findSelfReferencedServer(manifest: unknown): { path: string[]; message: string }[] {
-  const { name } = asRecord(manifest);
-  return typeof name === "string" &&
-    getLocalServerRef(manifest as IntegrationManifest)?.name === name
-    ? [
-        {
-          path: ["source", "server", "name"],
-          message: `'${name}' is this integration itself; name the mcp-server package it runs`,
-        },
-      ]
-    : [];
 }
 
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
@@ -96,7 +80,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     storageFolder: "integrations",
     labelSingular: "Integration",
     checkManifest: (manifest) => [
-      ...findSelfReferencedServer(manifest),
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
       ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
@@ -104,15 +87,8 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findUnevaluableExpressions(manifest),
       ...findConnectionlessVariables(manifest),
       ...findUnexposedDefaultTools(manifest),
+      ...findRuntimeBinding(manifest),
     ],
-    manifestIsStoredFile: true,
-  },
-  // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
-  // integration's `source.kind: "local"`.
-  "mcp-server": {
-    type: "mcp-server",
-    storageFolder: "mcp-servers",
-    labelSingular: "MCP Server",
     manifestIsStoredFile: true,
   },
 };

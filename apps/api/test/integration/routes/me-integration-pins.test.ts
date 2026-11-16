@@ -62,7 +62,6 @@ const app = getTestApp();
 
 const AGENT = "@pinorg/agent";
 const INTEGRATION = "@pinorg/svc";
-const MCP_SERVER = "@pinorg/svc-server";
 
 function buildAgentManifest(): Record<string, unknown> {
   return {
@@ -79,7 +78,6 @@ function buildAgentManifest(): Record<string, unknown> {
 function buildIntegrationManifest() {
   return localIntegrationManifest({
     name: INTEGRATION,
-    serverName: MCP_SERVER,
     version: "1.0.0",
     auths: {
       primary: {

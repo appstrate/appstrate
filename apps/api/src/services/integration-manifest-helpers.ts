@@ -4,6 +4,8 @@
 
 import {
   getApiCallConfigs,
+  getIntegrationSourceKind,
+  getRemoteSource,
   isUnauthenticatedIntegration,
   selectedApiCallConfigs,
   type IntegrationManifest,
@@ -84,8 +86,6 @@ export const PUBLIC_CLIENT_WITH_SECRET_MESSAGE =
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;
-  /** The mcp-server `${user_config.<key>}` this value fills (AFPS §7.6); defaults to the map key. */
-  user_config_key?: string;
 }
 export interface AfpsDeliveryFilesEntry {
   value: string;
@@ -187,14 +187,6 @@ export function isSafeDeliveryFilePath(path: string): boolean {
   return true;
 }
 
-export function getIntegrationSourceKind(
-  manifest: IntegrationManifest,
-): "local" | "remote" | "none" | undefined {
-  const source = (manifest as { source?: { kind?: string } }).source;
-  const kind = source?.kind;
-  return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
-}
-
 /**
  * Auths whose connection exposes a tool of `selection` — a server's own tools via any auth, an
  * `api_call` only via its own. `null` when every auth does, or none does (not a connection
@@ -244,35 +236,6 @@ export function authKeyOnUnauthenticatedIntegration(
   authKey: string | undefined,
 ): authKey is string {
   return authKey !== undefined && isUnauthenticatedIntegration(manifest);
-}
-
-export function getLocalServerRef(
-  manifest: IntegrationManifest,
-): { name: string; version: string } | null {
-  const source = (
-    manifest as { source?: { kind?: string; server?: { name?: unknown; version?: unknown } } }
-  ).source;
-  if (source?.kind !== "local" || !source.server) return null;
-  const { name, version } = source.server;
-  if (typeof name !== "string" || typeof version !== "string") return null;
-  return { name, version };
-}
-
-/**
- * `transport` is checked against AFPS §7.1's enum so no caller is tempted to coerce an unknown one
- * to HTTP. The schema parse already refuses it; this keeps the type honest, it is not the gate.
- */
-export function getRemoteSource(
-  manifest: IntegrationManifest,
-): { url: string; transport: "streamable-http" | "sse" } | null {
-  const source = (
-    manifest as { source?: { kind?: string; remote?: { url?: unknown; transport?: unknown } } }
-  ).source;
-  if (source?.kind !== "remote" || !source.remote) return null;
-  const { url, transport } = source.remote;
-  if (typeof url !== "string") return null;
-  if (transport !== "streamable-http" && transport !== "sse") return null;
-  return { url, transport };
 }
 
 /** `source.remote` rendered for one connection (AFPS §7.12); `null` when absent or unrenderable. */

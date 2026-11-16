@@ -246,7 +246,7 @@ describe("view as role", () => {
     await expectProblem(await share(persona("member", "preset:viewer")), 403);
     // Same request, no header: the owner is `admin` in the agent's home.
     const real = await share();
-    expect(real.status, await real.clone().text()).toBe(200);
+    expect(real.status, await real.clone().text()).toBe(201);
   });
 
   // ─── 2. A guest with no assignment reaches nothing ────────────────

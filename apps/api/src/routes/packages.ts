@@ -16,7 +16,7 @@ import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { assertImportedType, readExpectedImportType } from "../lib/import-type.ts";
@@ -24,7 +24,6 @@ import {
   activatePackage,
   activatePackageWithin,
   assertHasPublishedVersion,
-  assertMcpServerActivatable,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
@@ -32,8 +31,6 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
-import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -53,7 +50,6 @@ import {
   assertContentConforms,
   assertArchiveContentConforms,
   assertManifestConforms,
-  assertNoManifestViolations,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type ManifestIssue, type PackageType } from "@appstrate/core/validation";
@@ -116,10 +112,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
-import {
-  findUnexposedLocalDefaultTools,
-  validateAgentIntegrationSelections,
-} from "../services/integration-scope-validation.ts";
+import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { buildServedSkills, servedSkillsContext } from "../services/served-skills.ts";
 import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
@@ -175,9 +168,8 @@ import { parsePathMessages } from "../lib/field-errors.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 /**
- * The 400 items of an invalid manifest: one per structured issue, carrying the rule's own code
- * when it has one (`output_tool_required`), else `invalid_manifest`. A dispatcher-level failure
- * comes as strings only.
+ * The 400 items of an invalid manifest, each coded `invalid_manifest`: one per structured
+ * issue. A dispatcher-level failure comes as strings only.
  */
 function manifestErrorsToFieldErrors(result: {
   errors: string[];
@@ -192,7 +184,7 @@ function manifestErrorsToFieldErrors(result: {
   }
   return result.issues.map((issue) => ({
     field: issue.path ? `manifest.${issue.path}` : "manifest",
-    code: issue.code ?? "invalid_manifest",
+    code: "invalid_manifest",
     title: "Invalid Manifest",
     message: issue.message,
   }));
@@ -226,19 +218,10 @@ async function assertAgentIntegrationScopesValid(
   }
 }
 
-/** The part of the `default_tools` rule `checkManifest` cannot judge: a `local` source's tools. */
-async function assertLocalDefaultToolsExposed(
-  manifest: Record<string, unknown>,
-  orgId: string,
-): Promise<void> {
-  assertNoManifestViolations(await findUnexposedLocalDefaultTools(manifest, orgId));
-}
-
 /**
  * The manifest gate every package write goes through — schema validation, the
  * route/manifest `type` agreement check, then the integration-scope subset
- * check and a `local` integration's `default_tools` — returning the VALIDATED
- * (normalized) manifest callers persist.
+ * check — returning the VALIDATED (normalized) manifest callers persist.
  *
  * `direction` says where the manifest came from, and both policies key off it:
  *
@@ -247,14 +230,13 @@ async function assertLocalDefaultToolsExposed(
  *   type while `validateManifest` dispatches purely on the manifest's own root
  *   `type`, so without it a wrong-type manifest validates against ITS OWN
  *   schema and then has `type` rewritten to the route's downstream —
- *   persisting a manifest no schema ever accepted. Retired
- *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
- *   of silently stripped.
+ *   persisting a manifest no schema ever accepted. A retired `dependencies`
+ *   key rejects.
  * - `"stored"` — the manifest is already persisted (PATCH content-only
  *   carry-forward; publishing an existing draft). NO `type` gate: stored
  *   artifacts are tolerated on read, and gating here would make a
- *   legacy drifted draft permanently un-publishable. Retired ids drop so such
- *   a draft stays editable and publishable.
+ *   legacy drifted draft permanently un-publishable. A retired `dependencies`
+ *   key is tolerated so such a draft stays editable and publishable.
  *
  * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
  * bytes came from, not whether they are being frozen. Publishing a draft is
@@ -270,7 +252,7 @@ async function validateManifestForRoute(
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
-    direction === "stored" ? { retiredRuntimeTools: "drop" } : undefined,
+    direction === "stored" ? { retiredDependencyKeys: "tolerate" } : undefined,
   );
   if (!result.valid) {
     throw validationFailed(manifestErrorsToFieldErrors(result));
@@ -298,7 +280,6 @@ async function validateManifestForRoute(
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
   }
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
-  await assertLocalDefaultToolsExposed(validated, c.get("orgId"));
   return validated;
 }
 
@@ -461,51 +442,6 @@ export const shareTargetSchema = z
   })
   .strict();
 
-// --- Shared ZIP upload parsing ---
-
-interface ParsedUpload {
-  id: string;
-  name?: string;
-  description?: string;
-  archive: Uint8Array;
-  manifest: Record<string, unknown>;
-}
-
-async function readPackageUpload(c: Context<AppEnv>): Promise<ParsedUpload> {
-  if (!(c.req.header("content-type") ?? "").includes("multipart/form-data")) {
-    throw new ApiError({
-      status: 415,
-      code: "archive_required",
-      title: "Archive Required",
-      detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
-    });
-  }
-  const formData = await c.req.formData();
-  const file = formData.get("file");
-  if (!(file instanceof File)) throw invalidRequest("File is required", "file");
-  if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip"))
-    throw invalidRequest("Only .afps and .zip files are accepted", "file");
-  const id = file.name.replace(/\.(afps|zip)$/i, "");
-  if (!SLUG_REGEX.test(id))
-    throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
-  const name = formData.get("name");
-  const description = formData.get("description");
-  const archive = new Uint8Array(await file.arrayBuffer());
-  let manifest: Record<string, unknown>;
-  try {
-    manifest = parseManifestFromFiles(unzipPackageArchive(archive));
-  } catch (err) {
-    throw invalidRequest(getErrorMessage(err), "file");
-  }
-  return {
-    id,
-    name: typeof name === "string" ? name : undefined,
-    description: typeof description === "string" ? description : undefined,
-    archive,
-    manifest,
-  };
-}
-
 /** Publish a valid initial snapshot; incomplete authoring drafts remain editable. */
 async function createVersionSafe(params: {
   packageId: string;
@@ -576,8 +512,6 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
   storageFileName: string;
   /** If true, version create/restore require no running runs (agents). */
   requireMutableForVersionOps?: boolean;
-  /** If true, this type uses JSON body for create (not ZIP upload parsing). */
-  jsonBodyCreate?: boolean;
   /**
    * If true, this type's content file is mandatory: create refuses a body
    * without a non-blank `content` (through
@@ -597,20 +531,18 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
   detailDto?: (c: Context<AppEnv>, itemId: string, orgId: string) => Promise<PackageDetail | null>;
 }
 
-// Three types have JSON creation forms; MCP server creation accepts an archive.
+// Every type has a JSON creation form.
 const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     storageFileName: "SKILL.md",
-    jsonBodyCreate: true,
     requireContent: true,
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     storageFileName: "prompt.md",
-    jsonBodyCreate: true,
     requireContent: true,
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
@@ -624,21 +556,13 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
   // agents/skills). The stored `manifest.json` content mirrors the DB
   // `draft_manifest` — the runtime reads the manifest from the DB
   // (`fetchIntegrationManifest`), the storage file exists for export/bundle
-  // portability. Bundle-backed (`source.kind: "local"`) integrations still
-  // arrive via the import pipeline; the editor authors `remote`/`none`
-  // sources that need no server bundle.
+  // portability. Integrations carrying a server payload (`source.kind:
+  // "local"`) arrive via the import pipeline; the editor authors `remote`/`none`
+  // sources that need no server payload.
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
     storageFileName: "manifest.json",
-    jsonBodyCreate: true,
-  },
-  // Standalone MCP bundles are created by import and edited through the shared draft editor.
-  "mcp-server": {
-    cfg: CONFIG_BY_TYPE["mcp-server"],
-    path: "mcp-servers",
-    storageFileName: "manifest.json",
-    jsonBodyCreate: false,
   },
 };
 
@@ -664,139 +588,101 @@ function makeListHandler(rcfg: PackageRouteConfig) {
 function makeCreateHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    let draft: Parameters<typeof createPackageDraft>[0];
     // Only the integration body carries `publish`; every other create snapshots its version.
     let publish = true;
+    // The two create bodies differ only in whether `content` is mandatory,
+    // which is what `requireContent` means. Selecting the schema here — as
+    // opposed to re-checking the parsed body afterwards — is what lets the
+    // spec publish the difference: `zod-schema-registry.ts` registers
+    // whichever of the two schemas this package type's route uses.
+    const body = await readJsonBody(
+      c,
+      rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
+    );
+
+    if ("publish" in body && body.publish === false) publish = false;
+    let content = body.content ?? "";
+
+    const validatedManifest = await validateManifestForRoute(
+      body.manifest,
+      rcfg.cfg.type,
+      c,
+      "author",
+    );
+
+    assertContentConforms(rcfg.cfg.type, content, "content");
+
     // Validate the complete tree before either store is written.
-    if (rcfg.jsonBodyCreate) {
-      // The two create bodies differ only in whether `content` is mandatory,
-      // which is what `requireContent` means. Selecting the schema here — as
-      // opposed to re-checking the parsed body afterwards — is what lets the
-      // spec publish the difference: `zod-schema-registry.ts` registers
-      // whichever of the two schemas this package type's route uses.
-      const body = await readJsonBody(
-        c,
-        rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
-      );
-
-      if ("publish" in body && body.publish === false) publish = false;
-      const manifest = body.manifest;
-      let content = body.content ?? "";
-
-      const validatedManifest = await validateManifestForRoute(
-        manifest,
-        rcfg.cfg.type,
-        c,
-        "author",
-      );
-
-      assertContentConforms(rcfg.cfg.type, content, "content");
-
-      const manifestText = JSON.stringify(validatedManifest, null, 2);
-      let normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName]: new TextEncoder().encode(
-          rcfg.cfg.manifestIsStoredFile ? manifestText : content,
-        ),
-      };
-      const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
-      if (contentEntryPath && content)
-        normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
-      if (body.operations || rcfg.requireContent) {
-        try {
-          normalizedFiles = applyFileOperations(
-            { ...normalizedFiles, [PACKAGE_MANIFEST_FILE]: new TextEncoder().encode(manifestText) },
-            [
-              // The primary file travels as content, but has the same write limit.
-              ...(rcfg.requireContent
-                ? [
-                    {
-                      op: "write" as const,
-                      path: rcfg.storageFileName,
-                      bytes: normalizedFiles[rcfg.storageFileName]!,
-                    },
-                  ]
-                : []),
-              ...toDraftFileOperations(body.operations ?? []),
-            ],
-            { type: rcfg.cfg.type },
-          );
-          content = validateAuthoredPackageFiles(
-            normalizedFiles,
-            rcfg.cfg.type,
-            validatedManifest,
-            body.operations !== undefined,
-          );
-          if (!rcfg.cfg.manifestIsStoredFile) delete normalizedFiles[PACKAGE_MANIFEST_FILE];
-        } catch (error) {
-          if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
-          throw error;
-        }
-      }
-
-      const packageId = validatedManifest.name;
-
-      // The only scopes that gate creation are the platform's (`createOrgItem` refuses them,
-      // 400 `scope_reserved`); beyond that, a system package id must never be shadowed by an
-      // org-owned row — the boot sync upserts system rows by id and would later overwrite it
-      // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
-      if (isSystemPackage(packageId)) {
-        throw forbidden(`'${packageId}' is a system package and cannot be created`);
-      }
-
-      // Check for name collision
-      const existingIds = await getAllPackageIds(orgId);
-      if (existingIds.includes(packageId)) {
-        // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
-        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
-      }
-
-      draft = {
-        orgId,
-        id: packageId,
-        content,
-        createdBy: user.id,
-        homeSpaceId: c.get("spaceId"),
-        type: rcfg.cfg.type,
-        manifest: validatedManifest,
-        files: normalizedFiles,
-      };
-    } else {
-      const parsed = await readPackageUpload(c);
-      // Report schema/type errors before checking companion files for another type.
-      await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, c, "author");
-      let canonical;
+    const manifestText = JSON.stringify(validatedManifest, null, 2);
+    let normalizedFiles: Record<string, Uint8Array> = {
+      [rcfg.storageFileName]: new TextEncoder().encode(
+        rcfg.cfg.manifestIsStoredFile ? manifestText : content,
+      ),
+    };
+    const contentEntryPath = optionalContentEntryPath(rcfg.cfg.type, content);
+    if (contentEntryPath && content)
+      normalizedFiles[contentEntryPath] = new TextEncoder().encode(content);
+    if (body.operations || rcfg.requireContent) {
       try {
-        canonical = parsePackageZip(parsed.archive);
-      } catch (err) {
-        if (err instanceof PackageZipError) throw invalidRequest(err.message, "file");
-        throw err;
-      }
-      const packageId = `@${orgSlug}/${parsed.id}`;
-      if (canonical.packageId !== packageId) {
-        throw invalidRequest(
-          `Archive manifest name '${canonical.packageId}' must match upload package id '${packageId}'.`,
-          "manifest.name",
+        normalizedFiles = applyFileOperations(
+          { ...normalizedFiles, [PACKAGE_MANIFEST_FILE]: new TextEncoder().encode(manifestText) },
+          [
+            // The primary file travels as content, but has the same write limit.
+            ...(rcfg.requireContent
+              ? [
+                  {
+                    op: "write" as const,
+                    path: rcfg.storageFileName,
+                    bytes: normalizedFiles[rcfg.storageFileName]!,
+                  },
+                ]
+              : []),
+            ...toDraftFileOperations(body.operations ?? []),
+          ],
+          { type: rcfg.cfg.type },
         );
+        content = validateAuthoredPackageFiles(
+          normalizedFiles,
+          rcfg.cfg.type,
+          validatedManifest,
+          body.operations !== undefined,
+        );
+        if (!rcfg.cfg.manifestIsStoredFile) delete normalizedFiles[PACKAGE_MANIFEST_FILE];
+      } catch (error) {
+        if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
+        throw error;
       }
-      if (isSystemPackage(packageId))
-        throw forbidden(`'${packageId}' is a system package and cannot be created`);
-      assertContentConforms(rcfg.cfg.type, canonical.content, "content");
-      draft = {
-        orgId,
-        id: packageId,
-        name: parsed.name,
-        description: parsed.description,
-        content: canonical.content,
-        createdBy: user.id,
-        homeSpaceId: c.get("spaceId"),
-        type: rcfg.cfg.type,
-        manifest: canonical.manifest,
-        files: canonical.files,
-      };
     }
+
+    const newId = validatedManifest.name;
+
+    // The only scopes that gate creation are the platform's (`createOrgItem` refuses them,
+    // 400 `scope_reserved`); beyond that, a system package id must never be shadowed by an
+    // org-owned row — the boot sync upserts system rows by id and would later overwrite it
+    // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
+    if (isSystemPackage(newId)) {
+      throw forbidden(`'${newId}' is a system package and cannot be created`);
+    }
+
+    // Check for name collision
+    const existingIds = await getAllPackageIds(orgId);
+    if (existingIds.includes(newId)) {
+      // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
+      throw conflict("name_collision", `A package with identifier '${newId}' already exists`);
+    }
+
+    const draft: Parameters<typeof createPackageDraft>[0] = {
+      orgId,
+      id: newId,
+      content,
+      createdBy: user.id,
+      homeSpaceId: c.get("spaceId"),
+      type: rcfg.cfg.type,
+      manifest: validatedManifest,
+      files: normalizedFiles,
+    };
 
     const createdItem = await createPackageDraft(draft).catch((err: unknown) => {
       if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
@@ -869,7 +755,7 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 }
 
 /**
- * Build the canonical package detail DTO for skills / integrations / mcp-servers
+ * Build the canonical package detail DTO for skills / integrations
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no space activation gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
@@ -1028,7 +914,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
     // already-stored draft — and the direction decides both the `type` gate and
-    // how a retired `runtime_tools` id is treated (see
+    // how a retired `dependencies` key is treated (see
     // `validateManifestForRoute`). Concretely, a content-only save must not 400
     // on fields the request never mentioned.
     const authoredManifest = body.manifest;
@@ -1080,7 +966,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
         : content;
 
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
-    // content entry it is the manifest (integration, mcp-server), and it is
+    // content entry it is the manifest (integration), and it is
     // rebuilt from the VALIDATED manifest rather than echoing `content`: this
     // route accepts a manifest-only PATCH, and the `existing.content`
     // carried forward above is `packages.draft_content` — which for an
@@ -1164,7 +1050,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
 /**
  * Reject (409) when an agent package has runs in progress. No-op for package
- * types that don't gate version/delete ops on running runs (skills/tools, where
+ * types that don't gate version/delete ops on running runs (skills, where
  * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
  * / restore-version / delete-version handlers so the conflict message + the
  * `(orgId, spaceId)` scoping stay identical across all four.
@@ -1343,8 +1229,8 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       }
       if (result.error === "invalid_bundle") {
         throw invalidRequest(
-          result.detail ?? "MCP-server package archive is not executable",
-          "manifest.server.entry_point",
+          result.detail ?? "Integration server payload is not executable",
+          "manifest.source.server.entry_point",
         );
       }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
@@ -2006,10 +1892,6 @@ export function createPackagesRouter() {
       // and `has_unarchived_changes` compares it against the latest version's
       // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
       // touching it would report a fully-published package as dirty.
-      //
-      // The move must not be a way past the mcp-server activation check; it
-      // reads object storage, so it runs outside the transaction.
-      await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
       const activation = await db.transaction(async (tx) => {
         // Source authority re-asked against the locked home (a concurrent move
         // may have changed it). `FOR UPDATE`: racing moves must serialize.
@@ -2195,7 +2077,7 @@ export function createPackagesRouter() {
   //
   // Authorized by `<type>:share` in the home (no route-level guard); withdraw
   // accepts either side (`assertPlacementRemovalAccess`). No ACCEPT route:
-  // switching a placement on is activation, via `POST /api/spaces/{spaceId}/packages`.
+  // switching a placement on is activation, via `POST /api/spaces/{id}/packages`.
 
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
@@ -2235,12 +2117,9 @@ export function createPackagesRouter() {
       ? recipientUserId === ownerId
       : (ownerId !== null && destination?.ownerUserId === ownerId) ||
         (destination?.permissions.has(spacePackagePermission(pkg.type, "activate")) ?? false);
-    // Landing ON is an activation: run its bundle check first, after the
-    // version refusal the dialog knows how to answer.
-    if (enabled) {
-      await assertHasPublishedVersion(packageId);
-      await assertMcpServerActivatable({ orgId, spaceId }, packageId);
-    }
+    // Landing ON is an activation: the version refusal the dialog knows how
+    // to answer comes first.
+    if (enabled) await assertHasPublishedVersion(packageId);
     const { created } = await sharePackage({
       packageId,
       spaceId,
@@ -2287,13 +2166,13 @@ export function createPackagesRouter() {
       }
     }
 
-    // 200 either way (idempotent), rendered through the listing's projection.
+    // 201 either way (idempotent), rendered through the listing's projection.
     const [view] = await listPackageShares(packageId, orgId, spaceId);
     if (!view) {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    return c.json({ object: "package_share", ...view });
+    return c.json({ object: "package_share", ...view }, 201);
   });
 
   router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
@@ -2388,23 +2267,18 @@ export function createPackagesRouter() {
    * original bytes), while the skill-only fallback must rebuild the archive
    * because it synthesizes the `manifest.json` the upload lacks.
    *
-   * WRITE direction — retired/unknown `runtime_tools` ids REJECT, passed
-   * explicitly so the choice reads as deliberate at the call site. Both routes
-   * are author input, not content the platform already holds: `/import-github`
-   * fetches hand-written source files from a repository, and the two routes
-   * share this helper.
-   *
-   * The policy is binary — it cannot tell a retired id from a typo — so `drop`
-   * here would silently swallow `"lgo"` on the primary hand-authoring route and
-   * ship an agent missing a tool with no signal. `POST /import-bundle` is the
-   * sanctioned path for re-ingesting platform-produced artifacts, and it DOES
-   * drop; a single rejected upload is locally repairable, since the error names
-   * the offending field and value.
+   * WRITE direction — a retired `dependencies` key REJECTS, passed explicitly
+   * so the choice reads as deliberate at the call site. Both routes are author
+   * input, not content the platform already holds: `/import-github` fetches
+   * hand-written source files from a repository, and the two routes share this
+   * helper. `POST /import-bundle` is the sanctioned path for re-ingesting
+   * platform-produced artifacts, and it tolerates the key; a single rejected
+   * upload is locally repairable, since the error names the offending key.
    */
   async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
     const zipBytes = new Uint8Array(upload);
     try {
-      const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      const parsed = parsePackageZip(zipBytes, { retiredDependencyKeys: "reject" });
       // `parsePackageZip` applies the lenient loader rule (it also reads
       // already-published artifacts); an import is author input.
       assertArchiveContentConforms(parsed.type, parsed.files, "file");
@@ -2492,7 +2366,6 @@ export function createPackagesRouter() {
       asRecord(existing?.draftManifest),
     );
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
-    await assertLocalDefaultToolsExposed(manifest as Record<string, unknown>, orgId);
     if (existing) {
       if (existing.orgId !== orgId) {
         throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);

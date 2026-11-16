@@ -25,9 +25,9 @@ import { listAgentIndex, listPackageIndex } from "../services/package-index.ts";
 import { readableSpacesAcross } from "../lib/reachable-spaces.ts";
 import { fileLifecycleCeiling, type Permission, type SpaceGrant } from "../lib/permissions.ts";
 import { getActor } from "../lib/actor.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { assertKnownQuery } from "../lib/list-query.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseGlobalRunListQuery, RUN_LIST_QUERY_PARAMETERS } from "../lib/run-list-query.ts";
 import { parseListFilesQuery } from "../lib/file-list-query.ts";
 import { packageAccessSpaces } from "../lib/package-access.ts";
@@ -40,7 +40,6 @@ import { packageAccessSpaces } from "../lib/package-access.ts";
 const INDEXED_PACKAGE_TYPES = [
   { type: "skill", segment: "skills" },
   { type: "integration", segment: "integrations" },
-  { type: "mcp-server", segment: "mcp-servers" },
 ] as const satisfies readonly {
   [T in PackageType]: { type: T; segment: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T] };
 }[PackageType][];
@@ -84,12 +83,7 @@ export function createCrossSpaceReadsRouter() {
       async (c, orgId, grants) => {
         const filters = parseGlobalRunListQuery(c);
         const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
-        setOffsetLinkHeader({
-          c,
-          limit: filters.limit,
-          offset: filters.offset,
-          total: result.total,
-        });
+        setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
         return c.json(result);
       },
     ),

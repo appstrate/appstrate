@@ -54,7 +54,7 @@ function verdicts(ctx: ChatAccessContext): Record<string, boolean> {
 const CONVERSES = ["chat:write", "mcp:read", "mcp:invoke"];
 
 /** Every permission any row reads — a caller who holds the lot. */
-const PACKAGE_WRITES = ["agents:write", "skills:write", "integrations:write", "mcp-servers:write"];
+const PACKAGE_WRITES = ["agents:write", "skills:write", "integrations:write"];
 
 const EVERYTHING = [
   ...CONVERSES,
@@ -62,7 +62,6 @@ const EVERYTHING = [
   "agents:write",
   "skills:write",
   "integrations:write",
-  "mcp-servers:write",
   "runs:read",
   "runs:read-all",
   "files:read",

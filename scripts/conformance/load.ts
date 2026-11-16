@@ -27,9 +27,10 @@ function sourceKind(manifest: Record<string, unknown>): string | undefined {
 
 /** Map a loaded package to its behavioural class. */
 export function classify(entry: SystemPackageEntry): PackageClass {
-  if (entry.type === "mcp-server") return "mcp-server-local";
   if (entry.type === "integration") {
-    return sourceKind(entry.manifest) === "remote" ? "mcp-remote" : "integration-cred";
+    const kind = sourceKind(entry.manifest);
+    if (kind === "local") return "integration-local";
+    return kind === "remote" ? "mcp-remote" : "integration-cred";
   }
   return "other";
 }

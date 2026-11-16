@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchEnforcedSkills } from "./chat-skills.ts";
-import type { GetHeaders } from "./runtime-context.ts";
+import type { ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /**
@@ -10,11 +10,11 @@ import { spaceIdFromHeaders } from "./sessions.ts";
  * a library toggle shows on the next mount past it, without a cross-module
  * invalidation.
  */
-export function useEnforcedSkills(getHeaders: GetHeaders | undefined) {
-  const spaceId = spaceIdFromHeaders(getHeaders);
+export function useEnforcedSkills(transport: ChatTransport | undefined) {
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
   return useQuery({
     queryKey: ["chat", "enforced-skills", spaceId],
-    queryFn: () => fetchEnforcedSkills(getHeaders),
-    enabled: !!spaceId,
+    queryFn: () => fetchEnforcedSkills(transport!.request),
+    enabled: !!spaceId && !!transport,
   });
 }

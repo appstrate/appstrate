@@ -9,7 +9,7 @@ test("a resized column survives a language change and resets on double-click", a
   browserCtx,
 }) => {
   await createIntegration(apiClient, `@${browserCtx.org.orgSlug}`, `widths-${Date.now()}`);
-  await page.goto("/integrations?execution=local");
+  await page.goto("/integrations?source=local");
   await page.getByRole("tab", { name: "Vue tableau", exact: true }).click();
   const table = page.getByRole("table", { name: "Intégrations de l'organisation", exact: true });
   const head = table.locator('th[data-column="name"]');
@@ -41,7 +41,7 @@ test("a resized column survives a language change and resets on double-click", a
   );
   await page.getByRole("option", { name: "English", exact: true }).click();
   expect((await savedLanguage).status()).toBe(200);
-  await page.goto("/integrations?execution=local");
+  await page.goto("/integrations?source=local");
   const englishHead = page
     .getByRole("table", { name: "Organization integrations", exact: true })
     .locator('th[data-column="name"]');

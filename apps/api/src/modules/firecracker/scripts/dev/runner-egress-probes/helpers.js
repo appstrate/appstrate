@@ -5,7 +5,7 @@
  * `agent.js`. Plain JavaScript run by the guest's `bun`: the smoke
  * (`../smoke-runner-egress.ts`) bundles each program with this module into a
  * single file (`Bun.build`), so the runner ships as one `server.js` in the
- * probe mcp-server bundle and the agent as one `bun -e` argument.
+ * probe integration bundle and the agent as one `bun -e` argument.
  *
  * Every setting arrives through the environment (`PROBE_*`), set host-side by
  * the smoke: the programs carry no copy of a port, a timeout or the marker tag.

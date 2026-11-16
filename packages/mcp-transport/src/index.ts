@@ -434,12 +434,20 @@ export type {
 export {
   createMcpHttpClient,
   httpStatusOf,
+  isRequestTimeout,
+  jsonRpcErrorOf,
   wrapClient,
   type AppstrateMcpClient,
   type ListedSkillEntry,
 } from "./client.ts";
 
-export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
+export {
+  createStatelessTransport,
+  parseMcpPost,
+  serveAuthenticatedStatelessPost,
+  serveStatelessPost,
+  type McpPost,
+} from "./streamable-post.ts";
 
 // Inline bounds of a resource's bytes in a tool or `resources/read` result,
 // shared by the platform's file reads and the chat's `read_resource` tool.
@@ -462,10 +470,19 @@ export {
   isHiddenCodePoint,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  stripReservedResultMeta,
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
+
+// Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor
+// the model sees under the exposed name, stamped with the integration tool it exposes. Shared by
+// the sidecar's McpHost and the CLI.
+export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
+
+// The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
+export { mcpFetch } from "./mcp-fetch.ts";
 
 // Upstream-response metadata wire format — `_meta` key, header
 // allowlist, and `UpstreamMeta` type shared by the sidecar serializer
@@ -491,6 +508,8 @@ export {
   isApiUploadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
+  readToolIntegration,
+  TOOL_INTEGRATION_META_KEY,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
 } from "./tool-meta.ts";

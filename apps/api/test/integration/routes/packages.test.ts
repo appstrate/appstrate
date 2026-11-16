@@ -28,10 +28,7 @@ import {
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas, expectProblem } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import {
-  mcpServerManifest,
-  remoteIntegrationManifest,
-} from "../../helpers/integration-manifests.ts";
+import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import {
   buildMinimalZip,
   uploadPackageZip,
@@ -48,6 +45,7 @@ import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/z
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
@@ -470,7 +468,7 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/{skills,integrations,mcp-servers}/:scope/:name
+  // GET /api/packages/{skills,integrations}/:scope/:name
   //   — WHICH definition the page renders
   // ═══════════════════════════════════════════════
 
@@ -692,52 +690,6 @@ describe("Packages API", () => {
       expect(res.status, JSON.stringify(body)).toBe(200);
       expect(body.definition).toBe("draft");
       expect(body.content).toBe(EDITED_BODY);
-    });
-
-    it("applies the same rule to an mcp-server, whose content IS its manifest", async () => {
-      // The third type has no companion file at all (`PACKAGE_CONTENT_ENTRY`
-      // is `null`), so its published `content` is the manifest text — the exact
-      // inverse of what `applyDraftOverlay` puts in the draft column.
-      const mcpId = "@pkgorg/definition-mcp";
-      const mcpDraft = mcpServerManifest({ name: mcpId, version: "0.2.0" });
-      const mcpPublished = mcpServerManifest({ name: mcpId, version: "0.1.0" });
-      await seedPackage({
-        id: mcpId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        homeSpaceId: homeId,
-        createdBy: ctx.user.id,
-        draftManifest: mcpDraft,
-        draftContent: JSON.stringify(mcpDraft, null, 2),
-      });
-      await seedSpacePackage(homeId, mcpId);
-      const zip = zipArtifact(
-        {
-          "manifest.json": new TextEncoder().encode(JSON.stringify(mcpPublished, null, 2)),
-          "server.js": new TextEncoder().encode("// published server"),
-        },
-        6,
-      );
-      await uploadPackageZip(mcpId, "0.1.0", Buffer.from(zip));
-      const row = await seedPackageVersion({
-        packageId: mcpId,
-        version: "0.1.0",
-        manifest: mcpPublished,
-        integrity: computeIntegrity(new Uint8Array(zip)),
-        artifactSize: zip.byteLength,
-      });
-      await db
-        .insert(packageDistTags)
-        .values({ packageId: mcpId, tag: "latest", versionId: row.id });
-
-      const res = await app.request(`/api/packages/mcp-servers/${mcpId}`, {
-        headers: await memberIn("viewer"),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.definition).toBe("published");
-      expect(body.version).toBe("0.1.0");
-      expect(JSON.parse(body.content as string)).toMatchObject({ version: "0.1.0" });
     });
   });
 
@@ -1076,6 +1028,76 @@ describe("Packages API", () => {
       expect(JSON.stringify(await res.json())).toContain("cannot declare variables");
     });
 
+    it("refuses the runtime binding key: only a system package may carry it", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/runtime-bound",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.3",
+            display_name: "Runtime bound",
+            source: {
+              kind: "remote",
+              remote: { url: "https://example.com/mcp", transport: "streamable-http" },
+            },
+            _meta: { "dev.appstrate/platform": {} },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("reserved for system packages");
+    });
+
+    it("refuses the runtime binding key on an update", async () => {
+      const id = "@pkgorg/bound-later";
+      // The binding is legal only without auths: only the reserved-key rule can refuse it.
+      const { auths: _auths, ...unauthenticated } = remoteIntegrationManifest(id);
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: unauthenticated }),
+      });
+      expect(createRes.status).toBe(201);
+
+      const res = await app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(createRes)),
+        }),
+        body: JSON.stringify({
+          manifest: { ...unauthenticated, _meta: { "dev.appstrate/platform": {} } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      expect(body).toContain("dev.appstrate/platform");
+      expect(body).toContain("reserved for system packages");
+    });
+
+    it("refuses a fork of the runtime-bound system integration", async () => {
+      const restore = await installRuntimeBoundSystemPackages();
+      try {
+        const res = await app.request("/api/packages/@appstrate/platform/fork", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({}),
+        });
+
+        expect(res.status).toBe(400);
+        const body = JSON.stringify(await res.json());
+        expect(body).toContain("dev.appstrate/platform");
+        expect(body).toContain("reserved for system packages");
+      } finally {
+        restore();
+      }
+    });
+
     it("updates an integration manifest under If-Match", async () => {
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
@@ -1362,96 +1384,11 @@ describe("Packages API", () => {
       expect(etagVersion(res)).toBeGreaterThan(agent.lockVersion!);
     });
 
-    // ── retired `runtime_tools` ids: direction decides ──────────
-    //
-    // Read the PERSISTED draft, not the response DTO: the defect is that the
-    // handler validated one object and wrote another, so only the stored row
-    // can prove which one landed.
-    async function readDraftRuntimeTools(packageId: string): Promise<string[] | undefined> {
-      const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, packageId))
-        .limit(1);
-      return (row!.draftManifest as { runtime_tools?: string[] }).runtime_tools;
-    }
-    //
-    // The same handler serves two directions. A SUPPLIED manifest is author
-    // input — an id the platform does not know is a mistake the author must
-    // see. An OMITTED manifest carries the stored draft forward — a read, so a
-    // legacy id is dropped rather than 400-ing a content-only save, and the
-    // normalised shape is what gets written back.
-
-    it("rejects an update whose manifest names a retired runtime tool", async () => {
-      const agent = await seedAgent({
-        id: "@pkgorg/retired-tool-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const res = await app.request("/api/packages/agents/@pkgorg/retired-tool-agent", {
-        method: "PATCH",
-        headers: authHeaders(ctx, {
-          "Content-Type": "application/json",
-          ...ifMatch(agent.lockVersion),
-        }),
-        body: JSON.stringify({
-          manifest: {
-            name: "@pkgorg/retired-tool-agent",
-            version: "0.2.0",
-            type: "agent",
-            schema_version: "0.1",
-            display_name: "Retired Tool Agent",
-            runtime_tools: ["report", "log"],
-          },
-          content: "Updated prompt.",
-        }),
-      });
-
-      expect(res.status).toBe(400);
-
-      // Nothing was persisted — the draft is exactly as seeded.
-      expect(await readDraftRuntimeTools("@pkgorg/retired-tool-agent")).toBeUndefined();
-    });
-
-    it("normalises a carried-forward draft that names a retired runtime tool", async () => {
-      const id = "@pkgorg/legacy-tool-agent";
-      const agent = await seedAgent({
-        id,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        draftManifest: {
-          name: id,
-          version: "0.1.0",
-          type: "agent",
-          schema_version: "0.1",
-          display_name: "Legacy Tool Agent",
-          runtime_tools: ["report", "log"],
-        },
-      });
-
-      // Content-only save: no `manifest` in the body, so the stored draft is
-      // carried forward. It must be written back VALIDATED, not raw.
-      const res = await app.request(`/api/packages/agents/${id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, {
-          "Content-Type": "application/json",
-          ...ifMatch(agent.lockVersion),
-        }),
-        body: JSON.stringify({
-          content: "Only the prompt changed.",
-        }),
-      });
-
-      expect(res.status).toBe(200);
-      expect(await readDraftRuntimeTools(id)).toEqual(["log"]);
-    });
-
-    // ── retired AFPS 1.x dependency keys: same direction split (#1021) ──
+    // ── retired AFPS 1.x dependency keys: direction decides (#1021) ──
     //
     // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
-    // renamed them to `mcp_servers` / `integrations`. Every reader destructures
-    // exactly the three canonical maps, so the retired spelling is INERT — it
+    // renamed `providers` to `integrations` and moved MCP servers inline on their
+    // integration. Every reader destructures exactly the two canonical maps, so the retired spelling is INERT — it
     // used to validate and then be silently ignored, shipping an agent whose
     // declared dependency is never resolved. Author input must reject.
     async function putManifestDependencies(
@@ -1492,7 +1429,7 @@ describe("Packages API", () => {
       // The error must name the retired key AND its replacement — a bare
       // "invalid manifest" leaves the author with nowhere to go.
       expect(body).toContain("dependencies.tools");
-      expect(body).toContain("dependencies.mcp_servers");
+      expect(body).toContain("source.server");
 
       // Not a partial write — the seeded draft is untouched.
       const [row] = await db
@@ -1531,7 +1468,6 @@ describe("Packages API", () => {
 
       const res = await putManifestDependencies(id, agent.lockVersion, {
         skills: {},
-        mcp_servers: {},
         integrations: {},
         _meta: { "dev.appstrate/note": "still legal" },
       });
@@ -1623,7 +1559,14 @@ describe("Packages API", () => {
         name: integrationId,
         version: "1.0.0",
         display_name: "Gmail (test)",
-        source: { kind: "local", server: { name: "@pkgorg/gmail-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "oauth2",
@@ -2011,57 +1954,42 @@ describe("Packages API", () => {
       expect(codes).toContain("unknown_tool");
     });
 
-    it("publish judges a local integration's mcp-server catalog on its RESOLVED version, not its draft", async () => {
-      // One level deeper than the test above. A `source.kind: "local"`
-      // integration takes its tool catalog from a separate mcp-server package,
-      // and the spawn resolver reads that package at the version
-      // `source.server.version` resolves to. The validator read
-      // `packages.draft_manifest` instead, which the runtime never does.
+    it("publish judges a local integration's own catalog on its RESOLVED version, not its draft", async () => {
+      // A `source.kind: "local"` integration declares its tool catalog inline
+      // (`source.server.tools`), and a run reads the PUBLISHED version the agent
+      // pinned. The validator must read that version, not `packages.draft_manifest`.
       //
       // Asserted in the ACCEPT direction on purpose: a tool present in the
-      // PUBLISHED mcp-server but absent from its author's draft must publish
+      // PUBLISHED 1.0.0 but absent from its author's draft must publish
       // cleanly, because the run will find it. A refusal here can only come
-      // from reading the draft — whereas a rejection test would also pass for
-      // the unrelated reason that an unreadable draft falls back to the
-      // integration's own `tools_policy`.
-      const serverId = "@pkgorg/gmail-server";
-      // Built through the shared helper: a hand-written manifest failed
-      // `mcpServerManifestSchema` (it wants manifest_version 0.3 and
-      // `server.mcp_config`), the resolver returned null, and the catalog fell
-      // back to the integration's own `tools_policy` — a green-looking test
-      // that exercised neither read path.
-      const serverManifest = (tools: string[], version: string) => ({
-        ...mcpServerManifest({ name: serverId, version }),
-        tools: tools.map((name) => ({ name })),
+      // from reading the draft.
+      const localSource = (tools: string[]) => ({
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+          tools: tools.map((name) => ({ name })),
+        },
       });
-      await seedPackage({
-        id: serverId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        source: "local",
-        // The DRAFT has dropped `archive_thread`…
-        draftManifest: serverManifest(["list_messages"], "1.1.0"),
-      });
-      // …the PUBLISHED 1.0.0 the integration pins still advertises it.
-      await seedPackageVersion({
-        packageId: serverId,
-        version: "1.0.0",
-        manifest: serverManifest(["list_messages", "archive_thread"], "1.0.0"),
-      });
-      const localIntegrationManifest = gmailIntegrationManifest({
-        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+      // The DRAFT has dropped `archive_thread`…
+      const draftManifest = gmailIntegrationManifest({
+        source: localSource(["list_messages"]),
       });
       await seedPackage({
         id: integrationId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
-        draftManifest: localIntegrationManifest,
+        draftManifest,
       });
+      // …the PUBLISHED 1.0.0 the agent pins still advertises it.
       await seedPackageVersion({
         packageId: integrationId,
         version: "1.0.0",
-        manifest: localIntegrationManifest,
+        manifest: gmailIntegrationManifest({
+          source: localSource(["list_messages", "archive_thread"]),
+        }),
       });
       await seedDraftDeclaring("@pkgorg/publish-server-published-tool", {
         tools: ["archive_thread"],
@@ -2113,22 +2041,16 @@ describe("Packages API", () => {
     });
 
     it("publish refuses wildcard when a known catalog is entirely hidden", async () => {
-      const serverId = "@pkgorg/gmail-server";
-      const server = {
-        ...mcpServerManifest({ name: serverId, version: "1.0.0" }),
-        tools: [{ name: "list_messages" }],
-      };
-      await seedPackage({
-        id: serverId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        source: "local",
-        draftManifest: server,
-      });
-      await seedPackageVersion({ packageId: serverId, version: "1.0.0", manifest: server });
-
       const manifest = gmailIntegrationManifest({
-        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+            tools: [{ name: "list_messages" }],
+          },
+        },
         allow_undeclared_tools: true,
         hidden_tools: ["list_messages"],
         tools_policy: { list_messages: { required_scopes: { primary: ["read"] } } },
@@ -2993,62 +2915,7 @@ describe("Packages API", () => {
       expect(body.type).toBe("skill");
     });
 
-    // ── retired `runtime_tools` policy: /import is the WRITE direction ──
-    //
-    // `/import` (and `/import-github`, which shares the same parse helper) is
-    // author input, NOT content the platform already holds — so a retired id
-    // and a typo both reject, with a field-precise error the operator can fix
-    // by editing one line of manifest.json. Contrast
-    // `POST /api/packages/import-bundle`, which drops (see
-    // packages-import-bundle.test.ts). If this pair ever starts returning 201,
-    // the policy has silently flipped and typos are being swallowed.
-    async function importAgentWithRuntimeTools(tools: string[]): Promise<Response> {
-      const enc = (s: string) => new TextEncoder().encode(s);
-      const afps = zipSync({
-        "manifest.json": enc(
-          JSON.stringify({
-            name: "@pkgorg/rt-policy-agent",
-            version: "1.0.0",
-            type: "agent",
-            schema_version: "0.1",
-            display_name: "Runtime Tools Policy Agent",
-            runtime_tools: tools,
-          }),
-        ),
-        "prompt.md": enc("You are an agent."),
-      });
-      const formData = new FormData();
-      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
-      return app.request("/api/packages/import", {
-        method: "POST",
-        headers: authHeaders(ctx),
-        body: formData,
-      });
-    }
-
-    it("returns 400 for a RETIRED runtime_tools id (author input rejects)", async () => {
-      const res = await importAgentWithRuntimeTools(["output", "report"]);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(JSON.stringify(body)).toContain("runtime_tools");
-
-      // Nothing was persisted — the reject is not a partial write.
-      const [row] = await db
-        .select({ id: packages.id })
-        .from(packages)
-        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
-        .limit(1);
-      expect(row).toBeUndefined();
-    });
-
-    it("returns 400 for a MISSPELLED runtime_tools id (author input rejects)", async () => {
-      const res = await importAgentWithRuntimeTools(["lgo"]);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(JSON.stringify(body)).toContain("runtime_tools");
-    });
-
-    // Same WRITE direction, applied to the retired AFPS 1.x dependency keys
+    // `/import` is the WRITE direction for the retired AFPS 1.x dependency keys
     // (#1021). An uploaded .afps is author input and locally repairable — the
     // error names the key and its replacement, so the operator edits one line.
     it("returns 400 for a retired dependencies key (author input rejects)", async () => {
@@ -3077,7 +2944,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
       const body = JSON.stringify(await res.json());
       expect(body).toContain("dependencies.tools");
-      expect(body).toContain("dependencies.mcp_servers");
+      expect(body).toContain("source.server");
 
       // Nothing was persisted — the reject is not a partial write.
       const [row] = await db
@@ -3086,22 +2953,6 @@ describe("Packages API", () => {
         .where(eq(packages.id, "@pkgorg/dep-vocab-agent"))
         .limit(1);
       expect(row).toBeUndefined();
-    });
-
-    it("imports an agent whose runtime_tools are all still selectable", async () => {
-      // Control: the reject above must be caused by the id, not by the mere
-      // presence of `runtime_tools`.
-      const res = await importAgentWithRuntimeTools(["output", "log"]);
-      expect(res.status).toBe(201);
-      const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
-        .limit(1);
-      expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual([
-        "output",
-        "log",
-      ]);
     });
 
     it("returns 400 when no file is provided", async () => {
@@ -3836,18 +3687,17 @@ describe("Packages API", () => {
 
   // ═══════════════════════════════════════════════
   // Issue #974 — a fork is a READ that MINTS: it copies an already-published
-  // (immutable, unrepairable) manifest into a brand new version row + ZIP.
-  // The normalisation therefore has to happen ONCE, before the draft row is
-  // written, so the three sinks — draft row, draft storage files, published
-  // version (row + ZIP) — can never disagree.
+  // (immutable, unrepairable) manifest into a brand new version row + ZIP, and
+  // the three sinks — draft row, draft storage files, published version
+  // (row + ZIP) — must never disagree.
   // ═══════════════════════════════════════════════
 
-  describe("POST fork — published manifest normalisation", () => {
+  describe("POST fork — published manifest fidelity", () => {
     /**
      * Seed a PUBLISHED source package in another org WITHOUT going through the
-     * API: the write direction rejects a retired `runtime_tools` id, so the
-     * legacy state a fork must cope with can only be produced by writing the
-     * row + artifact directly.
+     * API: the legacy states a fork must cope with (a drifted `type`, say) are
+     * refused by the write direction, so they can only be produced by writing
+     * the row + artifact directly.
      */
     async function seedPublishedSource(
       packageId: string,
@@ -3860,7 +3710,7 @@ describe("Packages API", () => {
        * provider→integration migration left in the catalog. Defaults to the
        * manifest's own type (the aligned, ordinary case).
        */
-      rowType?: "agent" | "skill" | "integration" | "mcp-server",
+      rowType?: "agent" | "skill" | "integration",
     ): Promise<void> {
       const version = manifest.version as string;
       const type = rowType ?? (manifest.type as "agent" | "skill");
@@ -3910,75 +3760,6 @@ describe("Packages API", () => {
       return new TextDecoder().decode(entries["manifest.json"]!);
     }
 
-    it("drops a retired runtime tool from all three fork sinks", async () => {
-      const srcCtx = await createTestContext({ orgSlug: "forkret" });
-      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
-      const sourceId = "@forkret/legacy-agent";
-      await seedPublishedSource(sourceId, srcCtx.orgId, {
-        name: sourceId,
-        version: "0.1.0",
-        type: "agent",
-        schema_version: "0.1",
-        display_name: "Legacy Tool Agent",
-        description: "Published before `report` was retired",
-        runtime_tools: ["output", "report"],
-      });
-
-      const res = await app.request(`/api/packages/${sourceId}/fork`, {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(201);
-
-      const targetId = "@pkgorg/legacy-agent";
-      // 1. the new catalog row
-      expect((await versionManifest(targetId)).runtime_tools).toEqual(["output"]);
-      // 2. the fork's draft — leave the retired id here and the fork's first
-      //    re-publish regraves it into yet another immutable artifact.
-      expect((await draftManifest(targetId)).runtime_tools).toEqual(["output"]);
-      // 3. the immutable artifact — a normalised row over a stale ZIP still
-      //    ships the retired id to every runner that downloads the bundle.
-      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as {
-        runtime_tools?: string[];
-      };
-      expect(zipped.runtime_tools).toEqual(["output"]);
-    });
-
-    it("removes the runtime_tools key entirely when every tool was retired", async () => {
-      const srcCtx = await createTestContext({ orgSlug: "forkret2" });
-      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
-      const sourceId = "@forkret2/all-retired";
-      await seedPublishedSource(sourceId, srcCtx.orgId, {
-        name: sourceId,
-        version: "0.1.0",
-        type: "agent",
-        schema_version: "0.1",
-        display_name: "All Retired",
-        description: "Its only runtime tool no longer exists",
-        runtime_tools: ["report"],
-      });
-
-      const res = await app.request(`/api/packages/${sourceId}/fork`, {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(201);
-
-      // ABSENT, not `[]`: absent and `[]` parse to the same agent but are
-      // different bytes, and the editor spells "no runtime tools" as absent.
-      // Emitting `[]` here would give one manifest two integrity hashes.
-      const targetId = "@pkgorg/all-retired";
-      expect(await versionManifest(targetId)).not.toHaveProperty("runtime_tools");
-      expect(await draftManifest(targetId)).not.toHaveProperty("runtime_tools");
-      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as Record<
-        string,
-        unknown
-      >;
-      expect(zipped).not.toHaveProperty("runtime_tools");
-    });
-
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
       await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
@@ -3989,8 +3770,7 @@ describe("Packages API", () => {
         type: "agent",
         schema_version: "0.1",
         display_name: "Clean Agent",
-        description: "Nothing to drop",
-        runtime_tools: ["output", "log"],
+        description: "Nothing to rewrite",
       });
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {
@@ -4000,14 +3780,10 @@ describe("Packages API", () => {
       });
       expect(res.status).toBe(201);
 
-      // FORWARD guard, not a proof of the fix: `dropRetiredRuntimeTools`
-      // returns the same object reference when there is nothing to drop, so
-      // this passed before the normalisation existed too. What it pins is the
-      // shape of any FUTURE normalisation added here — a Zod re-parse would
-      // reorder keys to schema order and materialise defaults, giving one
-      // manifest two integrity hashes and defeating publish dedup (#896). A
-      // source with nothing to drop must serialise to the source manifest with
-      // ONLY `name` swapped. Compared against the STORED source manifest (not
+      // FORWARD guard: a Zod re-parse of the forked manifest would reorder keys
+      // to schema order and materialise defaults, giving one manifest two
+      // integrity hashes and defeating publish dedup (#896). The fork must
+      // serialise to the source manifest with ONLY `name` swapped. Compared against the STORED source manifest (not
       // the literal above) because jsonb does not preserve authoring key order.
       const targetId = "@pkgorg/clean-agent";
       const expected = JSON.stringify(
@@ -4019,8 +3795,6 @@ describe("Packages API", () => {
     });
 
     it("is a no-op for a non-agent package — a skill forks with only `name` swapped", async () => {
-      // `runtime_tools` is agent vocabulary, so the normalisation must be
-      // invisible to the other three package types.
       const srcCtx = await createTestContext({ orgSlug: "forkskill" });
       await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkskill/plain-skill";
@@ -4033,7 +3807,7 @@ describe("Packages API", () => {
           type: "skill",
           schema_version: "0.1",
           display_name: "Plain Skill",
-          description: "Nothing an agent-shaped normalisation could touch",
+          description: "A plain skill",
         },
         "# Plain Skill",
       );
@@ -4051,7 +3825,7 @@ describe("Packages API", () => {
       expect(await artifactManifestText(targetId, "0.1.0")).toBe(JSON.stringify(expected, null, 2));
       // `toMatchObject`, not `toEqual`: every draft row gets `$schema` + `type`
       // stamped by `createOrgItem` regardless of package type — pre-existing,
-      // unrelated to this normalisation. What matters here is that nothing the
+      // unrelated to the fork. What matters here is that nothing the
       // source declared was changed or lost.
       expect(await draftManifest(targetId)).toMatchObject(expected);
     });
@@ -4155,8 +3929,8 @@ describe("Packages API", () => {
   // "which archive entry is this type's primary content" fact. Import
   // (`parsePackageZip`), the file explorer's overlay and the package UI all
   // read it from `PACKAGE_CONTENT_ENTRY`; the fork read a hardcoded
-  // `prompt.md`/`SKILL.md` pair, so it covered two of the four types and
-  // produced `""` for the other two — a column NO import of the same bytes
+  // `prompt.md`/`SKILL.md` pair, so it covered two of the three types and
+  // produced `""` for the third — a column NO import of the same bytes
   // could ever produce.
   // ═══════════════════════════════════════════════
 

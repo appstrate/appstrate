@@ -188,7 +188,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(byId.get(r.deuxMember!)!.input).toBeNull();
   });
 
-  it("pages across spaces with one total and a Link header", async () => {
+  it("pages across spaces on a cursor, with one total and a Link header", async () => {
     const first = await app.request(path("?limit=3"), { headers: session(member) });
     expect(first.status).toBe(200);
     expect(first.headers.get("Link")).toContain('rel="next"');
@@ -196,7 +196,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(page1.data).toHaveLength(3);
     expect(page1.total).toBe(4);
     expect(page1.hasMore).toBe(true);
-    const page2 = await list(session(member), "?limit=3&offset=3");
+    const page2 = await list(session(member), `?limit=3&startingAfter=${page1.data.at(-1)!.id}`);
     expect(page2.data).toHaveLength(1);
     expect(page2.hasMore).toBe(false);
     expect([...ids(page1), ...ids(page2)].sort()).toEqual(
@@ -204,7 +204,7 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     );
   });
 
-  it("breaks a tie on start time by id, so offset pages never overlap", async () => {
+  it("breaks a tie on start time by id, so cursor pages never overlap", async () => {
     const startedAt = new Date("2026-01-02T03:04:05.000Z");
     const pkg = await seedPackage({
       id: `@orgruns/tied-${crypto.randomUUID().slice(0, 8)}`,
@@ -226,13 +226,24 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     }
     const query = `?end_date=${encodeURIComponent(startedAt.toISOString())}&limit=1`;
     const paged: string[] = [];
-    for (const offset of [0, 1, 2]) {
-      const page = await list(session(member), `${query}&offset=${offset}`);
+    let cursor = "";
+    for (let i = 0; i < 3; i++) {
+      const page = await list(session(member), `${query}${cursor}`);
       expect(page.total).toBe(3);
       paged.push(...ids(page));
+      cursor = `&startingAfter=${page.data.at(-1)!.id}`;
     }
     expect(new Set(paged).size).toBe(3);
     expect(paged.sort()).toEqual(tied.sort());
+  });
+
+  it("takes no cursor from a run the caller cannot read: the page starts at the head", async () => {
+    const head = await list(session(member), "?limit=2");
+    // Deux's owner run: in a space the member reads, but not theirs to read there.
+    for (const hidden of [r.deuxOwner!, r.ferme!, foreignRun]) {
+      const page = await list(session(member), `?limit=2&startingAfter=${hidden}`);
+      expect(ids(page)).toEqual(ids(head));
+    }
   });
 
   it("refuses an unknown query parameter", async () => {

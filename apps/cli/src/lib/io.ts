@@ -18,14 +18,11 @@
  * modules in `commands/*.ts` do; four deliberately do not, and the seam is not
  * a claim about them:
  *
- *   - `commands/run.ts` owns a *different* output architecture.
- *     `attachStdoutBridge` reassigns the process-global
- *     `process.stdout.write` on purpose — that is how canonical tool events
- *     emitted as JSON lines get aspirated — and the sinks take explicit
- *     `writeStdout` / `writeStderr` writers so their own emissions can bypass
- *     that interceptor via the bridge's `writeRaw` (see the docstring in
- *     `commands/run/sink.ts`). A `CommandIO` layered on top would be a second
- *     seam over the same bytes, not a unification. Its `commands/run/*`
+ *   - `commands/run.ts` owns a *different* output architecture: its run
+ *     events go through event sinks that take explicit `writeStdout` /
+ *     `writeStderr` writers (see the docstring in `commands/run/sink.ts`).
+ *     A `CommandIO` layered on top would be a second seam over the same
+ *     bytes, not a unification. Its `commands/run/*`
  *     helpers are not covered by that reasoning one way or the other:
  *     `run/input.ts` takes an optional `io?: CommandIO` because
  *     `validateLocalInput` ends the command and a test asserting that needs

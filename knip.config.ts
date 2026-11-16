@@ -69,9 +69,9 @@ import type { KnipConfig } from "knip";
  *                SLUG_PATTERN, decodePairingToken,
  *                RUN_AND_WAIT_MAX_MS, RUN_AND_WAIT_BACKOFF_MS,
  *                RUN_AND_WAIT_TERMINAL_STATUSES, isRunAndWaitTerminalStatus,
- *                projectRunAndWaitPayload, mcpServerSchema, RESERVE_FRACTION,
+ *                projectRunAndWaitPayload, RESERVE_FRACTION,
  *                RESERVE_CEILING_FRACTION, integrationManifestSchema,
- *                mcpServerManifestSchema, SCHEMA_VERSION_REGEX, manifestSchema
+ *                SCHEMA_VERSION_REGEX, manifestSchema
  *   core types   FieldErrorCode, IntegrationsConfiguration,
  *                IntegrityCheckResult, SidecarConfig, LlmProxyConfig,
  *                BoundedUnzipLimits

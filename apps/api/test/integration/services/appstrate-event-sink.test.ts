@@ -101,14 +101,9 @@ describe("persistRunEvent", () => {
   // `file.published` / `fileId` is the ONE published-file spelling. The
   // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
   //
-  // The "producer and acceptor are the same build, so there is no version
-  // boundary" argument does NOT cover this drop, and it is worth writing down
-  // because it reads as if it does. That argument belongs to the CONTAINER-side
-  // acceptor `reEmitRuntimeToolEvents`, which core bundles into the runtime
-  // image alongside the producer `filePublishedEvent`. `persistRunEvent` is the
-  // PLATFORM-side sink — a separate artifact, reached over HTTP by whatever
-  // image the operator happens to have launched — so a version boundary very
-  // much exists across it.
+  // `persistRunEvent` is the PLATFORM-side sink — a separate artifact from the
+  // runtime image, reached over HTTP by whatever image the operator happens to
+  // have launched — so a version boundary exists across it.
   //
   // What makes the drop safe across that boundary is the image-tag rule plus
   // the event's own precondition. `findRuntimeImageTagMismatch`, enforced by
@@ -143,18 +138,6 @@ describe("persistRunEvent", () => {
     expect(fileLogs).toHaveLength(1);
     expect(fileLogs[0]!.type).toBe("result");
     expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("file_canonical");
-  });
-
-  it("maps log.written into run_logs with the original level + message", async () => {
-    await persist(event("log.written", { level: "info", message: "booting" }));
-    await persist(event("log.written", { level: "warn", message: "retry" }));
-
-    const progressLogs = (await loadLogs()).filter((l) => l.type === "progress");
-    expect(progressLogs.map((l) => l.message)).toEqual(["booting", "retry"]);
-    expect(progressLogs.map((l) => l.level)).toEqual(["info", "warn"]);
-    // `log.written` is tagged `event='log'` (vs lifecycle/tool `'progress'`) so
-    // the chat run card can show ONLY the agent's explicit log-tool output.
-    expect(progressLogs.map((l) => l.event)).toEqual(["log", "log"]);
   });
 
   it("maps appstrate.progress into progress run_logs with message/data/level", async () => {

@@ -4,7 +4,7 @@
  * Platform-synthesised terminals must recover the structured deliverable the
  * agent already emitted (issue #1020).
  *
- * The `output` runtime tool is persisted at emit time as a `run_logs` row
+ * The `output` tool's payload is persisted at emit time as a `run_logs` row
  * (`type='result'`, `event='output'`), but `runs.result` is written only at
  * finalize from the RunResult the runner posts. On every path where the
  * runner never posts its own finalize — user cancel, timeout, container
@@ -128,7 +128,6 @@ describe("platform-synthesised terminals — emitted `output` recovery", () => {
         version: "0.1.0",
         type: "agent",
         description: "Agent with a declared output schema",
-        runtime_tools: ["output"],
         output: {
           schema: {
             type: "object",
@@ -240,6 +239,29 @@ describe("platform-synthesised terminals — emitted `output` recovery", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toMatch(/without calling the required `output` tool/);
     expect(row.result).toBeNull();
+  });
+
+  it("an empty `output.schema` declares no schema: success without emission stays success", async () => {
+    const emptySchemaAgentId = "@recovery/empty-schema-agent";
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: emptySchemaAgentId,
+      type: "agent",
+      draftManifest: {
+        name: emptySchemaAgentId,
+        version: "0.1.0",
+        type: "agent",
+        description: "Agent with an empty output schema",
+        output: { schema: {} },
+      },
+    });
+    const runId = await seedRunWithSink(ctx, emptySchemaAgentId);
+
+    await synthesiseFinalize(runId, { status: "success", durationMs: 100 });
+
+    const row = await readRun(runId);
+    expect(row.status).toBe("success");
+    expect(row.error).toBeNull();
   });
 
   it("synthesised success + declared output schema: a non-conforming emission still fails", async () => {

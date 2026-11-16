@@ -255,7 +255,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "settings:creation.chat.draft.", // lib/creation-handoff.ts — buildChatCreationDraft(), one per package type
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type
-  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
   "agents:integrationEditor.discover.warning.", // components/integration-editor/discovery-warnings.tsx — one key per warning code
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
@@ -265,8 +264,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
-  "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
-  "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
+  "integrations.source.", // components/integration-source-label.tsx — one per source_kind
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()

@@ -162,8 +162,7 @@ export function IntegrationOverview({
 }
 
 /**
- * The integration's overview while it loads: its description line, then the
- * three summary cards drawn by the same components, labels included. The health
+ * The integration's overview while it loads: the three summary cards drawn by the same components, labels included. The health
  * card above them only exists when something needs fixing, so it is not drawn.
  */
 export function IntegrationOverviewSkeleton() {
@@ -171,7 +170,6 @@ export function IntegrationOverviewSkeleton() {
   const value = <SkeletonLine className="w-10" />;
   return (
     <>
-      <SkeletonLine className="mb-6 w-1/2 text-sm" />
       <div className="flex flex-col gap-6">
         <div className="grid items-start gap-4 lg:grid-cols-3">
           <DetailSectionCard

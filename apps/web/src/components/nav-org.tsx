@@ -17,7 +17,7 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { useUnreadRunCount } from "../hooks/use-run-reads";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { useOverviewMode } from "../hooks/use-overview-mode";
@@ -40,11 +40,10 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
  */
 function useWorkingSpaceRunning(enabled: boolean): boolean {
   const { data: agents } = useAgents(false, enabled);
-  const { data: runningInline } = usePaginatedRuns({
+  const { data: runningInline } = useFirstRunsPage({
     kind: "inline",
     status: ["running"],
     limit: 1,
-    offset: 0,
     enabled,
   });
   return (

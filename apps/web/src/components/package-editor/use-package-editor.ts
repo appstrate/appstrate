@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { useEditorState, type EditorState } from "../../hooks/use-editor-state";
 import type { EditablePackageType } from "./package-editor-frame";
 import type { MetadataState } from "../agent-editor/metadata-section";
@@ -65,7 +64,6 @@ export function usePackageEditor({
   const submit = async () => {
     try {
       await saveDraft();
-      toast.success(t("editor.saved"));
     } catch {
       // `saveDraft` has already said why, translated, in the editor's error slot.
     }

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { SettingRow } from "./setting-row";
 import { SaveFeedback } from "./save-feedback";
 import { useOrg } from "../../hooks/use-org";
@@ -32,11 +34,13 @@ export function OrgSettingToggle({
   field: OrgToggleField;
   onSuccess?: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
   const { data: orgSettings, isLoading } = useOrgSettings();
   const update = useUpdateOrgSettings();
   if (!currentOrg) return null;
+  const mayWrite = can("org:settings");
 
   return (
     <SettingRow
@@ -50,20 +54,22 @@ export function OrgSettingToggle({
       status={<SaveFeedback {...fieldWriteState(update, field)} />}
     >
       {!isLoading ? (
-        <Switch
-          id={id}
-          checked={orgSettings?.[field] ?? false}
-          disabled={!can("org:settings") || !orgSettings || update.isPending}
-          onCheckedChange={(checked) =>
-            update.mutate(
-              {
-                params: { path: { orgId: currentOrg.id } },
-                body: { [field]: checked === true },
-              },
-              { onSuccess },
-            )
-          }
-        />
+        <DisabledReasonTooltip reason={mayWrite ? null : t("orgSettings.cannotChange")}>
+          <Switch
+            id={id}
+            checked={orgSettings?.[field] ?? false}
+            disabled={!mayWrite || !orgSettings || update.isPending}
+            onCheckedChange={(checked) =>
+              update.mutate(
+                {
+                  params: { path: { orgId: currentOrg.id } },
+                  body: { [field]: checked === true },
+                },
+                { onSuccess },
+              )
+            }
+          />
+        </DisabledReasonTooltip>
       ) : (
         <Skeleton className="h-6 w-11 rounded-full" />
       )}

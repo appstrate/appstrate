@@ -72,7 +72,7 @@ export function FileTile({
             type="button"
             onClick={() => activate(file)}
             aria-label={`${preview ? t("row.preview") : t("common:btn.download")}: ${file.name}`}
-            className="bg-muted hover:bg-muted/70 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            className="bg-muted/40 hover:bg-muted/50 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset"
           >
             {media}
           </button>

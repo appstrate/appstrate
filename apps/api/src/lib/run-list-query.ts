@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
 import { invalidRequest } from "./errors.ts";
-import { parseListPagination } from "./list-query.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 import { parseRunListFilters } from "./run-list-filters.ts";
 
 /** The closed set a run list's `?user=` accepts: `me`, the caller's own runs. */
@@ -23,7 +23,7 @@ export const RUN_LIST_QUERY_PARAMETERS = [
   "end_date",
   "chat_session_id",
   "limit",
-  "offset",
+  "startingAfter",
 ] as const;
 
 /**
@@ -60,15 +60,16 @@ function closedSetQuery<T extends string>(
 /**
  * The query of a run list spanning a space or an organization: the parameters
  * {@link RUN_LIST_QUERY_PARAMETERS} names. `user`, `kind` and `status` are
- * closed sets: an unrecognised value is a 400, not a dropped filter. Absent,
- * `limit`/`offset` are 20 and 0; supplied, a value outside their range is a
- * 400 (`parseListPagination`) — a page other than the one asked would read as
- * the list.
+ * closed sets: an unrecognised value is a 400, not a dropped filter. Keyset-paged:
+ * `startingAfter` is the last run id of the previous page; `limit` is 20 when absent, and a
+ * value outside its range is a 400 (`parseListLimit`) — a page other than the one asked would
+ * read as the list.
  */
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,
-): GlobalRunListFilters & { limit: number; offset: number } {
-  const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+): GlobalRunListFilters & { limit: number } {
+  const limit = parseListLimit(c, { defaultLimit: 20 });
+  const startingAfter = c.req.query("startingAfter") || undefined;
   // `user=me` narrows to the caller's own runs even where `runs:read-all`
   // would have widened the list, and composes with every filter below. An
   // end-user needs no branch of its own: `read-all` is not grantable to them.
@@ -93,7 +94,7 @@ export function parseGlobalRunListQuery(
   }
   return {
     limit,
-    offset,
+    startingAfter,
     ownOnly,
     kind,
     unread,

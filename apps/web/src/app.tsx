@@ -31,6 +31,7 @@ import { ShellFrameProvider } from "./components/shell-header-slots";
 import {
   ChatConversationSkeleton,
   ChatPanelSkeleton,
+  DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
   OverlayPanelSkeleton,
@@ -98,7 +99,6 @@ const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReader
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
-const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -280,9 +280,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/integrations": <IntegrationsPage />,
   "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
-  "/mcp-servers": <McpServersPage />,
-  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
-  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   "/catalogue": <CatalogueIndexRedirect />,
   "/catalogue/:type": <CataloguePage />,
   "/preferences": <Outlet />,
@@ -336,7 +333,6 @@ const flatPaths = (overlay: boolean) =>
 const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
   ["/agents/", "agent"],
   ["/skills/", "skill"],
-  ["/mcp-servers/", "mcp-server"],
   ["/integrations/", "integration"],
 ];
 
@@ -345,26 +341,44 @@ const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
 const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
   "/agents": "agent",
   "/skills": "skill",
-  "/mcp-servers": "mcp-server",
   "/integrations": "integrations",
+  "/files": "documents",
 };
 
-/** The settings pages that are a table, not rows of fields; the value says whether a toolbar leads. */
-const SETTINGS_TABLES: Partial<Record<RoutePath, boolean>> = {
-  "/org-settings/members": false,
-  "/org-settings/spaces": false,
-  "/org-settings/proxies": false,
-  "/org-settings/cli-sessions": false,
-  "/preferences/devices": false,
-  "/workspace-settings/members": false,
-  "/workspace-settings/api-keys": false,
-  "/workspace-settings/webhooks": false,
-  "/workspace-settings/end-users": true,
+/**
+ * The collection pages' titles (their crumb), whether they carry an Actions menu, and what ends
+ * their bar: `views` (the cards-or-table switch).
+ */
+const LIST_PAGE: Partial<
+  Record<RoutePath, { titleKey: string; actions: boolean; views?: boolean }>
+> = {
+  "/agents": { titleKey: "common:nav.agents", actions: true, views: true },
+  "/skills": { titleKey: "settings:packages.type.skills", actions: true, views: true },
+  "/integrations": { titleKey: "settings:integrations.title", actions: true, views: true },
+  "/schedules": { titleKey: "common:nav.schedules", actions: true },
+  "/runs": { titleKey: "agents:runs.title", actions: true },
+  "/files": { titleKey: "common:nav.files", actions: false, views: true },
+};
+
+/** The settings pages that are a table, not rows of fields; the value says what leads the table. */
+const SETTINGS_TABLES: Partial<
+  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "heading" | "hint" }>
+> = {
+  "/org-settings/members": { toolbar: true },
+  "/org-settings/spaces": {},
+  "/org-settings/proxies": {},
+  "/org-settings/cli-sessions": { intro: "heading" },
+  "/preferences/devices": { intro: "heading" },
+  "/workspace-settings/members": { toolbar: true, intro: "hint" },
+  "/workspace-settings/api-keys": { toolbar: true },
+  "/workspace-settings/webhooks": {},
+  "/workspace-settings/end-users": { toolbar: true, columns: true },
 };
 
 function skeletonOf(path: RoutePath): ReactNode {
   const table = SETTINGS_TABLES[path];
-  if (table !== undefined) return <SettingsTableSkeleton toolbar={table} />;
+  if (table !== undefined) return <SettingsTableSkeleton {...table} />;
+  if (path === "/") return <DashboardSkeleton />;
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
   if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;
@@ -374,7 +388,15 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
-  return <ListPageSkeleton list={LIST_VIEW_OF[path]} />;
+  const page = LIST_PAGE[path];
+  return (
+    <ListPageSkeleton
+      list={LIST_VIEW_OF[path]}
+      titleKey={page?.titleKey}
+      actions={page?.actions}
+      views={page?.views}
+    />
+  );
 }
 
 function pageRoute(path: RoutePath) {

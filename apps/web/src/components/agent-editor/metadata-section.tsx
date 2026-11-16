@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { StringListInput } from "../app-ui/string-list-input";
-import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "../app-ui/form-item";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
 import { SettingsHeading } from "../settings/settings-heading";
@@ -81,17 +81,13 @@ export function MetadataSection({
           placeholder="1.0.0"
           description={t("editor.metaVersionDesc")}
         />
-        <div className="flex flex-col gap-2">
-          <Label className="mb-0" htmlFor="meta-description">
-            {t("editor.fieldDescLabel")}
-          </Label>
+        <FormItem id="meta-description" label={t("editor.fieldDescLabel")}>
           <Textarea
-            id="meta-description"
             value={value.description}
             onChange={(e) => update({ description: e.target.value })}
             placeholder={t("editor.metaDescPlaceholder")}
           />
-        </div>
+        </FormItem>
         <StringListInput
           label={t("manifest.keywords")}
           labelClassName="mb-0"

@@ -59,7 +59,14 @@ function oauth2Manifest(): IntegrationManifest {
     name: INTEG,
     version: "1.0.0",
     display_name: "Test",
-    source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       oauth: {
         type: "oauth2",
@@ -598,6 +605,29 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       [narrow.id, []],
       [broad.id, []],
     ]);
+  });
+
+  it("a proxy call naming a tool requires that tool's scopes and serving auth", () => {
+    const manifest = {
+      ...oauth2Manifest(),
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+    const short = own({ scopesGranted: ["read"] });
+    const scoped = resolveConnections({
+      requirements: [proxyRequirement(INTEG, manifest, "t1")],
+      accessibleConnections: [short],
+      pins: [],
+    });
+    expect(scoped.errors.map((e) => [e.code, e.connectionId, e.missingScopes])).toEqual([
+      ["insufficient_scopes", short.id, ["repo"]],
+    ]);
+    // Without the tool, the same row serves the call.
+    const unscoped = resolveConnections({
+      requirements: [proxyRequirement(INTEG, manifest)],
+      accessibleConnections: [short],
+      pins: [],
+    });
+    expect(unscoped.errors).toEqual([]);
   });
 
   it("lists the serving rows as candidates, least privilege first", () => {
@@ -1340,7 +1370,14 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1420,7 +1457,14 @@ describe("requirementOf — the selection scopes are inferred from", () => {
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       allow_undeclared_tools: true,
       ...(defaultTools !== undefined ? { default_tools: defaultTools } : {}),
       auths: {
@@ -1654,7 +1698,14 @@ describe("resolveConnections — org default", () => {
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1906,7 +1957,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         oauth: {
           type: "oauth2",
@@ -1951,7 +2009,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {
         pat: {
           type: "api_key",
@@ -1979,7 +2044,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
-      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
       auths: {},
       tools_policy: { t1: {} },
     } as unknown as IntegrationManifest;

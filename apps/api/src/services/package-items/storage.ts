@@ -21,7 +21,7 @@ export { SYSTEM_STORAGE_NAMESPACE };
 
 /** Upload a package item's full normalized files to Storage. Returns SHA256 SRI integrity hash. */
 export async function uploadPackageFiles(
-  type: "agents" | "skills" | "integrations" | "mcp-servers",
+  type: "agents" | "skills" | "integrations",
   orgId: string,
   itemId: string,
   normalizedFiles: Record<string, Uint8Array>,
@@ -53,7 +53,7 @@ type PackageStorageOwnership = "org" | "system";
  *  org-scoped path first and falls back to the system namespace.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
-  type: "agents" | "skills" | "integrations" | "mcp-servers",
+  type: "agents" | "skills" | "integrations",
   orgId: string,
   itemId: string,
   expectedIntegrity?: string | null,

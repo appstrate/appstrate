@@ -20,6 +20,7 @@ import {
 } from "../../helpers/seed.ts";
 import { recordRunFinished, markRunRead } from "../../../src/services/state/run-reads.ts";
 import { createFailedRun } from "../../../src/services/state/runs.ts";
+import { createAgentMessageNotifications } from "../../../src/services/state/notifications.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
@@ -390,6 +391,40 @@ describe("Run read state (per-recipient)", () => {
 
       expect(await bellCount(authHeaders(ctx))).toBe(0);
       expect((await notificationsOf(run.id))[0]!.readAt).not.toBeNull();
+    });
+
+    it("also marks the message its agent sent read (`agent_message`)", async () => {
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
+
+      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
+
+      expect(await bellCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("marks an inline run's `agent_message` read, though the run holds no read state", async () => {
+      const inlineId = `@inline/r-${crypto.randomUUID()}`;
+      await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
+      const run = await seedRun({
+        packageId: inlineId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        status: "running",
+        userId: ctx.user.id,
+      });
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
+
+      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
+
+      expect(await bellCount(authHeaders(ctx))).toBe(0);
     });
 
     it("leaves another run's notification unread", async () => {
@@ -975,15 +1010,22 @@ describe("Run read state (per-recipient)", () => {
       expect(res.status).toBe(400);
     });
 
-    it("paginates the unread list (limit + offset) with `total` of every unread run", async () => {
+    it("paginates the unread list (limit + startingAfter) with `total` of every unread run", async () => {
       for (let i = 0; i < 3; i++) {
         await seedFinishedRun({ agentName: `pg-${i}`, actor: { userId: ctx.user.id } });
       }
-      const res = await app.request("/api/runs?unread=true&limit=2&offset=2", {
+      const first = await app.request("/api/runs?unread=true&limit=2", {
         headers: authHeaders(ctx),
       });
-      const body = (await res.json()) as { data: unknown[]; total: number };
+      const page1 = (await first.json()) as { data: { id: string }[]; hasMore: boolean };
+      expect(page1.hasMore).toBe(true);
+      const res = await app.request(
+        `/api/runs?unread=true&limit=2&startingAfter=${page1.data[1]!.id}`,
+        { headers: authHeaders(ctx) },
+      );
+      const body = (await res.json()) as { data: unknown[]; total: number; hasMore: boolean };
       expect(body.data).toHaveLength(1);
+      expect(body.hasMore).toBe(false);
       expect(body.total).toBe(3);
     });
   });
@@ -1052,7 +1094,7 @@ describe("Run read state (per-recipient)", () => {
       expect(body.data[0]!.userId).toBe(ctx.user.id);
     });
 
-    it("respects limit + offset", async () => {
+    it("pages by keyset: limit + startingAfter", async () => {
       await seedAgent({ id: "@notiforg/page-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       for (let i = 0; i < 5; i++) {
         await seedRun({
@@ -1064,11 +1106,22 @@ describe("Run read state (per-recipient)", () => {
         });
       }
 
-      const res = await app.request("/api/runs?limit=2&offset=3", { headers: authHeaders(ctx) });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[]; total: number };
-      expect(body.data).toHaveLength(2);
-      expect(body.total).toBe(5);
+      const seen: string[] = [];
+      let cursor = "";
+      for (let page = 0; page < 3; page++) {
+        const res = await app.request(`/api/runs?limit=2${cursor}`, { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: { id: string }[];
+          total: number;
+          hasMore: boolean;
+        };
+        expect(body.total).toBe(5);
+        expect(body.hasMore).toBe(page < 2);
+        seen.push(...body.data.map((r) => r.id));
+        cursor = `&startingAfter=${body.data.at(-1)!.id}`;
+      }
+      expect(new Set(seen).size).toBe(5);
     });
 
     it("respects org isolation", async () => {

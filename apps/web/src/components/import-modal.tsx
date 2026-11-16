@@ -27,8 +27,8 @@ interface ImportModalProps {
   type?: PackageType;
   /**
    * Stay where you are and hand the result back, instead of opening the
-   * imported package. For an import made from inside another form — the
-   * integration editor importing its local server — navigating would throw
+   * imported package. For an import made from inside another form — the agent
+   * editor importing a skill or integration to attach — navigating would throw
    * away the form.
    */
   onImported?: (result: ImportedPackage) => void;

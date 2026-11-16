@@ -280,7 +280,7 @@ export const schedulesPaths = {
         "404": {
           $ref: "#/components/responses/NoPublishedVersion",
           description:
-            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
+            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`).",
         },
         "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
@@ -525,14 +525,20 @@ export const schedulesPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { $ref: "#/components/parameters/Offset" },
+        {
+          name: "startingAfter",
+          in: "query",
+          schema: { type: "string" },
+          description:
+            'Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it.',
+        },
         { $ref: "#/components/parameters/RunStatusFilter" },
         { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {
           description: "Paginated run list",
-          headers: STD_RESPONSE_HEADERS,
+          headers: { ...STD_RESPONSE_HEADERS, Link: { $ref: "#/components/headers/Link" } },
           content: {
             "application/json": {
               schema: {
@@ -553,8 +559,7 @@ export const schedulesPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+          description: "`limit` outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

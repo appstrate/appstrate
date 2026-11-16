@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { CountBadge } from "./count-badge";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { RunStatusBadge } from "./status-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -34,6 +35,10 @@ type NotificationItem =
 interface NotificationRow {
   title: string;
   status: string | null;
+  /** The text an agent sent (`agent_message`). */
+  message: string | null;
+  /** The line under the row: its date, and who sent it for an agent's message. */
+  meta: string;
   target: string | null;
 }
 
@@ -47,6 +52,7 @@ function notificationRow(
   canReach: (target: string) => boolean,
   t: TFunction<["common", "agents"]>,
 ): NotificationRow {
+  const date = formatDateField(notification.createdAt);
   if (notification.type === "package_shared") {
     // One share, one decision: open THAT package's sheet, not a list to search.
     const share = notification.payload;
@@ -57,22 +63,41 @@ function notificationRow(
         package: share?.packageId ?? "",
       }),
       status: null,
+      message: null,
+      meta: date,
       target: href && canReach(href) ? href : null,
     };
   }
-  // A run that needs attention: it failed or timed out.
   const packageId = notification.payload?.packageId ?? null;
   const href =
     packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
+  const target = href && canReach(href) ? href : null;
+  const liveName = packageId ? agentName(packageId) : undefined;
+  if (notification.type === "agent_message") {
+    // A message the agent sent from its run (`notify`): its own title and text, no status.
+    const sent = notification.payload;
+    const agent =
+      liveName ?? sent?.agent_name ?? packageId ?? t("runs.deletedAgent", { ns: "agents" });
+    return {
+      title: sent?.title ?? agent,
+      status: null,
+      message: sent?.message ?? null,
+      meta: t("notifications.agentMessageFrom", { agent, date }),
+      target,
+    };
+  }
+  // A run that needs attention: it failed or timed out.
   return {
     // Live name, else the one stamped on the run (agent switched off or deleted).
     title:
-      (packageId ? agentName(packageId) : undefined) ??
+      liveName ??
       notification.payload?.agent_name ??
       packageId ??
       t("runs.deletedAgent", { ns: "agents" }),
     status: notification.payload?.status ?? null,
-    target: href && canReach(href) ? href : null,
+    message: null,
+    meta: date,
+    target,
   };
 }
 
@@ -90,6 +115,9 @@ export function NotificationContent({
   markAllRead,
   loading = false,
   failed = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: {
   unread: number;
   notifications: NotificationItem[];
@@ -102,6 +130,10 @@ export function NotificationContent({
   loading?: boolean;
   /** The list could not be read. */
   failed?: boolean;
+  /** More notifications than the pages read so far. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const { t } = useTranslation(["common", "agents"]);
 
@@ -147,7 +179,12 @@ export function NotificationContent({
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
-            const { title, status, target } = notificationRow(notification, agentName, canReach, t);
+            const { title, status, message, meta, target } = notificationRow(
+              notification,
+              agentName,
+              canReach,
+              t,
+            );
             const body = (
               <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
@@ -156,9 +193,12 @@ export function NotificationContent({
                     <span className="truncate text-sm font-medium">{title}</span>
                     {status && <RunStatusBadge status={status} />}
                   </div>
-                  <p className="text-muted-foreground text-xs">
-                    {formatDateField(notification.createdAt)}
-                  </p>
+                  {message && (
+                    <p className="mb-0.5 line-clamp-3 text-xs break-words whitespace-pre-line">
+                      {message}
+                    </p>
+                  )}
+                  <p className="text-muted-foreground text-xs">{meta}</p>
                 </div>
               </>
             );
@@ -175,6 +215,13 @@ export function NotificationContent({
               <button key={notification.id} type="button" {...row} />
             );
           })}
+          {hasMore && (
+            <div className="flex justify-center border-t px-4 py-2">
+              <PendingButton variant="ghost" size="sm" pending={loadingMore} onClick={onLoadMore}>
+                {t("notifications.loadMore")}
+              </PendingButton>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -191,6 +238,9 @@ export function NotificationBell() {
     data: notifications,
     isPending: notificationsPending,
     isError: notificationsFailed,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
   } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
@@ -231,13 +281,16 @@ export function NotificationBell() {
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,
     failed: notificationsFailed && notifications === undefined,
+    hasMore: hasNextPage,
+    loadingMore: isFetchingNextPage,
+    onLoadMore: () => void fetchNextPage(),
   };
 
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>{triggerButton}</SheetTrigger>
-        <SheetContent side="bottom" className="rounded-t-xl p-0 [&>button:last-child]:hidden">
+        <SheetContent side="bottom" className="rounded-t-xl p-0" showCloseButton={false}>
           <NotificationContent {...contentProps} />
         </SheetContent>
       </Sheet>

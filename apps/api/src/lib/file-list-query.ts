@@ -6,7 +6,7 @@ import { zFilePurposeEnum } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import type { ListFilesFilters } from "../services/files.ts";
 import { parseBody } from "./errors.ts";
-import { parseListPagination } from "./list-query.ts";
+import { parseListPagination } from "@appstrate/core/list-query";
 
 const listFilesQuerySchema = z
   .object({

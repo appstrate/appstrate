@@ -11,7 +11,7 @@ import {
   type CreationResource,
 } from "../creation-handoff.ts";
 
-const resources: CreationResource[] = ["agent", "skill", "integration", "mcp-server"];
+const resources: CreationResource[] = ["agent", "skill", "integration"];
 const frenchChatDrafts: Record<CreationResource, string> = {
   agent:
     "Aide-moi à créer un nouvel agent Appstrate. Commence par me poser les questions nécessaires.",
@@ -19,8 +19,6 @@ const frenchChatDrafts: Record<CreationResource, string> = {
     "Aide-moi à créer un nouveau skill Appstrate. Commence par me poser les questions nécessaires.",
   integration:
     "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
-  "mcp-server":
-    "Aide-moi à créer un nouveau serveur MCP local Appstrate. Commence par me poser les questions nécessaires.",
 };
 const dictionaries = { en: settingsEn, fr: settingsFr } as const;
 

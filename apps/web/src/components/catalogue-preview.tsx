@@ -18,7 +18,6 @@ import { useTranslation } from "react-i18next";
 import {
   Boxes,
   Clock,
-  Hammer,
   Hash,
   History,
   House,
@@ -54,6 +53,8 @@ import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
+import type { IntegrationSource } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import { toastError } from "../lib/mutation-error";
 import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement";
@@ -70,6 +71,7 @@ import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
 import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
+import { ManifestOverview } from "./package-manifest/manifest-overview";
 import { SettingsHeading } from "./settings/settings-heading";
 
 /** The alert's words per state, spelled out so the locale test sees every key. */
@@ -169,8 +171,9 @@ export function CataloguePreview({
   mayConfigureIn,
   integrations,
   agents,
-  protocol,
+  source,
   actionsMenu,
+  icon,
   pinnedVersion,
   onUnpin,
   busy,
@@ -189,10 +192,12 @@ export function CataloguePreview({
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
   agents: LibraryPackageItem[];
-  /** An integration's protocol, when the catalogue knows it. */
-  protocol?: string;
+  /** An integration's source (API, remote or local MCP), when the catalogue knows it. */
+  source?: IntegrationSource;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
+  /** The package's tile, the one its card draws. */
+  icon: ReactNode;
   /**
    * The published version the address asked to read. The sheet then draws that
    * version's content; its spaces and switches are the package's, which run the
@@ -353,14 +358,14 @@ export function CataloguePreview({
   const usedBy = (other?.agents ?? []).filter((entry) => agents.some((row) => row.id === entry.id));
   const agentSkills = agent?.dependencies.skills ?? [];
   const agentInputs = agent ? inputNames(agent) : [];
-  const runtimeTools = Array.isArray(agent?.manifest?.runtime_tools)
-    ? (agent.manifest.runtime_tools as unknown[]).length
-    : 0;
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <SettingsHeading className="mb-2" title={item.name || item.id} />
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          {icon}
+          <SettingsHeading className="mb-0 min-w-0" title={item.name || item.id} />
+        </div>
         <div className="flex shrink-0 items-center gap-3">{actionsMenu}</div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -408,9 +413,9 @@ export function CataloguePreview({
       {/* "À propos" comes FIRST, in the same order for every type; what varies by type follows. */}
       <SettingsGroup title={t("orgSettings.tabGeneral")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
-          {protocol && (
-            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-              {protocol}
+          {source && (
+            <PropertyRow icon={Plug} label={t("integrations.col.source")}>
+              <IntegrationSourceLabel source={source} />
             </PropertyRow>
           )}
           {usedBy.length > 0 && (
@@ -438,11 +443,6 @@ export function CataloguePreview({
           {agentInputs.length > 0 && (
             <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
               {agentInputs.join(", ")}
-            </PropertyRow>
-          )}
-          {runtimeTools > 0 && (
-            <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-              {t("catalogue.sheet.toolCount", { count: runtimeTools })}
             </PropertyRow>
           )}
           {/* Held at their height so the groups below do not move when the detail lands. */}
@@ -490,6 +490,8 @@ export function CataloguePreview({
           </dl>
         </SettingsGroup>
       )}
+
+      <ManifestOverview manifest={(agent ?? other)?.manifest} />
 
       <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
         {mode === "readonly" && (

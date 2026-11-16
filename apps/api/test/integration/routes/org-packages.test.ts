@@ -2,7 +2,7 @@
 
 /**
  * The package indexes spanning the spaces of an organization:
- * `GET /api/orgs/{orgId}/agents` and `GET /api/orgs/{orgId}/packages/{skills|integrations|mcp-servers}`.
+ * `GET /api/orgs/{orgId}/agents` and `GET /api/orgs/{orgId}/packages/{skills|integrations}`.
  * Each lists the single-space index's rows of every space the caller reaches
  * with the type's sight there, one row per (package, space) where it is active.
  *
@@ -10,11 +10,11 @@
  * | ------------------------------------------- | ----------------------------------------------------------------- | ---- |
  * | member session                              | Un (`agents:read`, `agents:run`, `runs:read-all`, `skills:read`, `integrations:read`) | agent A with its dependencies and every running run; skill S1; integration I1 |
  * | member session                              | Deux (`agents:run` only)                                          | agents A and B, summary rows, own running run only; skill S2 not listed |
- * | member session                              | Trois (`skills:read`, `integrations:read`, `mcp-servers:read`)    | agent C not listed; skill S3; integration I2; MCP server M1 |
+ * | member session                              | Trois (`skills:read`, `integrations:read`)                        | agent C not listed; skill S3; integration I2 |
  * | member session                              | Fermé (`closed`, not joined)                                      | nothing |
  * | owner session                               | every team space (preset `admin`)                                 | every row |
  * | API key pinned to Un, scopes `agents:read`  | Un only                                                           | agent A in Un |
- * | API key pinned to Deux, scopes `mcp-servers:read` | Deux only, which grants no `mcp-servers:read`               | empty list |
+ * | API key pinned to Deux, scopes `integrations:read` | Deux only, which grants no `integrations:read`             | empty list |
  * | chat loopback bearer, ceiling `agents:run`  | Un (`agents:read` capped away), Deux                              | summary rows everywhere |
  * | API key without the type's read in scopes   | —                                                                 | 403 (ceiling guard) |
  * | member session, unknown query parameter     | —                                                                 | 400 |
@@ -75,7 +75,7 @@ describe("package indexes across the organization's spaces", () => {
   /** A package homed in `home` and active in each of `activeIn`. */
   async function seedIndexed(
     name: string,
-    type: "agent" | "skill" | "integration" | "mcp-server",
+    type: "agent" | "skill" | "integration",
     home: string,
     activeIn: string[],
   ) {
@@ -134,7 +134,7 @@ describe("package indexes across the organization's spaces", () => {
       "integrations:read",
     ]);
     await join(s.deux, ["agents:run"]);
-    await join(s.trois, ["skills:read", "integrations:read", "mcp-servers:read"]);
+    await join(s.trois, ["skills:read", "integrations:read"]);
 
     await seedIndexed("a", "agent", s.un, [s.un, s.deux]);
     await seedIndexed("b", "agent", s.deux, [s.deux]);
@@ -150,8 +150,6 @@ describe("package indexes across the organization's spaces", () => {
     await seedIndexed("s3", "skill", s.trois, [s.trois]);
     await seedIndexed("i1", "integration", s.un, [s.un]);
     await seedIndexed("i2", "integration", s.trois, [s.trois]);
-    await seedIndexed("m1", "mcp-server", s.trois, [s.trois]);
-    await seedIndexed("m2", "mcp-server", s.un, [s.un]);
 
     const foreign = await createTestContext({ orgSlug: "orgpkg-foreign" });
     foreignOrgId = foreign.orgId;
@@ -190,10 +188,9 @@ describe("package indexes across the organization's spaces", () => {
     expect(agents["a@deux"]!.running_runs).toBe(1);
   });
 
-  it("lists skills, integrations and MCP servers of the spaces granting their read", async () => {
+  it("lists skills and integrations of the spaces granting their read", async () => {
     expect(await keys("packages/skills", session(member))).toEqual(["s1@un", "s3@trois"]);
     expect(await keys("packages/integrations", session(member))).toEqual(["i1@un", "i2@trois"]);
-    expect(await keys("packages/mcp-servers", session(member))).toEqual(["m1@trois"]);
   });
 
   it("serves the owner every row of every team space", async () => {
@@ -223,14 +220,14 @@ describe("package indexes across the organization's spaces", () => {
 
   it("answers 200 with an empty list where no reached space admits the list", async () => {
     // Pinned to Deux, where the member holds `agents:run` only: the ceiling
-    // passes, the one space reached grants no `mcp-servers:read`.
+    // passes, the one space reached grants no `integrations:read`.
     const key = await seedApiKey({
       orgId: owner.orgId,
       spaceId: s.deux,
       createdBy: member.user.id,
-      scopes: ["mcp-servers:read"],
+      scopes: ["integrations:read"],
     });
-    const res = await app.request(path("packages/mcp-servers"), {
+    const res = await app.request(path("packages/integrations"), {
       headers: { Authorization: `Bearer ${key.rawKey}` },
     });
     expect(res.status).toBe(200);
@@ -258,12 +255,7 @@ describe("package indexes across the organization's spaces", () => {
   });
 
   it("refuses an unknown query parameter", async () => {
-    for (const list of [
-      "agents",
-      "packages/skills",
-      "packages/integrations",
-      "packages/mcp-servers",
-    ]) {
+    for (const list of ["agents", "packages/skills", "packages/integrations"]) {
       const res = await app.request(path(`${list}?spaceId=${s.un}`), { headers: session(member) });
       expect(res.status).toBe(400);
       expect(res.headers.get("content-type")).toContain("application/problem+json");
@@ -291,12 +283,7 @@ describe("package indexes across the organization's spaces", () => {
       scopes: ["runs:read"],
     });
     const headers = { Authorization: `Bearer ${key.rawKey}` };
-    for (const list of [
-      "agents",
-      "packages/skills",
-      "packages/integrations",
-      "packages/mcp-servers",
-    ]) {
+    for (const list of ["agents", "packages/skills", "packages/integrations"]) {
       expect((await app.request(path(list), { headers })).status).toBe(403);
     }
   });

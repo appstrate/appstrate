@@ -17,11 +17,9 @@
  *     runner, which fetches it from the platform, never from the workspace;
  *   - `RECORD`, a packaging artefact.
  *
- * Runtime tools (`output` / `log` / `note` / `pin`) are not registered here:
- * they are transport-neutral MCP tool definitions
- * (`@appstrate/core/runtime-tool-defs`) hosted by the sidecar (over `/mcp`)
- * or, in the `appstrate run` CLI, registered as Pi extensions via
- * {@link buildRuntimeToolExtensions} at the call site.
+ * Tools are not registered here: the harness tools `output` and
+ * `publish_file` are registered by `PiRunner`, the platform tools (`log`, `note`, …) are served
+ * by the `@appstrate/platform` integration.
  *
  * Used by:
  *   1. `runtime-pi/entrypoint.ts` — the in-container agent bootloader.
@@ -112,7 +110,7 @@ const NOT_MATERIALISED: ReadonlySet<string> = new Set([
   "integration.json",
 ]);
 
-/** An integration's vendored server code: run by the sidecar's runner, never read by the agent. */
+/** A local integration's server payload: run by the sidecar's runner, never read by the agent. */
 const INTEGRATION_SERVER_DIR = "server/";
 
 /**

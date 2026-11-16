@@ -5,38 +5,18 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 
 /**
- * Severity levels carried by `log.written` run events. Mirrored on the
- * aggregated {@link LogEntry} so the reducer can surface the same
- * vocabulary back to callers.
- */
-export type LogLevel = "info" | "warn" | "error";
-
-/**
  * Aggregated state at the end of a run.
  *
  * Built by the runtime by reducing the stream of {@link RunEvent} values
  * against the canonical AFPS semantics:
  *
- * - `memory.added` events append to `memories`
- * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
  * - `output.emitted` events replace `output` wholesale (last-write-wins;
  *   the reducer assigns `result.output = event.data`, it does NOT merge)
- * - `log.written` events append to `logs`
  *
  * Passed to {@link EventSink.finalize} when the run ends.
  */
 export interface RunResult {
-  memories: Memory[];
-  /**
-   * Named pinned slots — last-write-wins per `key`. The reserved
-   * `"checkpoint"` key is the carry-over slot read by ingestion +
-   * prompt builder; other keys (`"persona"`, `"goals"`, …) are
-   * persisted as named pinned rows in `package_persistence` and
-   * rendered into the system prompt on the next run.
-   */
-  pinned?: Record<string, PinnedSlot>;
   output: unknown | null;
-  logs: LogEntry[];
   error?: RunError;
   /**
    * Terminal status, stamped by the runner (events alone cannot tell "success"
@@ -103,32 +83,6 @@ export interface RunArtifactsSummary {
  * importers keep working.
  */
 export type { TokenUsage };
-
-export interface Memory {
-  content: string;
-  /**
-   * AFPS scope dimension for the unified persistence store.
-   * Emitters MAY omit the field — consumers default to `"actor"`.
-   */
-  scope?: "actor" | "shared";
-}
-
-/**
- * A single pinned slot — the value carried by one `pinned.set` event.
- * Aggregated by `RunResult.pinned[key]` so consumers can iterate every
- * named slot the run wrote without losing the per-slot scope.
- */
-export interface PinnedSlot {
-  content: unknown;
-  /** AFPS per-slot persistence scope; defaults to `"actor"`. */
-  scope?: "actor" | "shared";
-}
-
-export interface LogEntry {
-  level: LogLevel;
-  message: string;
-  timestamp: number;
-}
 
 /**
  * Error envelope for a failed run.

@@ -66,7 +66,7 @@ function publishedManifest(version = "1.2.3") {
     schema_version: "0.1",
     author: "tester",
     timeout: 300,
-    dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+    dependencies: { skills: {}, integrations: {} },
   } as const;
 }
 
@@ -213,65 +213,9 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.versionRef).toBe("1.0.0");
   });
 
-  it("still runs a published version whose manifest names a retired runtime tool", async () => {
-    // The whole reason the read direction DROPS instead of rejecting: a
-    // published version is an immutable, integrity-checked artifact. Once the
-    // platform retires a `runtime_tools` id, every already-published manifest
-    // naming it would 500 on `invalid_stored_manifest` forever — unfixable
-    // without republishing, which the org may not even be able to do.
-    // Author input still rejects the same id (write direction); only this
-    // persisted-read path drops it.
-    const version = "2.0.0";
-    const manifest = {
-      ...publishedManifest(version),
-      // `log` is live, `report` was retired — only the retired one may go.
-      runtime_tools: ["log", "report"],
-    } as unknown as Record<string, unknown>;
-
-    // Non-vacuity guard: if `report` were ever re-admitted to the catalog this
-    // test would pass while exercising nothing. Assert it is genuinely retired
-    // by checking the WRITE direction still refuses the same manifest.
-    const asAuthorInput = validateManifest(manifest);
-    expect(asAuthorInput.valid).toBe(false);
-
-    await seedPackage({
-      orgId: ctx.orgId,
-      id: "@acme/briefing",
-      homeSpaceId: ctx.defaultSpaceId,
-      type: "agent",
-      draftManifest: manifest,
-      draftContent: PROMPT,
-    });
-    const versionRow = await seedPackageVersion({
-      packageId: "@acme/briefing",
-      version,
-      integrity: "sha256-test",
-      artifactSize: 1024,
-      manifest,
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
-
-    const res = await post({
-      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      spaceId: ctx.defaultSpaceId,
-      input: {},
-    });
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: string };
-    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
-    expect(run!.packageId).toBe("@acme/briefing");
-    expect(run!.versionRef).toBe(version);
-  });
-
   it("still runs a published version whose manifest carries a retired AFPS 1.x dependency key", async () => {
-    // Same doctrine as the retired-`runtime_tools` test above, applied to the
-    // `dependencies.tools` / `dependencies.providers` keys AFPS 2.0 retired
-    // (#1021). Author input rejects them; a PUBLISHED manifest carrying one
+    // The `dependencies.tools` / `dependencies.providers` keys AFPS 2.0
+    // retired (#1021). Author input rejects them; a PUBLISHED manifest carrying one
     // must keep validating, because it is re-validated on every run and the
     // artifact is immutable + integrity-checked — closing `dependencies` would
     // make such an agent permanently unrunnable with no repair path.
@@ -375,7 +319,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         type: "agent",
         schema_version: "0.1",
         author: "tester",
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -412,7 +356,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         type: "agent",
         schema_version: "0.1",
         author: "tester",
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -433,7 +377,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         schema_version: "0.1",
         author: "tester",
         timeout: 300,
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       },
     });
     await db
@@ -452,7 +396,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
           schema_version: "0.1",
           author: "tester",
           timeout: 300,
-          dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+          dependencies: { skills: {}, integrations: {} },
         },
         PROMPT,
       ),
@@ -518,7 +462,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         version: "0.0.1",
         type: "agent",
         // display_name + schema_version intentionally omitted
-        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        dependencies: { skills: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -685,7 +629,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -718,7 +662,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"] } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -891,7 +835,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -930,7 +874,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         ctx,
         {
           ...publishedManifest("1.2.3"),
-          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          dependencies: { skills: {}, integrations: { [INTEG]: "^1.0.0" } },
           integrations_configuration: { [INTEG]: { tools: ["search"] } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
@@ -1046,7 +990,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       schema_version: "0.1",
       author: "tester",
       timeout: 300,
-      dependencies: { skills: { "@acme/helper": "^1.0.0" }, mcp_servers: {}, integrations: {} },
+      dependencies: { skills: { "@acme/helper": "^1.0.0" }, integrations: {} },
     } as unknown as Record<string, unknown>;
     await seedPackage({
       orgId: ctx.orgId,

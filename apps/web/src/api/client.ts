@@ -125,16 +125,32 @@ export async function toApiError(response: Response): Promise<Error> {
   return new Error(body.detail || `API Error: ${response.status}`);
 }
 
+/** A non-2xx answer becomes the thrown error, after the shell-wide reactions to a refusal. */
+async function rejectProblem(request: Request, response: Response): Promise<Response> {
+  if (response.ok) return response;
+  // Before the throw, and for every route: a refused role preview must end
+  // the preview wherever it is noticed, not only on the org listing.
+  await noteViewAsRefusal(request.headers, response);
+  noteStaleAuthority(request, response);
+  throw await toApiError(response);
+}
+
 const problemDetailErrors: Middleware = {
-  async onResponse({ request, response }) {
-    if (response.ok) return response;
-    // Before the throw, and for every route: a refused role preview must end
-    // the preview wherever it is noticed, not only on the org listing.
-    await noteViewAsRefusal(request.headers, response);
-    noteStaleAuthority(request, response);
-    throw await toApiError(response);
-  },
+  onResponse: ({ request, response }) => rejectProblem(request, response),
 };
+
+/**
+ * A request the typed client cannot express (a module's dynamic path, a streaming body), with
+ * the typed client's contract: credentials and scoping headers added, and a non-2xx answer
+ * thrown as {@link ApiError}. The response body stays unread.
+ */
+export async function fetchOrThrow(path: string, init?: RequestInit): Promise<Response> {
+  const request = new Request(path, { credentials: "include", ...init });
+  for (const [k, v] of Object.entries(missingScopingHeaders(request.headers))) {
+    request.headers.set(k, v);
+  }
+  return rejectProblem(request, await fetch(request));
+}
 
 /**
  * How an array query parameter goes on the wire: comma-separated under one key

@@ -16,7 +16,7 @@ import { CountBadge } from "@/components/count-badge";
 import { useSpaceAction, useSpacesFor } from "@/hooks/use-space-action";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
-import { buildScopingHeaders } from "@/lib/scoping-headers";
+import { SHELL_CHAT_TRANSPORT } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
@@ -46,8 +46,8 @@ export function ProductTabs() {
   const chatLink = chat.link("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides on this tab. It is
   // the working space's, so « Vue d'ensemble » does not show it.
-  const chatUnread = useChatUnreadCount(buildScopingHeaders, chatReachable);
-  const hasChatSessions = useHasChatSessions(buildScopingHeaders, chatReachable);
+  const chatUnread = useChatUnreadCount(SHELL_CHAT_TRANSPORT, chatReachable);
+  const hasChatSessions = useHasChatSessions(SHELL_CHAT_TRANSPORT, chatReachable);
   const chatShown = isChatTabShown({
     reachable: chatReachable,
     canWrite,

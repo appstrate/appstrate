@@ -26,15 +26,15 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
+  seedPackage,
   seedSpacePackage,
-  seedMcpServer,
   seedSpace,
   seedSpaceMember,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
 
 const app = getTestApp();
-const MCP_ID = "@catalog/hidden-server";
+const HIDDEN_ID = "@catalog/hidden-skill";
 
 let ctx: TestContext;
 
@@ -63,37 +63,42 @@ describe("space package detail follows the list's visibility", () => {
   beforeEach(async () => {
     // Homed here, so the row means something: what these two cases separate is
     // the caller's TYPE read scope, not the placement.
-    await seedMcpServer({ id: MCP_ID, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
-    await seedSpacePackage(ctx.defaultSpaceId, MCP_ID);
+    await seedPackage({
+      id: HIDDEN_ID,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: ctx.defaultSpaceId,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, HIDDEN_ID);
   });
 
-  it("hides an mcp-server row from a role holding only agents:read, in the list AND by id", async () => {
+  it("hides a skill row from a role holding only agents:read, in the list AND by id", async () => {
     const headers = await memberHolding(["agents:read"]);
 
     const list = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, { headers });
     expect(list.status).toBe(200);
     expect(((await list.json()) as SpacePackageList).data).toEqual([]);
 
-    const byId = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${MCP_ID}`, {
+    const byId = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${HIDDEN_ID}`, {
       headers,
     });
     expect(byId.status).toBe(404);
     expect(await byId.json()).toMatchObject({ code: "package_not_placed" });
   });
 
-  it("serves the same row to a role that does hold mcp-servers:read", async () => {
-    const headers = await memberHolding(["agents:read", "mcp-servers:read"]);
+  it("serves the same row to a role that does hold skills:read", async () => {
+    const headers = await memberHolding(["agents:read", "skills:read"]);
 
     const list = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, { headers });
     expect(((await list.json()) as SpacePackageList).data.map((row) => row.packageId)).toEqual([
-      MCP_ID,
+      HIDDEN_ID,
     ]);
 
-    const byId = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${MCP_ID}`, {
+    const byId = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${HIDDEN_ID}`, {
       headers,
     });
     expect(byId.status).toBe(200);
-    expect(await byId.json()).toMatchObject({ packageId: MCP_ID });
+    expect(await byId.json()).toMatchObject({ packageId: HIDDEN_ID });
   });
 });
 
@@ -109,7 +114,7 @@ describe("a disjunction denial records every alternative", () => {
 
   afterEach(() => setPermissionDenialHandler(null));
 
-  it("names all four write scopes when an import is refused, not just the first", async () => {
+  it("names all three write scopes when an import is refused, not just the first", async () => {
     const viewer = await memberContext(ctx, "guest", "viewer");
 
     const refused = await app.request("/api/packages/import-github", {
@@ -119,7 +124,7 @@ describe("a disjunction denial records every alternative", () => {
     });
 
     expect(refused.status).toBe(403);
-    expect(denials).toEqual(["agents:write|skills:write|integrations:write|mcp-servers:write"]);
+    expect(denials).toEqual(["agents:write|skills:write|integrations:write"]);
   });
 });
 

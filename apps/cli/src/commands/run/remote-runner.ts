@@ -8,13 +8,13 @@
  * and the platform spawns a Pi container (same path as the dashboard
  * "Run" button). The CLI then tails the run by polling two endpoints:
  *
- *   - `GET /api/runs/:runId/logs?since=<lastId>` — append-only run-log
+ *   - `GET /api/runs/:id/logs?since=<lastId>` — append-only run-log
  *     entries with `id > since`. The cursor is required for bounded
  *     per-poll cost: without it the server returns the run's full
  *     history every tick and per-poll wire size grows linearly with run
  *     length. We track the highest log id we've rendered and pass it as
  *     `?since=` on the next request.
- *   - `GET /api/runs/:runId` — terminal-status detection + the final
+ *   - `GET /api/runs/:id` — terminal-status detection + the final
  *     RunResult/error/cost reconciliation.
  *
  * Polling (rather than SSE) is the v1 transport because the realtime
@@ -217,11 +217,8 @@ export interface RunRemoteOptions {
   /**
    * Optional path — final RunResult JSON written here. Shape parity
    * with the local path's `--output`: top-level keys match the AFPS
-   * `RunResult` (`memories`, `pinned`, `output`, `logs`, `error`,
-   * `status`, `durationMs`, `cost`). `memories`, `pinned`, and `logs`
-   * are emitted as empty defaults — the remote path does not
-   * have a server-side endpoint surfacing the runner's reduced AFPS
-   * state, only `runs.result`. Two remote-only extras (`runId`,
+   * `RunResult` (`output`, `error`, `status`, `durationMs`, `cost`),
+   * reconstructed from the run record (`runs.result`). Two remote-only extras (`runId`,
    * `instance`) are added for debuggability.
    */
   outputPath?: string | undefined;
@@ -765,23 +762,17 @@ async function safeReadBody(res: Response): Promise<unknown> {
  * the persisted `result/result` snapshot).
  *
  * The forward mapping lives in
- * `apps/api/src/services/adapters/appstrate-event-sink.ts` —
+ * `apps/api/src/services/run-launcher/appstrate-event-sink.ts` —
  * any change there must update this function in lockstep, otherwise
  * `appstrate run` (remote) and `appstrate run --local` will drift
  * apart on rendering.
  *
  * Lossy cases worth knowing:
- *   - `progress/progress` rows can come from either `appstrate.progress`
- *     or `log.written` events; both render the same way through the
- *     console sink (progress branch with optional tool data, log.written
- *     hits the silent default), so we always map to `appstrate.progress`.
  *   - `appstrate.metric` events leave no row — they're synthesized
  *     separately at end-of-run from `runs.tokenUsage` + `runs.cost`.
- *   - `memory.added` / `pinned.set` events are not persisted to
- *     `run_logs` either (they update `package_persistence`); the local
- *     human sink only renders memories with a leading `+ memory:` line,
- *     so the remote-mode user simply doesn't see those breadcrumbs.
- *     Acceptable for v1 — the dashboard surfaces both.
+ *   - `note` / `pin` leave no `run_logs` row: the run MCP server writes
+ *     them to `package_persistence` when the tool is called, and the
+ *     dashboard surfaces both.
  */
 function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
   // RunEvent envelope requires `timestamp` (Unix ms) + `runId`. We pull
@@ -792,11 +783,12 @@ function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
   const timestamp = Number.isFinite(ts) ? ts : Date.now();
   const envelope = { timestamp, runId: log.runId };
 
-  // `progress/progress` — runner lifecycle breadcrumb or tool call.
+  // `progress/progress` — runner lifecycle breadcrumb or tool call;
+  // `progress/log` — a message of the `log` tool of `@appstrate/platform`.
   // The console sink's `appstrate.progress` branch handles both cases:
   // when `data.tool` is present it renders the cyan tool-call line +
   // args/result; otherwise it prints the message with a `→` glyph.
-  if (log.type === "progress" && log.event === "progress") {
+  if (log.type === "progress" && (log.event === "progress" || log.event === "log")) {
     const data = isPlainObject(log.data) ? (log.data as Record<string, unknown>) : undefined;
     return {
       ...envelope,
@@ -875,10 +867,7 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
 
 /**
  * Reconstruct a {@link RunResult} from the run record + terminal status,
- * matching the shape `EventSink.finalize` consumes locally. Fields the
- * record cannot reconstruct (`memories`, `pinned` named slots,
- * per-event `logs`) are emitted as empty defaults — the
- * dashboard remains the source of truth for those surfaces. `usage` is
+ * matching the shape `EventSink.finalize` consumes locally. `usage` is
  * reconstructed from the run row when present and otherwise explicit zero.
  * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
@@ -889,10 +878,7 @@ function buildRunResultPayload(
 ): TerminalRunResult {
   const storedResult = isPlainObject(record.result) ? record.result : null;
   const result: TerminalRunResult = {
-    memories: [],
-    pinned: {},
     output: storedResult && "output" in storedResult ? storedResult.output : null,
-    logs: [],
     status,
   };
   if (record.error) {

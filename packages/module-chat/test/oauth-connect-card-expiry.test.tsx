@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
@@ -60,9 +61,11 @@ function Card({ expiresAt }: { expiresAt?: string }) {
 
 const render = (expiresAt?: string) =>
   renderToString(
-    <ChatHostProvider value={host}>
-      <Card expiresAt={expiresAt} />
-    </ChatHostProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatHostProvider value={host}>
+        <Card expiresAt={expiresAt} />
+      </ChatHostProvider>
+    </QueryClientProvider>,
   );
 
 describe("OAuthConnectCard expiry", () => {

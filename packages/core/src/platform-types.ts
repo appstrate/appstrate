@@ -87,7 +87,7 @@ export interface IsolationBoundary {
   readonly name: string;
   /**
    * Per-run shared workspace handle. Backs `/workspace` on the agent
-   * container and (opt-in via mcp-server `_meta["dev.appstrate/workspace"]`)
+   * container and (opt-in via the local integration `_meta["dev.appstrate/workspace"]`)
    * on per-integration runner containers. Shape varies by orchestrator:
    *
    *   - Docker: `{ kind: "volume", name: string }` — a named Docker

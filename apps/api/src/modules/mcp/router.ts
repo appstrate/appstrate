@@ -36,7 +36,6 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `createInsufficientScopeError` marks the error it returns in a module-level
 // WeakSet, and `createResourceServerChallenge` recognises it by asking
@@ -58,12 +57,15 @@ import { APIError } from "better-auth/api";
 import {
   createMcpServer,
   parseMcpPost,
-  serveStatelessPost,
+  serveAuthenticatedStatelessPost,
   type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import {
+  INLINE_MANIFEST_RULE,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+} from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
@@ -97,6 +99,7 @@ import {
   buildFileResourceProvider,
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
+  INLINE_LOG_INSTRUCTION,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   WARNING_CODES_PHRASE,
   type Dispatch,
@@ -219,13 +222,11 @@ export function buildServerInstructions(
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  const inlineShortcut = inline
-    ? " For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate, `runtime_tools` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so `runtime_tools: []` stays empty. You may override every field with a complete deterministic manifest; a strict `output.schema` requires an explicit runtime tool selection containing `output`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected."
-    : "";
+  const inlineShortcut = inline ? ` ${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION}` : "";
   // Authoring a package means an inline run writing it; without that grant
   // only the validation half of the bullet is true.
   const packageFiles = inline
-    ? "MCP package authoring — call `get_runtime_capabilities` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
+    ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
@@ -234,7 +235,7 @@ export function buildServerInstructions(
 `
     : "";
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
   const integrationListing = listsIntegrations
@@ -346,6 +347,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
     proxies: any("proxies"),
+    proxiesClosed: any("proxiesClosed"),
   };
 }
 
@@ -524,10 +526,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
-    const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
-      ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
-    }));
+    const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
+      deriveMcpSurface(permissions, ceiling, actor, proxied, space),
+    );
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
     if (!chosen) {
@@ -541,7 +542,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
+      surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -685,7 +686,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
+      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c), c.get("space")!);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
@@ -730,27 +731,17 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         prompts,
       },
     );
-    const raw = c.req.raw;
-    const body = await c.req.arrayBuffer();
-    // `null`: the SDK reads the bytes itself and answers its own parse error.
-    const post = c.get("mcpPost") ?? null;
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: !post?.requestsProgress,
-      // Disabled deliberately: the SDK's Host-header allowlist would reject
-      // legitimate reverse-proxied hosts, and the rebinding threat it guards
-      // (a browser tricked into POSTing to a localhost MCP server) doesn't
-      // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
-      // or a SameSite session cookie), so a cross-site page cannot drive it.
-      enableDnsRebindingProtection: false,
-    });
-
-    // The SDK reads these bytes only when they did not parse here.
-    const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
-
-    // Any audit insert the tool layer triggered is already tracked (see
-    // `observe` above) and flushed at shutdown, not here.
-    return serveStatelessPost(server, transport, forwarded, post);
+    // `/api/mcp/o/:org` requires platform auth (Bearer/API key, or a SameSite
+    // session cookie), so a cross-site page cannot drive it. `null` post: the
+    // SDK reads the bytes itself and answers its own parse error. Any audit
+    // insert the tool layer triggered is already tracked (see `observe` above)
+    // and flushed at shutdown, not here.
+    return serveAuthenticatedStatelessPost(
+      server,
+      c.req.raw,
+      await c.req.arrayBuffer(),
+      c.get("mcpPost") ?? null,
+    );
   };
   app.post(MCP_PATH, serveMcp);
   app.post(MCP_SPACE_PATH, serveMcp);

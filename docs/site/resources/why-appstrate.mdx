@@ -16,7 +16,7 @@ Appstrate runs agents for teams and inside products. A few design choices explai
 | Sandboxed runs                       | On the `docker` backend each run gets its own container and network, and on the opt-in `firecracker` backend (early preview) its own microVM. The default `process` backend is for development and is not a security boundary. See [Sandbox and sidecar](/features/sandbox-and-sidecar). |
 | Credentials out of the model's reach | A sidecar injects credentials into outbound requests. The agent never sees the secret.                                                                                                                                                                                                   |
 | Everything over an API               | The dashboard uses the same REST API (OpenAPI 3.1) you do. See [API reference](/api).                                                                                                                                                                                                    |
-| Portable packages                    | Agents, skills, integrations and MCP servers ship as AFPS packages with semantic versioning and integrity checks.                                                                                                                                                                        |
+| Portable packages                    | Agents, skills and integrations ship as AFPS packages with semantic versioning and integrity checks.                                                                                                                                                                                     |
 
 ## Sidecar isolation
 

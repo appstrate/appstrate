@@ -39,6 +39,7 @@ import {
   type PreparedApiCallRequest,
   redactionFields,
   templateHost,
+  templateTarget,
   URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
   type CookieJar,
@@ -59,7 +60,7 @@ import {
   type ProxyCallPath,
 } from "./integration-resolver.ts";
 import type { CredentialStatus } from "../../lib/credential-status-header.ts";
-import { clearUpstreamRejections } from "../integration-connections.ts";
+import { clearUpstreamRejections, type ConnectionNaming } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -88,6 +89,8 @@ type ProxyCallInput = {
    * run's bound set, or outside a run one the caller reaches.
    */
   connectionId?: string;
+  /** How the caller names `connectionId`; the header when omitted. */
+  connectionNaming?: ConnectionNaming;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -230,6 +233,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     spaceId: input.spaceId,
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),
@@ -376,7 +380,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       credentialForwarded = sent.credentialsForwarded;
       return sent.response;
     } catch (err) {
-      throw toProxyCallError(err, input.integrationId, redactedHost, connectionId);
+      throw toProxyCallError(err, input.integrationId, input.target, connectionId);
     }
   };
 
@@ -560,9 +564,10 @@ export function bodyReadError(
 function toProxyCallError(
   err: unknown,
   integrationId: string,
-  redactedHost: string,
+  target: string,
   connectionId: string,
 ): Error {
+  const redactedHost = templateHost(target);
   const failure = classifyApiCallFailure(err);
   // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
   const sent =
@@ -573,13 +578,19 @@ function toProxyCallError(
       : undefined;
   switch (failure.code) {
     case "unauthorized_target":
-    case "blocked_target":
+    case "blocked_target": {
+      // An authorization refusal is about the URL (the host may be allowed); an SSRF one, the host.
+      const named = failure.redirect
+        ? ""
+        : failure.code === "unauthorized_target"
+          ? ` (${templateTarget(target)})`
+          : ` (host ${redactedHost})`;
       return new ProxyCallError(
         failure.code,
-        `Integration ${integrationId}: ${failure.message}` +
-          (failure.redirect ? "" : ` (host ${redactedHost})`),
+        `Integration ${integrationId}: ${failure.message}${named}`,
         sent,
       );
+    }
     case "upstream_unresolvable":
       return new ProxyCallError(failure.code, failure.message, sent);
     case "credential_unusable":

@@ -1,6 +1,6 @@
 ---
 title: Notifications
-description: The in-app feed that tells people a run needs their attention or a package was shared with them, and the unread state of their runs.
+description: The in-app feed that tells people a run needs their attention, an agent sent them a message or a package was shared with them, and the unread state of their runs.
 ---
 
 Notifications are the **in-app** inbox of a person or an [end-user](/features/end-users): the bell in the web app. They are not emails or push messages. To notify an external system, use [webhooks](/features/webhooks).
@@ -15,6 +15,9 @@ The feed holds what needs the recipient's attention, decided when the notificati
 | ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `run_failed`     | A run ends `failed` or `timeout`. The payload carries the `packageId`, the `agent_name` and the `status`. | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
 | `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it.         | The person, in their personal space.                                                                             |
+| `agent_message`  | A running agent calls the `notify` [platform tool](/features/tools#platform-tools).                       | The run's recipients, as for `run_failed`, at most once per run.                                                 |
+
+An `agent_message` payload carries the `packageId`, the `title` and the `message` the agent wrote, and its `runId` is the run that sent it. The `notify` call of an inline agent's run is refused. An agent has `notify` only when its manifest selects it under `integrations_configuration["@appstrate/platform"].tools`; it is not one of the integration's default tools. The message is not instant: the bell shows it at its next refresh, which happens when the run ends, when the live connection reconnects, and every five minutes. Opening the run reads it, like a `run_failed`.
 
 A scheduled run that is refused before it starts (a missing package, a connection that no longer resolves) is a `failed` run like any other, and is notified. A run that succeeds or is cancelled is not notified: it is only unread (below). Runs of an inline agent are never notified, since their result is already in front of the caller.
 

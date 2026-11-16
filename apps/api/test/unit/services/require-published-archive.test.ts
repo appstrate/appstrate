@@ -7,7 +7,7 @@
  * missing or unreadable, or whose archive lacks the type's REQUIRED content
  * entry, is refused with a 422 `version_artifact_unavailable` rather than
  * degrading into an empty prompt or an empty draft. An OPTIONAL entry
- * (integration) or a type with no entry (mcp-server) is not a refusal. Readers
+ * (integration's `INTEGRATION.md`) is not a refusal. Readers
  * that download the ZIP themselves (bundle export, file explorer, download,
  * fork) raise the same refusal through `versionArtifactUnavailable` instead.
  */
@@ -72,16 +72,6 @@ describe("requirePublishedArchive", () => {
       content: { "manifest.json": enc("{}"), "INTEGRATION.md": doc },
     });
     expect(out.entry).toEqual(doc);
-  });
-
-  it("has no entry for an mcp-server", () => {
-    const files = { "manifest.json": enc("{}"), "prompt.md": enc("ignored") };
-    const out = requirePublishedArchive("mcp-server", "@acme/mcp", {
-      version: "1.0.0",
-      content: files,
-    });
-    expect(out.files).toEqual(files);
-    expect(out.entry).toBeUndefined();
   });
 
   it.each([

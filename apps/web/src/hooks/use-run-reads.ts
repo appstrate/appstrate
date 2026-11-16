@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
 import { markAllRunsReadRequests } from "../lib/mark-all-runs-read";
-import { usePaginatedRuns } from "./use-paginated-runs";
+import { useFirstRunsPage } from "./use-paginated-runs";
 import { agentsKeys, paginatedRunsKeys, runKeys, scheduleKeys } from "../lib/query-keys";
 import { invalidateNotificationQueries } from "./use-notifications";
 
@@ -20,7 +20,7 @@ import { invalidateNotificationQueries } from "./use-notifications";
  * `spanning`: in every space the reader reaches instead.
  */
 export function useUnreadRunCount(enabled = true, spanning = false): number {
-  const { data } = usePaginatedRuns({ unread: true, limit: 1, offset: 0, enabled, spanning });
+  const { data } = useFirstRunsPage({ unread: true, limit: 1, enabled, spanning });
   return data?.total ?? 0;
 }
 

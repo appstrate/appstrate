@@ -87,11 +87,11 @@ describe("fetchPackageIndex", () => {
   });
 
   it("asks the org route of each type, naming no space", async () => {
-    for (const type of ["skill", "integration", "mcp-server"] as const) {
+    for (const type of ["skill", "integration"] as const) {
       await fetchPackageIndex(type, "org_1");
     }
     expect(get.mock.calls).toEqual(
-      ["skills", "integrations", "mcp-servers"].map((segment) => [
+      ["skills", "integrations"].map((segment) => [
         `/api/orgs/{orgId}/packages/${segment}`,
         { params: { path: { orgId: "org_1" } } },
       ]),

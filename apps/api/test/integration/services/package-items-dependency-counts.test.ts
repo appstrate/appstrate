@@ -148,34 +148,32 @@ describe("package-items dependency counts", () => {
 
     it("counts every dependency map, including a self-reference", async () => {
       await seedPackage({
-        id: "@depcount/mcp-one",
+        id: "@depcount/skill-one",
         homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
-        type: "mcp-server",
+        type: "skill",
         createdBy: ctx.user.id,
         // Self-reference: the legacy loop counted it, so the SQL must too.
-        draftManifest: agentManifest("@depcount/mcp-one", {
-          mcp_servers: { "@depcount/mcp-one": "^0.1.0" },
+        draftManifest: agentManifest("@depcount/skill-one", {
+          skills: { "@depcount/skill-one": "^0.1.0" },
         }),
       });
-      await seedSpacePackage(ctx.defaultSpaceId, "@depcount/mcp-one");
+      await seedSpacePackage(ctx.defaultSpaceId, "@depcount/skill-one");
       await seedPackage({
         id: "@depcount/agent-c",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: agentManifest("@depcount/agent-c", {
-          mcp_servers: { "@depcount/mcp-one": "^0.1.0" },
-          integrations: { "@depcount/mcp-one": "^0.1.0" },
+          skills: { "@depcount/skill-one": "^0.1.0" },
+          integrations: { "@depcount/skill-one": "^0.1.0" },
         }),
       });
 
-      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE["mcp-server"], [
-        ctx.defaultSpaceId,
-      ]);
+      const items = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, [ctx.defaultSpaceId]);
       const oracle = await legacyCountMap(ctx.orgId);
-      const row = items.find((i) => i.id === "@depcount/mcp-one");
-      expect(row?.used_by_agents).toBe(oracle.get("@depcount/mcp-one") ?? 0);
-      // self + agent-c's mcp_servers entry + agent-c's integrations entry
+      const row = items.find((i) => i.id === "@depcount/skill-one");
+      expect(row?.used_by_agents).toBe(oracle.get("@depcount/skill-one") ?? 0);
+      // self + agent-c's skills entry + agent-c's integrations entry
       expect(row?.used_by_agents).toBe(3);
     });
 

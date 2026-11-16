@@ -5,7 +5,6 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
@@ -67,6 +66,8 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const [pickedSpaceId, setPickedSpaceId] = useState<string | null>(null);
   const [pickedRole, setPickedRole] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
+  /** Why the preview did not start, under the fields: the dialog stays open for another try. */
+  const [refusal, setRefusal] = useState<string | null>(null);
   /** A closed or unmounted dialog must never commit a pending preview. */
   const abandoned = useRef(false);
   useLayoutEffect(() => {
@@ -110,6 +111,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
     if (!orgId || !ready || entering) return;
     const persona = toViewAsPersona(orgId, orgRole, space, roleOption);
     setEntering(true);
+    setRefusal(null);
     try {
       // Load the persona's org row BEFORE committing: permissions and banner appear together,
       // and a failed load must leave the admin where they were.
@@ -130,7 +132,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
       setEntering(false);
       // Three of the four refusals are permanent; "try again" fits only an unnamed failure.
       const code = viewAsRefusalCode(err);
-      toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
+      setRefusal(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
       return;
     }
   };
@@ -143,6 +145,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         void submit();
       }}
       title={t("viewAs.trigger")}
+      error={refusal}
       submitLabel={t("viewAs.rowAction")}
       // Not `isPending`: Cancel must stay live while the preview loads, to abandon it.
       submitDisabled={!ready || entering}

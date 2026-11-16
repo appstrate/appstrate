@@ -31,7 +31,7 @@ import { markSpaceRescope } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { logger } from "../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getClientIp } from "../../lib/client-ip.ts";

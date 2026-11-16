@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { readIntegrationSource } from "../../lib/package-manifest";
 import { CopyBlock } from "../copy-block";
+import { IntegrationSourceLabel } from "../integration-source-label";
 import { SettingValue } from "../settings/setting-row";
-import { packageDetailPath } from "../../lib/package-paths";
 
 function accessInfo(detail: IntegrationDetailWire) {
   const source = readIntegrationSource(detail.manifest.source);
@@ -29,23 +28,13 @@ export function IntegrationFunctioning({ detail }: { detail: IntegrationDetailWi
         {t(`integration.structure.type.${type}`)}
       </SettingValue>
       {source && source.kind !== "none" && (
-        <SettingValue label={t("integration.structure.hosting")}>
-          {t(
-            source.kind === "local"
-              ? "integration.structure.local"
-              : "integration.structure.remote",
-          )}
+        <SettingValue label={t("integrations.col.source")}>
+          <IntegrationSourceLabel source={source.kind} />
         </SettingValue>
       )}
       {source?.kind === "local" && (
-        <SettingValue label={t("integration.structure.serverPackage")}>
-          <Link
-            className="text-primary hover:underline"
-            to={packageDetailPath("mcp-server", source.serverName)}
-          >
-            {source.serverName}
-          </Link>{" "}
-          {source.serverVersion}
+        <SettingValue label={t("integration.structure.localServer")}>
+          <code>{source.serverType}</code> · <code>{source.entryPoint}</code>
         </SettingValue>
       )}
       {source?.kind === "remote" && (

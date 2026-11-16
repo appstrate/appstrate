@@ -14,3 +14,20 @@ export function exitUnlessDatabaseNamed(): void {
   );
   process.exit(2);
 }
+
+/**
+ * The line naming the database a script writes to: the PostgreSQL database and its server, or
+ * the resolved `PGLITE_DATA_DIR` of an embedded database.
+ */
+export async function describeDatabaseTarget(): Promise<string> {
+  // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
+  const { db, getPGliteClient, toRows } = await import("@appstrate/db/client");
+  const pglite = getPGliteClient();
+  if (pglite) return `database: PGlite at ${pglite.dataDir}`;
+  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
+    await db.execute(
+      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
+    ),
+  );
+  return `database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`;
+}

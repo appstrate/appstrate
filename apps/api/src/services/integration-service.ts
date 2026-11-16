@@ -13,7 +13,6 @@ import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags, spacePackages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { canonicalUrl } from "@appstrate/afps-shared/authorized-uris";
@@ -123,53 +122,6 @@ async function fetchIntegrationManifestUncached(
   return parseIntegrationManifest(pkgRow.manifest);
 }
 
-/**
- * Resolve an `mcp-server` package's MCPB manifest from the package store.
- *
- * An integration whose `source.kind: "local"` references a SEPARATE
- * `mcp-server` package via `source.server.name`. Reads that package's DRAFT; runs
- * go through {@link resolveMcpServerForSpawn}. Returns `null` when it does not resolve.
- */
-export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
-  const [pkgRow] = await db
-    .select({ manifest: packages.draftManifest, type: packages.type })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  // `debug`: every read of an integration's draft comes through here.
-  if (!pkgRow) {
-    logger.debug("referenced mcp-server package not found", { packageId });
-    return null;
-  }
-  if (pkgRow.type !== "mcp-server") {
-    logger.debug("referenced package is not an mcp-server", {
-      packageId,
-      actualType: pkgRow.type,
-    });
-    return null;
-  }
-  const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) {
-    logger.debug("mcp-server manifest failed validation", { packageId });
-    return null;
-  }
-  return parsed.data;
-}
-
-/** An mcp-server's MCPB `tools[]`, a `local` integration's catalog; `undefined` when absent. */
-export function readMcpServerTools(
-  manifest: McpServerManifest,
-): { name: string; description?: string }[] | undefined {
-  const tools = (manifest as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-  if (!Array.isArray(tools)) return undefined;
-  return tools
-    .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-    .map((e) => ({
-      name: e.name,
-      description: typeof e.description === "string" ? e.description : undefined,
-    }));
-}
-
 // ---------------------------------------------------------------------------
 // Spawn-time package version resolution (single kernel)
 // ---------------------------------------------------------------------------
@@ -196,8 +148,7 @@ type PublishedManifestResolution =
  * Resolve a package to a CONCRETE published version honoring its pin, and
  * return that version's RAW manifest (unparsed — the caller validates with the
  * schema for its package type). This is the single version-resolution kernel
- * behind both the mcp-server spawn path and the integration spawn path:
- * the manifest comes from `package_versions.manifest` for the SAME
+ * behind the integration spawn path: the manifest comes from `package_versions.manifest` for the SAME
  * `version` the byte route is told to serve, so manifest and bytes can never
  * skew.
  *
@@ -215,7 +166,6 @@ type PublishedManifestResolution =
  */
 async function resolvePublishedManifest(
   packageId: string,
-  expectedType: "integration" | "mcp-server",
   orgId: string,
   pin?: string | null,
   executor: DbOrTx = db,
@@ -238,7 +188,7 @@ async function resolvePublishedManifest(
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!pkgRow) return { ok: false, reason: "not_found" };
-  if (pkgRow.type !== expectedType) {
+  if (pkgRow.type !== "integration") {
     return { ok: false, reason: "wrong_type", actualType: pkgRow.type };
   }
 
@@ -297,62 +247,6 @@ async function resolvePublishedManifest(
     version: picked.version,
     source: "version",
   };
-}
-
-/**
- * Discriminated failure modes for {@link resolveMcpServerForSpawn}. Mirrors
- * {@link PublishedManifestFailure} with the mcp-server-specific `not_mcp_server`
- * name preserved for existing call-site logging.
- */
-type McpServerResolveFailure =
-  | "not_found"
-  | "not_mcp_server"
-  | "invalid_manifest"
-  | "unsatisfiable_pin"
-  | "no_published_version";
-
-type McpServerResolution =
-  | {
-      ok: true;
-      manifest: McpServerManifest;
-      /**
-       * The CONCRETE version the spawn will run. `null` for system
-       * mcp-servers (single version served from the boot registry — no
-       * `package_versions` row, no `?version=` needed on the byte route).
-       */
-      version: string | null;
-      /** `"system"` → boot registry bytes; `"version"` → published `.afps`. */
-      source: "system" | "version";
-    }
-  | { ok: false; reason: McpServerResolveFailure };
-
-/**
- * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
- * `source.server.version` pin, and return that version's manifest. Thin wrapper
- * over {@link resolvePublishedManifest} + MCPB schema validation.
- *
- * `orgId` is the run's org — required so the spawn can only ever resolve a
- * package the org owns or a system package (defense in depth against a
- * cross-tenant reference).
- */
-export async function resolveMcpServerForSpawn(
-  packageId: string,
-  orgId: string,
-  pin?: string | null,
-): Promise<McpServerResolution> {
-  const res = await resolvePublishedManifest(packageId, "mcp-server", orgId, pin);
-  if (!res.ok) {
-    const reason: McpServerResolveFailure =
-      res.reason === "wrong_type" ? "not_mcp_server" : res.reason;
-    logger.warn("mcp-server could not be resolved for spawn", { packageId, pin, reason });
-    return { ok: false, reason };
-  }
-  const parsed = mcpServerManifestSchema.safeParse(res.rawManifest);
-  if (!parsed.success) {
-    logger.warn("mcp-server manifest failed validation", { packageId, version: res.version });
-    return { ok: false, reason: "invalid_manifest" };
-  }
-  return { ok: true, manifest: parsed.data, version: res.version, source: res.source };
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +381,7 @@ export async function readIntegrationManifestForProxy(
   frozen: ResolvedIntegrationVersion | null,
 ): Promise<IntegrationManifestLoadResult | { ok: false; failure: { kind: "not_published" } }> {
   if (frozen) return readIntegrationManifestForRun(packageId, frozen);
-  const res = await resolvePublishedManifest(packageId, "integration", orgId);
+  const res = await resolvePublishedManifest(packageId, orgId);
   if (res.ok) return parseIntegrationManifest(res.rawManifest);
   if (res.reason === "not_found") return { ok: false, failure: { kind: "not_found" } };
   if (res.reason === "wrong_type") {
@@ -537,6 +431,7 @@ export async function resolveRunIntegrationVersions(params: {
   const entries = parseManifestIntegrations(params.agentManifest);
   const versions: ResolvedIntegrationVersionMap = {};
   const unresolved: Array<{ name: string; versionSpec: string }> = [];
+  const seeded: Array<Promise<IntegrationManifestLoadResult>> = [];
 
   for (const entry of entries) {
     const override = params.dependencyOverrides?.[entry.id];
@@ -547,13 +442,7 @@ export async function resolveRunIntegrationVersions(params: {
     } else {
       // A non-draft override replaces the manifest pin; otherwise the pin wins.
       const spec = override ?? entry.version;
-      const res = await resolvePublishedManifest(
-        entry.id,
-        "integration",
-        params.orgId,
-        spec,
-        params.executor,
-      );
+      const res = await resolvePublishedManifest(entry.id, params.orgId, spec, params.executor);
       if (res.ok) {
         descriptor =
           res.source === "system" ? { kind: "system" } : { kind: "version", version: res.version! };
@@ -577,13 +466,17 @@ export async function resolveRunIntegrationVersions(params: {
     // pinned manifest transparently (one entry per integration, overwriting any
     // draft entry an earlier readiness pass may have memoized).
     if (params.manifestCache) {
-      params.manifestCache.set(
-        entry.id,
-        readIntegrationManifestAt(entry.id, descriptor, params.executor),
-      );
+      const read = readIntegrationManifestAt(entry.id, descriptor, params.executor);
+      params.manifestCache.set(entry.id, read);
+      seeded.push(read);
     }
     versions[entry.id] = descriptorToResolved(descriptor);
   }
+
+  // The freeze is complete when this function returns: every seeded read has
+  // settled, so a draft saved afterwards cannot reach this run through a read
+  // still in flight.
+  await Promise.all(seeded);
 
   if (unresolved.length > 0) return { ok: false, unresolved };
   return { ok: true, versions };
@@ -686,7 +579,16 @@ async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
 }
 
 export type ConnectManifestRead =
-  | { ok: true; manifest: IntegrationManifest }
+  | {
+      ok: true;
+      manifest: IntegrationManifest;
+      /**
+       * The published version the manifest was read from, from the same read: the archive a
+       * connect-run fetches is that version's. `null` for a system integration (boot registry)
+       * and for a draft (nothing published; its files are served).
+       */
+      version: string | null;
+    }
   /** `no_usable_version`: versions exist, none of which resolves as `latest` and parses. */
   | { ok: false; reason: "not_found" | "no_usable_version" };
 
@@ -713,10 +615,16 @@ export async function readIntegrationManifestForConnect(
       ? await findPlacedIntegrationRow({ orgId: scope.orgId, spaceId: scope.spaceId }, packageId)
       : undefined;
   if (placed === null) return { ok: false, reason: "not_found" };
-  const res = await resolvePublishedManifest(packageId, "integration", scope.orgId);
+  const res = await resolvePublishedManifest(packageId, scope.orgId);
   if (res.ok) {
     const parsed = parseIntegrationManifest(res.rawManifest);
-    if (parsed.ok) return { ok: true, manifest: parsed.manifest };
+    if (parsed.ok) {
+      return {
+        ok: true,
+        manifest: parsed.manifest,
+        version: res.source === "version" ? res.version : null,
+      };
+    }
     logger.warn("Published integration manifest failed validation", {
       packageId,
       version: res.version,
@@ -730,7 +638,7 @@ export async function readIntegrationManifestForConnect(
   const draft = placed
     ? asIntegrationManifest(placed.draftManifest)
     : await getOrgWideIntegrationManifest(scope.orgId, packageId);
-  return draft ? { ok: true, manifest: draft } : { ok: false, reason: "not_found" };
+  return draft ? { ok: true, manifest: draft, version: null } : { ok: false, reason: "not_found" };
 }
 
 /**

@@ -93,11 +93,13 @@ export type ConnectBlocker =
   | "notPermittedImposed"
   | "defaultUnavailable"
   | "unusable"
-  | "unusableImposed";
+  | "unusableImposed"
+  | "proxyClosed";
 
 /**
  * Connecting is offered only where a connection of the caller's own can change the verdict: never
- * under an imposed connection, past an org default that binds first, or without the permission.
+ * under an imposed connection, past an org default that binds first, without the permission, or
+ * in a space that closes the credential proxy outside a run.
  */
 export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed: boolean }): {
   blocker: ConnectBlocker;
@@ -119,6 +121,8 @@ export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed
       };
     case "default_unavailable":
       return { blocker: "defaultUnavailable", offerConnect: false };
+    case "proxy_closed":
+      return { blocker: "proxyClosed", offerConnect: false };
     default:
       return { blocker: "none", offerConnect: true };
   }

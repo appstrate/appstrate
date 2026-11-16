@@ -3,7 +3,6 @@
 import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
-  dropRetiredRuntimeTools,
   extractSkillMeta,
   agentManifestSchema,
   SUPPORTED_SCHEMA_VERSION_MAJOR,
@@ -71,7 +70,7 @@ describe("validateManifest", () => {
     // Without a `type`, validateManifest fails fast with a single typed Zod
     // issue keyed on `type` rather than running the permissive base schema.
     // This makes the dispatcher's contract explicit: `type` is the AFPS
-    // discriminator and MUST be one of agent|skill|mcp-server|integration.
+    // discriminator and MUST be one of agent|skill|integration.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
     expect(result.valid).toBe(false);
@@ -132,15 +131,13 @@ describe("validateManifest", () => {
     expect(m.integrations_configuration).toBeUndefined();
   });
 
-  it("agent with dependencies (skills/mcp_servers/integrations) + runtime_tools", () => {
+  it("agent with dependencies (skills/integrations)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           integrations: { "@test/gmail": "^1.0.0" },
-          mcp_servers: { "@test/fetch": "^1.0.0" },
           skills: { "@test/skill": "^1.0.0", "@test/other": "~2.3.0" },
         },
-        runtime_tools: ["log", "note"],
       }),
     );
     expect(result.valid).toBe(true);
@@ -148,70 +145,20 @@ describe("validateManifest", () => {
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
     expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
-    expect(deps.mcp_servers).toEqual({ "@test/fetch": "^1.0.0" });
-    // Selectable runtime tools are the top-level snake_case `runtime_tools`.
-    expect(m.runtime_tools).toEqual(["log", "note"]);
   });
 
-  // `report` was a selectable runtime tool until it was replaced by durable
-  // `outputs/` files. How an unknown id is treated depends on the
-  // DIRECTION of the call, and both halves matter:
-  //
-  //   - author input (default) MUST reject — `["lgo"]` is a typo, and
-  //     dropping it silently ships an agent missing its tool with no signal;
-  //   - reading something already persisted MUST drop — a published ZIP is
-  //     immutable, so rejecting would make a legacy agent unrunnable forever.
-  it("rejects a retired runtime tool id on the author path (default policy)", () => {
-    const result = validateManifest(
-      validAgentManifest({ runtime_tools: ["report", "log", "output"] }),
-    );
-    expect(result.valid).toBe(false);
-    // Surfaced on the runtime_tools field so the editor can render it.
-    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
-  });
-
-  it("rejects a misspelled runtime tool id on the author path", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["lgo", "log"] }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
-  });
-
-  it("drops a retired runtime tool id on the read path and reports what went", () => {
-    const result = validateManifest(
-      validAgentManifest({ runtime_tools: ["report", "log", "output"] }),
-      { retiredRuntimeTools: "drop" },
-    );
-    expect(result.valid).toBe(true);
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
-    expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
-  });
-
-  // The field is REMOVED, not emptied — the editor's `setRuntimeTools` drops it
-  // on an empty selection too, so both writers emit the same bytes for an agent
-  // left with no runtime tools.
-  it("drops a retired runtime tool id even when it is the only one declared", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["report"] }), {
-      retiredRuntimeTools: "drop",
-    });
-    expect(result.valid).toBe(true);
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toBeUndefined();
-    expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
-  });
-
-  // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
-  // renamed them to `mcp_servers` / `integrations`. Every reader destructures
-  // exactly `{ skills, mcp_servers, integrations }`, so the retired spelling is
-  // inert — accepting it silently ships an agent whose dependency is never
-  // resolved (#1021). Same direction split as the runtime-tools policy:
-  // author input rejects, an already-persisted manifest is tolerated.
-  it("rejects dependencies.tools on the author path, naming the replacement key", () => {
+  // AFPS retires `dependencies.tools` and `dependencies.providers`. Every reader destructures exactly
+  // `{ skills, integrations }`, so a retired spelling is inert — accepting it silently
+  // ships an agent whose dependency is never resolved (#1021). Author input rejects,
+  // an already-persisted manifest is tolerated.
+  it("rejects dependencies.tools on the author path, naming the replacement", () => {
     const result = validateManifest(
       validAgentManifest({ dependencies: { tools: { "@appstrate/report": "^1.0.0" } } }),
     );
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toStartWith("dependencies.tools:");
-    expect(result.errors[0]).toContain("dependencies.mcp_servers");
+    expect(result.errors[0]).toContain("source.server");
   });
 
   it("rejects dependencies.providers on the author path, naming the replacement key", () => {
@@ -251,7 +198,7 @@ describe("validateManifest", () => {
         skills: { "@test/skill": "^1.0.0" },
       },
     });
-    const result = validateManifest(stored, { retiredRuntimeTools: "drop" });
+    const result = validateManifest(stored, { retiredDependencyKeys: "tolerate" });
     expect(result.valid).toBe(true);
     const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
       string,
@@ -264,12 +211,11 @@ describe("validateManifest", () => {
 
   // The fix must not close `dependencies`: AFPS §10 mandates extensibility for
   // objects it does not explicitly close, so an unknown extension key stays legal.
-  it("accepts the three canonical dependency maps plus an unrelated extension key", () => {
+  it("accepts the canonical dependency maps plus an unrelated extension key", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           skills: { "@test/skill": "^1.0.0" },
-          mcp_servers: { "@test/fetch": "^1.0.0" },
           integrations: { "@test/gmail": "^1.0.0" },
           _meta: { "dev.appstrate/note": "still legal" },
         },
@@ -283,158 +229,10 @@ describe("validateManifest", () => {
     expect(deps._meta).toEqual({ "dev.appstrate/note": "still legal" });
   });
 
-  it("reports no dropped runtime tools when every id is known", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }), {
-      retiredRuntimeTools: "drop",
-    });
-    expect(result.valid).toBe(true);
-    expect(result.valid && result.droppedRuntimeTools).toEqual([]);
-  });
-
-  // The version-snapshot path serialises the result of this helper into an
-  // integrity-hashed ZIP, so it must be structural: no Zod re-parse, no key
-  // reordering, no injected defaults — otherwise publish dedup (#896) breaks.
-  it("dropRetiredRuntimeTools preserves key order and unknown fields", () => {
-    const stored = {
-      name: "@test/my-agent",
-      runtime_tools: ["report", "log"],
-      custom_field: "must-survive",
-      version: "1.0.0",
-      type: "agent",
-    };
-    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
-    expect(dropped).toEqual(["report"]);
-    expect(Object.keys(manifest)).toEqual(Object.keys(stored));
-    expect(manifest.custom_field).toBe("must-survive");
-    expect(manifest.runtime_tools).toEqual(["log"]);
-  });
-
-  // Absent and `[]` parse identically, but they are different bytes and the
-  // agent editor's writer also drops the field on an empty selection — so the
-  // two write paths must agree or one manifest gets two integrity hashes.
-  it("dropRetiredRuntimeTools removes the key when nothing survives", () => {
-    const stored = { type: "agent", name: "@test/a", runtime_tools: ["report"] };
-    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
-    expect(dropped).toEqual(["report"]);
-    expect("runtime_tools" in manifest).toBe(false);
-    expect(manifest).toEqual({ type: "agent", name: "@test/a" });
-  });
-
-  it("dropRetiredRuntimeTools returns the same reference when nothing is retired", () => {
-    const stored = { type: "agent", runtime_tools: ["log"] };
-    expect(dropRetiredRuntimeTools(stored).manifest).toBe(stored);
-  });
-
-  // Settled empty-array representation. The helper deletes the key when a DROP
-  // empties the list (test above), but an author-written `runtime_tools: []` is
-  // left ALONE — it is a dropper, not a canonicaliser, and rewriting the bytes
-  // of a manifest with nothing retired in it is exactly the blast-radius
-  // widening the structural contract forbids (the result is serialised into an
-  // integrity-hashed artifact by the publish path). Absent and `[]` stay two
-  // accepted spellings; the guarantee is only that no platform writer mints the
-  // second. Pinned here so neither direction can drift silently.
-  it("dropRetiredRuntimeTools leaves an author-written empty runtime_tools untouched", () => {
-    const stored = { type: "agent", name: "@test/a", runtime_tools: [] };
-    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
-    expect(dropped).toEqual([]);
-    // Same reference — no copy, no key deletion.
-    expect(manifest).toBe(stored);
-    expect("runtime_tools" in manifest).toBe(true);
-    expect(manifest.runtime_tools).toEqual([]);
-  });
-
-  it("dropRetiredRuntimeTools leaves non-agent manifests untouched", () => {
-    const stored = { type: "skill", runtime_tools: ["report"] };
-    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
-    expect(manifest).toBe(stored);
-    expect(dropped).toEqual([]);
-  });
-
-  // -------------------------------------------------------------------------
-  // An id the platform does not know: refused by direction, never guessed.
-  //
-  // `runtime_tools` is persisted inside agent manifests, including published
-  // ZIPs that are immutable by construction, so the two directions cannot
-  // share one rule. Author input is REJECTED (the author can still fix it);
-  // a stored manifest has the id DROPPED and REPORTED (a hard rejection would
-  // make the agent permanently unrunnable). `publish_document` — the retired
-  // pre-#1177 spelling that used to be aliased forward — is the worked
-  // example: it is now simply unknown.
-  // -------------------------------------------------------------------------
-
-  it("a stored manifest naming a retired id has it dropped AND reported", () => {
-    const result = validateManifest(
-      validAgentManifest({ runtime_tools: ["log", "publish_document"] }),
-      { retiredRuntimeTools: "drop" },
-    );
-    expect(result.valid).toBe(true);
-    // Reported — this is what makes the removal auditable instead of silent.
-    expect(result.valid && result.droppedRuntimeTools).toEqual(["publish_document"]);
-    // Dropped, NOT resolved to `publish_file`. The agent keeps its other tools.
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
-  });
-
-  it("an author saving a retired id is refused rather than corrected", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["publish_document"] }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
-  });
-
-  it("dropRetiredRuntimeTools strips the unknown id and leaves the rest byte-identical", () => {
-    // What the publish path serialises into the integrity-hashed ZIP: key
-    // order and unknown fields survive, only the unknown id disappears.
-    const stored = {
-      name: "@test/my-agent",
-      runtime_tools: ["log", "publish_document"],
-      custom_field: "must-survive",
-      type: "agent",
-    };
-    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
-    expect(dropped).toEqual(["publish_document"]);
-    expect(Object.keys(manifest)).toEqual(Object.keys(stored));
-    expect(manifest.custom_field).toBe("must-survive");
-    expect(manifest.runtime_tools).toEqual(["log"]);
-  });
-
-  it("dropping the only id removes the key rather than leaving it empty", () => {
-    const { manifest, dropped } = dropRetiredRuntimeTools({
-      type: "agent",
-      name: "@test/a",
-      runtime_tools: ["publish_document"],
-    });
-    expect(dropped).toEqual(["publish_document"]);
-    expect(manifest.runtime_tools).toBeUndefined();
-  });
-
-  it("an unknown id is rejected on the author path alongside a valid one", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["publish_file", "lgo"] }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
-  });
-
-  it("agent with no output schema is valid without the `output` runtime tool", () => {
-    // Side-effect-only run: do a task and finish, no result to return.
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects an output schema when the `output` runtime tool is not selected", () => {
+  it("accepts an output schema", () => {
     const result = validateManifest(
       validAgentManifest({
         output: { schema: { type: "object", properties: { x: { type: "string" } } } },
-        runtime_tools: ["log"],
-      }),
-    );
-    expect(result.valid).toBe(false);
-    // Error is surfaced on the runtime_tools field so the editor can render it.
-    expect(result.errors.some((e) => e.startsWith("runtime_tools:"))).toBe(true);
-  });
-
-  it("accepts an output schema when the `output` runtime tool is selected", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        output: { schema: { type: "object", properties: { x: { type: "string" } } } },
-        runtime_tools: ["output", "log"],
       }),
     );
     expect(result.valid).toBe(true);
@@ -526,12 +324,11 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
   });
 
-  it("accepts skill + mcp_server dependency values as bare semver strings (§4.1)", () => {
+  it("accepts skill dependency values as bare semver strings (§4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          skills: { "@test/skill": "^1.0.0" },
-          mcp_servers: { "@test/mcp": "^2.0.0" },
+          skills: { "@test/skill": "^1.0.0", "@test/other": "^2.0.0" },
         },
       }),
     );
@@ -698,7 +495,6 @@ describe("validateManifest", () => {
       dependencies: {
         integrations: { "@test/google": "^1.0.0" },
         skills: {},
-        mcp_servers: {},
         customDepsField: "preserved",
       },
       integrations_configuration: {
@@ -724,7 +520,7 @@ describe("validateManifest", () => {
 });
 
 // ─────────────────────────────────────────────
-// validateManifest — all four AFPS package types
+// validateManifest — the three AFPS package types
 // ─────────────────────────────────────────────
 
 describe("validateManifest — package-type dispatch", () => {
@@ -750,50 +546,23 @@ describe("validateManifest — package-type dispatch", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("dispatches an mcp-server manifest via root identity (AFPS §3.4)", () => {
+  it("dispatches a local integration declaring its server inline", () => {
     const r = validateManifest({
-      manifest_version: "0.3",
       name: "@test/fetch-json",
       version: "1.0.0",
-      type: "mcp-server",
+      type: "integration",
       schema_version: "0.1",
       display_name: "Fetch JSON",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
     });
     expect(r.valid).toBe(true);
-  });
-
-  it("rejects an mcp-server manifest with no root identity", () => {
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "@test/fetch-json",
-      version: "1.0.0",
-      // missing type: "mcp-server"
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node" },
-      },
-    });
-    // No root `type` → dispatcher fails fast with the typed Unknown-package-type
-    // error (AFPS requires `type` as the discriminator).
-    expect(r.valid).toBe(false);
-  });
-
-  it("rejects an mcp-server with uv server type on manifest_version 0.3", () => {
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "@test/uv-srv",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
-    });
-    expect(r.valid).toBe(false);
   });
 });
 

@@ -43,16 +43,7 @@ export const runStatusEnum = pgEnum("run_status", runStatusValues);
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
 
-export const packageTypeValues = [
-  "agent",
-  "skill",
-  "integration",
-  // AFPS §3.4 — a standalone MCP Bundle (MCPB) package that an
-  // integration's `source.kind: "local"` references via `source.server`.
-  // The integration carries the auth/scope/delivery contract; the mcp-server
-  // package carries the runnable server (entry point + runtime).
-  "mcp-server",
-] as const;
+export const packageTypeValues = ["agent", "skill", "integration"] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
 export type PackageType = (typeof packageTypeValues)[number];
 

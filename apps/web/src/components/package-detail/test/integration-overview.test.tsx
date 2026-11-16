@@ -79,8 +79,6 @@ describe("the integration overview", () => {
 
   it("opens the tools at their section's address, carrying nothing else", () => {
     const html = renderOverview([]);
-    expect(html).toContain(
-      'href="/integrations/@acme/gmail?integrationSettings=tools#configuration"',
-    );
+    expect(html).toContain('href="/integrations/@acme/gmail?integrationSettings=tools#settings"');
   });
 });

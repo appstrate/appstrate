@@ -223,6 +223,15 @@ export class HttpSink implements EventSink {
   }
 }
 
+/**
+ * The run endpoint `endpoint` beside the run's event sink, authenticated by the
+ * same run-secret signature: `…/api/runs/{id}/events` → `…/api/runs/{id}/{endpoint}`.
+ */
+export function sinkSiblingUrl(sinkUrl: string, endpoint: string): string {
+  if (!sinkUrl.endsWith("/events")) throw new Error(`sink URL does not end in /events: ${sinkUrl}`);
+  return `${sinkUrl.slice(0, -"events".length)}${endpoint}`;
+}
+
 class NonRetryableHttpError extends Error {
   constructor(
     readonly status: number,

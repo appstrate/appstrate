@@ -23,7 +23,6 @@ const LIST_ROUTE = {
   agents: "/agents",
   skills: "/skills",
   integrations: "/integrations",
-  "mcp-servers": "/mcp-servers",
 } as const satisfies Record<string, PermissionRoute>;
 
 export type SpaceList = keyof typeof LIST_ROUTE;

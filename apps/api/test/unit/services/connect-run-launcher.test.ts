@@ -38,7 +38,6 @@ import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
   parseConnectResult,
-  type McpServerResolver,
 } from "../../../src/services/connect/connect-run-launcher.ts";
 import type { ConnectToolExecution } from "../../../src/services/connect/orchestrated-strategy.ts";
 import {
@@ -57,6 +56,7 @@ beforeAll(() => {
 
 const MANIFEST: IntegrationManifest = localIntegrationManifest({
   name: "@scope/connect-it",
+  server: { type: "python", entryPoint: "./server.py", env: { REGION: "ca-central" } },
   auths: {
     session: {
       type: "custom",
@@ -76,22 +76,8 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
   },
 });
 
-// The local-source integration references an mcp-server package; the launcher
-// resolves its runnable server config. Injected here so the unit test needs no DB.
-const SERVER_ID = "@scope/connect-it-server";
-const SERVER_VERSION = "1.4.2";
-const resolverCalls: { packageId: string; orgId: string; pin: string | null }[] = [];
-// The real resolver honours the `source.server.version` RANGE and answers with
-// a CONCRETE published version; the fixture mirrors that contract (a resolver
-// that echoed the range back would produce a `?version=^1.0.0` the byte route
-// 404s).
-const fakeMcpResolver: McpServerResolver = async (packageId, orgId, pin) => {
-  resolverCalls.push({ packageId, orgId, pin });
-  return {
-    server: { type: "python", entry_point: "./server.py" },
-    version: SERVER_VERSION,
-  };
-};
+// The launcher names the published version the manifest was read from, carried on the execution.
+const BUNDLE_VERSION = "1.4.2";
 
 /**
  * Mirror of the sidecar's result-channel encryption
@@ -113,6 +99,7 @@ function execution(): ConnectToolExecution {
     integrationId: "@scope/connect-it",
     authKey: "session",
     manifest: MANIFEST,
+    bundleVersion: BUNDLE_VERSION,
     toolName: "login",
     produces: ["session_token"],
     inputs: { email: "a@b.c", password: "pw" },
@@ -231,26 +218,20 @@ function mockOrchestrator(opts: {
 }
 
 describe("buildConnectLoginSpec", () => {
-  it("derives the connectLogin block from the manifest auth + resolved mcp-server", async () => {
-    const spec = await buildConnectLoginSpec(execution(), fakeMcpResolver);
+  it("derives the connectLogin block from the manifest auth + the integration's inline server", async () => {
+    const spec = await buildConnectLoginSpec(execution());
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
-    // The runnable server config comes from the referenced mcp-server package —
-    // INCLUDING which package it is and which concrete version, without which
-    // the sidecar cannot fetch the bytes (it hard-fails a local spec that names
-    // no `packageId`, and the byte route rejects an absent `?version=`).
+    // The runnable server config is the integration's own, INCLUDING the published version the
+    // sidecar forwards when it fetches the integration's archive by `integrationId`.
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
-      packageId: SERVER_ID,
-      version: SERVER_VERSION,
+      version: BUNDLE_VERSION,
     });
-    // The pin handed to the resolver is the manifest RANGE, scoped to the run's org.
-    expect(resolverCalls.at(-1)).toEqual({
-      packageId: SERVER_ID,
-      orgId: "o",
-      pin: "^1.0.0",
-    });
+    // The literal `mcp_config.env` of the server rides the spawn env, as on the agent-run path.
+    expect(spec.spawnEnv).toEqual({ REGION: "ca-central" });
+    // The version is looked up for the integration itself, in the run's org.
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -289,7 +270,7 @@ describe("buildConnectLoginSpec", () => {
       opts: { tls: true },
       otp: null,
     };
-    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    const spec = await buildConnectLoginSpec(ex);
     const expected = {
       email: "a@b.c",
       password: "pw",
@@ -311,7 +292,7 @@ describe("buildConnectLoginSpec", () => {
     delete auth.authorized_uris;
     auth.allow_all_uris = true;
     ex.manifest = allowAll;
-    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    const spec = await buildConnectLoginSpec(ex);
     expect(spec.egress).toEqual({ authorizedUris: [], declaredUris: [], allowAllUris: true });
   });
 
@@ -320,7 +301,7 @@ describe("buildConnectLoginSpec", () => {
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
     delete (noHttp.auths!.session as { delivery?: unknown }).delivery;
     ex.manifest = noHttp;
-    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no delivery.http/);
+    await expect(buildConnectLoginSpec(ex)).rejects.toThrow(/no delivery.http/);
   });
 
   it("throws when the integration is not a local source (no spawnable server)", async () => {
@@ -331,26 +312,15 @@ describe("buildConnectLoginSpec", () => {
       remote: { url: "https://x/mcp", transport: "streamable-http" },
     };
     ex.manifest = remote as unknown as IntegrationManifest;
-    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no spawnable server/);
+    await expect(buildConnectLoginSpec(ex)).rejects.toThrow(/no spawnable server/);
   });
 
-  it("omits server.version for a system mcp-server (byte route serves it by id alone)", async () => {
-    const systemResolver: McpServerResolver = async () => ({
-      server: { type: "python", entry_point: "./server.py" },
-      version: null,
-    });
-    const spec = await buildConnectLoginSpec(execution(), systemResolver);
+  it("omits server.version when there is none to name (system integration, unpublished draft)", async () => {
+    const spec = await buildConnectLoginSpec({ ...execution(), bundleVersion: null });
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
-      packageId: SERVER_ID,
     });
-  });
-
-  it("throws when the referenced mcp-server cannot be resolved", async () => {
-    const ex = execution();
-    const missing: McpServerResolver = async () => null;
-    await expect(buildConnectLoginSpec(ex, missing)).rejects.toThrow(/mcp-server/);
   });
 });
 
@@ -498,7 +468,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     const result = await executor.run(execution());
@@ -528,7 +497,7 @@ describe("createConnectRunExecutor.run", () => {
   // exists before the sidecar can call, names only what the spec resolved, and
   // is gone the moment the run ends — on every exit path.
 
-  it("publishes the grant BEFORE createSidecar, naming exactly the resolved integration + mcp-server + version", async () => {
+  it("publishes the grant BEFORE createSidecar, naming exactly the resolved integration + version", async () => {
     // Catches: never writing the grant (the connect run then 404s on its first
     // `/internal/*` call — the pre-existing gap), writing it AFTER
     // `createSidecar` (a race the sidecar loses on a fast boot), and widening
@@ -538,7 +507,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     await executor.run(execution());
@@ -547,8 +515,7 @@ describe("createConnectRunExecutor.run", () => {
     expect(calls.grantAtSidecar[0]).toEqual({
       orgId: "o",
       integrationId: "@scope/connect-it",
-      mcpServerId: SERVER_ID,
-      mcpServerVersion: SERVER_VERSION,
+      version: BUNDLE_VERSION,
     });
     // …and it is keyed by the id the run token is signed over, not by anything
     // else the sidecar could not present.
@@ -567,7 +534,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
@@ -584,7 +550,6 @@ describe("createConnectRunExecutor.run", () => {
     const executor = createConnectRunExecutor({
       orchestrator: orch,
       timeoutMs: 30,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow();
@@ -599,7 +564,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
@@ -619,7 +583,6 @@ describe("createConnectRunExecutor.run", () => {
     const { orch, calls } = mockOrchestrator({ stdoutLines: logs, exitCode: 137 });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -653,7 +616,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -673,7 +635,6 @@ describe("createConnectRunExecutor.run", () => {
     });
     const executor = createConnectRunExecutor({
       orchestrator: orch,
-      resolveMcpServer: fakeMcpResolver,
     });
     const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
     try {
@@ -689,7 +650,6 @@ describe("createConnectRunExecutor.run", () => {
     const executor = createConnectRunExecutor({
       orchestrator: orch,
       timeoutMs: 30,
-      resolveMcpServer: fakeMcpResolver,
     });
 
     // A timeout is an upstream failure, not a server bug — 504 with the budget
@@ -726,7 +686,7 @@ describe("createConnectRunExecutor.run", () => {
     );
     _resetCacheForTesting();
     try {
-      const executor = createConnectRunExecutor({ resolveMcpServer: fakeMcpResolver });
+      const executor = createConnectRunExecutor();
       // INVERTED (failure-legibility): the throw used to carry the operator
       // remedy `RUN_ADAPTER="fake-vm" … use RUN_ADAPTER=docker` in its message,
       // which the routes turned into a flat 500 for everyone — including an end

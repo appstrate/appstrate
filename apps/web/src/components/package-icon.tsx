@@ -8,7 +8,13 @@ import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 
-const BOX = { sm: "size-7 rounded-md", md: "size-10 rounded-[10px]" } as const;
+/** `xs` sits inline beside a line of text, `sm` in a compact row, `md` on a card. */
+const BOX = {
+  xs: "size-4 rounded-sm",
+  sm: "size-7 rounded-md",
+  md: "size-10 rounded-[10px]",
+} as const;
+const GLYPH_PADDING = { xs: "p-0", sm: "p-1", md: "p-1.5" } as const;
 
 type PackageIconSize = keyof typeof BOX;
 
@@ -41,7 +47,7 @@ export function PackageIcon(props: PackageIconProps) {
   const { type, name, icon, color, size = "md", className } = props;
   const box = cn(BOX[size], className);
   const muted = cn("bg-muted text-muted-foreground flex shrink-0 items-center justify-center", box);
-  const mutedGlyph = size === "sm" ? "size-4" : "size-5";
+  const mutedGlyph = { xs: "size-3", sm: "size-4", md: "size-5" }[size];
 
   if (props.type === "agent") {
     return (
@@ -67,7 +73,7 @@ export function PackageIcon(props: PackageIconProps) {
     return (
       <ManifestGlyph
         icon={parsed}
-        className={cn("shrink-0", box, size === "sm" ? "p-1" : "p-1.5")}
+        className={cn("shrink-0", box, GLYPH_PADDING[size])}
         fallback={placeholder}
       />
     );

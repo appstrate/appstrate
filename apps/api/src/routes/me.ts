@@ -102,7 +102,7 @@ import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 
 const router = new Hono<AppEnv>();
 

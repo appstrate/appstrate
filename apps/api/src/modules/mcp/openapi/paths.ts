@@ -9,54 +9,11 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
-
-const jsonRpcRequestBody = {
-  required: true,
-  content: {
-    "application/json": {
-      schema: {
-        type: "object",
-        description: "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
-        properties: {
-          jsonrpc: { type: "string", enum: ["2.0"] },
-          id: { type: ["string", "number", "null"] },
-          method: { type: "string" },
-          params: { type: "object", additionalProperties: true },
-        },
-        required: ["jsonrpc", "method"],
-      },
-    },
-  },
-} as const;
-
-/** A refusal the SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
-function jsonRpcTransportError(description: string) {
-  return {
-    description,
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          description: "A JSON-RPC 2.0 error envelope.",
-          properties: {
-            jsonrpc: { type: "string", enum: ["2.0"] },
-            id: { type: "null" },
-            error: {
-              type: "object",
-              properties: {
-                code: { type: "integer" },
-                message: { type: "string" },
-                data: {},
-              },
-              required: ["code", "message"],
-            },
-          },
-          required: ["jsonrpc", "id", "error"],
-        },
-      },
-    },
-  } as const;
-}
+import {
+  jsonRpcErrorContent,
+  jsonRpcRequestBody,
+  mcpTransportResponses,
+} from "../../../openapi/responses.ts";
 
 const orgPathParameter = {
   name: "org",
@@ -84,14 +41,14 @@ const MCP_TOOLS_DESCRIPTION =
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
   "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
-  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or " +
+  "`search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or " +
   "`credential-proxy:call`, on a " +
   "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
   "role. Together they let an MCP client discover and call platform API operations, " +
   "launch and wait for agent runs, and call third-party APIs through the caller's own " +
   "connections (and those shared into the space, for a caller holding " +
-  "`credential-proxy:call`), with the caller's own credentials. `api_call` is the only " +
+  "`credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only " +
   "MCP path to the " +
   "credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves.";
 
@@ -161,24 +118,13 @@ const orgEndpoint = {
           "`invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; " +
           "pin a space with `/api/mcp/o/{org}/s/{space}` instead.",
         content: {
-          ...jsonRpcTransportError("").content,
+          ...jsonRpcErrorContent,
           "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
         },
       },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
-      "406": jsonRpcTransportError(
-        "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
-      ),
-      "413": {
-        description:
-          "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
-          "(enforced by the body-limit middleware, before the MCP transport).",
-        content: {
-          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-        },
-      },
-      "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
+      ...mcpTransportResponses,
     },
   },
   get: {

@@ -10,8 +10,8 @@
  * this loader path therefore reject the same inputs from a single source.
  *
  * Spec references: §3.3 (skill SKILL.md + frontmatter `name`), §3.4 (agent
- * prompt.md non-empty; mcp-server `server.entry_point` payload present in
- * the archive).
+ * prompt.md non-empty; a `local` integration's `source.server.entry_point`
+ * payload present in the archive).
  */
 
 import {
@@ -28,7 +28,7 @@ import { BundleError } from "./errors.ts";
  * over the shared `checkCompanionFiles`.
  */
 export function checkCompanionFiles(
-  manifest: { type?: unknown; server?: unknown } & Record<string, unknown>,
+  manifest: { type?: unknown; source?: unknown } & Record<string, unknown>,
   files: Map<string, Uint8Array>,
 ): CompanionFileViolation | null {
   return checkCompanionFilesShared(manifest, companionFilesFromMap(files));
@@ -41,7 +41,7 @@ export function checkCompanionFiles(
  * surface is uniform.
  */
 export function assertCompanionFiles(
-  manifest: { type?: unknown; server?: unknown } & Record<string, unknown>,
+  manifest: { type?: unknown; source?: unknown } & Record<string, unknown>,
   files: Map<string, Uint8Array>,
 ): void {
   const violation = checkCompanionFiles(manifest, files);

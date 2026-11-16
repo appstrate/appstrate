@@ -6,7 +6,7 @@
  *
  * The bundle is self-describing — its root package holds the prompt
  * template + input/output schemas, and every non-root package
- * declares its own `type` (skill / mcp-server / integration) in its
+ * declares its own `type` (skill / integration) in its
  * manifest. That is enough to compute every section of the platform
  * preamble that does not require live platform state (DB, sidecar,
  * credentials).
@@ -33,6 +33,7 @@ import type {
 import { PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 import { readIntegrationRefs } from "../resolvers/integration-api-call.ts";
 import { resolvePackageRef } from "../resolvers/bundle-adapter.ts";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 
 /** Plain-object narrowing used throughout the helper. */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -54,15 +55,13 @@ function readTimeoutSeconds(bundle: Bundle): number | undefined {
 }
 
 /**
- * Extract the AFPS `{ schema, file_constraints?, ui_hints?, … }` wrapper
- * for input/output sections. Returns the inner JSON Schema when
- * present, or `undefined`.
+ * Extract the inner JSON Schema of the AFPS `input` wrapper
+ * (`{ schema, file_constraints?, ui_hints?, … }`), or `undefined`.
  */
-function readSchemaSection(
+function readInputSchema(
   manifest: Record<string, unknown> | undefined,
-  key: "input" | "output",
 ): Record<string, unknown> | undefined {
-  const section = manifest?.[key];
+  const section = manifest?.["input"];
   if (!isPlainObject(section)) return undefined;
   const schema = section["schema"];
   return isPlainObject(schema) ? schema : undefined;
@@ -144,8 +143,8 @@ export function buildPlatformPromptInputs(
   const { availableIntegrationIds, ...promptOverrides } = overrides;
   const available = new Set(availableIntegrationIds ?? []);
 
-  const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
-  const outputSchema = readSchemaSection(rootManifest, "output");
+  const inputSchema = asPromptSchema(readInputSchema(rootManifest));
+  const outputSchema = readDeclaredOutputSchema(rootManifest);
 
   const derived: PlatformPromptOptions = {
     template: readRootPromptTemplate(bundle),

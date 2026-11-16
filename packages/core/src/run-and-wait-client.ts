@@ -4,6 +4,7 @@ import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "./integration.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
@@ -82,21 +83,24 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
 
 /**
  * Request header asking the run-kickoff routes to mint a hosted-connect session
- * for every actor-actionable item of a `missing_integration_connection` 409 and
+ * for every actor-actionable item of a `missing_integration_connection` 409 (and
+ * the credential proxy's tool routes, for a connection-selection 409, and its
+ * integrations listing, for each `refusal`) and
  * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
  * error carries the remedy, so nothing has to be called to obtain it).
  *
  * A minted `connect_url` is a bearer capability that creates a connection AS
  * the calling actor. Set this header ONLY from a caller that either renders the
  * connect card itself (the chat) or hands the link straight to the human who is
- * that actor — the external MCP `run_and_wait` tool qualifies, because the model
- * driving it already receives a `connect_url` from `initiateIntegrationConnect`
- * on that very same path, so this is not a new exposure class. Never set it from
+ * that actor — the external MCP `run_and_wait`, `search_integration_tools` and
+ * `call_integration_tool` tools qualify, because the model driving them already
+ * receives a `connect_url` from `initiateIntegrationConnect` on that very same
+ * path, so this is not a new exposure class. Never set it from
  * a caller that logs its responses, persists them, or forwards them to a third
  * party; the dashboard, the CLI, the GitHub Action, the scheduler and dry-run
  * validation all leave it unset and keep driving the connect kickoff themselves.
  *
- * Sent on the LAUNCH request only; the poll loop never carries it.
+ * For a run, sent on the LAUNCH request only; the poll loop never carries it.
  */
 export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
 
@@ -150,20 +154,27 @@ type MaterializedManifest =
   | { manifest: Record<string, unknown>; error?: undefined }
   | { manifest?: undefined; error: string };
 
+/** What `materializeInlineManifest` does, told to whoever composes an inline run. */
+export const INLINE_MANIFEST_RULE =
+  "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set only a " +
+  "concise task-specific `display_name` plus the dependencies/configuration the task needs. " +
+  "The platform derives `name` and fills the top-level fields you omit with AFPS boilerplate " +
+  "and an open object `output` schema; every field you provide replaces its default verbatim, " +
+  "except the tables keyed by package id, which receive defaults entry by entry: the platform " +
+  "adds the `@appstrate/platform` dependency unless `dependencies.integrations` already names " +
+  "it, and selects its `log` tool in `integrations_configuration` unless either " +
+  "`dependencies.integrations` or `integrations_configuration` names it (the dependency alone " +
+  "keeps its `default_tools`). It never changes your entries, and " +
+  '`integrations_configuration["@appstrate/platform"] = { tools: [] }` gives a run without ' +
+  "the platform tools. A complete deterministic manifest may override every field, including " +
+  "a strict `output.schema`; the run has the `output` tool exactly when its manifest declares " +
+  "a non-empty `output.schema`.";
+
 /**
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
- * AFPS manifest sent to the inline-run route.
- *
- * This is a shallow defaulting boundary by design: defaults fill ABSENT
- * top-level fields only, while every caller-supplied field replaces its
- * default verbatim. In particular, an explicit `runtime_tools: []` remains an
- * empty array; no capability is silently re-injected. Nested deterministic
- * contracts such as `output.schema` therefore remain entirely caller-owned.
- *
- * `output` is part of the convenience runtime-tools default rather than an
- * independent default. Once a caller explicitly selects `runtime_tools`, an
- * absent `output` stays absent so side-effect-only agents — including
- * `runtime_tools: []` — remain expressible.
+ * AFPS manifest sent to the inline-run route, as {@link INLINE_MANIFEST_RULE}
+ * states. A `dependencies` or `dependencies.integrations` value that is not an
+ * object is left as written, for manifest validation to refuse.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -188,17 +199,39 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";
-  if (!hasOwn("dependencies")) defaults.dependencies = {};
-  if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_file"];
-    if (!hasOwn("output")) {
-      defaults.output = {
-        schema: { type: "object", properties: {}, additionalProperties: true },
+  if (!hasOwn("output")) {
+    defaults.output = {
+      schema: { type: "object", properties: {}, additionalProperties: true },
+    };
+  }
+
+  const materialized: Record<string, unknown> = { ...defaults, ...manifest };
+  const names = (table: Record<string, unknown>): boolean =>
+    Object.prototype.hasOwnProperty.call(table, PLATFORM_INTEGRATION_ID);
+
+  const dependencies = hasOwn("dependencies") ? asRecordOrNull(manifest.dependencies) : {};
+  const integrations =
+    dependencies && Object.prototype.hasOwnProperty.call(dependencies, "integrations")
+      ? asRecordOrNull(dependencies.integrations)
+      : {};
+  const configuration = hasOwn("integrations_configuration")
+    ? asRecordOrNull(manifest.integrations_configuration)
+    : {};
+
+  if (dependencies && integrations && !names(integrations)) {
+    materialized.dependencies = {
+      ...dependencies,
+      integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE },
+    };
+    if (configuration && !names(configuration)) {
+      materialized.integrations_configuration = {
+        ...configuration,
+        [PLATFORM_INTEGRATION_ID]: { tools: ["log"] },
       };
     }
   }
 
-  return { manifest: { ...defaults, ...manifest } };
+  return { manifest: materialized };
 }
 
 /**
@@ -680,14 +713,6 @@ export async function launchRunAndWait(
               "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
           : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
               "alongside `manifest` (not inside it).",
-      );
-    }
-    const selected = manifest.runtime_tools;
-    if (selected !== undefined && !Array.isArray(selected)) {
-      return refuseArguments(
-        "invalid_argument",
-        "`manifest.runtime_tools` must be an array for kind:'inline'.",
-        ["manifest.runtime_tools"],
       );
     }
     const materialized = materializeInlineManifest(manifest);

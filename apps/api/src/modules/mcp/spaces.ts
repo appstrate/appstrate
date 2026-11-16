@@ -9,7 +9,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
-import { callerReachableSpaces } from "../../lib/reachable-spaces.ts";
+import { callerReachableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
 import type { Refusal } from "./tool-results.ts";
@@ -21,7 +21,7 @@ export interface McpSpace {
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
   permissions: ReadonlySet<string>;
-  /** The acts the caller holds there (`deriveMcpSurface` over `permissions`). */
+  /** The acts the caller holds there (`deriveMcpSurface` over `permissions` and the space). */
   surface: McpSurface;
 }
 
@@ -36,18 +36,26 @@ export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
   return [c.get("spaceId"), c.req.param("space")].filter((id): id is string => Boolean(id));
 }
 
-/** The reachable spaces whose role grants `mcp:read`: the MCP acts, it does not browse. */
+/**
+ * The reachable spaces whose role grants `mcp:read` (the MCP acts, it does not browse), each
+ * with the acts `surfaceOf` gives it there.
+ */
 export async function listReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
-): Promise<Omit<McpSpace, "surface">[]> {
+  surfaceOf: (
+    permissions: ReadonlySet<string>,
+    space: Pick<ReachableSpace, "credentialProxyOpen">,
+  ) => McpSurface,
+): Promise<McpSpace[]> {
   return (await callerReachableSpaces(c, orgId))
     .filter((space) => space.permissions.has("mcp:read"))
-    .map(({ id, name, role, permissions }) => ({
-      id,
-      name,
-      role: toSpaceRoleWire(role)!.name,
-      permissions,
+    .map((space) => ({
+      id: space.id,
+      name: space.name,
+      role: toSpaceRoleWire(space.role)!.name,
+      permissions: space.permissions,
+      surface: surfaceOf(space.permissions, space),
     }));
 }
 

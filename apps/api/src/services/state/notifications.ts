@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { eq, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
   notifications,
@@ -14,7 +15,7 @@ import {
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
@@ -85,8 +86,9 @@ export async function notifyRunFinished(
 }
 
 /**
- * Read the caller's notification of one run (`runId`), or of every run: opening
- * a run, or reading them all, acknowledges the failure the bell showed for it.
+ * Read the caller's notifications of one run (`runId`), or of every run: opening
+ * a run, or reading them all, acknowledges what the bell showed for it — its
+ * failure, and the message its agent sent. Every kind with a run is read.
  */
 export async function markRunNotificationsRead(
   scope: SpaceScope,
@@ -102,12 +104,53 @@ export async function markRunNotificationsRead(
         spaceId: scope.spaceId,
         extra: [
           recipientFilter(actor),
-          eq(notifications.type, "run_failed"),
+          isNotNull(notifications.runId),
           isNull(notifications.readAt),
           ...(runId ? [eq(notifications.runId, runId)] : []),
         ],
       }),
     );
+}
+
+/**
+ * Write the notification an agent sends from inside its run (`notify`, a tool
+ * of `@appstrate/platform`), one row per recipient of the run
+ * (`resolveRunRecipients`, the same people its read state and failure notice
+ * go to).
+ *
+ * Each recipient receives at most one `agent_message` per run: the
+ * `(run, recipient, type)` unique index makes a second call a no-op. Returns how
+ * many rows were written; `0` means the run already sent its message. `recipients`
+ * is not empty.
+ */
+export async function createAgentMessageNotifications(
+  scope: SpaceScope,
+  run: { id: string; packageId: string | null; agentName: string | null },
+  recipients: Actor[],
+  message: { title: string; message: string },
+): Promise<number> {
+  const payload: NotificationPayloads["agent_message"] = toPgSafe({
+    packageId: run.packageId,
+    agent_name: run.agentName,
+    title: message.title,
+    message: message.message,
+  });
+  const inserted = await db
+    .insert(notifications)
+    .values(
+      recipients.map((r) => ({
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        recipientType: r.type,
+        recipientId: r.id,
+        type: "agent_message" as const,
+        runId: run.id,
+        payload,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ id: notifications.id });
+  return inserted.length;
 }
 
 /**
@@ -227,10 +270,9 @@ export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor
 export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
-  options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
+  options: { unread?: boolean; limit: number; startingAfter?: string },
 ): Promise<ListEnvelope<NotificationDto>> {
-  const { unread = false, startingAfter } = options;
-  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const { unread = false, limit, startingAfter } = options;
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
   const extra: SQL[] = [recipientFilter(actor)];

@@ -47,6 +47,7 @@ import {
   createInProcessPair,
   createMcpHttpClient,
   httpStatusOf,
+  mcpFetch,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -116,7 +117,7 @@ import type { WorkspaceHandle } from "@appstrate/core/platform-types";
  * Decode the workspace handle from the launching orchestrator's
  * `WORKSPACE_HANDLE_JSON` env var. Returns `null` when the var is
  * absent or malformed — the sidecar then degrades to no-workspace
- * (any opt-in mcp-server runs without workspace access, logged as a
+ * (any opt-in local server runs without workspace access, logged as a
  * warning at spawn time). Strict shape validation: a foreign-shaped
  * JSON triggers a one-time warn but doesn't abort boot.
  */
@@ -168,7 +169,7 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
 
 /**
  * Where the sidecar fetches integration bundles from. The platform
- * surface is `GET /internal/mcp-server-bundle/:scope/:name` with
+ * surface is `GET /internal/integration-bundle/:scope/:name` with
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
 interface BundleFetchOptions {
@@ -246,25 +247,24 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
 }
 
 /**
- * Fetch a referenced mcp-server package's bundle from the platform's internal
- * surface. AFPS: a local-source integration references a SEPARATE
- * mcp-server package (`source.server.name`); its bundle carries the runnable
- * server code. The endpoint authorises with the same Bearer run-token as the
- * credentials surface and verifies that the run's agent declares an installed
- * integration referencing this mcp-server.
+ * Fetch a local integration's own archive from the platform's internal
+ * surface. The archive carries the runnable server payload next to the
+ * manifest; `server.entry_point` is relative to its root. The endpoint
+ * authorises with the same Bearer run-token as the credentials surface and
+ * verifies that the run's agent declares this integration.
  */
 async function fetchBundleBytes(
-  mcpServerId: string,
-  serverVersion: string | undefined,
+  integrationId: string,
+  integrationVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
   // The platform pins a concrete version at run kickoff; forward it so
   // the bytes match the manifest the spawn-resolver read. Only a system
-  // mcp-server has none (boot registry, single version, served by id alone) —
+  // integration has none (boot registry, single version, served by id alone) —
   // for anything else the route rejects an absent `?version=`.
-  const url = serverVersion
-    ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
-    : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
+  const url = integrationVersion
+    ? `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}?version=${encodeURIComponent(integrationVersion)}`
+    : `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}`;
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { Authorization: `Bearer ${opts.runToken}` } });
   if (!res.ok) {
@@ -276,7 +276,7 @@ async function fetchBundleBytes(
       // ignore
     }
     throw new Error(
-      detail || `Failed to fetch mcp-server bundle for ${mcpServerId}: HTTP ${res.status}`,
+      detail || `Failed to fetch integration bundle for ${integrationId}: HTTP ${res.status}`,
     );
   }
   const ab = await res.arrayBuffer();
@@ -298,7 +298,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-`));
   // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
-  // sidecar (decompression-bomb floor). Caps chosen for a realistic mcp-server
+  // sidecar (decompression-bomb floor). Caps chosen for a realistic local server
   // bundle (multi-MB code + deps) with generous headroom: 200 MiB total across
   // at most 10k entries. `unzipBounded` throws `DecompressionLimitError` on a
   // budget breach; it excludes directory entries but does NOT sanitize paths —
@@ -514,12 +514,51 @@ function withRemoteFailures(client: AppstrateMcpClient, origin: string): Appstra
   };
 }
 
+/**
+ * Open a Streamable HTTP MCP client on an integration's endpoint through
+ * `fetchFn` (which owns credentials and egress), every failure — the connect
+ * and each later call — reported through {@link remoteMcpFailure}.
+ */
+async function connectStreamableHttp(
+  spec: IntegrationSpawnSpec,
+  endpoint: string,
+  fetchFn: typeof fetch,
+  clientInfo: { name: string; version: string },
+  deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs">,
+  era: "auto" | "legacy" = "auto",
+): Promise<AppstrateMcpClient> {
+  const createClient = deps.createClient ?? createMcpHttpClient;
+  const toolTimeoutMs = toolTimeoutMsFromEnv();
+  return settleRemoteClient(
+    createClient(endpoint, {
+      fetch: fetchFn,
+      clientInfo,
+      era,
+      onWarning: (message, data) =>
+        logger.warn(message, { integrationId: spec.integrationId, ...data }),
+      retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
+      ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
+    }),
+    originForLog(endpoint) ?? "<unparseable>",
+  );
+}
+
+/** A connecting client, its failure and every later one reported through {@link remoteMcpFailure}. */
+async function settleRemoteClient(
+  connecting: Promise<AppstrateMcpClient>,
+  origin: string,
+): Promise<AppstrateMcpClient> {
+  const client = await connecting.catch((err: unknown) => {
+    throw remoteMcpFailure(err, origin);
+  });
+  return withRemoteFailures(client, origin);
+}
+
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   source: IntegrationCredentialsSource | null,
   deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string | null }> {
-  const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
   const serverUrl = spec.manifest.server?.url;
@@ -597,107 +636,95 @@ export async function connectRemoteHttpIntegration(
   const handshakeRejectable =
     credential !== null && spec.connectLogin?.authKey !== credential.authKey;
 
-  // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
-  // call signature. The MCP transport's `fetch?: typeof fetch` option demands
-  // the full shape, so forward the real `preconnect` rather than casting it
-  // away — the override stays a faithful drop-in for `fetch`.
-  const customFetch: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const send = async (): Promise<{
-        response: Response;
-        credentialAnswered: boolean;
-        credentialRevision: string | undefined;
-      }> => {
-        const snapshot = credential?.source.snapshot();
-        const credentialRevision = snapshot?.credentialRevision;
-        const headers = new Headers(init?.headers);
-        const injection = planInjection(snapshot, [...headers.keys()]);
-        // `guardedFetch` accepts `string | URL`; the MCP transports always
-        // call with a URL/string target (headers/body ride in `init`), so a
-        // stray `Request` is normalised to its URL for the type.
-        const target: string | URL =
-          typeof input === "string" || input instanceof URL ? input : input.url;
-        // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
-        // hop that still carries it (same origin as the first; another origin strips it).
-        let validateHop: ((url: URL) => void) | undefined;
-        if (injection.kind === "inject") {
-          const authorizedUris =
-            snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
-          const origin = new URL(String(target)).origin;
-          validateHop = (url) => {
-            if (url.origin !== origin) return;
-            if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
-              throw new RemoteCredentialRefusal(
-                // The origin only: the endpoint's path may itself be a capability.
-                `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
-              );
-            }
-          };
-          // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
-          // reads would carry the credential.
-          assertHttpFieldValue(injection.header.name, injection.header.value);
-          headers.set(injection.header.name, injection.header.value);
-        }
-        const sensitiveHeaderName =
-          injection.kind === "inject"
-            ? injection.header.name
-            : injection.kind === "caller_override"
-              ? injection.headerName
-              : null;
-        // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
-        // by the platform) skip only the host blocklist — without this, a remote
-        // MCP server the platform-side spawn validation just allowed (internal
-        // host explicitly allowlisted by the operator) would be re-blocked here
-        // and fail opaquely in-run. Redirect discipline still applies.
-        const { response, credentialsForwarded } = await guardedFetchChain(
-          target,
-          { ...init, headers },
-          {
-            allowHost: isOperatorTrustedEgressHost,
-            // The injected credential header is arbitrarily NAMED by the
-            // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
-            // builtin authorization/cookie strip set cannot know about it —
-            // declare it, or a hostile server 302ing cross-origin would carry
-            // the credential to another origin.
-            ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
-            ...(validateHop ? { validateHop } : {}),
-            ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
-          },
-        );
-        return {
-          response,
-          // A redirect hop that dropped the credential: that answer says nothing about it.
-          credentialAnswered: injection.kind === "inject" && credentialsForwarded,
-          credentialRevision,
+  const customFetch = mcpFetch(async (target, init) => {
+    const send = async (): Promise<{
+      response: Response;
+      credentialAnswered: boolean;
+      credentialRevision: string | undefined;
+    }> => {
+      const snapshot = credential?.source.snapshot();
+      const credentialRevision = snapshot?.credentialRevision;
+      const headers = new Headers(init?.headers);
+      const injection = planInjection(snapshot, [...headers.keys()]);
+      // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
+      // hop that still carries it (same origin as the first; another origin strips it).
+      let validateHop: ((url: URL) => void) | undefined;
+      if (injection.kind === "inject") {
+        const authorizedUris =
+          snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
+        const origin = new URL(String(target)).origin;
+        validateHop = (url) => {
+          if (url.origin !== origin) return;
+          if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
+            throw new RemoteCredentialRefusal(
+              // The origin only: the endpoint's path may itself be a capability.
+              `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
+            );
+          }
         };
+        // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
+        // reads would carry the credential.
+        assertHttpFieldValue(injection.header.name, injection.header.value);
+        headers.set(injection.header.name, injection.header.value);
+      }
+      const sensitiveHeaderName =
+        injection.kind === "inject"
+          ? injection.header.name
+          : injection.kind === "caller_override"
+            ? injection.headerName
+            : null;
+      // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
+      // by the platform) skip only the host blocklist — without this, a remote
+      // MCP server the platform-side spawn validation just allowed (internal
+      // host explicitly allowlisted by the operator) would be re-blocked here
+      // and fail opaquely in-run. Redirect discipline still applies.
+      const { response, credentialsForwarded } = await guardedFetchChain(
+        target,
+        { ...init, headers },
+        {
+          allowHost: isOperatorTrustedEgressHost,
+          // The injected credential header is arbitrarily NAMED by the
+          // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
+          // builtin authorization/cookie strip set cannot know about it —
+          // declare it, or a hostile server 302ing cross-origin would carry
+          // the credential to another origin.
+          ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
+          ...(validateHop ? { validateHop } : {}),
+          ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
+        },
+      );
+      return {
+        response,
+        // A redirect hop that dropped the credential: that answer says nothing about it.
+        credentialAnswered: injection.kind === "inject" && credentialsForwarded,
+        credentialRevision,
       };
-      let attempt = await send();
-      if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
-        const handshake = handshakeRejectable && !connected;
-        const refreshed = await credential.source
-          .refreshOnUnauthorized(
-            credential.authKey,
-            attempt.credentialRevision,
-            handshake ? "handshake" : undefined,
-          )
-          .catch(() => false);
-        if (refreshed) attempt = await send();
-        else if (handshake && credential.source.needsReconnection()) {
-          // The connection's name and the reconnect step, rather than the server's 401 body.
-          throw new RemoteCredentialRefusal(
-            `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
-              `during the MCP handshake (HTTP 401); the connection is flagged as needing ` +
-              `reconnection. Reconnect it and relaunch the run.`,
-          );
-        }
+    };
+    let attempt = await send();
+    if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
+      const handshake = handshakeRejectable && !connected;
+      const refreshed = await credential.source
+        .refreshOnUnauthorized(
+          credential.authKey,
+          attempt.credentialRevision,
+          handshake ? "handshake" : undefined,
+        )
+        .catch(() => false);
+      if (refreshed) attempt = await send();
+      else if (handshake && credential.source.needsReconnection()) {
+        // The connection's name and the reconnect step, rather than the server's 401 body.
+        throw new RemoteCredentialRefusal(
+          `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
+            `during the MCP handshake (HTTP 401); the connection is flagged as needing ` +
+            `reconnection. Reconnect it and relaunch the run.`,
+        );
       }
-      if (credential && attempt.response.ok && attempt.credentialAnswered) {
-        credential.source.reportUpstreamSuccess(attempt.credentialRevision);
-      }
-      return attempt.response;
-    },
-    { preconnect: fetch.preconnect },
-  );
+    }
+    if (credential && attempt.response.ok && attempt.credentialAnswered) {
+      credential.source.reportUpstreamSuccess(attempt.credentialRevision);
+    }
+    return attempt.response;
+  });
 
   const clientInfo = {
     name: "appstrate-sidecar-remote-integration",
@@ -707,23 +734,45 @@ export async function connectRemoteHttpIntegration(
   // branches share the same per-request credential + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
-  const toolTimeoutMs = toolTimeoutMsFromEnv();
-  const connecting =
+  const client =
     transport === "sse"
-      ? createSseClient(serverUrl, { fetch: customFetch, clientInfo })
-      : createClient(serverUrl, {
-          fetch: customFetch,
-          clientInfo,
-          onWarning: (message, data) =>
-            logger.warn(message, { integrationId: spec.integrationId, ...data }),
-          retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
-          ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
-        });
-  const client = await connecting.catch((err: unknown) => {
-    throw remoteMcpFailure(err, origin);
-  });
+      ? await settleRemoteClient(
+          createSseClient(serverUrl, { fetch: customFetch, clientInfo }),
+          origin,
+        )
+      : await connectStreamableHttp(spec, serverUrl, customFetch, clientInfo, deps);
   connected = true;
-  return { client: withRemoteFailures(client, origin), authKey: credential?.authKey ?? null };
+  return { client, authKey: credential?.authKey ?? null };
+}
+
+/**
+ * Open the platform's run MCP server for an integration bound to the runtime
+ * (`spec.manifest.server.platformEndpoint`): `{platformApiUrl}/internal/mcp`,
+ * authenticated by the run token. The platform API is the origin the sidecar
+ * already trusts with the run token, so this client skips the SSRF guard. The
+ * client sends every request to that endpoint and follows no redirect.
+ */
+export async function connectPlatformIntegration(
+  spec: IntegrationSpawnSpec,
+  opts: Pick<BundleFetchOptions, "platformApiUrl" | "runToken" | "fetchFn">,
+  deps: Pick<ConnectRemoteHttpDeps, "connectDeadlineMs"> = {},
+): Promise<AppstrateMcpClient> {
+  const endpoint = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/mcp`;
+  const baseFetch = opts.fetchFn ?? fetch;
+  const platformFetch = mcpFetch(async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${opts.runToken}`);
+    return baseFetch(input, { ...init, headers, redirect: "error" });
+  });
+  return connectStreamableHttp(
+    spec,
+    endpoint,
+    platformFetch,
+    { name: "appstrate-sidecar-platform-integration", version: "0.1.0" },
+    deps,
+    // Built by `createMcpServer`, legacy by construction: no era probe per run.
+    "legacy",
+  );
 }
 
 /**
@@ -933,7 +982,7 @@ async function startLocalIntegration(params: {
    * `WORKSPACE_HANDLE_JSON` env var (set by the platform orchestrator).
    * Passed verbatim to `adapter.spawn`; the adapter wires it into the
    * runner only when the spec's `workspaceMount` is also set (opt-in
-   * by the referenced mcp-server's `_meta["dev.appstrate/workspace"]`).
+   * by the integration's `_meta["dev.appstrate/workspace"]`).
    */
   workspaceHandle: WorkspaceHandle | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
@@ -1048,21 +1097,10 @@ async function startLocalIntegration(params: {
     });
   }
 
-  // AFPS — fetch the referenced mcp-server package's bundle (the runnable
-  // server code), NOT the integration's own bundle. `server.packageId` is
-  // required for a local source (optional in TypeScript only because the
-  // `server` bag is the collapsed union of the local / remote / serverless
-  // shapes), so an absent one means the spec did not come from a conforming
-  // manifest — a hard-fail at boot, never a fetch of some other package's
-  // bytes into a code-execution position.
-  const serverPackageId = spec.manifest.server?.packageId;
-  if (!serverPackageId) {
-    throw new Error(
-      `integration ${spec.integrationId} declares sourceKind="local" but no server.packageId`,
-    );
-  }
+  // Fetch the integration's own archive (it carries the server payload), keyed by the
+  // integration id itself: never some other package's bytes in a code-execution position.
   const bytes = await fetchBundleBytes(
-    serverPackageId,
+    spec.integrationId,
     spec.manifest.server?.version,
     bundleFetchOpts,
   );
@@ -1096,7 +1134,7 @@ async function startLocalIntegration(params: {
     { name: "appstrate-sidecar-integration-host", version: "0.1.0" },
     // Advertise MCP Roots capability when the spec declares a workspace
     // mount and the launching orchestrator carried a handle. The server
-    // (mcp-server runner) can then call roots/list to discover the
+    // (local server runner) can then call roots/list to discover the
     // shared workspace root and bound its filesystem operations to it.
     // SOTA-consistent: cyanheads/git-mcp-server, modelcontextprotocol/
     // servers/filesystem all rely on the Roots protocol for boundary
@@ -1195,6 +1233,7 @@ async function registerLocalIntegration(
 ): Promise<{ allocatedNs: string; toolCount: number }> {
   const sizeBefore = host.routeCount();
   const allocatedNs = await host.register({
+    integrationId: spec.integrationId,
     namespace: spec.namespace,
     client: wrapped,
     connection: spec.connection,
@@ -1527,7 +1566,7 @@ export async function bootIntegrations(
   onAdapterPrepared?.(adapter);
   // Decode the workspace handle once for the whole run — same handle is
   // shared by every opt-in integration runner. The agent already has
-  // the underlying workspace mounted; this surfaces it to mcp-server
+  // the underlying workspace mounted; this surfaces it to the local server
   // runners that declared `_meta["dev.appstrate/workspace"]`.
   const workspaceHandle = decodeWorkspaceHandle();
   if (workspaceHandle) {
@@ -1666,7 +1705,9 @@ export async function bootIntegrations(
       // no per-tool upstream URL can be enforced through a hosted MCP —
       // the upstream decides.
       if (spec.sourceKind === "remote") {
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
+        const { client, authKey } = spec.manifest.server?.platformEndpoint
+          ? { client: await connectPlatformIntegration(spec, bundleFetchOpts), authKey: null }
+          : await connectRemoteHttpIntegration(spec, source);
         // On the caller-owned teardown collector as soon as it is open, so a
         // failed registration still closes the Streamable HTTP client.
         clients.push(client);
@@ -1814,6 +1855,7 @@ export async function bootIntegrations(
       const sizeBefore = host.routeCount();
       const merging = sharedNamespace !== undefined;
       const allocatedNamespace = await host.register({
+        integrationId: spec.integrationId,
         namespace: spec.namespace,
         client: wrapped,
         connection,
@@ -1877,6 +1919,7 @@ export async function bootIntegrations(
         const { client, authKey } = upstream;
         const sizeBefore = host.routeCount();
         const allocatedNs = await host.register({
+          integrationId: spec.integrationId,
           namespace: spec.namespace,
           client,
           connection,
@@ -2203,7 +2246,7 @@ export async function runConnectOnce(
       // non-goal. Strip any `workspaceMount` the resolver attached so the
       // runtime adapter sees no opt-in: passing the mount + a null handle
       // would otherwise trip the adapter's "declared mount but no handle"
-      // ERROR on every connect run for a workspace-opted-in mcp-server.
+      // ERROR on every connect run for a workspace-opted-in local server.
       spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
       runId,
       adapter,

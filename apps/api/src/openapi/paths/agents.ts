@@ -45,7 +45,6 @@ const agentListResponses = {
               unread_count: 2,
               dependencies: {
                 skills: {},
-                mcp_servers: {},
                 integrations: {},
               },
             },
@@ -68,7 +67,6 @@ const agentListResponses = {
               unread_count: 0,
               dependencies: {
                 skills: { "@appstrate/summarize": "^1.0.0" },
-                mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
                 integrations: { "@appstrate/github": "^2.0.0" },
               },
             },
@@ -89,7 +87,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -105,7 +103,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List agents across the organization's spaces",
       description:
-        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
+        "Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` is withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.",
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         ...agentListResponses,
@@ -442,15 +440,15 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["memories_deleted", "checkpoint_deleted"],
+                required: ["memory_count", "checkpoint_count"],
                 properties: {
-                  memories_deleted: {
+                  memory_count: {
                     type: "integer",
                     description: "Number of memory rows deleted",
                   },
-                  checkpoint_deleted: {
-                    type: "boolean",
-                    description: "Whether the checkpoint slot was deleted",
+                  checkpoint_count: {
+                    type: "integer",
+                    description: "Number of checkpoint slots deleted (0 or 1)",
                   },
                 },
               },
@@ -685,7 +683,7 @@ export const agentsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{id}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
         },
         "422": {
           description:

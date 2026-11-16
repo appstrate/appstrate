@@ -251,7 +251,7 @@ The profile/member family stays camelCase as a fixed set of names:
 | `runs.metadata`                                                                                                                                 | `degraded_integrations`, …                                                                                                                                                                                     | the run DTO                                                            |
 | `runs.generation_config`, `runs.generation_config_override`, `space_packages.generation_config`, `package_schedules.generation_config_override` | `ModelGenerationSettings` (`packages/core/src/model-generation.ts`): `temperature`, `reasoning_level`                                                                                                          | run DTO (`generation`, `generation_override`), space package, schedule |
 | `runs.token_usage`                                                                                                                              | `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic/OpenAI SDK names)                                                                                         | run DTO `token_usage`                                                  |
-| `notifications.payload`                                                                                                                         | `packageId` (4b), `agent_name`, `status` (`run_failed`); `packageId`, `package_type`, `shared_by_name` (`package_shared`)                                                                                      | `GET /api/notifications`                                               |
+| `notifications.payload`                                                                                                                         | `packageId` (4b), `agent_name`, `status` (`run_failed`); `packageId`, `package_type`, `shared_by_name` (`package_shared`); `packageId`, `title`, `message` (`agent_message`)                                   | `GET /api/notifications`                                               |
 | `spaces.settings`                                                                                                                               | `allowedRedirectDomains` (4n); `branding.{name, logo_url, primary_color, accent_color, support_email, from_name}`                                                                                              | the spaces routes                                                      |
 | `integration_connections.identity_claims`                                                                                                       | the manifest's `identity_claims` keys — snake_case, refused otherwise on every package write (`findNonSnakeCaseIdentityClaimKeys`, see the manifest section); a stored manifest predating the rule still reads | connection DTOs                                                        |
 
@@ -281,11 +281,11 @@ When adding a JSONB column, decide up front which of the three it is. If a route
 
 #### Carve-out 4i — Run events (CloudEvents-style)
 
-**Files**: `packages/afps-runtime/src/types/canonical-events.ts`, `packages/afps-runtime/src/types/run-result.ts`
+**Files**: `packages/afps-runtime/src/runner/event-builders.ts`, `packages/afps-runtime/src/types/run-result.ts`
 
-**Rule**: event envelopes and payloads are camelCase — `BaseEnvelope`: `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
+**Rule**: event envelopes and payloads are camelCase — the `RunEvent` envelope (`@afps-spec/types`, re-exported by `packages/afps-runtime/src/types/index.ts`): `runId`, `toolCallId`, `timestamp`; payloads: `durationMs`, … The `file.published` event (emitted by `runtime-pi/publish.ts`, consumed by `apps/api/src/services/run-launcher/appstrate-event-sink.ts`) carries `fileId`; the `file` run-log row the platform writes from it is `{file_id, uri, name, mime, size, sha256}` (4g).
 
-The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{runId}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
+The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this vocabulary, which is why the finalize body (`POST /api/runs/{id}/events/finalize`, `TerminalRunResult`) declares `durationMs` in the OpenAPI spec.
 
 **Why**: CloudEvents spec uses camelCase for context attributes; consistent producer/consumer across the runtime, the sidecar and the platform.
 
@@ -350,7 +350,7 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 - API key surface: `keyPrefix`
 - Proxy surface: `urlPrefix`
 - Space / end-user surface: `externalId`, `isDefault`, `allowedRedirectDomains`
-- List envelope: `hasMore` — every list goes through `listResponse` (`{ object: "list", data, hasMore }`), `GET /api/notifications` and `GET /api/files` included; cursor params `startingAfter` / `endingBefore`
+- List envelope: `hasMore` — every list goes through `listResponse` (`{ object: "list", data, hasMore }`), `GET /api/notifications` and `GET /api/files` included; cursor param `startingAfter`
 - Webhook CRUD surface: `payloadMode`, `eventId`, `eventType`, `statusCode`; secret rotation (`POST /api/webhooks/{id}/rotate`): `windowSeconds`, `secretPrevious`, `rotationWindowEndsAt`
 
 **Why**: developer-platform surfaces modelled on the Stripe headless API convention (camelCase for developer-platform CRUD). End-to-end coherent; flipping is a breaking change for external API consumers with zero user-visible benefit. For any new endpoint family, snake_case wire per the Zone 1 default.
@@ -365,7 +365,7 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 
 **Rule**: the argument vocabulary of these two tools is camelCase: `fromFile`, `fromBytes`, `contentType` (multipart parts), `substituteBody`, `responseMode.{toFile, maxInlineBytes}`, `uploadProtocol`, `sourceMimeType`, `partSizeBytes`.
 
-**Why**: an LLM-facing tool schema, not a REST body — agent prompts and skills are written against these names, so renaming one silently breaks every agent that uses it. The platform's own MCP server (`apps/api/src/modules/mcp/tools.ts`) is a different surface and follows Zone 1: `list_files` takes `runId` (4b), `chat_session_id`, `purpose` and refuses any other argument; `invoke_operation` takes `if_match`. Its own `api_call` (`connection-tools.ts`), the credential proxy outside the sandbox, is that surface too and shares only the name with the sidecar's tools: `integration_package_id`, `connection_id`, `session_id`, `substitute_body`, `max_response_bytes`.
+**Why**: an LLM-facing tool schema, not a REST body — agent prompts and skills are written against these names, so renaming one silently breaks every agent that uses it. The platform's own MCP server (`apps/api/src/modules/mcp/tools.ts`) is a different surface and follows Zone 1: `list_files` takes `runId` (4b), `chat_session_id`, `purpose` and refuses any other argument; `invoke_operation` takes `if_match`. Its `call_integration_tool` (`integration-tools.ts`), the credential proxy outside the sandbox, is that surface too: it takes `tool`, `arguments` and `connection_id`, and the `{ns}__api_call` it calls (`api-call-batch.ts`) shares only its name with the sidecar's tool — `requests[].{method, target, headers, body, substitute_body, connection_id}`, `session_id`, `max_response_bytes`. A remote MCP server's typed tool (`{ns}__{tool}`) takes the server's own arguments, whatever their casing.
 
 #### Carve-out 4q — AFPS bundle container
 
@@ -438,8 +438,8 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 - `GET`/`PATCH /api/agents/{scope}/{name}/model` (`modelId`) and `GET`/`PUT /api/agents/{scope}/{name}/proxy` (`proxyId`)
 - the org model surface `/api/models*`: `credentialId`; `PUT /api/models/default` takes `modelId`
 - `PUT /api/proxies/default` (`proxyId`)
-- the space package (`space_package` on `/api/spaces/{spaceId}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
-- `ResolvedRunConfig` (`GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
+- the space package (`space_package` on `/api/spaces/{id}/packages*`, and its `PATCH` body): `modelId`, `proxyId` — beside the snake_case `generation_config`
+- `ResolvedRunConfig` (`GET /api/spaces/{id}/packages/{scope}/{name}/run-config`): `modelId`, `proxyId`, beside `generation` and `input`
 - the run-launch bodies (`POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline` and `/inline/validate`): `modelId`, `proxyId`; the chat body (`POST /api/chat`): `modelId`
 - the model-provider family (4e table): `credentialId` on the inline-test, discover and pairing bodies, the pairing status and the redeem response
 
@@ -465,7 +465,7 @@ The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the C
 Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
 
 - **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`), `?spaceId=` (`GET /api/webhooks`).
-- **Pagination-envelope params** (Carve-out 4n): the cursor params `startingAfter` / `endingBefore` pair with the camelCase `hasMore` body field.
+- **Pagination-envelope params** (Carve-out 4n): the cursor param `startingAfter` pairs with the camelCase `hasMore` body field.
 - **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users`.
 
 Conforming snake_case examples: `?actor_type=&actor_id=` on the persistence route (`routes/agents.ts`); `?chat_session_id=` on `GET /api/files`; OAuth 2.0 wire params `?client_id=`, `?post_logout_redirect_uri=` (RFC 6749, Zone 1). Single bare tokens (`limit`, `kind`, `status`, `q`, `since`, `purpose`) are trivially conforming.
@@ -476,13 +476,13 @@ A new camelCase domain query param is a bug, same as a camelCase domain wire fie
 
 ### Pagination styles (which one to use)
 
-Three pagination idioms exist; choose by collection shape, never mix styles on one endpoint. All three emit RFC 5988 `Link` headers via `apps/api/src/lib/pagination-link.ts`:
+Three pagination idioms exist; choose by collection shape, never mix styles on one endpoint. All three emit RFC 5988 `Link` headers via `apps/api/src/lib/pagination-link.ts`. A collection with no natural bound is keyset-paged; a bounded collection (schedules, agents, skills, settings lists) is not paginated at all; `offset` exists only to slice an in-memory catalogue:
 
-| Style                 | Params                                            | Use for                                                           | Example                                                                                                                           |
-| --------------------- | ------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Cursor (Stripe-style) | `startingAfter` / `endingBefore` + `hasMore` body | Unbounded user-facing collections                                 | `GET /api/end-users`, `GET /api/notifications`, `GET /api/files`, `GET /api/webhooks/{id}/deliveries`, the two call-journal reads |
-| Offset                | `limit` + `offset`                                | Bounded admin lists                                               | `GET /api/runs` (`routes/runs.ts`); also schedules and the integration list                                                       |
-| Sequence cursor       | `since` (monotonic id)                            | Append-only log streams ONLY — doubles as the polling-tail cursor | `GET /api/runs/{id}/logs` (`routes/runs.ts`)                                                                                      |
+| Style                 | Params                                                       | Use for                                                           | Example                                                                                                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor (Stripe-style) | `startingAfter` + `limit`, `hasMore` body (`total` optional) | Unbounded collections                                             | `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs`, `GET /api/schedules/{id}/runs`, `GET /api/end-users`, `GET /api/notifications`, `GET /api/files`, `GET /api/webhooks/{id}/deliveries`, the two call-journal reads |
+| Offset                | `limit` + `offset`                                           | In-memory catalogues sliced in process                            | `GET /api/integrations`, the model-provider registry                                                                                                                                                                      |
+| Sequence cursor       | `since` (monotonic id)                                       | Append-only log streams ONLY — doubles as the polling-tail cursor | `GET /api/runs/{id}/logs` (`routes/runs.ts`)                                                                                                                                                                              |
 
 ---
 
@@ -518,9 +518,9 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Common** (every package type): `name`, `version`, `type`, `display_name`, `description`, `long_description`, `keywords`, `license`, `author`, `repository`, `homepage`, `documentation`, `support`, `icon`, `icons[].{src, theme, …}`, `screenshots`, `privacy_policies`, `compatibility.{platforms, runtimes, clients}`, `schema_version`, `dependencies`, `_meta`
 
-**Dependencies subkeys**: `skills`, `mcp_servers`, `integrations`
+**Dependencies subkeys**: `skills`, `integrations`
 
-**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
+**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`
 
 **Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
 
@@ -529,12 +529,11 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 - `file_constraints.{key}`: `accept`, `max_size`
 - `ui_hints.{key}`: `placeholder`
 
-**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override; per AFPS the mcp-server manifest is AFPS-native at the root — no `_meta["dev.afps/mcp-server"]` identity wrapper)
-
 **Integration**:
 
 - `source.kind`: `"local" | "remote" | "none"`
-- `source.server.{name, version, vendored}`
+- `source.server.{type, entry_point, mcp_config, tools}`, `source.server.mcp_config.{command, args, env, platform_overrides}`, `source.server.tools[].{name, description}`
+- `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override of the local server, on the integration manifest)
 - `source.remote.{url, transport}`
 - `_meta["dev.appstrate/api"].auths.<key>.upload_protocols`
 - `auths.{key}.{type, issuer, authorization_endpoint, token_endpoint, userinfo_endpoint, token_endpoint_auth_method, code_challenge_methods_supported, resource, authorization_params, default_scopes, scope_catalog, identity_claims, required_identity_claims, credentials, connect, delivery, authorized_uris, allow_all_uris, callback_url_hint}`
@@ -544,7 +543,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 - `auths.{key}.connect.login.{request, success_criteria, outputs, expires_in_output, identity_outputs}`
 - `auths.{key}.connect.limits.{request_timeout_ms, max_response_bytes}`
 - `auths.{key}.delivery.http.{in, name, prefix, value, encoding, allow_server_override}`
-- `auths.{key}.delivery.env.{key}.{value, sensitive, user_config_key}`
+- `auths.{key}.delivery.env.{key}.{value, sensitive}`
 - `auths.{key}.delivery.files.{key}.{value, mode}`
 - `tools_policy.{name}.required_scopes` — a map keyed by auth key (`{ "<auth_key>": ["scope", …] }`)
 - `hidden_tools`

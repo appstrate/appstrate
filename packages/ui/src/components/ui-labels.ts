@@ -14,6 +14,8 @@ interface UiLabels {
   sidebar: string;
   sidebarDescription: string;
   toggleSidebar: string;
+  breadcrumb: string;
+  breadcrumbMore: string;
   copy: string;
   copied: string;
   copyFailed: string;
@@ -24,6 +26,8 @@ export const UiLabelsContext = createContext<UiLabels>({
   sidebar: "Sidebar",
   sidebarDescription: "Displays the mobile sidebar.",
   toggleSidebar: "Toggle Sidebar",
+  breadcrumb: "Breadcrumb",
+  breadcrumbMore: "More items",
   copy: "Copy",
   copied: "Copied",
   copyFailed: "Could not copy: the browser refused access to the clipboard.",

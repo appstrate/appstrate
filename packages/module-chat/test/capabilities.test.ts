@@ -62,7 +62,7 @@ describe("canAuthorPackages", () => {
   });
 
   it("holds on a write on ANY package type, not only on agents", () => {
-    for (const write of ["skills:write", "integrations:write", "mcp-servers:write"]) {
+    for (const write of ["skills:write", "integrations:write"]) {
       const set = new Set(["chat:write", "mcp:read", "mcp:invoke", write]);
       expect(canAuthorPackages((p) => set.has(p))).toBe(true);
     }

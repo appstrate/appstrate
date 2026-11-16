@@ -122,7 +122,7 @@ function spec(overrides: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
     manifest: {
       name: "@tractr/gmail",
       version: "1.0.0",
-      server: { type: "node", entry_point: "./server.js", packageId: "@tractr/gmail-server" },
+      server: { type: "node", entry_point: "./server.js" },
     },
     spawnEnv: {},
     ...overrides,

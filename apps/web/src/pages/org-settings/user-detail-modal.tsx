@@ -44,7 +44,7 @@ export function UserDetailModal({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { options: roleOptions, roles } = useSpaceRoleOptions();
-  const { assign, isPending: isChangingSpaceRole } = useAssignSpaceRole(roleOptions);
+  const { assign, isPending: isChangingSpaceRole } = useAssignSpaceRole();
 
   const columns = useUserSpaceColumns({
     // Owners and admins reach every space through their org role, so there is
@@ -65,7 +65,6 @@ export function UserDetailModal({
             source: space.source,
             role: space.role,
           },
-          name: space.name,
         },
         value,
       ),

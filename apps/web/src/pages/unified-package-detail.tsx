@@ -16,7 +16,7 @@ import {
   useVersionInfo,
   type Versioned,
 } from "../hooks/use-packages";
-import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -43,7 +43,6 @@ import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
-import { AgentIdentity } from "../components/agent-detail/agent-identity";
 import { AgentDetailBar } from "../components/agent-detail/agent-detail-bar";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
@@ -117,12 +116,12 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 // ─── Main Page ──────────────────────────────────────────────────────
 
 /** One body per package and version: the modals it opens hold that package's state, and a route change must not carry them to another. */
-export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
+export function UnifiedPackageDetailPage({ type }: { type: "agent" | "skill" }) {
   const { scope, name, version } = useParams<{ scope: string; name: string; version?: string }>();
   return <PackageDetailBody key={`${scope}/${name}@${version ?? ""}`} type={type} />;
 }
 
-function PackageDetailBody({ type }: { type: PackageType }) {
+function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   // Only an agent has a narrower read: without `agents:read` a runner launches
@@ -190,7 +189,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
 
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
-  // Skill and MCP-server details carry no `active`; an agent's does, so the query is not mounted there.
+  // A skill detail carries no `active`; an agent's does, so the query is not mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
     enabled: type !== "agent",
   });
@@ -250,10 +249,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
     return <Navigate to={versionResult.redirect} replace />;
   }
   const { isHistoricalVersion } = versionResult;
-
-  // The manifest the page is looking at — the archived one when a version is
-  // pinned, the live draft otherwise. Same rule the file explorer follows.
-  const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
   // A pinned version shows its OWN parameter schema; one it does not declare
   // is an empty wrapper, never the draft's.
@@ -412,11 +407,6 @@ function PackageDetailBody({ type }: { type: PackageType }) {
           <>
             <DetailTabPanel value="overview">
               <div className="flex flex-col gap-8">
-                <AgentIdentity
-                  description={unifiedForHeader.description}
-                  source={unifiedForHeader.source}
-                  homeSpaceName={homeSpaceName}
-                />
                 {fullRead ? (
                   <AgentOverviewTab
                     packageId={packageId}
@@ -449,7 +439,7 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                 <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
               )}
             </DetailTabPanel>
-            <DetailTabPanel value="settings" flush>
+            <DetailTabPanel value="settings" framed>
               <AgentSettingsView
                 versions={versionsProps}
                 packageId={packageId}
@@ -459,11 +449,11 @@ function PackageDetailBody({ type }: { type: PackageType }) {
                 inputWrapperOverride={historicalInputWrapper}
               />
             </DetailTabPanel>
-            <DetailTabPanel value="memory" flush>
+            <DetailTabPanel value="memory">
               {tabReads.memory ? (
                 <AgentMemoryTab packageId={packageId} />
               ) : (
-                <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
+                <RoleLimitNotice>{t("detail.roleLimit.memory")}</RoleLimitNotice>
               )}
             </DetailTabPanel>
           </>
@@ -471,17 +461,12 @@ function PackageDetailBody({ type }: { type: PackageType }) {
 
         {type !== "agent" && (
           <>
-            {/* Non-Agent tab content */}
-            {/* Both follow the version being viewed: the explorer through
-          `versionLabel`, the overview through the manifest picked above. */}
+            {/* Skill tab content. Both follow the version being viewed: the explorer
+          through `versionLabel`, the overview through the version's own `content`. */}
             <DetailTabPanel value="overview">
               {pkgDetail && (
                 <PackageOverview
-                  type={type}
-                  description={unifiedForHeader.description}
                   content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
-                  manifest={effectiveManifest}
-                  version={unifiedForHeader.version}
                   historical={isHistoricalVersion}
                   agentCount={pkgDetail.agents.length}
                   onOpenFiles={() => setTab("settings")}
@@ -490,17 +475,14 @@ function PackageDetailBody({ type }: { type: PackageType }) {
               )}
             </DetailTabPanel>
 
-            {(type === "skill" || type === "mcp-server") && (
-              <DetailTabPanel value="settings" flush>
-                <PackageSettingsView
-                  versions={versionsProps}
-                  type={type}
-                  packageId={packageId}
-                  detail={pkgDetail}
-                  version={versionLabel}
-                />
-              </DetailTabPanel>
-            )}
+            <DetailTabPanel value="settings" framed>
+              <PackageSettingsView
+                versions={versionsProps}
+                packageId={packageId}
+                detail={pkgDetail}
+                version={versionLabel}
+              />
+            </DetailTabPanel>
 
             <DetailTabPanel value="usedBy">
               {!tabReads.usedBy ? (

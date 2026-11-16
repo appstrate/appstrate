@@ -65,7 +65,6 @@ export const REFUSAL_ERROR_KEYS = {
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
   connection_label_taken: "error.connectionLabelTaken",
-  output_tool_required: "error.outputToolRequired",
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
   end_user_connection_not_shareable: "error.endUserConnectionNotShareable",

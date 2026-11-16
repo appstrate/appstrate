@@ -107,7 +107,6 @@ export function RunsPage() {
         status={statuses}
         spanning={spanning}
         search={search}
-        countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
           <ListToolbar
             search={{

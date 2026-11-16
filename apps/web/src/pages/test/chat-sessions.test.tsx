@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { ChatConversationList, ChatHeadersProvider } from "@appstrate/module-chat/ui";
+import { ChatConversationList, ChatTransportProvider } from "@appstrate/module-chat/ui";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import {
   sessionsQueryKey,
@@ -12,6 +12,7 @@ import {
 import {
   ChatHostProvider,
   type ChatHost,
+  type ChatTransport,
 } from "../../../../../packages/module-chat/src/ui/runtime-context.ts";
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
@@ -23,12 +24,18 @@ function conversation(id: string, title: string, unread: boolean): SessionSummar
 
 /** One loaded page, as the session-list infinite query caches it. */
 function cache(data: SessionSummary[]): SessionsCache {
-  return { pages: [{ data, hasMore: false }], pageParams: [null] };
+  return { pages: [{ data, hasMore: false }], pageParams: [undefined] };
 }
+
+/** Scoped to one space; a static render reads the cache and never requests. */
+const TRANSPORT: ChatTransport = {
+  getHeaders: () => ({ "X-Space-Id": "spc_a" }),
+  request: () => Promise.reject(new Error("no request in a static render")),
+};
 
 /**
  * Render the conversation list as the chat shell mounts it. The list is the
- * shell's navigation, not part of `ChatPage`; the headers provider is what
+ * shell's navigation, not part of `ChatPage`; the transport provider is what
  * scopes the sessions query to one space. Its visibility read needs a document,
  * no DOM or effects.
  */
@@ -41,9 +48,9 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
   try {
     return render(
       <SidebarProvider>
-        <ChatHeadersProvider value={() => ({ "X-Space-Id": "spc_a" })}>
+        <ChatTransportProvider value={TRANSPORT}>
           <ChatConversationList activeId="chat_active" t={(key) => key} can={can} />
-        </ChatHeadersProvider>
+        </ChatTransportProvider>
       </SidebarProvider>,
       { queryClient: qc },
     );

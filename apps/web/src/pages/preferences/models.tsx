@@ -36,9 +36,13 @@ import {
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
 import { invalidatePaths } from "../../lib/query-keys";
+import { errorMessage } from "../../lib/mutation-error";
 import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 import { EmptyStateAction } from "../../components/page-states";
+
+/** The key form shows a refusal under its fields. */
+const FORM_META = { errorHandledByCaller: true } as const;
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -56,8 +60,10 @@ export function PreferencesModelsPage() {
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
   const { data: registry } = useProvidersRegistry();
-  const createCredential = useCreateModelProviderCredential();
+  const createCredential = useCreateModelProviderCredential(FORM_META);
+  // The form shows its refusal inline; a rename goes through the cache's toast.
   const updateCredential = useUpdateModelProviderCredential();
+  const editKeyCredential = useUpdateModelProviderCredential(FORM_META);
   const deleteCredential = useDeleteModelProviderCredential();
 
   const [creating, setCreating] = useState(false);
@@ -77,6 +83,8 @@ export function PreferencesModelsPage() {
   };
 
   const closeForm = () => {
+    createCredential.reset();
+    editKeyCredential.reset();
     (editCredential ? editParam.close : () => setCreating(false))();
     refreshModels();
   };
@@ -96,7 +104,7 @@ export function PreferencesModelsPage() {
   const submitForm = (data: { label: string; providerId: string; apiKey?: string }) => {
     if (editCredential) {
       // The provider is pinned at create time: only the label and the key change.
-      updateCredential.mutate(
+      editKeyCredential.mutate(
         {
           params: { path: { id: editCredential.id } },
           body: credentialUpdateBody(editCredential, data),
@@ -163,7 +171,12 @@ export function PreferencesModelsPage() {
           key={editCredential?.id ?? "__create__"}
           onClose={closeForm}
           credential={editCredential}
-          isPending={createCredential.isPending || updateCredential.isPending}
+          isPending={createCredential.isPending || editKeyCredential.isPending}
+          error={
+            createCredential.error || editKeyCredential.error
+              ? errorMessage(createCredential.error ?? editKeyCredential.error)
+              : null
+          }
           onSubmit={submitForm}
           personal
         />

@@ -18,6 +18,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   releases at once, and roll back by restoring the backup. Detail in
   `scripts/migration/README.md`.
 
+- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the release window**
+  (#2197, #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools
+  it had, and nothing reports it. Back up before the schema migrations. Then, with the app stopped,
+  after the schema migrations and before the app serves traffic:
+  1. Note an instant after the app stopped, in RFC 3339 with `Z` or an offset: it is `--before`,
+     the same value on every re-run.
+  2. Dry run:
+     `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
+     (on the embedded database, name it: `PGLITE_DATA_DIR=<dir> bun scripts/migration/…`).
+  3. The same with `--apply`. It exits 1 while a malformed manifest remains: fix it by hand, then
+     re-run with the same `--before`.
+
+  What it rewrites and what `--before` bounds: the script's header. Verification, the embedded
+  database and rollback: its section in `scripts/migration/README.md`. Rehearse it on a restored
+  production dump first.
+
+- **Run `scripts/migration/0054-fold-mcp-servers.ts` before the first boot of
+  this release** (#2220). A local MCP server is no longer a package of its own:
+  the script folds every stored `mcp-server` package into the integration that
+  referenced it and removes stored `mcp-servers:*` grants. Run it BEFORE the
+  release's migrations: drizzle `0106` rebuilds the `package_type` enum without
+  `mcp-server` and fails, with nothing applied, while a row of that type remains.
+  **Snapshot object storage first** (buckets `agent-packages` and
+  `library-packages`): `--apply` overwrites archives in place and queues server
+  archives for deletion, which `pg_dump` cannot roll back. Dry run first; any
+  `UNFOLDED` line must be resolved before `--apply`, which refuses (exit 1,
+  nothing written) otherwise. Then `--apply` with the app stopped. Procedure
+  and rollback (database dump plus storage snapshot) in
+  `scripts/migration/README.md`, section "`mcp-server` packages folded into
+  their integrations".
+
+- **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
+  agents without the `@appstrate/platform` tools and without `output`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
@@ -49,6 +83,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     The live model catalog follows the new Pi version: instances on this release
     read `pi-1.5.2.json`, published by `publish-model-catalog.yml` once `main`
     carries the bump; until then they run on the embedded registry only.
+
+- **Migration `0104` adds `spaces.credential_proxy_open`** (#2204): a
+  boolean, `NOT NULL DEFAULT true`, so every existing space keeps direct
+  connection access open. Applied at boot, no data rewrite;
+  `packages/db/schema-catalog.txt` gains the column.
 
 - **A non-system integration whose authorization server does not support RFC 9207
   issuer identification no longer connects** (#2102). A client the platform
@@ -112,6 +151,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking (AFPS 0.13, API, CLI): a local MCP server is declared inline on
+  its integration; the `mcp-server` package type is gone** (#2220). A
+  `source.kind: "local"` integration now carries `source.server = { type,
+entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
+  in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
+  values merged into the runner env; the auth's `delivery.env` wins on
+  conflict.
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
+    manifest that still carries it is refused on every write path, naming the
+    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
+    permissions, the `createMcpServerPackage` chat operation,
+    `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.
+    `@appstrate/core/mcp-server` stays, now reading the integration manifest
+    (`getMcpServerRuntime`, `getMcpServerWorkspaceMount`, `getLocalServerEnv`);
+    `@appstrate/core/integration` gains `getLocalServer` and
+    `getLocalServerTools`. The `dev.appstrate/mcp-server` and
+    `dev.appstrate/workspace` `_meta` keys move to the integration manifest.
+  - `resolveIntegrationToolCatalog({ integration, listedTools? })`: a local
+    source's catalog is its own `source.server.tools`, so
+    `findUnexposedDefaultTools` judges local sources synchronously and
+    `findUnexposedLocalDefaultTools` is gone.
+  - The sidecar fetches the integration archive from
+    `GET /internal/integration-bundle/:scope/:name[?version=]` (replaces
+    `/internal/mcp-server-bundle/`): a system integration from the boot
+    registry, a version from that exact published archive, no version from the
+    draft. The run's agent must declare that local integration, or a connect
+    grant `{ integrationId, version }` must name it. The
+    `local_server_ref_missing`, `mcp_server_unresolved` and
+    `mcp_server_not_runnable` drop reasons become `local_server_not_runnable`.
+  - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
+    their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
+    packages are removed.
+  - The `package_type` Postgres enum keeps its `mcp-server` label for now
+    (Postgres cannot drop a value in place); application code never produces
+    it.
+
+- **The integrations page lists every integration in one list with a Source
+  column and filter** (API, remote MCP, local MCP). On an instance running
+  `RUN_ADAPTER=process` (app config `localIntegrations` false), a local
+  integration is marked « indisponible ici ».
+
 - **Breaking (API): a run's read state leaves the notifications; the bell
   shows only what needs attention.** Every finished run used to be a bell
   notification, so the bell repeated the unread runs of the runs page, and the
@@ -131,11 +212,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `unread_count` on `GET /api/agents`) and
     `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
+- **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). Only a system
+  package may bind an integration to the runtime, whose tools the platform serves with the run's
+  authority. Saving, forking or importing an organization integration that carries the key now
+  answers `400`.
+
+- **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
+  to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP
+  integrations, with the run's MCP server on the instance (`/api/runs/{id}/mcp`) as its
+  target, each request signed with the run's sink secret like its events. A run that reports to no
+  instance starts without it (`no connection is bound to this run`).
+
+- **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
+  inline manifest gets the `@appstrate/platform` dependency unless `dependencies.integrations`
+  already names it, and its `log` tool selected in `integrations_configuration` unless either
+  `dependencies.integrations` or `integrations_configuration` names it (the dependency alone
+  keeps its `default_tools`); the caller's own entries are kept, so a caller selects the tools
+  it wants there (`{ tools: [] }` gives a run without the platform tools). An inline manifest
+  without `output` gets the open object output schema. The
+  `runtime_tools` default and the `manifest.runtime_tools` argument are gone. The chat
+  prompt and the `run_and_wait` descriptions say so. The default "Hello World"
+  agent declares `@appstrate/platform`.
+
+- **BREAKING: `publish_file` is a harness tool** (#2199). The runner registers it whenever its
+  host supplies an uploader (`PiRunner` option `fileUploader`): every platform run has it,
+  whatever the manifest declares, and a CLI run has none.
+
+- **BREAKING: `output` is injected from `output.schema`** (#2197). A run has the `output` tool
+  exactly when its agent declares a non-empty `output.schema`; without a schema there is no
+  `output` tool. A run that ends without calling it gets one corrective turn, then is failed at
+  finalize unless the schema validates `{}` (it requires no property). The `PiRunner`
+  builds the tool in the agent container and in the CLI; the sidecar does not host it
+  (`OUTPUT_SCHEMA` is not part of the sidecar env). Inline runs keep their open object output
+  schema, so they keep `output`. The runner, the platform prompt's `## Output Format` section
+  and the output validation at finalize read the schema the same way: an empty `output.schema`
+  (`{}`) declares none.
+
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /
   `testModelInline` descriptions state that `ok: true` covers the credential
   (validated offline for a subscription, by one lightweight provider request
   for an API key), never the model itself. The response is unchanged.
+
+- **BREAKING (MCP): `search_integration_tools` and `call_integration_tool` replace
+  `list_connections` and `api_call`** (#2205, #2206). `search_integration_tools` lists the
+  tools of the integrations the caller holds a connection of in the space, each naming by
+  `connection_ids` the connections it reaches, which the result lists once in `connections`
+  (every field `list_connections` returned; a typed tool adds `missing_scopes` per
+  connection): `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths
+  expose one, for each `api_call` an integration's catalog exposes (every tool less
+  `hidden_tools`, not `default_tools`), and the typed tools of a remote MCP server (see
+  Added). A search by `query` or `integration` carries the first result's input schema
+  and usage in `best_match`. `call_integration_tool` takes the `tool` name, its
+  `arguments` and an optional `connection_id`: for `{ns}__api_call`, the `requests` batch,
+  `session_id` and `max_response_bytes` of the old `api_call`, without
+  `integration_package_id`, so a batch targets one integration. **An integration that
+  declares no `api_call` is no longer callable through the MCP** (the old generic
+  `api_call` took any integration); `/api/credential-proxy/proxy` is unchanged and still
+  serves it. A namespace is the normalised package id, cut at 20 characters without a
+  trailing `_`; two integrations active in the space whose namespaces are equal each take
+  `_` and a hash of their own id, 6 hex digits, 2 more while one still equals another,
+  where a run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. An
+  `{ns}__api_call__{auth}` name too long for the 56-character tool-name bound keeps
+  `{ns}__api_call__` and ends with its auth part cut to fit and a hash of the tool name.
+  Refusal codes: an unknown tool name passed to `call_integration_tool` is the tool result
+  `unknown_tool`, a name two tools would share `ambiguous_tool` (neither is called); an
+  `{ns}__api_call` batch has 45 s, past which an entry is `not_sent` or
+  `no_answer_before_deadline`. The old names answer `-32602 Unknown tool`, with no
+  alias: re-list the tools in the client. Each request still re-enters the proxy route
+  under its guard, rate limit and access rule.
 
 - **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
   are read through the MCP Skills extension: `skills/list` and `skills/get` for the
@@ -384,10 +529,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     server now names it and stores it in `connection_overrides` — on every
     `POST` or `PATCH` of an enabled schedule, a rename included — where it used
     to answer `409 must_choose_connection`.
-  - **Manifest validation**: an agent manifest declaring an output schema
-    without the `output` runtime tool now answers the `errors[]` item
-    `output_tool_required` on `manifest.runtime_tools` instead of
-    `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+  - **Manifest validation**: `errors[]` items carry `line`/`column` on a YAML
+    syntax error.
 - **An integration's `INTEGRATION.md` reaches the agent as a file, not inlined
   in the prompt** (#2005). The run bundle carries each integration the run uses
   at the version the run froze, written to `.pi/integrations/<id>/`; the
@@ -495,7 +638,231 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   takes the imposed connections past 20; before, it always succeeded. Nothing is
   stored; `DELETE` is always allowed.
 
+### Removed
+
+- **`log`, `note`, `pin`, `recall_memory` and `run_history` leave the sidecar and the CLI**
+  (#2199). They are tools of the `@appstrate/platform` system integration, which an agent gets
+  as `appstrate_platform__<tool>` by declaring its dependency, served by the run MCP server.
+  `GET /internal/run-history`, `GET /internal/memories`, the sidecar's runtime-event journal,
+  `GET /runtime-events` and the `RUNTIME_TOOLS_JSON` env var are removed, and `appstrate run`
+  no longer registers them as local tools; `@appstrate/runner-pi` drops
+  `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories`, `buildRuntimeToolExtensions` and its
+  `./runtime-tools` export.
+- **BREAKING: the finalize contract carries no memories, pinned slots or logs** (#2199).
+  `POST /api/runs/{id}/events/finalize` ignores `memories`, `pinned` and `logs`, and
+  finalize writes neither `package_persistence`, `runs.checkpoint` nor a run log from them:
+  `note`, `pin` and `log` write when the tool is called. `@appstrate/afps-runtime` drops
+  `RunResult.memories`, `RunResult.pinned`, `RunResult.logs`, `Memory`, `PinnedSlot`,
+  `LogEntry` and `LogLevel`.
+- **`memory.added`, `pinned.set` and `log.written` are no longer canonical run events**
+  (#2199). Nothing emits them: `note`, `pin` and `log` write server-side. Ingestion writes no
+  row for such an envelope; `@appstrate/afps-runtime` removes its canonical-events module (see
+  its CHANGELOG) and its reducer reads `output.emitted` only; the L4 conformance script does not
+  contain them, and `appstrate run` prints no `+ memory:` line.
+- **The `_meta["dev.appstrate/events"]` channel is removed** (#2199). The runner's
+  `output` and `publish_file` tools emit their event through the `emit` their
+  handler receives, and the sidecar no longer strips the key from third-party tool results.
+- **BREAKING: the `runtime_tools` manifest field is removed** (#2199). An agent gets
+  `log`, `note`, `pin`, `recall_memory` and `run_history` by declaring the
+  `@appstrate/platform` integration (`integrations_configuration` restricts the
+  selection); `output` and `publish_file` are harness tools. The field leaves the
+  `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema, and the agent editor loses
+  its Tools tab. Nothing reads it any more: `scripts/migration/0053` moves the stored agents
+  (see Operators). Because it rewrites the jsonb manifest of every agent version, a version
+  signed before it exports unsigned (see `SECURITY.md`, package signatures) and is refused on
+  import under `AFPS_SIGNATURE_POLICY=required`; the archive a version download serves is
+  unchanged, so an agent imported from one still carries `runtime_tools` and has none of the
+  platform tools until it declares the integration.
+
+- **BREAKING: `@appstrate/core` removes its runtime-tool exports** (#2197, #2199):
+  `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
+  `@appstrate/core/runtime-event-drain`, and the `runtime_tools` helpers of
+  `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
+
 ### Added
+
+- **Tool events name the integration tool they call** (#2233). The `appstrate.progress` start
+  and end events of a call to an integration's tool carry `data.integration`:
+  `{ id, tool, title? }`, the integration's package id, the tool's name on its server and its
+  title when the server gives one (`tool` and `title` are each sanitised and capped at 512
+  bytes). `data.tool` stays the name the model called. The sidecar's host and the CLI stamp it on
+  each tool they expose (`_meta["dev.appstrate/integration"]`); the platform's own tools
+  (`@appstrate/platform`) and `api_call` / `api_upload` carry it too, the runner's `output` and
+  `publish_file` do not. Runs recorded before this release have none.
+
+- **System integration `@appstrate/platform`** (#2199). Runtime-bound
+  (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
+  `recall_memory`, `run_history` and `notify`. All but `notify` are selected by default:
+  `notify` reaches people, so an agent gets it by selecting it. Its tools exist only inside a
+  run: outside one, the credential proxy considers no runtime-bound integration, so
+  `GET /api/credential-proxy/tools` (and `search_integration_tools`) never lists it and
+  `POST /api/credential-proxy/tools/call` naming it answers `404`, before any request to its
+  declared URL.
+
+- **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{id}/mcp`** (#2199).
+  One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
+  for one run, and each tool writes at call time: `log` a run log (message up to 2 000
+  characters), `note` an archive memory (up to 2 000 characters, refused beyond rather than
+  cut), `pin` a pinned slot (and, for `checkpoint` with an object content, the run's checkpoint
+  snapshot `run_history` returns), `notify` a notification. The sidecar authenticates `/internal/mcp` with the run
+  token (a run that is not `running` answers 403). The host executing a remote run reaches
+  `/api/runs/{id}/mcp` with the Standard Webhooks signature it already puts on the run's
+  events, over the exact request body, so the credential lasts as long as the run's sink, not
+  a session: a bad signature answers 401, a replayed `webhook-id` 409, a closed sink 410, and a
+  platform-origin run 404 (its sidecar serves these tools, restricted to the agent's selection).
+  `/internal/mcp` allows 200 requests a minute per run token (429 beyond), every verb counted;
+  `/api/runs/{id}/mcp` allows 200 signed POSTs a minute per run. Both refuse a JSON-RPC batch
+  with 400 and answer 405 (`Allow: POST`) to every other verb, GET included.
+
+- **`notify`: an agent sends an in-app notification from inside its run** (#2200).
+  A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100
+  characters, message 1–500) writes an `agent_message` notification, linked to the
+  run, to the run's recipients (those of its read state): the member or end-user
+  who triggered it, else the organization's owners and admins. Each recipient gets
+  one per run; a second call, a run with no recipient (an inline run) and
+  arguments outside the schema are tool errors that write nothing. The bell
+  renders it with its title, message and a link to the run. `GET /api/notifications`
+  adds the `agent_message` kind (payload `packageId`, `title`, `message`);
+  migration `0105` restates the `notifications_type_valid` CHECK. The bell shows it at its
+  next refresh — when the run ends, on reconnect, or at its five-minute poll — not instantly.
+  Opening the run reads it, like a failure notice. An agent gets it
+  by selecting it: it is not in the integration's `default_tools`, and the agents
+  `scripts/migration/0053` rewrites keep an explicit selection without it.
+
+- **`appstrate run --local` wires unauthenticated remote MCP integrations**
+  (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
+  CLI connects to `source.remote.url` itself and exposes each tool the agent
+  selects (`integrations_configuration.<id>.tools`, else `default_tools`), minus
+  `hidden_tools`, as `{ns}__{tool}`, named as on the platform. Requests go
+  through the same SSRF guard as the CLI's `api_call` calls: the declared host
+  is reachable, a redirect to a blocked range is refused. A server the CLI
+  cannot reach, a connection and `tools/list` that take more than 10 s, a
+  failing `tools/list`, an SSE transport or a `{$variable.<name>}` URL template
+  leaves the integration unavailable: the agent is told and the run starts
+  without it.
+  Authenticated remote integrations and `local` sources stay unavailable to a
+  local run; `--integrations none` wires none.
+
+- **The typed tools of a remote MCP integration are callable outside a run**
+  (#2206). `search_integration_tools` lists, for an integration backed by a
+  remote MCP server, the tools its catalog selects (the `tools_policy` keys, or
+  everything the server lists under `allow_undeclared_tools`, less
+  `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
+  the server's `tools/list`. The name is a function of the upstream name alone,
+  whatever the listing order, the connection listed with or the other tools:
+  `{ns}__{tool}` when that is a valid tool name (56 characters at most, the body
+  in `[A-Za-z0-9_-]`), the tool is not named `api_call`, `api_upload` or a
+  `…__{auth}` form of either, and its name does not end in `_` and 8 hex digits
+  (nor is 8 hex digits alone); otherwise the upstream name with each other
+  character made `_`, `_` runs collapsed, cut to fit, stripped of leading and
+  trailing `_` and always followed by `_` and 8 hex digits of its hash, so a
+  hashed name holds no `__` and never equals a plain one (two hashed names
+  still equal, a hash collision, are both dropped and logged; a run keeps a
+  transformed name's plain form while it is free, so there the name differs
+  from a run's). The catalog
+  is read through the credential proxy with the connection the proxy selects (when several qualify, the first of the caller's
+  own connections it accepts, never a colleague's shared one the caller did not
+  name; sanitised; cached 5 minutes per connection, integration version and
+  rendered server URL, read only after that selection, at most 128 catalogs
+  per replica; at most 500 tools of names up to 128 characters and 512 KiB of
+  descriptors, a longer catalog reported by a `note` and, on the listing route,
+  in `truncated_catalogs` with the number of tools read, `listed_tools`; a
+  declared output schema
+  relayed as `output_schema`). A server that cannot be listed leaves the names,
+  marked `catalog_unreadable`; one the proxy refused to list for the caller, or
+  whose server refused the connection's credential, comes back in `unlisted`
+  with that refusal. `call_integration_tool` sends one `tools/call` through the proxy, on
+  the named `connection_id` or the connection selected for that tool:
+  `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
+  `remedy`, or `must_choose_connection` with the candidates, both before
+  anything is sent (every auth of the integration serves a typed tool). A
+  JSON-RPC error -32602 (Invalid params) the server answers to the `tools/call` is
+  `422 upstream_invalid_params`, any other `502 upstream_mcp_error`
+  (`mcp_error: { code, message }`, the message bounded), an answer over the
+  exchange bound (2 MiB, or the proxy's `max_response_bytes` when lower)
+  `502 upstream_response_too_large` (at once, as JSON or as an event stream),
+  -32602 answered to anything but the `tools/call` itself (the handshake, which
+  MCP uses for an unsupported protocol version) `502 upstream_mcp_error`,
+  a 401 or 403 of the server `502 upstream_credential_rejected`
+  (`upstream_status`, and the proxy's `credential` verdict when its forced
+  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
+  each with its `Proxy-Status` (`received-status` on a credential rejection and
+  on a JSON-RPC error, the status the error came in, with
+  `error=http_request_error` on `upstream_invalid_params` and
+  `error=http_protocol_error` on `upstream_mcp_error` and on a `bad_gateway`
+  that received an answer); the server sync of
+  `POST /api/integrations/{packageId}/discover` answers the same codes (its
+  timeout 20 s, never `upstream_invalid_params`: it sends no arguments) where it
+  answered `bad_gateway`. The result
+  keeps no reserved `_meta` key, on the result or on any content block: a key
+  whose prefix (before its first `/`, in any case) is `dev.appstrate`, or has
+  `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`,
+  `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`).
+  Past 256 KiB the result is cut so that its JSON stays within 256 KiB: a text
+  block that does not fit is cut on a character boundary, any other is
+  replaced by a note while one fits, a closing note counts what was cut or
+  dropped, and `_meta["dev.appstrate/truncated"]` is set.
+  The call journal records one row per `tools/call` (that exchange, not a later
+  one of its session), a timeout included, and one per listing that reached the
+  server, a refused or unanswered handshake
+  included (one row for the sync as well), and a listing reaching a server
+  goes through the forced refresh on a 401, which can rotate the stored OAuth
+  tokens, and can flag the connection on a credential refusal, as a call does:
+  a search is annotated neither read-only nor idempotent. A
+  listing waits 20 s for all its servers (5 s when `call_integration_tool`
+  resolves its tool by name, keeping resolution and call under a client's
+  60 s), and no longer than its request: a catalog not read by then is listed
+  `catalog_unreadable` and read on for the next listing, and no further server
+  is contacted. Resolving a name its catalog is not there to prove — not
+  declared, under `allow_undeclared_tools`, and not an upstream name exposed as
+  itself (a name ending in `_` and 8 hex digits never is) — answers, in
+  `unlisted`, `503 tool_catalog_unavailable` and sends nothing: the catalog
+  could not be read, `listing_failure` naming why when known (the proxy's
+  problem code, or `timeout`); retryable, a later listing may read it. Tool names are unique in a space: a namespace equal to another
+  active integration's after normalisation (cut at 20 characters, without a
+  trailing `_`) takes a hash of its package id, and a name never depends on the
+  caller's connections. The listing gives the connections the tools reach
+  once (`connections`), each tool naming its own (`connection_ids`, a typed
+  tool's `missing_scopes` per connection). Both routes answer `Cache-Control: no-store`, like
+  `/proxy`. Two routes
+  back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
+  and `unlisted`) and
+  `POST /api/credential-proxy/tools/call`, under the access rule of
+  `/api/credential-proxy/proxy` outside a run, each with its own rate-limit
+  bucket, and both kept out of the MCP operation catalog like `/proxy`.
+  `search_integration_tools` also lists, in `not_ready`, the integrations
+  active in the space the caller has no usable connection of and that offer a
+  tool outside a run, each with the
+  `proxy_connection` verdict of a call naming none (`none`,
+  `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
+  the selection's `refusal` item, whose `connect_url` (run launch's minter and
+  policy, `integrations:connect`) connects or reconnects it. The MCP exchange
+  of the editor's server sync and of these routes share one proxy adapter;
+  `stripForgedRuntimeEvents` moves from the sidecar to
+  `@appstrate/mcp-transport`, which both consume, beside the relay's wider
+  `stripReservedResultMeta`.
+
+- **A space can close direct access to its connections** (#2204). A space
+  admin turns off « Direct connection access » in the space settings
+  (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
+  `spaces.credential_proxy_open`, default `true`, migration `0104`). The
+  credential proxy then answers calls that name no run
+  (`GET /api/credential-proxy/connections`, `GET /api/credential-proxy/tools`,
+  `POST /api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without
+  `X-Run-Id`) and the authenticated `POST /api/integrations/{packageId}/discover`
+  with `403 credential_proxy_closed` for every role,
+  organization owners and admins included, and the MCP tools
+  `search_integration_tools` and `call_integration_tool` are not declared for
+  that space; `get_me` stops naming them there. On the organization URL, a
+  call whose `space_id` names that space is refused with
+  `credential_proxy_closed`. Runs are unaffected: platform runs reach
+  their connections through the sidecar, remote runs (`X-Run-Id`) their bound
+  ones. The switch does not stop a member allowed to launch inline runs from
+  having an agent make the call inside a run. The space object carries
+  `credential_proxy_open`; a personal space keeps it open
+  (`409 personal_space_immutable`). The integration detail's `proxy_connection`
+  verdict (`GET /api/integrations/{packageId}`) is then `proxy_closed`, and the
+  editor's connect step says so instead of offering a connection.
 
 - **A model refused for the runtime version says so** (#2148). When a provider
   refuses a model for the client version the agent SDK announces (Anthropic's
@@ -692,13 +1059,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A draft saved right after a run starts no longer reaches that run** (#2203).
+  The run's integration versions were frozen with their manifest reads still
+  in flight, so an integration draft saved within that window could be the
+  manifest the run spawned with. The freeze now completes before the run
+  proceeds.
+
 - **`get_me` lists only the integrations active in the space** (#2146).
   `GET /api/me/context` listed every integration with a connection the caller
   may bind in the space, including an org-scope connection of an integration
-  not activated there, which `list_connections`, `api_call` and runs refuse.
+  not activated there, which the credential proxy and runs refuse.
   `connections[]` now holds the active integrations only, as the agent and
   skill hints of the same payload do, and the `get_me` tool description points
-  to `list_connections` for the connections `api_call` can use.
+  to `search_integration_tools` for the tools those connections can call.
 
 - **A remote MCP integration whose credential is rejected at boot is flagged on
   the first run** (#2181). A 401 on the MCP handshake of an API key, basic or

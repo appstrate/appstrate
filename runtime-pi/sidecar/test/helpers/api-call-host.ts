@@ -4,8 +4,8 @@
  * Test helper mirroring the production wiring in `integrations-boot.ts`:
  * host the generic `api_call` (+ optional `api_upload`) tools as TRUSTED
  * in-process MCP servers on a shared {@link McpHost}. Tests then expose
- * `host.buildTools()` via `additionalMcpToolsProvider` (createApp) or
- * `additionalToolsProvider` (mountMcp) — the same single pipeline the
+ * `host.buildTools()` via `mcpToolsProvider` (createApp) or
+ * `toolsProvider` (mountMcp) — the same single pipeline the
  * sidecar uses, so they exercise the real namespacing + dispatch path.
  */
 
@@ -36,6 +36,7 @@ export async function buildApiCallHost(
     });
     const sharedNamespace = allocatedByRequested.get(integ.namespace);
     const allocated = await host.register({
+      integrationId: integ.namespace,
       namespace: integ.namespace,
       client: wrapClient(pair.client, { close: () => pair.close() }),
       // Single-connection hosts: no selector, so the upstream binds none.

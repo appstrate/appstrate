@@ -621,6 +621,7 @@ column space_social_providers.updated_at timestamp with time zone not null defau
 column spaces.color text
 column spaces.created_at timestamp with time zone not null default now()
 column spaces.created_by text
+column spaces.credential_proxy_open boolean not null default true
 column spaces.default_role text not null default 'operator'::text
 column spaces.icon text
 column spaces.id text not null
@@ -807,7 +808,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -989,7 +990,7 @@ enum invitation_status pending,accepted,expired,cancelled
 enum llm_usage_source proxy,runner
 enum org_role owner,admin,member,guest
 enum package_source local,system
-enum package_type agent,skill,integration,mcp-server
+enum package_type agent,skill,integration
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
 enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid,package_removed

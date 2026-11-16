@@ -24,6 +24,8 @@ export interface ReachableSpace {
   visibility: SpaceVisibility;
   defaultRole: SpaceRolePreset;
   ownerUserId: string | null;
+  /** Whether the space lets an MCP caller reach the credential proxy outside a run. */
+  credentialProxyOpen: boolean;
   role: SpaceRoleRef;
   permissions: Set<Permission>;
 }
@@ -84,6 +86,7 @@ async function resolveReachableSpaces(
             visibility: space.visibility,
             defaultRole: space.defaultRole,
             ownerUserId: space.ownerUserId,
+            credentialProxyOpen: space.credentialProxyOpen,
             role,
             permissions: effectiveInSpace(c, role),
           },

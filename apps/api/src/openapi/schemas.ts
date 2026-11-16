@@ -21,7 +21,6 @@ import {
   MODEL_REASONING_OFF_BEHAVIOURS,
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
-import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -61,14 +60,6 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
  * turn a server-side id-shape change into a client-side break.
  */
 export const SPACE_ROLE_ID_PATTERN = "^srl_";
-
-/**
- * Runtime-tool ids a manifest may DECLARE — the canonical catalog
- * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
- * Schema `enum` member takes. There is no second list to pick from and no
- * reason to import anything but the catalog itself.
- */
-const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
@@ -116,7 +107,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -126,6 +117,19 @@ const PACKAGE_HOME_PROPERTIES = {
  */
 export const EMOJI_ICON_WRITE_RULE =
   "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
+
+/** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
+export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
+  "Whether members may use the space's connections directly, outside a run: " +
+  "`/api/credential-proxy/connections`, `/api/credential-proxy/tools`, " +
+  "`/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, " +
+  "`POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP " +
+  "tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
+  "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
+  "and admins included. Runs keep their connections: a run the platform executes reaches them " +
+  "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +
+  "member who may launch an inline run from having an agent make the call inside that run; " +
+  "that is governed by the inline-run permission of the member's role. Default `true`.";
 
 /**
  * The visual identity of an agent, a space or an organization — one `icon`
@@ -426,7 +430,7 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -1041,17 +1045,12 @@ export const schemas = {
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
-        // caller; a launcher is the one who connects them. `skills` and
-        // `mcp_servers` are the composition, withheld from a summary read
+        // caller; a launcher is the one who connects them. `skills` is the
+        // composition, withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
           skills: {
-            type: "object",
-            additionalProperties: { type: "string" },
-            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
             type: "object",
             additionalProperties: { type: "string" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
@@ -1179,8 +1178,8 @@ export const schemas = {
       dependencies: {
         type: "object",
         // `integrations` (via parseManifestIntegrations) is emitted to every
-        // caller — a launcher is the one who connects them. `skills` and
-        // `mcp_servers`, the composition, are withheld from a summary read
+        // caller — a launcher is the one who connects them. `skills`, the
+        // composition, is withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
@@ -1188,19 +1187,6 @@ export const schemas = {
             type: "array",
             items: { $ref: "#/components/schemas/AgentSkillRef" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
-            type: "array",
-            items: {
-              type: "object",
-              required: ["id", "version"],
-              properties: {
-                id: { type: "string" },
-                version: { type: "string" },
-              },
-            },
-            description:
-              "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`).",
           },
           integrations: {
             type: "array",
@@ -1533,7 +1519,7 @@ export const schemas = {
         properties: {
           output: {
             description:
-              "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+              "Structured JSON emitted via the `output` tool the runner injects from the agent's `output.schema`. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
           },
         },
       },
@@ -1990,17 +1976,20 @@ export const schemas = {
         type: "string",
         enum: ["local", "remote", "none"],
         description:
-          "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
+          "The manifest's `source.kind`: `local` runs the MCP server the integration archive carries, in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
       },
       server: {
         type: ["object", "null"],
-        required: ["name", "version"],
+        required: ["type", "entry_point"],
         properties: {
-          name: { type: "string" },
-          version: { type: "string", description: "Semver range" },
+          type: { type: "string", description: "Runtime: `node`, `python`, `binary` or `uv`." },
+          entry_point: {
+            type: "string",
+            description: "Path of the server entry point inside the integration archive.",
+          },
         },
         description:
-          "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source.",
+          "`source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source.",
       },
     },
   },
@@ -2046,7 +2035,7 @@ export const schemas = {
       content: {
         type: ["string", "null"],
         description:
-          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
+          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an integration published without one. Read from the draft or from the published archive according to `definition`.",
       },
       source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
@@ -2529,7 +2518,7 @@ export const schemas = {
       errors: {
         type: "array",
         description:
-          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
+          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{id}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
         items: {
           allOf: [
             { $ref: "#/components/schemas/ResolutionFieldError" },
@@ -2731,6 +2720,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "credential_proxy_open",
       "personal",
       "access",
       "role",
@@ -2766,6 +2756,10 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      credential_proxy_open: {
+        type: "boolean",
+        description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
       },
       personal: {
         type: "boolean",
@@ -2975,29 +2969,11 @@ export const schemas = {
     },
   },
   AgentManifest: {
+    type: "object",
     description:
-      "AFPS Agent manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, " +
-      "with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
-    allOf: [
-      { $ref: "https://schemas.afps.dev/v0/agent.schema.json" },
-      {
-        type: "object",
-        properties: {
-          runtime_tools: {
-            type: "array",
-            items: {
-              type: "string",
-              enum: RUNTIME_TOOL_IDS,
-            },
-            description:
-              "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
-              "An id outside this enum is rejected on author input and dropped (with the " +
-              "drop reported) when read back from a stored manifest.",
-          },
-        },
-      },
-    ],
+      "AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's " +
+      'extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta["dev.appstrate/*"]`, AFPS §10).',
+    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   FileConstraintsMap: {
     type: "object",
@@ -3124,7 +3100,7 @@ export const schemas = {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
       },
       chat_enforced: {
         type: "boolean",

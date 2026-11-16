@@ -38,7 +38,7 @@ If an agent declares an `output.schema` and ends its turn without calling the `o
 
 ## Remote runs
 
-A [remote run](/features/runs#remote-runs) streams signed events to a short-lived sink. Its liveness works the same way: events and explicit heartbeats keep it alive, and the stall threshold applies. A long idle period can be bridged with `PATCH /api/runs/{runId}/sink/extend`, which pushes the sink expiry out (up to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, 24 hours by default) and counts as a heartbeat. The default sink lifetime is 2 hours (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`).
+A [remote run](/features/runs#remote-runs) streams signed events to a short-lived sink. Its liveness works the same way: events and explicit heartbeats keep it alive, and the stall threshold applies. A long idle period can be bridged with `PATCH /api/runs/{id}/sink/extend`, which pushes the sink expiry out (up to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, 24 hours by default) and counts as a heartbeat. The default sink lifetime is 2 hours (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`).
 
 ## Restarts and shutdown
 

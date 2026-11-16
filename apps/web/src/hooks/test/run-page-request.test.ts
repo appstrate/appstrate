@@ -28,7 +28,6 @@ describe("fetchRunPage", () => {
       search: "rap",
       acrossOrgId: null,
       limit: 15,
-      offset: 0,
     });
     expect(get.mock.calls).toEqual([
       [
@@ -37,7 +36,7 @@ describe("fetchRunPage", () => {
           params: {
             query: {
               limit: 15,
-              offset: 0,
+              startingAfter: undefined,
               user: undefined,
               kind: undefined,
               status: ["failed"],
@@ -56,7 +55,7 @@ describe("fetchRunPage", () => {
       kind: "inline",
       acrossOrgId: "org_1",
       limit: 15,
-      offset: 15,
+      startingAfter: "run_15",
     });
     expect(get.mock.calls).toEqual([
       [
@@ -66,7 +65,7 @@ describe("fetchRunPage", () => {
             path: { orgId: "org_1" },
             query: {
               limit: 15,
-              offset: 15,
+              startingAfter: "run_15",
               user: "me",
               kind: "inline",
               status: undefined,

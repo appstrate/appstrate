@@ -1112,14 +1112,11 @@ program
     "--run-id <id>",
     "Explicit run id (default: generated). In remote mode this is forwarded as the trigger's Idempotency-Key — re-running with the same value replays the original response instead of creating a duplicate run.",
   )
-  .option(
-    "--output <path>",
-    "Write the final RunResult JSON to this path. Note: in remote mode the `memories` / `pinned` / `logs` fields are emitted as empty defaults — the dashboard remains the source of truth for those surfaces.",
-  )
+  .option("--output <path>", "Write the final RunResult JSON to this path.")
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first; a space with direct connection access turned off refuses them)",
   )
   .option(
     "--report-fallback <mode>",

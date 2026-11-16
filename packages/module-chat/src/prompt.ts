@@ -17,6 +17,7 @@
 
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
+import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
@@ -29,6 +30,7 @@ import type { PrincipalKind } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
+  platformToolName,
   type ConnectionResolutionWarningCode,
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
@@ -46,6 +48,9 @@ type InjectedSkillMap = InjectedSkills["skills"];
 
 /** A launch warning code as the persona names it. */
 const warningCode = (code: ConnectionResolutionWarningCode) => `\`${code}\``;
+
+/** The name a run's agent sees for the platform `log` tool. */
+const PLATFORM_LOG_TOOL = platformToolName("log");
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
 type SpaceRoleRefLike =
@@ -165,8 +170,8 @@ Choosing what to do:
 ${invoke(
   `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`; the permissions listed in your context decide what you may call, so never name an act they do not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n${
     authorsPackages
-      ? "- To create a package — an agent, a skill, an integration or a local MCP server — call its type's create operation (`createAgent`, `createSkill`, `createIntegrationPackage`), reading its schema with `describe_operation` first. A local MCP server embeds its code, so it is created only by importing an archive with `import_package_file`, which also imports a package of any other type. When a skill listed in your context guides authoring that type, load it before writing anything.\n"
-      : "- Do not create, import or modify any package (agent, skill, integration, MCP server) in this turn, not even through `invoke_operation`.\n"
+      ? "- To create a package — an agent, a skill or an integration — call its type's create operation (`createAgent`, `createSkill`, `createIntegrationPackage`), reading its schema with `describe_operation` first. An integration that runs a local MCP server declares it in `source.server` and ships its code as package files: add the files after creating it, or create it by importing an `.afps` archive with `import_package_file`, which also imports a package of any other type. When a skill listed in your context guides authoring that type, load it before writing anything.\n"
+      : "- Do not create, import or modify any package (agent, skill, integration) in this turn, not even through `invoke_operation`.\n"
   }`,
 )}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
 ${runs(
@@ -174,7 +179,7 @@ ${runs(
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent marked "draft only, yours to run" has no published version but the user authors it, so pass \`version:"draft"\` for those. An agent marked "draft only, not runnable" has no published version and the user does not author it — it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
 ${inline(
-  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a PARTIAL canonical AFPS agent \`manifest\` plus a top-level \`prompt\`. Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"). The platform derives the matching \`@inline/<kebab-case-slug>\` name and fills omitted AFPS boilerplate, \`runtime_tools\` (log, output, publish_file), and an open object output schema. Defaults apply ONLY to absent top-level fields: every field you provide replaces its default exactly, arrays and nested objects are never merged, and \`runtime_tools: []\` stays empty. You can override EVERY field — including \`name\`, \`runtime_tools\`, and a complete strict \`output.schema\` — when the task needs a complex deterministic manifest; if you provide a non-empty output schema, your explicit runtime tools must include \`output\`. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. When your context does not show a name you need (a tool beyond the default, or a default shown as a count), read the integration with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with \`log\`, do the work, then return the result with \`output\` as its mandatory last action.
+  `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. When your context does not show a name you need (a tool beyond the default, or a default shown as a count), read the integration with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
 
 When a request chains several external actions (e.g. scrape a page THEN email the result), do NOT chain one run per action: compose ONE sub-agent that declares ALL the needed integrations under \`dependencies.integrations\` and describes the whole chain in its \`prompt\` — a single \`run_and_wait\` call. Split into separate runs only when you must decide something between the steps (the user has to confirm, or the next step depends on a result you need to inspect first).
 
@@ -197,7 +202,7 @@ Example — summarising the user's latest emails (adapt the integration id, vers
     },
     "integrations_configuration": { "@appstrate/gmail": { "tools": ["api_call"], "required": true } }
   },
-  "prompt": "You are a sub-agent. Log meaningful progress with the log tool. Fetch the user's 3 most recent emails, summarise them, and return the summary by calling the output tool."
+  "prompt": "You are a sub-agent. Log meaningful progress with the ${PLATFORM_LOG_TOOL} tool. Fetch the user's 3 most recent emails, summarise them, and return the summary by calling the output tool."
 }
 \`\`\`
 Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
@@ -217,7 +222,7 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
   "\n",
 )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{spaceId}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
@@ -246,6 +251,7 @@ interface CallerContext {
         source: string;
         version?: string;
         default_tools?: readonly string[] | "*" | null;
+        needs_reconnection?: boolean;
       }[]
     | null;
   agents?:
@@ -502,7 +508,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     const list = ctx.connections
       .map((c) => {
         const ver = c.version ? `@${c.version}` : "";
-        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
+        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)}${c.needs_reconnection ? "; needs reconnection by its owner" : ""})`;
       })
       .join(", ");
     // Render the connected integrations as data only — the `@scope/name` id (+

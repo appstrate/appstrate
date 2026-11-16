@@ -27,6 +27,22 @@ they start with `packages/` or `e2e/`.
 - **Surfaces**: the page is `bg-canvas` (off-white), cards and dialogs are
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
+- **One frame per block**: a card (`Card`, `DetailSectionCard`, a `DataTable`) is
+  `bg-card rounded-lg border`, with no shadow (shadows are for what floats:
+  popovers, menus, dialogs). A table draws its own card on a page, a detail tab
+  included; inside a surface that is already framed (every overlay: settings and
+  the catalogue, every `Modal`, a `framed` `DetailTabPanel`) it draws none,
+  because that surface spreads `INTEGRATED_TABLE_SURFACE`. Never choose a
+  table's frame at the call site. A detail tab lays its content on the page:
+  a list tab (runs, memory, connections, usage, a run's journal) is its
+  `ListToolbar` over the list's own card, at the panel's edge; only a rail split
+  (settings, a run's results) is a `framed` panel. A toolbar's buttons are its
+  32px (`lib/toolbar-button.ts`), never a stock `size="sm"` beside them.
+- **Grey has two values**: a static muted surface (inset, notice, header band,
+  read-only field, code block) is `bg-muted/40` (insets add `rounded-lg border`);
+  hovering a row, a list item or a card is `hover:bg-muted/50`, the table row's
+  hover. A tinted surface that is itself clickable hovers to `bg-muted`. Buttons,
+  menus and the org switcher keep the primitives' `accent`.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
   `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
@@ -49,6 +65,16 @@ they start with `packages/` or `e2e/`.
   control (a button, a row being saved), never content on its way; no centred
   spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
   the shell exists there is no page to draw.
+- **A structure change updates its skeletons in the same change**: any change to
+  a screen's structure (frames, sections, toolbar or footer, header lines, tabs,
+  cards, row heights, a surface turning integrated) updates, in that same change,
+  every skeleton that stands for it — the page skeletons of
+  `loading-skeletons.tsx`, the per-component `*Skeleton`s, the `placeholder`
+  props of `DataColumn`/`CardGrid`/`ItemList`, the `skeletonOf` fallbacks and
+  tables of `app.tsx` — so the skeleton and the loaded page keep one shape.
+  Review checks both; a skeleton that keeps an old frame, shadow, tint, radius
+  or line is a defect of the change that left it. A detail page's skeleton draws the
+  tab the address opens on (`#runs`, `#settings`…), not always the first one.
 
 ## 2. The shell
 
@@ -127,9 +153,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
    `className` (`text-primary`, `text-destructive`). A link that loses its label
    under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
-   `PageHeader` with `variant="collection"` is for level-one list pages only:
-   title and actions, no descriptive subtitle, followed by the toolbar at the
-   same spacing on every list. Explanations belong in the content or empty state.
+   `PageHeader` with `variant="collection"` is for level-one pages only (lists and the
+   dashboard): title and actions, followed by the toolbar at the same spacing on every list.
+   `description` is a status line (the dashboard's date and running count), never an
+   explanation: those belong in the content or empty state.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
@@ -149,7 +176,11 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
 4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
    as `tabs`), underlined, an icon each, the tab kept in the URL hash
-   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
+   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string and pushes, so Back
+   undoes a switch). The summary tab is `overview`, the settings one `settings`. A tab that splits
+   a COLLECTION (`CollectionTabs`) is `useQueryTab(name, options)` (`hooks/use-query-tab.ts`, the
+   first option leaves the URL, also pushed); `CollectionTabs` with `hrefOf` draws links when the
+   router owns more than one param (the catalogue's views).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
    tabs for every role** (a package's « Utilisé par » included): what a role may
@@ -542,9 +573,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
     no model uses is deleted. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
-- **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
+- **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
+- **An integration's source** (API · MCP distant · MCP local) is worded in one place,
+  `IntegrationSourceLabel` (`components/integration-source-label.tsx`): the table column, the
+  card line, the catalogue sheet and the detail all draw it, and a local one says « indisponible ici »
+  (a focusable hint with its explanation) when this instance cannot run local servers.
 - **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
   the « … » menu holds EVERY action of the row, and nothing else sits at the
   row's end. No pencil, download, reconnect or gear icon beside it, in any
@@ -688,11 +723,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   only what it needs to exist, opened from every entry point
   with the context preselected, then the object's page takes the rest
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
-  (agent, skill, integration, MCP server): the creation hand-off modal
+  (agent, skill, integration): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
   url (when offered) / manual / chat / import), then, for the manual way, `components/create-package-modal.tsx`
   (name, identifier, description, plus an agent's prompt or an integration's server URL), after
-  which the new package's page takes the rest, its files included. An MCP server is imported. An integration is also added
+  which the new package's page takes the rest, its files included. A local integration (one that ships its own MCP server) is written in the editor or imported (`.afps`). An integration is also added
   from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
   `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
   in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
-import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
-import { Label } from "@appstrate/ui/components/label";
+import { FormItem } from "../app-ui/form-item";
 import type { VariableField } from "./connection-variables-schema";
 
 /** The hosted connect form's connection variables, controlled like `<CredentialFields>`. */
@@ -36,22 +35,24 @@ export function VariableFields({
       {fields.map((field) => {
         const id = `variable-${field.name}`;
         const error = errors[field.name];
-        const describedBy = [
-          field.description ? `${id}-description` : null,
-          error ? `${id}-error` : null,
-        ]
-          .filter(Boolean)
-          .join(" ");
         return (
-          <div key={field.name} className="flex flex-col gap-1">
-            <Label
-              htmlFor={id}
-              className={cn("mb-0", field.title ? "text-xs" : "font-mono text-xs")}
-            >
-              {field.title ?? field.name}
-            </Label>
+          <FormItem
+            key={field.name}
+            id={id}
+            className={cn("gap-1 [&_label]:text-xs", !field.title && "[&_label]:font-mono")}
+            label={field.title ?? field.name}
+            hint={
+              field.description ? (
+                <span className="leading-snug" data-testid={`variable-description-${field.name}`}>
+                  {field.description}
+                </span>
+              ) : undefined
+            }
+            error={
+              error ? <span data-testid={`variable-error-${field.name}`}>{error}</span> : undefined
+            }
+          >
             <Input
-              id={id}
               type="text"
               inputMode={field.format === "uri" ? "url" : undefined}
               required
@@ -61,25 +62,9 @@ export function VariableFields({
               placeholder={field.placeholder}
               autoComplete="off"
               spellCheck={false}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={describedBy || undefined}
               data-testid={`variable-input-${field.name}`}
             />
-            {field.description && (
-              <p
-                id={`${id}-description`}
-                className="text-muted-foreground text-xs leading-snug"
-                data-testid={`variable-description-${field.name}`}
-              >
-                {field.description}
-              </p>
-            )}
-            {error && (
-              <FieldError id={`${id}-error`} data-testid={`variable-error-${field.name}`}>
-                {error}
-              </FieldError>
-            )}
-          </div>
+          </FormItem>
         );
       })}
     </>

@@ -41,6 +41,7 @@
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
     "./identity-colors": "./src/identity-colors.ts",
+    "./keyset-paging": "./src/keyset-paging.ts",
     "./lucide-names": "./src/lucide-names.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",

@@ -234,7 +234,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` — the skills the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -446,7 +446,7 @@ export interface paths {
         };
         /**
          * List runs for an agent
-         * @description List runs for a specific agent (org-scoped, default limit 50).
+         * @description List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).
          */
         get: operations["listAgentRuns"];
         put?: never;
@@ -1180,7 +1180,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can call outside a run
-         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`.
+         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role.
          */
         get: operations["listCredentialProxyConnections"];
         put?: never;
@@ -1204,7 +1204,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1223,7 +1223,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1242,7 +1242,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1261,7 +1261,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1282,7 +1282,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1295,6 +1295,46 @@ export interface paths {
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         patch: operations["credentialProxyPatch"];
+        trace?: never;
+    };
+    "/api/credential-proxy/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tools the caller can call outside a run
+         * @description Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's OWN connections it accepts: a connection another member shared serves only when named or designated by an org default), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. Reaching a server sends the connection's credential: a 401 goes through the proxy's forced refresh, and a server refusing the credential can flag the connection `needs_reconnection`, as a call does. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all (5 s when it resolves a `name`), and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. `connections` lists the connections the tools reach, each once, as `GET /api/credential-proxy/connections` lists them; each tool names its own (`connection_ids`). `not_ready` lists the integrations active in the space the caller has no usable connection of and that offer a tool outside a run (an `api_call` tool, or a remote server's), with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, the egress guard, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal; resolving a `name` only the unread catalog could map (under `allow_undeclared_tools`, neither a declared tool's nor an upstream name exposed as itself, which one ending in `_` and 8 hex digits never is) adds the integration with `503 tool_catalog_unavailable`: the catalog could not be read (`listing_failure`, when known: the proxy's problem code or `timeout`), nothing was sent, and a later listing may read it. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        get: operations["listIntegrationTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/credential-proxy/tools/call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call a typed tool of a remote MCP integration
+         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the reserved `_meta` keys of the result and of each content block: a key whose prefix (the part before its first `/`, in any case) is `dev.appstrate`, or has `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`, `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks, a transport fault, or an answer of the server the platform turns into a problem carries RFC 9209 `Proxy-Status` (the 403, 422, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. The arguments go to the server as given: it validates them. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        post: operations["callRemoteIntegrationTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/docs": {
@@ -1326,9 +1366,7 @@ export interface paths {
         };
         /**
          * List end-users
-         * @description List end-users with cursor-based pagination. Filter by spaceId, externalId, or email.
-         *
-         *     **Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most one. Encoded via the `x-mutually-exclusive` extension below for client generators that honour it; the server enforces the constraint at runtime regardless.
+         * @description List end-users with cursor-based pagination (`startingAfter` + `limit`). Filter by externalId or email, or search with `q`.
          */
         get: operations["listEndUsers"];
         put?: never;
@@ -1920,7 +1958,7 @@ export interface paths {
         put?: never;
         /**
          * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
+         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -2040,7 +2078,7 @@ export interface paths {
         };
         /**
          * Organization library — the placement map, graded by caller
-         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Graded by the caller: the spaces list and the placements include only the spaces whose own library (`GET /api/spaces/{id}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — and each package type also requires that type's read permission in the space. So the response is the union of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package with no placement the caller reads is listed, with empty `placements`, when its home grants the caller `<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one space) receive 403. Ephemeral packages are excluded. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{id}/packages` activates a package in a space — placing it there when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{id}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2160,7 +2198,7 @@ export interface paths {
         put?: never;
         /**
          * Per-organization MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPost"];
         delete?: never;
@@ -2184,7 +2222,7 @@ export interface paths {
         put?: never;
         /**
          * Space-pinned MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPostInSpace"];
         delete?: never;
@@ -3150,7 +3188,7 @@ export interface paths {
         };
         /**
          * List agents across the organization's spaces
-         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` / `dependencies.mcp_servers` are withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
+         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: the rows of `GET /api/agents` for each of those spaces, one row per (agent, space) where the agent is ACTIVE, in the order of the single-space index (system agents first, then by id), the rows of an agent active in several spaces side by side, by space id. Each row carries its `spaceId` (map it to a name with `GET /api/spaces`) and follows the caller's role in that space: `dependencies.skills` is withheld where the caller holds `agents:run` without `agents:read`, and `running_runs` / `unread_count` span every run of the agent there under `runs:read-all`, the caller's own runs otherwise. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
          */
         get: operations["listOrgAgents"];
         put?: never;
@@ -3331,26 +3369,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgId}/packages/mcp-servers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List MCP-server packages across the organization's spaces
-         * @description Read-only index of the MCP-server packages of every space of the organization where the caller holds `mcp-servers:read`: the rows of `GET /api/packages/mcp-servers` for each of those spaces, one row per (package, space) where the package is ACTIVE, in the order of the single-space index (system packages first, then newest first), the rows of a package active in several spaces side by side, by space id. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. An end-user is refused with `403`.
-         */
-        get: operations["listOrgMcpServerPackages"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgId}/packages/skills": {
         parameters: {
             query?: never;
@@ -3444,7 +3462,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List the agent packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
+         * @description List the agent packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -3468,7 +3486,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills the agent is built from (`dependencies.skills`).
          */
         get: operations["getAgentPackage"];
         put?: never;
@@ -3644,13 +3662,13 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List the integration packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
+         * @description List the integration packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
         /**
          * Create an integration package, including a remote MCP
-         * @description Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.
+         * @description Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; a local MCP server (`source.kind: "local"`) ships its server payload inside the integration archive, so it is created by importing that archive (`POST /api/packages/import`), not by this JSON form.
          */
         post: operations["createIntegrationPackage"];
         delete?: never;
@@ -3775,146 +3793,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/mcp-servers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List MCP-server packages
-         * @description List the MCP-server packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
-         */
-        get: operations["listMcpServerPackages"];
-        put?: never;
-        /**
-         * Create a local MCP-server executable package
-         * @description Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.
-         */
-        post: operations["createMcpServerPackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package detail
-         * @description Get an MCP-server package's full details including content.
-         */
-        get: operations["getMcpServerPackage"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete an MCP-server package
-         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        delete: operations["deleteMcpServerPackage"];
-        options?: never;
-        head?: never;
-        /**
-         * Update an MCP-server package
-         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        patch: operations["updateMcpServerPackage"];
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List MCP-server package versions
-         * @description List all published versions for an MCP-server package.
-         */
-        get: operations["listMcpServerPackageVersions"];
-        put?: never;
-        /**
-         * Create a version from draft
-         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        post: operations["createMcpServerPackageVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get version info for an MCP-server package (latest published + draft)
-         * @description Returns the latest published version and the current draft version from the manifest.
-         */
-        get: operations["getMcpServerPackageVersionInfo"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package version detail
-         * @description Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.
-         */
-        get: operations["getMcpServerPackageVersionDetail"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete an MCP-server package version
-         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        delete: operations["deleteMcpServerPackageVersion"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore an MCP-server package version into the draft
-         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        post: operations["restoreMcpServerPackageVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/packages/skills": {
         parameters: {
             query?: never;
@@ -3924,7 +3802,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List the skills ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
+         * @description List the skills ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed here, or holding a row here) and switched on. A package placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{id}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -4169,7 +4047,7 @@ export interface paths {
         get: operations["getPackageHome"];
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
          */
         put: operations["movePackageHome"];
         post?: never;
@@ -4194,7 +4072,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a person or a space
-         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: an mcp-server whose `latest` archive does not parse is refused (`422 bundle_invalid`), and the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.
+         * @description Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -4644,7 +4522,7 @@ export interface paths {
         put?: never;
         /**
          * Create a remote-backed run (caller executes the agent)
-         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
+         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
          *
          *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.
          *
@@ -4701,6 +4579,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest one signed CloudEvent (HMAC)
+         * @description Receives a single AFPS `RunEvent` CloudEvent from the run's HttpSink. Authenticated via Standard Webhooks HMAC-SHA256 (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers). Idempotent: duplicate `webhook-id` values inside the replay window return `200 { outcome: "replay" }` without reprocessing. Events with non-contiguous sequence numbers are buffered and drained in order on the next contiguous arrival or when a terminal event flushes the buffer.
+         */
+        post: operations["ingestRunEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/events/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Terminal RunResult — close the sink (HMAC, idempotent)
+         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
+         *
+         *     The runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.
+         */
+        post: operations["finalizeRemoteRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/events/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runner liveness keep-alive (HMAC)
+         * @description Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).
+         */
+        post: operations["heartbeatRemoteRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the run's input files (HMAC)
+         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{id}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
+         */
+        get: operations["fetchRunFilesManifest"];
+        put?: never;
+        /**
+         * Publish an agent-produced file (HMAC, streaming)
+         * @description Posted by the agent runtime — via the runner's `publish_file` tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         */
+        post: operations["publishRunFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch a single run input file (HMAC)
+         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
+         */
+        get: operations["fetchRunFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/logs": {
         parameters: {
             query?: never;
@@ -4715,6 +4699,30 @@ export interface paths {
         get: operations["getRunLogs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run MCP server of a remote run (GET)
+         * @description The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.
+         */
+        get: operations["runToolsMcpGet"];
+        put?: never;
+        /**
+         * Run MCP server of a remote run (HMAC)
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run (whoever launched it, else the org's owners and admins; an ephemeral run has none and the tool refuses), once per run. Rate-limited to 200 requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) is refused with 400 (`-32600`). Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes, and each `webhook-id` is single-use (a replay answers 409 `message_replayed`). It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).
+         */
+        post: operations["runToolsMcpPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4741,113 +4749,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{runId}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest one signed CloudEvent (HMAC)
-         * @description Receives a single AFPS `RunEvent` CloudEvent from the run's HttpSink. Authenticated via Standard Webhooks HMAC-SHA256 (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers). Idempotent: duplicate `webhook-id` values inside the replay window return `200 { outcome: "replay" }` without reprocessing. Events with non-contiguous sequence numbers are buffered and drained in order on the next contiguous arrival or when a terminal event flushes the buffer.
-         */
-        post: operations["ingestRunEvent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/events/finalize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Terminal RunResult — close the sink (HMAC, idempotent)
-         * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
-         *
-         *     The runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.
-         */
-        post: operations["finalizeRemoteRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/events/heartbeat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Runner liveness keep-alive (HMAC)
-         * @description Proof-of-life beacon posted by the runner itself (platform container, remote CLI, GitHub Action). Bumps `runs.last_heartbeat_at = now()` on an open-sink row — no sequence advance, no log row, no payload. The server's stall watchdog reads `last_heartbeat_at` and finalises runs whose heartbeat has slipped past the threshold, giving every runner topology one unified crash-detection path. Any authenticated event POST is an implicit heartbeat; this endpoint exists for idle periods (agent waiting on an LLM or tool for longer than the heartbeat interval).
-         */
-        post: operations["heartbeatRemoteRun"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the run's input files (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
-         */
-        get: operations["fetchRunFilesManifest"];
-        put?: never;
-        /**
-         * Publish an agent-produced file (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
-         */
-        post: operations["publishRunFile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/files/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch a single run input file (HMAC)
-         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
-         */
-        get: operations["fetchRunFile"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/sink/extend": {
+    "/api/runs/{id}/sink/extend": {
         parameters: {
             query?: never;
             header?: never;
@@ -4867,7 +4769,7 @@ export interface paths {
         patch: operations["extendRunSink"];
         trace?: never;
     };
-    "/api/runs/{runId}/workspace": {
+    "/api/runs/{id}/workspace": {
         parameters: {
             query?: never;
             header?: never;
@@ -4876,7 +4778,7 @@ export interface paths {
         };
         /**
          * Fetch the run bundle archive (HMAC)
-         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
+         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{id}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
          */
         get: operations["fetchRunWorkspace"];
         put?: never;
@@ -5002,7 +4904,7 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.
+         * @description Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.
          */
         patch: operations["updateSpace"];
         trace?: never;
@@ -5021,6 +4923,26 @@ export interface paths {
          * @description Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); delegated credentials are refused.
          */
         post: operations["convertSpaceToTeam"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One space's placements, and what the caller could still place there
+         * @description Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{id}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.
+         */
+        get: operations["getSpaceLibrary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5073,6 +4995,78 @@ export interface paths {
          * @description Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` must name a bundle of this organization (404 otherwise).
          */
         patch: operations["updateSpaceMember"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List this space's package placements
+         * @description List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.
+         */
+        get: operations["listSpacePackages"];
+        put?: never;
+        /**
+         * Activate a package in this space
+         * @description Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.
+         */
+        post: operations["activatePackage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/packages/{scope}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one placement
+         * @description Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.
+         */
+        get: operations["getSpacePackage"];
+        put?: never;
+        post?: never;
+        /**
+         * Deactivate a package in this space
+         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.
+         */
+        delete: operations["deactivatePackage"];
+        options?: never;
+        head?: never;
+        /**
+         * Configure how this space runs a placed package
+         * @description Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{id}/packages` and `DELETE /api/spaces/{id}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
+         */
+        patch: operations["updateSpacePackage"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/packages/{scope}/{name}/run-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the resolved per-space run configuration
+         * @description Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, and the stored input layer (editor values plus locked fields). It carries no version — which bytes run is decided per launch by the `version` selector, defaulting to the latest published version. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.
+         */
+        get: operations["getSpacePackageRunConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/spaces/{id}/roles": {
@@ -5185,98 +5179,6 @@ export interface paths {
          * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); delegated credentials are refused. Recorded in the audit log (`space.swept`).
          */
         post: operations["sweepPersonalSpace"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/spaces/{spaceId}/library": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * One space's placements, and what the caller could still place there
-         * @description Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.
-         */
-        get: operations["getSpaceLibrary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/spaces/{spaceId}/packages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List this space's package placements
-         * @description List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.
-         */
-        get: operations["listSpacePackages"];
-        put?: never;
-        /**
-         * Activate a package in this space
-         * @description Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.
-         */
-        post: operations["activatePackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/spaces/{spaceId}/packages/{scope}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get one placement
-         * @description Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.
-         */
-        get: operations["getSpacePackage"];
-        put?: never;
-        post?: never;
-        /**
-         * Deactivate a package in this space
-         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.
-         */
-        delete: operations["deactivatePackage"];
-        options?: never;
-        head?: never;
-        /**
-         * Configure how this space runs a placed package
-         * @description Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
-         */
-        patch: operations["updateSpacePackage"];
-        trace?: never;
-    };
-    "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get the resolved per-space run configuration
-         * @description Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, and the stored input layer (editor values plus locked fields). It carries no version — which bytes run is decided per launch by the `version` selector, defaulting to the latest published version. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.
-         */
-        get: operations["getSpacePackageRunConfig"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5475,6 +5377,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-bundle/{scope}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the archive of a local integration (manifest and server payload)
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise a local integration's MCP server before spawning a runner container. A local integration declares its server inline (`source.server`) and ships the payload in its own archive; `server.entry_point` is relative to the archive root. The route verifies that the run's agent declares this integration in `dependencies.integrations`, that it is ACTIVE in the run's space and that it is a local one with a server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single integration and concrete version its spawn spec names — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). Which bytes: the version the run froze (`runs.resolved_integration_versions`). The spawn spec names a published version in `server.version` and the sidecar forwards it as `?version=`, which must be exactly that version — never a fallback to the newest published one (that would skew the manifest from the bytes). A system integration is answered from the in-memory boot registry, and an integration the run froze on its draft (a `draft` dependency override) from the draft files, read at fetch time (a draft edited after launch is served as edited); neither spec carries a version, and `?version=` is refused for them.
+         */
+        get: operations["getIntegrationBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -5615,7 +5537,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/internal/mcp-server-bundle/{scope}/{name}": {
+    "/internal/mcp": {
         parameters: {
             query?: never;
             header?: never;
@@ -5623,32 +5545,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).
+         * Run MCP server of a platform run (GET)
+         * @description The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.
          */
-        get: operations["getMcpServerBundle"];
+        get: operations["internalRunToolsMcpGet"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/memories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
         /**
-         * Recall archive memories
-         * @description Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.
+         * Run MCP server of a platform run
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run (whoever launched it, else the org's owners and admins; an ephemeral run has none and the tool refuses), once per run. Rate-limited to 200 requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) is refused with 400 (`-32600`). Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
          */
-        get: operations["recallMemories"];
-        put?: never;
-        post?: never;
+        post: operations["internalRunToolsMcpPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5689,26 +5595,6 @@ export interface paths {
          * @description Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on a revoked or missing refresh token, flips needsReconnection=true on the connection and returns 410.
          */
         post: operations["refreshOAuthModelProviderToken"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/run-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch run history
-         * @description Container-to-host only. Auth via Bearer run token.
-         */
-        get: operations["getRunHistory"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5783,7 +5669,7 @@ export interface components {
         AgentConnectionReadiness: {
             /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
             blocks_run: boolean;
-            /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
+            /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{id}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
             errors: (components["schemas"]["ResolutionFieldError"] & {
                 /** @enum {string} */
                 code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "connection_set_too_large" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "auth_key_on_unauthenticated_integration" | "required_integration_unbound" | "integration_not_active" | "agent_not_active";
@@ -5848,11 +5734,6 @@ export interface components {
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: components["schemas"]["AgentSkillRef"][];
-                /** @description AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`). */
-                mcp_servers?: {
-                    id: string;
-                    version: string;
-                }[];
                 integrations: {
                     id: string;
                     version: string;
@@ -5885,7 +5766,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
@@ -5928,7 +5809,7 @@ export interface components {
              * @description Package type from manifest
              * @enum {string}
              */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             running_runs: number;
             /** @description Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`. */
             unread_count: number;
@@ -5937,17 +5818,13 @@ export interface components {
                 skills?: {
                     [key: string]: string;
                 };
-                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
-                mcp_servers?: {
-                    [key: string]: string;
-                };
                 integrations: {
                     [key: string]: string;
                 };
             };
         };
-        /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
-        AgentManifest: ({
+        /** @description AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta["dev.appstrate/*"]`, AFPS §10). */
+        AgentManifest: {
             name: string;
             version: string;
             /** @constant */
@@ -6000,9 +5877,6 @@ export interface components {
             schema_version: string;
             dependencies?: {
                 skills?: {
-                    [key: string]: string;
-                };
-                mcp_servers?: {
                     [key: string]: string;
                 };
                 integrations?: {
@@ -6088,9 +5962,6 @@ export interface components {
             timeout?: number;
         } & {
             [key: string]: unknown;
-        }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file")[];
         };
         AgentSkillRef: {
             id: string;
@@ -6429,22 +6300,23 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
             /**
-             * @description The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
+             * @description The manifest's `source.kind`: `local` runs the MCP server the integration archive carries, in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).
              * @enum {string}
              */
             source_kind: "local" | "remote" | "none";
-            /** @description `source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source. */
+            /** @description `source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source. */
             server: {
-                name: string;
-                /** @description Semver range */
-                version: string;
+                /** @description Runtime: `node`, `python`, `binary` or `uv`. */
+                type: string;
+                /** @description Path of the server entry point inside the integration archive. */
+                entry_point: string;
             } | null;
         };
         IntegrationPin: {
@@ -6470,7 +6342,7 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             /** @description Package origin (`local` for org-owned packages, `system` for built-in system packages). */
             source: string;
             /** @description Display name from the package draft manifest (`manifest.display_name`); falls back to the package id. */
@@ -6483,7 +6355,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published. */
             published: boolean;
@@ -6789,7 +6661,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -6807,7 +6679,7 @@ export interface components {
              * @enum {string}
              */
             definition: "draft" | "published";
-            /** @description The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`. */
+            /** @description The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an integration published without one. Read from the draft or from the published archive according to `definition`. */
             content: string | null;
             /** @enum {string} */
             source: "local" | "system";
@@ -6833,7 +6705,7 @@ export interface components {
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             agents: {
                 id: string;
@@ -6953,14 +6825,14 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "integration" | "mcp-server";
+            type: "agent" | "skill" | "integration";
             /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404. */
             read_space_ids: string[];
@@ -6975,7 +6847,7 @@ export interface components {
              */
             via: "home" | "shared" | "system";
             /**
-             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.
              * @enum {string}
              */
             state: "active" | "inactive" | "none";
@@ -7110,7 +6982,7 @@ export interface components {
             source?: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
             /**
@@ -7168,7 +7040,7 @@ export interface components {
             } | null;
             /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
-                /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
+                /** @description Structured JSON emitted via the `output` tool the runner injects from the agent's `output.schema`. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
             } | null;
             /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
@@ -7586,6 +7458,8 @@ export interface components {
              * @enum {string}
              */
             default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+            credential_proxy_open: boolean;
             /** @description Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire. */
             personal: boolean;
             /**
@@ -7633,7 +7507,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             /** @enum {string} */
-            package_type: "agent" | "skill" | "integration" | "mcp-server";
+            package_type: "agent" | "skill" | "integration";
             /** @enum {string} */
             package_source: "local" | "system";
             /** @description Raw draft manifest JSONB for the placed package. */
@@ -7848,25 +7722,6 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description The endpoint requires a different request media type */
-        UnsupportedMediaType: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "type": "https://docs.appstrate.dev/errors/archive-required",
-                 *       "title": "Archive Required",
-                 *       "status": 415,
-                 *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
-                 *       "code": "archive_required",
-                 *       "request_id": "req_abc123"
-                 *     }
-                 */
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
         /** @description Too many requests */
         RateLimited: {
             headers: {
@@ -8074,7 +7929,7 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
@@ -8555,7 +8410,6 @@ export interface operations {
                      *           "unread_count": 2,
                      *           "dependencies": {
                      *             "skills": {},
-                     *             "mcp_servers": {},
                      *             "integrations": {}
                      *           }
                      *         },
@@ -8583,9 +8437,6 @@ export interface operations {
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
-                     *             },
-                     *             "mcp_servers": {
-                     *               "@appstrate/filesystem-mcp": "^1.0.0"
                      *             },
                      *             "integrations": {
                      *               "@appstrate/github": "^2.0.0"
@@ -8652,7 +8503,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent, or the caller lacks the read scope of a dependency type the bundle carries (`skills:read`, `integrations:read`). */
             403: components["responses"]["Forbidden"];
-            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`. */
+            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{id}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`. */
             404: components["responses"]["NotFound"];
             /** @description The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version (an integration pin included, exactly as a run refuses it), or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY` */
             422: {
@@ -8954,9 +8805,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @description Number of memory rows deleted */
-                        memories_deleted: number;
-                        /** @description Whether the checkpoint slot was deleted */
-                        checkpoint_deleted: boolean;
+                        memory_count: number;
+                        /** @description Number of checkpoint slots deleted (0 or 1) */
+                        checkpoint_count: number;
                     };
                 };
             };
@@ -9134,7 +8985,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
@@ -9279,7 +9130,7 @@ export interface operations {
             };
             /** @description Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it). */
             403: components["responses"]["Forbidden"];
-            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
+            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`. */
             404: components["responses"]["NotFound"];
             /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings), or `model_credential_required` (the model has no organization credential and the caller holds no personal credential that serves it) */
             409: {
@@ -9337,8 +9188,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
-                offset?: components["parameters"]["Offset"];
+                /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
+                startingAfter?: string;
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
@@ -9378,7 +9229,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
+            /** @description `limit` outside its declared range (`param` names it). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -9598,7 +9449,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) names another member as `actor`, or when a caller who is neither an API key nor a holder of `api-keys:create` names an end user, and `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time. */
             403: components["responses"]["Forbidden"];
-            /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
+            /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
             /** @description `missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration when that governance allows no additions, which outranks it (name only connections of that set, or drop the override; an admin pin that allows additions accepts them) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here) — or `required_integration_unbound` when the schedule's own `connection_overrides` sets `[]` on an integration the agent marks `required` and no admin pin or enforced org default imposes a set (`source: schedule_override`) — or `connection_set_too_large` when the schedule's additions take the imposed set past the cap. Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_governance_changed`: the write leaves the schedule enabled, and the admin pin of the agent, the actor's own pin for it or the space's org default of an integration its connections were judged under, or of one its `connection_overrides` names, changed between that judgment and the write (a concurrent pin or default write or delete); nothing was written — reload and retry. */
             409: {
@@ -11366,6 +11217,8 @@ export interface operations {
             query?: {
                 /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
                 limit?: number;
+                /** @description Case-insensitive substring search on the session title (`%`, `_` and `\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400. */
+                q?: string;
                 /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
                 startingAfter?: string;
             };
@@ -11683,7 +11536,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     credentialProxyGet: {
@@ -11694,7 +11556,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects the credential itself. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -11765,7 +11627,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11875,7 +11737,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects the credential itself. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -11951,7 +11813,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12061,7 +11923,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects the credential itself. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -12137,7 +11999,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12247,7 +12109,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects the credential itself. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -12318,7 +12180,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12428,7 +12290,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value. A URL carrying userinfo (`https://user:pass@host/…`, even an empty `https://@host/`) is refused (`403 unauthorized_target`): the platform injects the credential itself. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -12504,7 +12366,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12606,6 +12468,362 @@ export interface operations {
             };
         };
     };
+    listIntegrationTools: {
+        parameters: {
+            query?: {
+                /** @description Lists the tools of this integration alone (`@scope/name`); `404` when it is not active in the space. */
+                integration_package_id?: string;
+                /** @description Resolves the tool of this name alone, waiting 5 s at most for its server: an `api_call` tool lists no server, and only the remote integration whose namespace starts the name is listed. `not_ready` is then empty. */
+                name?: string;
+                /** @description The connection the server of the integration it belongs to is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. */
+                connection_id?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tools, sorted by integration, `api_call` tools first within one; a remote integration's typed tools follow in the order its server's `tools/list` gives them, or, when the server could not be listed in time (`catalog_unreadable`), its declared names in no guaranteed order. A server the proxy refused to list is an entry of `unlisted`, never an error status. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tools: {
+                            /** @description The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of the integration expose one) or `{ns}__{tool}` for a typed tool. `{ns}` is the package id normalised (cut at 20 characters, without a trailing `_`), followed by `_` and a hash of the package id while it equals the namespace of another integration active in the space. An `api_call` name over 56 characters keeps `{ns}__api_call__`, its auth part cut to fit and followed by a hash of the tool name. A typed tool's `{tool}` is a function of its `remote_name` alone: that name when `{ns}__{remote_name}` is a valid tool name (56 characters at most, `[A-Za-z0-9_-]` after `__`), it is not `api_call`, `api_upload` or a `…__{auth}` form of either, and it does not end in `_` and 8 hex digits (nor is 8 hex digits alone); otherwise that name with every other character made `_`, `_` runs collapsed, cut to fit, stripped of leading and trailing `_` and always followed by `_` and 8 hex digits of its hash: such a `{tool}` holds no `__` and never equals another tool's plain one, and two still equal (a hash collision) are both left out. No two tools of a space share a name, and a name depends on the space's active integrations and the tool alone, never on the caller's connections, the order the server lists its tools in, or its other tools. */
+                            name: string;
+                            /**
+                             * @description `api_call`: called through `/api/credential-proxy/proxy` with one of `connection_ids`; `remote`: a typed tool of the integration's MCP server, called through `/api/credential-proxy/tools/call` by its `remote_name`.
+                             * @enum {string}
+                             */
+                            kind: "api_call" | "remote";
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            description: string;
+                            /** @description `api_call` only: the auth whose connections it reaches. */
+                            auth_key?: string;
+                            /** @description `api_call` only: the integration also has connections of another auth, so a call names one of `connection_ids` (`X-Connection-Id`). */
+                            connection_required?: boolean;
+                            /** @description `remote` only: the name the server lists the tool by, which `tools/call` takes. */
+                            remote_name?: string;
+                            /** @description `remote` only: the tool's input schema, sanitised as in a run. */
+                            input_schema?: {
+                                [key: string]: unknown;
+                            };
+                            /** @description `remote` only, when the server declares one: the schema of the tool's `structuredContent`, sanitised as in a run. */
+                            output_schema?: {
+                                [key: string]: unknown;
+                            };
+                            /**
+                             * @description `remote` only: the server's `tools/list` could not be read, or not within the listing's wait (20 s, 5 s when resolving a `name`), so the tool is a declared name, without description and with an empty object schema.
+                             * @enum {boolean}
+                             */
+                            catalog_unreadable?: true;
+                            /** @description The listing's `connections` the tool reaches, by `connection_id`. */
+                            connection_ids: string[];
+                            /** @description `remote` only, when one of its connections lacks some: per `connection_id`, the scopes the tool's `tools_policy` entry requires on that connection's auth that it lacks; a call with it answers `409 insufficient_scopes`. */
+                            missing_scopes?: {
+                                [key: string]: string[];
+                            };
+                        }[];
+                        /** @description The connections the tools reach, each once. */
+                        connections: {
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            /**
+                             * Format: uuid
+                             * @description The `X-Connection-Id` that names this connection.
+                             */
+                            connection_id: string;
+                            label: string;
+                            /** @description True when the connection is the caller's own, false when another member shared it in the space: listed for a caller holding `credential-proxy:call`, and used when named or designated by an org default. */
+                            owned_by_actor: boolean;
+                            /** @description The manifest auth the connection is on. */
+                            auth_key: string;
+                            scopes_granted: string[];
+                            /** @description The auth's `authorized_uris`: what `X-Target` and every redirect hop are matched against. A literal entry is given as is, an entry templated on a connection variable (`{$variable.<name>}`) rendered for this connection, or omitted when the connection does not render it. An entry templated on a credential field (`{$credential.<field>}`) is given as the manifest declares it, never rendered: the proxy resolves it server-side from the stored credential, whose values this list never carries. To call such a target, write `{{<field>}}` in `X-Target` where the entry has `{$credential.<field>}`: `{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone (the field holds the whole URL), `https://{{host}}/v1/items` for `https://{$credential.host}/**`. */
+                            authorized_uris: string[];
+                            /** @description The auth sets `allow_all_uris`. Ignored on a call that places a `{{credential_field}}`: see `X-Target`. */
+                            allow_all_uris: boolean;
+                            /** @description A call binding it answers `409 needs_reconnection` until it is reconnected. */
+                            needs_reconnection: boolean;
+                            /** @description An enforced org default governs the integration in this space and the caller holds no `credential-proxy:call`: their call without `X-Run-Id` answers `403 call_permission_required`, this connection named or not. */
+                            call_permission_required: boolean;
+                        }[];
+                        not_ready: {
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            display_name: string;
+                            /** @description What a call naming no connection gets for this caller, as the integration detail's `proxy_connection` states it, judged against the latest published version: one of `none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` (`proxy_closed` never: a closed space refuses the listing itself). */
+                            proxy_connection: {
+                                /**
+                                 * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
+                                 * @enum {string}
+                                 */
+                                status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
+                                /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
+                                imposed: boolean;
+                            };
+                            /** @description Present when the verdict is a refusal the selection describes: the `not_connected` item of `none` (with the `auth_key` and `required_scopes` a connect flow targets), else the first item of the refusal (`needs_reconnection`, `pinned_connection_unavailable`…). Absent on `not_permitted`. */
+                            refusal?: components["schemas"]["ResolutionFieldError"];
+                        }[];
+                        unlisted: {
+                            integration_package_id: string;
+                            refusal: components["schemas"]["ProblemDetail"] & {
+                                /**
+                                 * @description `upstream_credential_rejected`: the server's HTTP status.
+                                 * @enum {integer}
+                                 */
+                                upstream_status?: 401 | 403;
+                                /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                                credential?: {
+                                    /** @enum {string} */
+                                    status: "in_use" | "needs_reconnection";
+                                    cause: string;
+                                    detail: string;
+                                    failures?: number;
+                                    max_failures?: number;
+                                };
+                                /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
+                                mcp_error?: {
+                                    code: number;
+                                    message: string;
+                                };
+                                /** @description `tool_catalog_unavailable`, when known: why the catalog could not be read, the proxy's problem code or `timeout`. */
+                                listing_failure?: string;
+                            };
+                        }[];
+                        /** @description The remote integrations whose catalog was read incomplete: the server lists more tools than are read (500 at most over 20 pages, and 512 KiB of descriptors), and a tool it lists after those is not offered. Empty when `name` is given. */
+                        truncated_catalogs: {
+                            integration_package_id: string;
+                            /** @description The tools read: the first ones the server lists. */
+                            listed_tools: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description `validation_failed` — an unknown query parameter, an empty `integration_package_id` or `name`, or a `connection_id` that is not a uuid (`errors[]` names each). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role. No `Proxy-Status`: nothing is relayed on this route. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — `integration_package_id` names an integration that is not active in this space. Without it, an inactive integration is left out of the listing. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    callRemoteIntegrationTool: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Integration package id (`@scope/name`). */
+                    integration_package_id: string;
+                    /**
+                     * Format: uuid
+                     * @description The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics).
+                     */
+                    connection_id?: string;
+                    /** @description The tool's name, as the server lists it. */
+                    name: string;
+                    /** @description The tool's arguments, following its `input_schema`. */
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The server's result. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description An MCP `CallToolResult` (`content`, optional `structuredContent` and `isError`). */
+                        result: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). */
+            403: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it; `upstream_invalid_params` — the server answered the `tools/call` JSON-RPC error -32602 (Invalid params): it refused the arguments or the tool name (`mcp_error: { code, message }`, its message untrusted text; `Proxy-Status: appstrate; error=http_request_error; received-status=<status>`, the HTTP status it came in). */
+            422: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description `upstream_credential_rejected`: the server's HTTP status.
+                         * @enum {integer}
+                         */
+                        upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                        credential?: {
+                            /** @enum {string} */
+                            status: "in_use" | "needs_reconnection";
+                            cause: string;
+                            detail: string;
+                            failures?: number;
+                            max_failures?: number;
+                        };
+                        /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
+                        mcp_error?: {
+                            code: number;
+                            message: string;
+                        };
+                        /** @description `tool_catalog_unavailable`, when known: why the catalog could not be read, the proxy's problem code or `timeout`. */
+                        listing_failure?: string;
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the MCP server failed the exchange (`Proxy-Status` error `http_protocol_error`, with `received-status=<status>` when it answered, a credential asked of an integration declaring none included); `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403, `Proxy-Status: appstrate; received-status=<401|403>`; `credential: { status, cause, detail, failures?, max_failures? }` when the proxy's forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on `/proxy`: `needs_reconnection` — the connection is now flagged and its owner must reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a JSON-RPC error other than a -32602 to the `tools/call` (a -32602 to the handshake included: MCP's answer to an unsupported protocol version; `mcp_error: { code, message }`, its message untrusted text; `Proxy-Status` error `http_protocol_error` and `received-status=<status>`, the HTTP status it came in); `upstream_response_too_large` — the tool ran, but its answer exceeds the exchange bound (at most 2 MiB, lower when the proxy's `max_response_bytes` is), answered as JSON or as an event stream (`http_response_body_size`); the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), `upstream_unreachable` (`destination_unavailable`) and `credential_unusable` (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description `upstream_credential_rejected`: the server's HTTP status.
+                         * @enum {integer}
+                         */
+                        upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                        credential?: {
+                            /** @enum {string} */
+                            status: "in_use" | "needs_reconnection";
+                            cause: string;
+                            detail: string;
+                            failures?: number;
+                            max_failures?: number;
+                        };
+                        /** @description `upstream_invalid_params` and `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted text cut at 512 characters. */
+                        mcp_error?: {
+                            code: number;
+                            message: string;
+                        };
+                        /** @description `tool_catalog_unavailable`, when known: why the catalog could not be read, the proxy's problem code or `timeout`. */
+                        listing_failure?: string;
+                    };
+                };
+            };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the MCP server did not answer within the call's 45 s deadline, the tool may have run (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     getSwaggerUI: {
         parameters: {
             query?: never;
@@ -12634,13 +12852,11 @@ export interface operations {
                 /** @description Filter by email address (exact match) */
                 email?: string;
                 /** @description Case-insensitive substring match across name, email, and external ID */
-                search?: string;
+                q?: string;
                 /** @description Maximum number of end-users to return */
                 limit?: number;
                 /** @description Cursor for forward pagination (end-user ID to start after) */
                 startingAfter?: string;
-                /** @description Cursor for backward pagination (end-user ID to end before) */
-                endingBefore?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -12681,8 +12897,7 @@ export interface operations {
                      *           "updatedAt": "2026-01-15T10:30:00Z"
                      *         }
                      *       ],
-                     *       "hasMore": false,
-                     *       "limit": 20
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
@@ -12691,8 +12906,6 @@ export interface operations {
                         data: components["schemas"]["EndUserObject"][];
                         /** @description Whether more results exist beyond this page */
                         hasMore: boolean;
-                        /** @description The limit that was applied to this query */
-                        limit?: number;
                     };
                 };
             };
@@ -13059,7 +13272,6 @@ export interface operations {
                             createdAt: string;
                         }[];
                         hasMore: boolean;
-                        limit?: number;
                     };
                 };
             };
@@ -14135,10 +14347,10 @@ export interface operations {
                         /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
@@ -15268,7 +15480,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). */
+            /** @description No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). */
             403: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -15303,11 +15515,26 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, refused the credential, or asked one of an integration declaring no auths; the proxy's `upstream_*` and `credential_unusable` codes are relayed. */
+            /** @description `bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error, whatever its code: the sync sends no arguments (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. `Proxy-Status`: `received-status=<status>` on `upstream_credential_rejected`; `error=http_protocol_error` with `received-status=<status>` on `upstream_mcp_error` (the HTTP status the error came in) and on a `bad_gateway` that received an answer (a credential asked of an integration declaring none included), `error=http_protocol_error` alone on any other `bad_gateway`; `error=http_response_body_size` on `upstream_response_too_large`, and the proxy's own error type on a relayed code. */
             502: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15765,10 +15992,10 @@ export interface operations {
                         /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
@@ -15862,7 +16089,6 @@ export interface operations {
                      *           }
                      *         ],
                      *         "skill": [],
-                     *         "mcp-server": [],
                      *         "integration": [
                      *           {
                      *             "id": "pkg_gmail",
@@ -15922,7 +16148,6 @@ export interface operations {
                         packages: {
                             agent: components["schemas"]["LibraryPackageList"];
                             skill: components["schemas"]["LibraryPackageList"];
-                            "mcp-server": components["schemas"]["LibraryPackageList"];
                             integration: components["schemas"]["LibraryPackageList"];
                         };
                     };
@@ -17498,6 +17723,11 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
+                            /**
+                             * @description Present (`true`) when none of the caller's usable connections of this integration is healthy: its owner must reconnect it before it can be used. Omitted otherwise.
+                             * @enum {boolean}
+                             */
+                            needs_reconnection?: true;
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
@@ -18353,7 +18583,7 @@ export interface operations {
         };
         responses: {
             /** @description Pairing token created. The plaintext is included exactly once. */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19163,8 +19393,36 @@ export interface operations {
                             payload: {
                                 packageId: string;
                                 /** @enum {string} */
-                                package_type: "agent" | "skill" | "integration" | "mcp-server";
+                                package_type: "agent" | "skill" | "integration";
                                 shared_by_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "agent_message";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The agent of the run that sent it; null when the run no longer references its agent. */
+                                packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted). */
+                                agent_name: string | null;
+                                /** @description Headline the agent wrote (`notify` tool). */
+                                title: string;
+                                /** @description Body the agent wrote (`notify` tool). */
+                                message: string;
                             } | null;
                             /**
                              * Format: date-time
@@ -20334,7 +20592,6 @@ export interface operations {
                      *           "unread_count": 2,
                      *           "dependencies": {
                      *             "skills": {},
-                     *             "mcp_servers": {},
                      *             "integrations": {}
                      *           }
                      *         },
@@ -20362,9 +20619,6 @@ export interface operations {
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
-                     *             },
-                     *             "mcp_servers": {
-                     *               "@appstrate/filesystem-mcp": "^1.0.0"
                      *             },
                      *             "integrations": {
                      *               "@appstrate/github": "^2.0.0"
@@ -20562,7 +20816,6 @@ export interface operations {
                             createdAt: string;
                         }[];
                         hasMore: boolean;
-                        limit?: number;
                     };
                 };
             };
@@ -20868,39 +21121,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    listOrgMcpServerPackages: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Organization ID — the organization a list spanning its spaces reads. */
-                orgId: components["parameters"]["OrgIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["OrgPackageItem"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
     listOrgSkills: {
         parameters: {
             query?: never;
@@ -20971,8 +21191,8 @@ export interface operations {
                 /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 user?: "me";
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
-                offset?: components["parameters"]["Offset"];
+                /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
+                startingAfter?: string;
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
@@ -21633,7 +21853,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
                 /** @description Skip draft overwrite protection. Set to true to overwrite a package with unpublished changes. */
                 force?: boolean;
             };
@@ -21676,7 +21896,7 @@ export interface operations {
                     "application/json": {
                         /** @description The imported package ID */
                         packageId: string;
-                        /** @description Package type (agent/skill/mcp-server/integration) */
+                        /** @description Package type (agent/skill/integration) */
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
@@ -21719,7 +21939,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -21761,7 +21981,7 @@ export interface operations {
                             status: "inserted" | "reused";
                             /** @description DB row id for the version; null for system packages. */
                             version_id?: number | null;
-                            /** @description Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only. */
+                            /** @description Package type (agent, skill, integration). Present on `inserted` entries only. */
                             type?: string;
                         }[];
                         /** @description Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not place it outside that home — the import still landed every package it carried. */
@@ -21772,7 +21992,7 @@ export interface operations {
                          * @description The root package's type.
                          * @enum {string}
                          */
-                        root_type: "agent" | "skill" | "mcp-server" | "integration";
+                        root_type: "agent" | "skill" | "integration";
                         /** @description Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
                         warnings: string[];
                     };
@@ -21805,7 +22025,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written. */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -21836,7 +22056,7 @@ export interface operations {
                     "application/json": {
                         /** @description The imported package ID */
                         packageId: string;
-                        /** @description Package type (agent/skill/mcp-server/integration) */
+                        /** @description Package type (agent/skill/integration) */
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
@@ -22369,483 +22589,6 @@ export interface operations {
             422: components["responses"]["VersionArtifactUnavailable"];
         };
     };
-    listMcpServerPackages: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["OrgPackageItem"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** @description Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`. */
-        requestBody: {
-            content: {
-                "multipart/form-data": {
-                    /**
-                     * Format: binary
-                     * @description Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.
-                     */
-                    file: Blob;
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            /** @description Validation error. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description A package with this name already exists (`code: name_collision`). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            415: components["responses"]["UnsupportedMediaType"];
-        };
-    };
-    getMcpServerPackage: {
-        parameters: {
-            query?: {
-                /** @description Which definition to project into `content`, `manifest` and the fields derived from them. OMITTED reads the one that EXISTS for this caller — the author's live draft when they may WRITE the package, the `latest` published version otherwise, and the draft again when nothing is published yet, because reading a definition is not running it and a package the listing shows must have a page. The response's `definition` says which of the two answered. An EXPLICIT `draft` is an author's act and is reserved to callers who may write the package: `403 draft_not_writable` otherwise. Any other value is resolved as a version spec (exact version, dist-tag, or semver range). A system package ships its definition with the platform, so every selector but the named `draft` reads the same stored tree. */
-                version?: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package. */
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    deleteMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    updateMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
-                "If-Match": components["parameters"]["IfMatchRequired"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest?: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            428: components["responses"]["PreconditionRequired"];
-        };
-    };
-    listMcpServerPackageVersions: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["AgentVersion"][];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createMcpServerPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** @description Optional semver version override (e.g. from bump selector) */
-                    version?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Version created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PackageVersionDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            412: components["responses"]["PreconditionFailed"];
-        };
-    };
-    getMcpServerPackageVersionInfo: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version info */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        latest_published_version?: string | null;
-                        active_version?: string | null;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getMcpServerPackageVersionDetail: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Version query — exact version, dist-tag, or semver range */
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Versioned MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PackageVersionDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    deleteMcpServerPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    restoreMcpServerPackageVersion: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
-                "If-Match"?: components["parameters"]["IfMatch"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Version to restore (exact, dist-tag, or semver range) */
-                version: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Version restored */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            412: components["responses"]["PreconditionFailed"];
-            422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
     listSkills: {
         parameters: {
             query?: never;
@@ -22950,7 +22693,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23197,7 +22940,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23294,7 +23037,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23455,7 +23198,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23790,26 +23533,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "type": "about:blank",
-                     *       "title": "Invalid MCP Server Bundle",
-                     *       "status": 422,
-                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
-                     *       "code": "bundle_invalid",
-                     *       "request_id": "req_abc123"
-                     *     }
-                     */
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     listPackageShares: {
@@ -23879,7 +23602,7 @@ export interface operations {
         };
         responses: {
             /** @description The placement, new or already present. */
-            200: {
+            201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
@@ -23896,16 +23619,6 @@ export interface operations {
             /** @description The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json. */
             409: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description The share would land ON and the package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -24816,8 +24529,8 @@ export interface operations {
                 /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even where they hold `runs:read-all` — composed with every other filter on this operation. Omit (or send an empty value) for every run the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 user?: "me";
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
-                offset?: components["parameters"]["Offset"];
+                /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
+                startingAfter?: string;
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
@@ -24889,7 +24602,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
@@ -25563,91 +25276,6 @@ export interface operations {
             };
         };
     };
-    getRunLogs: {
-        parameters: {
-            query?: {
-                /** @description Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel="next"` pagination header. */
-                since?: number;
-                /** @description Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything). */
-                level?: "debug" | "info" | "warn" | "error";
-                /** @description Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor — page with it to read longer histories. */
-                limit?: number;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Log entries (list envelope) */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    Link: components["headers"]["Link"];
-                    RateLimit: components["headers"]["RateLimit"];
-                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["RunLog"][];
-                        /** @description True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel="next"` header carries the next page's URL. */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    markRunRead: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
-                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
-            };
-            path: {
-                /** @description Run id */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run marked read (idempotent — 204 even if it was already read) */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     ingestRunEvent: {
         parameters: {
             query?: never;
@@ -25660,7 +25288,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25738,17 +25366,14 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": {
-                    memories?: unknown[];
-                    pinned?: Record<string, never>;
                     output?: unknown;
-                    logs?: unknown[];
                     error?: {
                         message?: string;
                         stack?: string;
@@ -25830,7 +25455,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25892,7 +25517,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -25968,7 +25593,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -26087,7 +25712,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
                 name: string;
             };
             cookie?: never;
@@ -26134,6 +25759,264 @@ export interface operations {
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
+    getRunLogs: {
+        parameters: {
+            query?: {
+                /** @description Return only log entries with `id > since`. Used by the CLI's `appstrate run` remote polling loop to fetch incremental tails without re-shipping the full history each poll, and as the cursor in the `Link; rel="next"` pagination header. */
+                since?: number;
+                /** @description Minimum severity to include (`debug < info < warn < error`). `level=info` returns info, warn and error entries. Defaults to `debug` (everything). */
+                level?: "debug" | "info" | "warn" | "error";
+                /** @description Maximum number of entries to return. Defaults to 1000 when omitted. When more entries follow, the response carries a `Link; rel="next"` header whose URL re-uses `since` as the cursor — page with it to read longer histories. */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Log entries (list envelope) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
+                    RateLimit: components["headers"]["RateLimit"];
+                    "RateLimit-Policy": components["headers"]["RateLimitPolicy"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RunLog"][];
+                        /** @description True when more entries follow the current page (the server caps each page at `limit`, default 1000) — the `Link; rel="next"` header carries the next page's URL. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description `limit` outside its declared range (`param` names it). */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    runToolsMcpGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
+            405: {
+                headers: {
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    runToolsMcpPost: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message (`-32700`/`-32600`), a batch (`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — no run with this id, or a platform-origin run. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `message_replayed` — this `webhook-id` was already used for this run. Each id is single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`, so a captured request cannot be replayed inside the timestamp tolerance; the CLI signs a fresh id on every request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `run_sink_closed` | `run_sink_expired` */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    markRunRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path: {
+                /** @description Run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run marked read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     extendRunSink: {
         parameters: {
             query?: never;
@@ -26142,7 +26025,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -26184,7 +26067,7 @@ export interface operations {
                 "webhook-signature": string;
             };
             path: {
-                runId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -26462,8 +26345,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
-                offset?: components["parameters"]["Offset"];
+                /** @description Cursor: the id of the last run of the previous page. Follow the `Link; rel="next"` header instead of building it. */
+                startingAfter?: string;
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
@@ -26487,6 +26370,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -26499,7 +26383,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
+            /** @description `limit` outside its declared range (`param` names it). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -26562,6 +26446,7 @@ export interface operations {
                      *           },
                      *           "visibility": "open",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "member",
                      *           "role": {
@@ -26592,6 +26477,7 @@ export interface operations {
                      *           },
                      *           "visibility": "closed",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "none",
                      *           "role": null,
@@ -26671,6 +26557,7 @@ export interface operations {
                      *       },
                      *       "visibility": "open",
                      *       "default_role": "operator",
+                     *       "credential_proxy_open": true,
                      *       "personal": false,
                      *       "access": "member",
                      *       "role": {
@@ -26821,6 +26708,8 @@ export interface operations {
                      * @enum {string}
                      */
                     default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+                    credential_proxy_open?: boolean;
                 };
             };
         };
@@ -26888,6 +26777,159 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    getSpaceLibrary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description This space's placement map, plus what the caller could still place here. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "library",
+                     *       "spaces": [
+                     *         {
+                     *           "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "name": "Default",
+                     *           "isDefault": true
+                     *         },
+                     *         {
+                     *           "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *           "name": "Staging",
+                     *           "isDefault": false
+                     *         }
+                     *       ],
+                     *       "packages": {
+                     *         "agent": [
+                     *           {
+                     *             "id": "pkg_inbox_triage",
+                     *             "type": "agent",
+                     *             "source": "local",
+                     *             "name": "Inbox Triage",
+                     *             "description": "Sorts incoming Gmail threads into priority buckets.",
+                     *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *             "home_writable": true,
+                     *             "home_deletable": true,
+                     *             "home_shareable": true,
+                     *             "published": true,
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "home",
+                     *                 "state": "active",
+                     *                 "chat_enforced": false,
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "shared",
+                     *                 "state": "inactive",
+                     *                 "chat_enforced": false,
+                     *                 "shared_by": {
+                     *                   "user_id": "usr_1",
+                     *                   "name": "Alex"
+                     *                 }
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "forbidden"
+                     *               }
+                     *             ]
+                     *           }
+                     *         ],
+                     *         "skill": [],
+                     *         "integration": [
+                     *           {
+                     *             "id": "pkg_gmail",
+                     *             "type": "integration",
+                     *             "source": "system",
+                     *             "name": "Gmail",
+                     *             "description": "Google Mail OAuth integration.",
+                     *             "home_space_id": null,
+                     *             "home_writable": false,
+                     *             "home_deletable": false,
+                     *             "home_shareable": false,
+                     *             "published": true,
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "system",
+                     *                 "state": "active",
+                     *                 "chat_enforced": false,
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "system",
+                     *                 "state": "inactive",
+                     *                 "chat_enforced": false,
+                     *                 "shared_by": null
+                     *               }
+                     *             ],
+                     *             "activation": [
+                     *               {
+                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "activate": "allowed",
+                     *                 "deactivate": "allowed"
+                     *               },
+                     *               {
+                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "activate": "forbidden",
+                     *                 "deactivate": "forbidden"
+                     *               }
+                     *             ]
+                     *           }
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "library";
+                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
+                        spaces: {
+                            /** @description Space id (`spc_…`). */
+                            id: string;
+                            name: string;
+                            isDefault: boolean;
+                        }[];
+                        /** @description Packages grouped by type. Every group is always present (possibly empty). */
+                        packages: {
+                            agent: components["schemas"]["LibraryPackageList"];
+                            skill: components["schemas"]["LibraryPackageList"];
+                            integration: components["schemas"]["LibraryPackageList"];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSpaceMembers: {
@@ -27076,6 +27118,277 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listSpacePackages: {
+        parameters: {
+            query?: {
+                /** @description Filter by package type */
+                type?: "agent" | "skill" | "integration";
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Placement list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpacePackage"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    activatePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Package ID from org catalog */
+                    packageId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Already active here — nothing changed. A package the deployment switches on without any placement row (a system package, an integration named by `SYSTEM_INTEGRATIONS`) was active before this call, so its first activation answers `200` too and writes no audit entry. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            /** @description This call turned the package on here — it was not active before, and now it is. */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space. */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSpacePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Placement detail */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deactivatePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switched off here, or already off. No audit entry when nothing changed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpacePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    generation_config?: components["schemas"]["ModelGenerationSettings"] | null;
+                    modelId?: string | null;
+                    proxyId?: string | null;
+                    /** @description Skills only. `true` injects the skill's latest published `SKILL.md` in every chat conversation held in this space, for every member whatever their `skills:*` grants — its content is disclosed to them. Refused unless the skill has a published version, and within the space's cap of enforced skills and the chat's skills content budget. Audited as `package.chat_enforced` / `package.chat_released`, only when the stored value changes. */
+                    chat_enforced?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated placement */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            /** @description Validation error (`validation_failed`), or `chat_enforced` sent for a package that is not a skill (`chat_enforced_not_skill`). */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    getSpacePackageRunConfig: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved run configuration */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoning_level": "high"
+                     *       },
+                     *       "modelId": "claude-sonnet-4-6",
+                     *       "proxyId": null,
+                     *       "input": {
+                     *         "values": {
+                     *           "dry_run": true
+                     *         },
+                     *         "locked_fields": [
+                     *           "dry_run"
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
+                        modelId: string | null;
+                        proxyId: string | null;
+                        /** @description Stored input layer for this space — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field. */
+                        input: components["schemas"]["AgentInputSettings"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listAssignableSpaceRoles: {
@@ -27398,452 +27711,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-        };
-    };
-    getSpaceLibrary: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description This space's placement map, plus what the caller could still place here. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "object": "library",
-                     *       "spaces": [
-                     *         {
-                     *           "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *           "name": "Default",
-                     *           "isDefault": true
-                     *         },
-                     *         {
-                     *           "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
-                     *           "name": "Staging",
-                     *           "isDefault": false
-                     *         }
-                     *       ],
-                     *       "packages": {
-                     *         "agent": [
-                     *           {
-                     *             "id": "pkg_inbox_triage",
-                     *             "type": "agent",
-                     *             "source": "local",
-                     *             "name": "Inbox Triage",
-                     *             "description": "Sorts incoming Gmail threads into priority buckets.",
-                     *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *             "home_writable": true,
-                     *             "home_deletable": true,
-                     *             "home_shareable": true,
-                     *             "published": true,
-                     *             "placements": [
-                     *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *                 "via": "home",
-                     *                 "state": "active",
-                     *                 "chat_enforced": false,
-                     *                 "shared_by": null
-                     *               },
-                     *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
-                     *                 "via": "shared",
-                     *                 "state": "inactive",
-                     *                 "chat_enforced": false,
-                     *                 "shared_by": {
-                     *                   "user_id": "usr_1",
-                     *                   "name": "Alex"
-                     *                 }
-                     *               }
-                     *             ],
-                     *             "activation": [
-                     *               {
-                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *                 "activate": "allowed",
-                     *                 "deactivate": "allowed"
-                     *               },
-                     *               {
-                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
-                     *                 "activate": "allowed",
-                     *                 "deactivate": "forbidden"
-                     *               }
-                     *             ]
-                     *           }
-                     *         ],
-                     *         "skill": [],
-                     *         "mcp-server": [],
-                     *         "integration": [
-                     *           {
-                     *             "id": "pkg_gmail",
-                     *             "type": "integration",
-                     *             "source": "system",
-                     *             "name": "Gmail",
-                     *             "description": "Google Mail OAuth integration.",
-                     *             "home_space_id": null,
-                     *             "home_writable": false,
-                     *             "home_deletable": false,
-                     *             "home_shareable": false,
-                     *             "published": true,
-                     *             "placements": [
-                     *               {
-                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *                 "via": "system",
-                     *                 "state": "active",
-                     *                 "chat_enforced": false,
-                     *                 "shared_by": null
-                     *               },
-                     *               {
-                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
-                     *                 "via": "system",
-                     *                 "state": "inactive",
-                     *                 "chat_enforced": false,
-                     *                 "shared_by": null
-                     *               }
-                     *             ],
-                     *             "activation": [
-                     *               {
-                     *                 "spaceId": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *                 "activate": "allowed",
-                     *                 "deactivate": "allowed"
-                     *               },
-                     *               {
-                     *                 "spaceId": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
-                     *                 "activate": "forbidden",
-                     *                 "deactivate": "forbidden"
-                     *               }
-                     *             ]
-                     *           }
-                     *         ]
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "library";
-                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
-                        spaces: {
-                            /** @description Space id (`spc_…`). */
-                            id: string;
-                            name: string;
-                            isDefault: boolean;
-                        }[];
-                        /** @description Packages grouped by type. Every group is always present (possibly empty). */
-                        packages: {
-                            agent: components["schemas"]["LibraryPackageList"];
-                            skill: components["schemas"]["LibraryPackageList"];
-                            "mcp-server": components["schemas"]["LibraryPackageList"];
-                            integration: components["schemas"]["LibraryPackageList"];
-                        };
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listSpacePackages: {
-        parameters: {
-            query?: {
-                /** @description Filter by package type */
-                type?: "agent" | "skill" | "integration" | "mcp-server";
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Placement list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["SpacePackage"][];
-                        /** @description Whether more results exist beyond this page */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    activatePackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package ID from org catalog */
-                    packageId: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Already active here — nothing changed. A package the deployment switches on without any placement row (a system package, an integration named by `SYSTEM_INTEGRATIONS`) was active before this call, so its first activation answers `200` too and writes no audit entry. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpacePackage"];
-                };
-            };
-            /** @description This call turned the package on here — it was not active before, and now it is. */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpacePackage"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space. */
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
-            422: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "type": "about:blank",
-                     *       "title": "Invalid MCP Server Bundle",
-                     *       "status": 422,
-                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
-                     *       "code": "bundle_invalid",
-                     *       "request_id": "req_abc123"
-                     *     }
-                     */
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    getSpacePackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Placement detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpacePackage"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deactivatePackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Switched off here, or already off. No audit entry when nothing changed. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateSpacePackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    generation_config?: components["schemas"]["ModelGenerationSettings"] | null;
-                    modelId?: string | null;
-                    proxyId?: string | null;
-                    /** @description Skills only. `true` injects the skill's latest published `SKILL.md` in every chat conversation held in this space, for every member whatever their `skills:*` grants — its content is disclosed to them. Refused unless the skill has a published version, and within the space's cap of enforced skills and the chat's skills content budget. Audited as `package.chat_enforced` / `package.chat_released`, only when the stored value changes. */
-                    chat_enforced?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated placement */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpacePackage"];
-                };
-            };
-            /** @description Validation error (`validation_failed`), or `chat_enforced` sent for a package that is not a skill (`chat_enforced_not_skill`). */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    getSpacePackageRunConfig: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resolved run configuration */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "generation": {
-                     *         "temperature": 0.2,
-                     *         "reasoning_level": "high"
-                     *       },
-                     *       "modelId": "claude-sonnet-4-6",
-                     *       "proxyId": null,
-                     *       "input": {
-                     *         "values": {
-                     *           "dry_run": true
-                     *         },
-                     *         "locked_fields": [
-                     *           "dry_run"
-                     *         ]
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        generation: components["schemas"]["ModelGenerationSettings"] | null;
-                        modelId: string | null;
-                        proxyId: string | null;
-                        /** @description Stored input layer for this space — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field. */
-                        input: components["schemas"]["AgentInputSettings"];
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     createUpload: {
@@ -28621,6 +28488,54 @@ export interface operations {
             };
         };
     };
+    getIntegrationBundle: {
+        parameters: {
+            query?: {
+                /** @description Concrete published version to serve — exactly the one the run froze (the spawn spec's `server.version`). Omitted for a system integration (boot registry) and for a draft run (draft files); a version sent for those, or a different one, is a 404. */
+                version?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AFPS bundle bytes (ZIP). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": Blob;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The run's agent does not declare this integration, it is not active in the space or not a local one, the run froze no version for it, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     getIntegrationCredentials: {
         parameters: {
             query?: {
@@ -29345,47 +29260,19 @@ export interface operations {
             };
         };
     };
-    getMcpServerBundle: {
+    internalRunToolsMcpGet: {
         parameters: {
-            query?: {
-                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone. */
-                version?: string;
-            };
+            query?: never;
             header?: never;
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description AFPS bundle bytes (ZIP). */
-            200: {
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
+            405: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/zip": Blob;
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an active integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run). */
-            409: {
-                headers: {
+                    Allow?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -29394,57 +29281,114 @@ export interface operations {
             };
         };
     };
-    recallMemories: {
+    internalRunToolsMcpPost: {
         parameters: {
-            query?: {
-                /** @description Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories. */
-                q?: string;
-                /** @description Max number of memories to return (1-50, default 10). */
-                limit?: number;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
         responses: {
-            /** @description Recalled memories */
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    /**
-                     * @example {
-                     *       "memories": [
-                     *         {
-                     *           "id": 42,
-                     *           "content": "User prefers Python over JS for data tasks",
-                     *           "createdAt": "2026-04-20T10:00:00Z",
-                     *           "actor_type": "user",
-                     *           "actor_id": "usr_abc"
-                     *         }
-                     *       ]
-                     *     }
-                     */
                     "application/json": {
-                        memories: {
-                            id: number;
-                            content: unknown;
-                            /** Format: date-time */
-                            createdAt: string;
-                            /** @enum {string} */
-                            actor_type: "user" | "end_user" | "shared";
-                            actor_id?: string | null;
-                        }[];
+                        [key: string]: unknown;
                     };
+                    "text/event-stream": string;
                 };
             };
-            400: components["responses"]["ValidationError"];
+            /** @description The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message (`-32700`/`-32600`), a batch (`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getOAuthModelProviderToken: {
@@ -29558,59 +29502,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    getRunHistory: {
-        parameters: {
-            query?: {
-                /** @description Max number of runs to return (1-50, default 10) */
-                limit?: number;
-                /** @description Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint") */
-                fields?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "object": "list",
-                     *       "hasMore": false,
-                     *       "data": [
-                     *         {
-                     *           "id": "run_cm9abc123",
-                     *           "status": "success",
-                     *           "checkpoint": {
-                     *             "lastProcessedId": 42
-                     *           },
-                     *           "date": "2026-01-14T09:00:00Z",
-                     *           "duration": 1234
-                     *         }
-                     *       ]
-                     *     }
-                     */
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: Record<string, never>[];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     acceptInvitation: {

@@ -7,7 +7,7 @@
  * Verifies the public REST surface end-to-end against a live API:
  *   - `GET /api/integrations` returns a list envelope
  *   - `GET /api/integrations/{pkgId}` returns 404 for an unknown package
- *   - `POST /api/spaces/{spaceId}/packages` — the ONE activation door, for every
+ *   - `POST /api/spaces/{id}/packages` — the ONE activation door, for every
  *     package family — returns 404 for an unknown package
  *   - `GET /api/integrations/{pkgId}/oauth-clients/{key}` returns 404 when none configured
  *   - The route shape — including the `@scope/name` path segment in URLs —

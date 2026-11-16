@@ -76,7 +76,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
+          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound} compact>
             <EmptyStateAction action={create} />
           </EmptyState>
         }

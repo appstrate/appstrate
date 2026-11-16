@@ -14,7 +14,7 @@ import {
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 
 /**
  * The recipient's notification feed — the dashboard bell: what needs their
@@ -36,7 +36,7 @@ export function createNotificationsRouter() {
     const scope = getSpaceScope(c);
     const unread = c.req.query("unread") === "true";
     // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
-    const { limit } = parseListPagination(c, { defaultLimit: 20 });
+    const limit = parseListLimit(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
     const lastId = result.data.at(-1)?.id;

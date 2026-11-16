@@ -10,7 +10,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
 import {
   fileBlobKeys,
@@ -62,23 +62,27 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/** The gallery's files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+/** The gallery's (or one run's) files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
 export function useFilesPaged(
-  filters: Pick<FileListFilters, "search" | "purpose"> & { spanning?: boolean } = {},
+  filters: Pick<FileListFilters, "search" | "purpose" | "runId" | "limit"> & {
+    spanning?: boolean;
+  } = {},
 ) {
   const spanning = !!filters.spanning;
   const header = useOrgScope().header;
   const scope = useListScope(spanning, usePermissions().can("files:read"));
-  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
+  const query = {
+    purpose: filters.purpose,
+    runId: filters.runId,
+    q: filters.search || undefined,
+    limit: filters.limit ?? 25,
+  };
   return useInfiniteQuery({
     queryKey: spanning
-      ? ([
-          "get",
-          "/api/orgs/{orgId}/files",
-          "paged",
-          { path: { orgId: scope.orgId }, query },
-        ] as const)
-      : (["get", "/api/files", "paged", { header, query }] as const),
+      ? pagedQueryKey("/api/orgs/{orgId}/files", {
+          params: { path: { orgId: scope.orgId }, query },
+        })
+      : pagedQueryKey("/api/files", { params: { header, query } }),
     queryFn: ({ pageParam, signal }) =>
       fetchFilePage(scope.acrossOrgId, { ...query, startingAfter: pageParam }, header, signal),
     ...keysetPaging,

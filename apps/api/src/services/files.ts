@@ -58,7 +58,7 @@ import type { SpaceGrant } from "../lib/permissions.ts";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { likeContains } from "../lib/like-pattern.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
@@ -1481,7 +1481,7 @@ export async function listFilesForActor(
   opts: { creatorCanManage?: boolean } = {},
 ): Promise<ListEnvelope<FileDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
-  if (grants.length === 0) return { ...listResponse([], { hasMore: false }), limit };
+  if (grants.length === 0) return listResponse([], { hasMore: false });
   const fetchLimit = limit + 1;
   const spaceIds = grants.map((g) => g.spaceId);
   const supervised = grants.filter((g) => canReadEveryRun(g.permissions)).map((g) => g.spaceId);
@@ -1585,7 +1585,7 @@ export async function listFilesForActor(
     });
     return toFileDto(row, actor, capabilities);
   });
-  return { ...listResponse(data, { hasMore }), limit };
+  return listResponse(data, { hasMore });
 }
 
 // ---------------------------------------------------------------------------

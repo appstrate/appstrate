@@ -99,11 +99,21 @@ describe("mcp catalog", () => {
     expect(operations).not.toContain("getServedSkillArchive");
   });
 
-  it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
+  it("keeps both mounts of the run MCP server out: they are a transport", () => {
+    const paths = [...getCatalog().operations.values()].map((op) => op.pathTemplate);
+    expect(paths).not.toContain("/internal/mcp");
+    expect(paths).not.toContain("/api/runs/{id}/mcp");
+  });
+
+  it("keeps the credential proxy out: `call_integration_tool` is its one MCP path", async () => {
     const operations = [...getCatalog().operations.values()];
     expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
       [],
     );
+    // The remote MCP tool routes too: the two integration tools are their one MCP path.
+    expect(
+      operations.filter((op) => op.pathTemplate.startsWith("/api/credential-proxy/tools/")),
+    ).toEqual([]);
     const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:run"]);
     const refused = await byName
       .get("invoke_operation")!
@@ -124,6 +134,41 @@ describe("mcp catalog", () => {
       ).toBe(true);
     }
   });
+});
+
+describe("credential proxy closed in the space", () => {
+  const ctxFor = (permissions: string[]) => ({
+    origin: "https://test.local",
+    authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+    permissions: withImpliedPermissions(permissions),
+    ceiling: undefined,
+    dispatch: async () => new Response("{}", { status: 200 }),
+    actor: { type: "user", id: "user_1" } as Actor,
+    scope: { orgId: "org_1", spaceId: "spc_1" },
+    authorizeBundle: async () => {},
+    placeRootAs: async () => null,
+    requestId: "req_test",
+    followRunLogs: () => () => {},
+    contextInjected: false,
+  });
+
+  for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+    it(`withholds search_integration_tools and call_integration_tool under ${permission}, and get_me stops naming them`, () => {
+      const ctx = ctxFor(["mcp:read", "mcp:invoke", permission]);
+      const names = (open: boolean) => toolsFor(ctx, true, open).map((t) => t.descriptor.name);
+      expect(names(true)).toEqual(
+        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
+      );
+      expect(names(false)).not.toContain("search_integration_tools");
+      expect(names(false)).not.toContain("call_integration_tool");
+      const getMe = (open: boolean) =>
+        toolsFor(ctx, true, open).find((t) => t.descriptor.name === "get_me")!.descriptor
+          .description!;
+      expect(getMe(true)).toContain("`search_integration_tools`");
+      expect(getMe(false)).not.toContain("search_integration_tools");
+      expect(getMe(false)).not.toContain("call_integration_tool");
+    });
+  }
 });
 
 /**
@@ -1147,29 +1192,30 @@ describe("buildMcpTools contextInjected", () => {
       schema_version: AFPS_SCHEMA_VERSION,
       package_archive_max_bytes: 10 * 1024 * 1024,
       runtimes: [
-        { runtime: "node", manifest_version: "0.3", server_type: "node" },
+        { runtime: "node", server_type: "node" },
         {
           runtime: "bun",
-          manifest_version: "0.3",
           server_type: "node",
           manifest_template: {
-            manifest_version: "0.3",
             schema_version: AFPS_SCHEMA_VERSION,
-            type: "mcp-server",
-            server: {
-              type: "node",
-              entry_point: "<archive-relative-entry-point>",
-              mcp_config: {
-                command: "bun",
-                args: ["<archive-relative-entry-point>"],
+            type: "integration",
+            source: {
+              kind: "local",
+              server: {
+                type: "node",
+                entry_point: "<archive-relative-entry-point>",
+                mcp_config: {
+                  command: "bun",
+                  args: ["<archive-relative-entry-point>"],
+                },
               },
             },
             _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
           },
         },
-        { runtime: "python", manifest_version: "0.3", server_type: "python" },
-        { runtime: "uv", manifest_version: "0.4", server_type: "uv" },
-        { runtime: "binary", manifest_version: "0.3", server_type: "binary" },
+        { runtime: "python", server_type: "python" },
+        { runtime: "uv", server_type: "uv" },
+        { runtime: "binary", server_type: "binary" },
       ],
     });
 
@@ -1186,7 +1232,7 @@ describe("buildMcpTools contextInjected", () => {
       const template = structuredClone(runtime.manifest_template) as Record<string, unknown>;
       template.name = "@test/authored-server";
       template.display_name = "Authored server";
-      const server = template.server as {
+      const server = (template.source as { server: Record<string, unknown> }).server as {
         entry_point: string;
         mcp_config: { command: string; args: string[] };
       };

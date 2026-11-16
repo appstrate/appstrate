@@ -74,7 +74,7 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-accent/50 relative flex h-full w-full flex-col p-4 transition-colors">
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
@@ -208,8 +208,8 @@ export function PackageCardSkeleton({
   runnable?: boolean;
   /** The card names its space beside the version (a list spanning spaces). */
   spaceName?: boolean;
-  /** What the line under the description carries: a version badge, or a line of text (the catalogue's origin). */
-  meta?: "version" | "line";
+  /** What the line under the description carries: a version badge, a line of text (the catalogue's origin), or both. */
+  meta?: "version" | "line" | "both";
   /** The keyword pills under the card's body. */
   keywords?: boolean;
 }) {
@@ -224,11 +224,8 @@ export function PackageCardSkeleton({
           <SkeletonLine className="mt-0.5 w-full text-xs" />
           <SkeletonLine className="w-2/3 text-xs" />
           <div className="mt-2 flex min-w-0 items-center gap-2 text-xs">
-            {meta === "version" ? (
-              <SkeletonBadge className="w-14 font-mono text-[10px]" />
-            ) : (
-              <SkeletonLine className="w-36" />
-            )}
+            {meta !== "line" && <SkeletonBadge className="w-14 font-mono text-[10px]" />}
+            {meta !== "version" && <SkeletonLine className="w-36" />}
             {spaceName && <SkeletonLine className="w-20" />}
           </div>
         </div>

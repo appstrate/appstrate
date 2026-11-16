@@ -24,7 +24,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
   invalidatePackageCaches,
-  versionKeys,
+  invalidateVersionInfo,
 } from "../lib/query-keys";
 import {
   launchFlight,
@@ -264,7 +264,6 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
@@ -321,8 +320,6 @@ export function useCreatePackage<T extends PackageType>(type: T) {
       body: CreatePackageBody<T>,
     ): Promise<{ id: string; version_count?: number }> => {
       switch (type) {
-        case "mcp-server":
-          throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
           const agentBody = body as CreatePackageBody<"agent">;
           const { data } = await client.POST("/api/packages/agents", {
@@ -391,7 +388,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       if (type === "agent" || type === "integration") {
         void invalidateIntegrationQueries(qc);
       }
-      qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+      void invalidateVersionInfo(qc);
     },
   });
 }

@@ -38,7 +38,7 @@ import {
   readBundleFromBuffer,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { findUnevaluableExpressions } from "@appstrate/core/integration";
+import { findRuntimeBinding, findUnevaluableExpressions } from "@appstrate/core/integration";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
@@ -46,7 +46,6 @@ import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
-  findUnexposedLocalDefaultTools,
   validateAgentIntegrationSelections,
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
@@ -250,7 +249,7 @@ interface ImportBundleResult {
   root_type: PackageType;
   /**
    * Non-blocking import-time warnings, each prefixed with its package identity
-   * (e.g. dropped runtime tools, `_meta` soft-fails, retired dependency keys, an expression a
+   * (e.g. `_meta` soft-fails, retired dependency keys, an expression a
    * dependency integration holds that its connect will refuse).
    * Empty when nothing is degraded.
    */
@@ -371,13 +370,12 @@ export async function importBundle(
       try {
         // READ direction. A bundle is assembled by the platform from its OWN
         // published versions (`GET /api/agents/:scope/:name/bundle`), and a
-        // published artifact is immutable by construction. A `runtime_tools`
-        // id retired after publication therefore cannot be repaired at the
-        // source — rejecting here would abort the ENTIRE bundle (every
-        // co-packaged skill and integration with it) on a legacy agent, with no
-        // recourse for the operator. Drop the retired ids and surface them as
-        // import warnings below.
-        return parsePackageZip(getReconstructedPackage(), { retiredRuntimeTools: "drop" });
+        // published artifact is immutable by construction. A retired
+        // `dependencies` key therefore cannot be repaired at the source —
+        // rejecting here would abort the ENTIRE bundle (every co-packaged skill
+        // and integration with it), with no recourse for the operator. The key
+        // is tolerated and surfaced as an import warning below.
+        return parsePackageZip(getReconstructedPackage(), { retiredDependencyKeys: "tolerate" });
       } catch (err) {
         throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
       }
@@ -448,15 +446,6 @@ export async function importBundle(
     // reuse the parse above; other types are parsed only after the reuse check.
     parsedZip ??= parseIncomingPackage();
 
-    // A drop keeps the import alive but is a silent capability loss — lift it
-    // into the same non-blocking warning channel the AFPS §10.1 soft-fails
-    // use, so the operator learns which package needs a republish.
-    if (parsedZip.droppedRuntimeTools.length > 0) {
-      warnings.push(
-        `${identity}: dropped retired runtime tools (${parsedZip.droppedRuntimeTools.join(", ")}) — republish this package to remove them from its manifest`,
-      );
-    }
-
     // Surface `_meta` policy warnings for all package types — the validator
     // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
@@ -465,8 +454,8 @@ export async function importBundle(
       warnings.push(`${identity}: ${w}`);
     }
 
-    // Same READ-direction rationale as the runtime-tools drop above: this
-    // manifest was validated with `retiredRuntimeTools: "drop"`, so a retired
+    // READ direction (see the parse above): this manifest was validated with
+    // `retiredDependencyKeys: "tolerate"`, so a retired
     // AFPS 1.x `dependencies` key (`tools` / `providers`) is tolerated instead
     // of rejected. It is inert — nothing reads it — so the import succeeds; the
     // warning is how the operator learns the dependencies declared under it
@@ -678,7 +667,7 @@ function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
  * handed to the validator is therefore the post-import
  * `incoming ∪ already-present` catalog: every manifest the bundle carries,
  * keyed by package id, is resolved together with existing versions and
- * dist-tags. Same map covers the mcp-servers a local integration references.
+ * dist-tags.
  */
 async function assertBundleAgentsExposeCallableTools(
   bundle: Bundle,
@@ -721,28 +710,6 @@ function assertBundleRootConforms(bundle: Bundle): void {
 }
 
 /**
- * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
- * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
- */
-async function assertBundleRootDefaultToolsExposed(
-  bundle: Bundle,
-  orgId: string,
-  carried: ReadonlyMap<string, CarriedVersion[]>,
-): Promise<void> {
-  const root = bundle.packages.get(bundle.root);
-  const parsed = parsePackageIdentity(bundle.root);
-  if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
-  assertNoManifestViolations(
-    await findUnexposedLocalDefaultTools(
-      root.manifest as unknown as Record<string, unknown>,
-      orgId,
-      carried,
-    ),
-    `${bundle.root}: `,
-  );
-}
-
-/**
  * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
@@ -766,6 +733,22 @@ function assertBundleScopesNotReserved(bundle: Bundle): void {
   }
 }
 
+/**
+ * Refuse a runtime-bound dependency integration (`findRuntimeBinding`; the root is judged by
+ * {@link assertBundleRootConforms}): the binding makes the platform serve its tools with the
+ * run's authority, so only a system package may carry the key. Unlike the root-only gates, a
+ * dependency is judged — no stored package can carry the key, so the refusal never blocks a
+ * bundle of already-published copies.
+ */
+function assertBundleRuntimeBindingsSystemOnly(bundle: Bundle): void {
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root || pkg.manifest.type !== "integration") continue;
+    const packageId = parsePackageIdentity(identity)?.packageId;
+    if (packageId && isSystemPackage(packageId)) continue;
+    assertNoManifestViolations(findRuntimeBinding(pkg.manifest), `${identity}: `);
+  }
+}
+
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
@@ -774,10 +757,10 @@ export async function preflightBundleImport(
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
   assertBundleScopesNotReserved(bundle);
+  assertBundleRuntimeBindingsSystemOnly(bundle);
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
-  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

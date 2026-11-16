@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAuth } from "../hooks/use-auth";
+import { useFirstName } from "../hooks/use-first-name";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { ErrorState } from "../components/page-states";
@@ -17,7 +17,6 @@ import { DashboardContent, DashboardHeader } from "./dashboard-content";
  * space the reader reaches (the org routes of its three lists).
  */
 export function DashboardPage() {
-  const { profile, user } = useAuth();
   // Every query gates itself on its guard; `DashboardContent` draws a section only when its read is open and non-empty.
   const { ready } = usePermissions();
   // The mode is known once the space listing is: the body waits for it.
@@ -26,13 +25,13 @@ export function DashboardPage() {
     data: runsData,
     isLoading: runsLoading,
     error: runsError,
-  } = usePaginatedRuns({ limit: 15, offset: 0, spanning });
+  } = useFirstRunsPage({ limit: 15, spanning });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents(spanning);
   // The same query as the agents above: no second request.
   const agentName = useRunAgentName(undefined, spanning);
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
   const { data: schedules, isLoading: schedulesLoading } = useAllSchedules(spanning);
-  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
+  const firstName = useFirstName();
 
   // A disabled query is not loading, so an unresolved permission set (or listing) must be.
   const isLoading = !ready || !known || runsLoading || agentsLoading || schedulesLoading;

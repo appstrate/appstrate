@@ -130,7 +130,7 @@ describe("End-Users API", () => {
         body: JSON.stringify({ name: "Arthur Dent", email: "arthur@example.com" }),
       });
 
-      const res = await app.request("/api/end-users?search=zaph", {
+      const res = await app.request("/api/end-users?q=zaph", {
         headers: apiKeyHeaders(),
       });
 
@@ -175,8 +175,7 @@ describe("End-Users API", () => {
       it("serves the default page size when limit is absent", async () => {
         const res = await app.request("/api/end-users", { headers: apiKeyHeaders() });
 
-        const body = (await res.json()) as { limit: number; data: unknown[]; hasMore: boolean };
-        expect(body.limit).toBe(PAGE);
+        const body = (await res.json()) as { data: unknown[]; hasMore: boolean };
         expect(body.data).toHaveLength(PAGE);
         expect(body.hasMore).toBe(true);
       });
@@ -188,7 +187,7 @@ describe("End-Users API", () => {
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as any;
-        expect(body.limit).toBe(3);
+        expect(Object.keys(body).sort()).toEqual(["data", "hasMore", "object"]);
         expect(body.data).toHaveLength(3);
         expect(body.hasMore).toBe(true);
       });

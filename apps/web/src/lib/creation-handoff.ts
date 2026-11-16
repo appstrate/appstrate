@@ -12,7 +12,7 @@ export function agentCreationWithIntegrationPath(integrationId: string): string 
   return `/agents?${params}`;
 }
 
-export type CreationResource = "agent" | "skill" | "integration" | "mcp-server";
+export type CreationResource = "agent" | "skill" | "integration";
 export type CreationPromptTranslate = (key: string, values?: Record<string, string>) => string;
 
 export function chatDraftNavigationState(prompt: string): { composerDraft: string } {

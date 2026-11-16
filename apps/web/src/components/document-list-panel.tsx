@@ -12,10 +12,9 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
-import { EmptyState } from "./page-states";
+import { EmptyState, NoMatchState } from "./page-states";
 import { CardGrid } from "./card-grid";
 import { FileTile, FileTileSkeleton } from "./file-tile";
 import { ItemList } from "./item-list";
@@ -41,24 +40,22 @@ export function DocumentListPanel({
   display = "table",
   toolbar,
   tableLabel,
-  tableSurface = "framed",
   spanning = false,
 }: {
   documents: FileDto[];
   isLoading: boolean;
   error: unknown;
-  empty: { message: string; hint?: string; compact?: boolean };
+  /** `onReset` marks a filtered list that found nothing: the state offers to clear the filters. */
+  empty: { message: string; hint?: string; compact?: boolean; onReset?: () => void };
   /** Whether a row links to the run that produced it (the gallery's). */
   showRunLink?: (doc: FileDto) => boolean;
-  /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
+  /** Rendered after the list: the gallery's load-more footer, a run's truncation notice. */
   footer?: ReactNode;
   /** The gallery offers cards or table; run surfaces keep their table or compact list. */
   display?: "cards" | "table" | "compact";
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Integrated rails already provide the surrounding surface. */
-  tableSurface?: "framed" | "integrated";
   /** The list spans several spaces: each row names its own. */
   spanning?: boolean;
 }) {
@@ -99,14 +96,9 @@ export function DocumentListPanel({
 
   // Keep ("pin") — clears the document's expiry.
   const onKeep = (doc: FileDto) =>
-    keepDoc.mutate(
-      { params: { path: { id: doc.id }, header: fileContextHeader(contextOf(doc)) } },
-      {
-        onSuccess: () => {
-          toast.success(t("keep.success"));
-        },
-      },
-    );
+    keepDoc.mutate({
+      params: { path: { id: doc.id }, header: fileContextHeader(contextOf(doc)) },
+    });
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
@@ -114,10 +106,7 @@ export function DocumentListPanel({
     deleteDoc.mutate(
       { params: { path: { id }, header: fileContextHeader(contextOf(pendingDelete)) } },
       {
-        onSuccess: () => {
-          toast.success(t("delete.success"));
-          setPendingDelete(null);
-        },
+        onSuccess: () => setPendingDelete(null),
       },
     );
   };
@@ -133,7 +122,9 @@ export function DocumentListPanel({
     spanning,
   });
   const { columns, menu } = useColumnVisibility("documents", allColumns);
-  const emptyState = (
+  const emptyState = empty.onReset ? (
+    <NoMatchState message={empty.message} onReset={empty.onReset} />
+  ) : (
     <EmptyState message={empty.message} hint={empty.hint} compact={empty.compact} icon={FileText} />
   );
 
@@ -193,7 +184,6 @@ export function DocumentListPanel({
             tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={readerHref}

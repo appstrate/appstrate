@@ -16,3 +16,17 @@ export function useListView(list: string): [ListView, (view: ListView) => void] 
   const defaultView = list === "integrations" || list === "documents" ? "cards" : "table";
   return [view ?? defaultView, setView];
 }
+
+export type RolesView = "list" | "matrix";
+
+/** The roles page's list-or-permission-matrix choice: a presentation of the same roles, kept like cards-or-table. */
+const rolesViews = createKeyedLocalStore<RolesView | null>(
+  "appstrate-view-",
+  (value) => (value === "list" || value === "matrix" ? value : null),
+  null,
+);
+
+export function useRolesView(): [RolesView, (view: RolesView) => void] {
+  const [view, setView] = rolesViews.useValue("roles");
+  return [view ?? "list", setView];
+}

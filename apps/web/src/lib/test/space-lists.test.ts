@@ -59,7 +59,6 @@ describe("listAdmits", () => {
     expect(listAdmits("agents")(["agents:run"])).toBe(true);
     expect(listAdmits("skills")(["skills:read"])).toBe(true);
     expect(listAdmits("integrations")(["integrations:read"])).toBe(true);
-    expect(listAdmits("mcp-servers")(["mcp-servers:read"])).toBe(true);
     expect(listAdmits("skills")(["agents:read", "integrations:read"])).toBe(false);
   });
 });
@@ -92,9 +91,6 @@ describe("holdsOverview", () => {
       "/skills/:scope/:name/:version",
       "/integrations",
       "/integrations/:scope/:name",
-      "/mcp-servers",
-      "/mcp-servers/:scope/:name",
-      "/mcp-servers/:scope/:name/:version",
       "/org-settings",
       "/org-settings/members",
       "/org-settings/billing",

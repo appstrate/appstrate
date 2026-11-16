@@ -14,7 +14,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { render } = await import("../../test/render.tsx");
-const { usePaginatedRuns } = await import("../use-paginated-runs.ts");
+const { useRuns } = await import("../use-paginated-runs.ts");
 const { useAllSchedules } = await import("../use-schedules.ts");
 const { useFilesPaged } = await import("../use-files.ts");
 const { useAgents, usePackageList } = await import("../use-packages.ts");
@@ -35,7 +35,7 @@ function intervalOf(useHook: () => unknown, ...prefix: string[]): unknown {
 
 describe("polling a list spanning spaces", () => {
   it("polls the runs list across spaces, not the current space's", () => {
-    const runs = (spanning: boolean) => () => usePaginatedRuns({ spanning, limit: 15, offset: 0 });
+    const runs = (spanning: boolean) => () => useRuns({ spanning, limit: 15 });
     expect(intervalOf(runs(true), "paginated-runs")).toBe(ACROSS_SPACES_POLL_MS);
     expect(intervalOf(runs(false), "paginated-runs")).toBeUndefined();
   });

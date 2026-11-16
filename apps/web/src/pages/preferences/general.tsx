@@ -143,8 +143,6 @@ function EmailRow() {
             components={{ strong: <strong /> }}
           />,
         );
-      } else {
-        toast.success(t("preferences.emailChanged"));
       }
       // SMTP keeps the account's current address until the change is approved.
       setDraft(null);

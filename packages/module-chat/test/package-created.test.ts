@@ -12,7 +12,6 @@ describe("packageCreatedByOperation", () => {
     ["createAgent", "agent", "/agents/@acme/triage"],
     ["createSkill", "skill", "/skills/@acme/triage"],
     ["createIntegrationPackage", "integration", "/integrations/@acme/triage"],
-    ["createMcpServerPackage", "mcp-server", "/mcp-servers/@acme/triage"],
   ] as const)("reads %s's 201 body and links the %s page", (operation, type, href) => {
     const created = packageCreatedByOperation(operation, {
       status: 201,
@@ -32,8 +31,8 @@ describe("packageCreatedByOperation", () => {
 describe("packageCreatedByImport", () => {
   it("reads the root and the root's type of a bundle import", () => {
     expect(
-      packageCreatedByImport({ root_package_id: "@acme/server", root_type: "mcp-server" }),
-    ).toEqual({ packageId: "@acme/server", type: "mcp-server" });
+      packageCreatedByImport({ root_package_id: "@acme/server", root_type: "integration" }),
+    ).toEqual({ packageId: "@acme/server", type: "integration" });
   });
 
   it("names nothing without a known root type", () => {

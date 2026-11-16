@@ -552,6 +552,11 @@ describe("personal spaces — the write rules", () => {
     await expectProblem(await patch({ visibility: "private" }), 409, {
       code: "personal_space_immutable",
     });
+    for (const credential_proxy_open of [false, true]) {
+      await expectProblem(await patch({ credential_proxy_open }), 409, {
+        code: "personal_space_immutable",
+      });
+    }
   });
 
   it("refuses `owner_user_id` on creation — it is not a body field", async () => {
@@ -709,15 +714,19 @@ describe("personal spaces — references that bypass the package routes", () => 
     personalId = (await ownPersonalSpace(member)).id;
   });
 
-  /** A `source.kind: "local"` integration — the shape that names an mcp-server. */
-  const localIntegrationManifest = (name: string, serverName: string) => ({
+  /** An integration declaring a dependency on a skill, the one reference an integration manifest can name. */
+  const localIntegrationManifest = (name: string, skillId: string) => ({
     name,
     version: "1.0.0",
     type: "integration",
     schema_version: "0.1",
     display_name: "Local Integration",
     description: "A local-source MCP integration",
-    source: { kind: "local", server: { name: serverName, version: "0.1.0" } },
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
+    },
+    dependencies: { skills: { [skillId]: "^0.1.0" } },
     auths: {
       primary: {
         type: "api_key",
@@ -747,27 +756,24 @@ describe("personal spaces — references that bypass the package routes", () => 
     "X-Space-Id": owner.defaultSpaceId,
   });
 
-  const createIntegration = (name: string, serverName: string) =>
+  const createIntegration = (name: string, skillId: string) =>
     app.request("/api/packages/integrations", {
       method: "POST",
       headers: { ...spaceHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ manifest: localIntegrationManifest(name, serverName) }),
+      body: JSON.stringify({ manifest: localIntegrationManifest(name, skillId) }),
     });
 
-  it("refuses a local-source integration naming an mcp-server homed in somebody else's personal space", async () => {
-    // `source.server.name` is a reference the SPAWN path resolves and runs
-    // (`integration-spawn-resolver.ts`), and it lives OUTSIDE `dependencies.*`.
-    // The access check reads it for that reason: without it, naming a package
-    // was a way to reach one §3.6 says does not exist for the caller — the
-    // resolver applies the organization boundary and asks nothing about
-    // placement.
-    const SERVER = "@ref-bypass/private-server";
+  it("refuses an integration depending on a skill homed in somebody else's personal space", async () => {
+    // A declared dependency lives in `dependencies.*` and is judged by the same
+    // access check: without it, naming a package was a way to reach one §3.6
+    // says does not exist for the caller.
+    const SERVER = "@ref-bypass/private-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
+      type: "skill",
       homeSpaceId: personalId,
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     // The control: the package routes already refuse it to the organization owner.
@@ -783,15 +789,15 @@ describe("personal spaces — references that bypass the package routes", () => 
     ).toBe(true);
   });
 
-  it("takes the same reference once the server is homed in a space the author reaches", async () => {
+  it("takes the same reference once the skill is homed in a space the author reaches", async () => {
     // The positive control: the refusal above is about PLACEMENT, not about the
     // shape of the reference.
-    const SERVER = "@ref-bypass/team-server";
+    const SERVER = "@ref-bypass/team-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      type: "skill",
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     const created = await createIntegration("@ref-bypass/fine", SERVER);

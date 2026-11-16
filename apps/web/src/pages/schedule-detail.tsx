@@ -4,6 +4,7 @@ import { Alert } from "@appstrate/ui/components/alert";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -24,7 +25,7 @@ import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
 import { NextRunPreview } from "../components/next-run-preview";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
@@ -51,8 +52,8 @@ import {
   Settings2,
 } from "lucide-react";
 
-type ScheduleTab = "details" | "runs" | "settings";
-const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
+type ScheduleTab = "overview" | "runs" | "settings";
+const SCHEDULE_TABS: readonly ScheduleTab[] = ["overview", "runs", "settings"];
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -68,13 +69,13 @@ export function ScheduleDetailPage() {
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   // The tab stays for every role; without the permission its content says so.
   const readsRuns = canReadRuns(can);
-  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
+  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "overview");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
-    { value: "details", label: t("detail.overview.summary"), icon: LayoutGrid },
+    { value: "overview", label: t("detail.overview.summary"), icon: LayoutGrid },
     { value: "runs", label: t("common:nav.runs"), icon: Play },
     { value: "settings", label: t("common:nav.settings"), icon: Settings2 },
   ];
@@ -145,11 +146,11 @@ export function ScheduleDetailPage() {
           )}
         </DetailTabPanel>
 
-        <DetailTabPanel value="details">
+        <DetailTabPanel value="overview">
           <ScheduleParams schedule={schedule} />
         </DetailTabPanel>
 
-        <DetailTabPanel value="settings" flush>
+        <DetailTabPanel value="settings" framed>
           {/* The settings seed their fields once: never from a list row that may be stale. */}
           {scheduleQuery.isPlaceholderData ? (
             <div className="p-6">
@@ -172,6 +173,7 @@ export function ScheduleDetailPage() {
           deleteSchedule.mutate(schedule.id, {
             onSuccess: () => {
               setConfirmOpen(false);
+              toast.success(t("schedule.deleted"));
               navigate("/schedules");
             },
           });
@@ -301,14 +303,10 @@ function ScheduleHistory({
 
   const isActive = schedule.enabled;
 
-  // The same query ScopedRunList makes for its first page (12 rows), so React
-  // Query serves both from one fetch.
+  // The same query ScopedRunList makes (default page size), so React Query
+  // serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const runsQuery = usePaginatedRuns({
-    scheduleId: schedule.id,
-    limit: 12,
-    offset: 0,
-  });
+  const runsQuery = useFirstRunsPage({ scheduleId: schedule.id });
   const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 

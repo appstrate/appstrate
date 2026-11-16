@@ -171,3 +171,24 @@ describe("isSmtpConfigured", () => {
     expect(buildAppConfig().features.smtp).toBe(isSmtpConfigured());
   });
 });
+
+describe("buildAppConfig — localIntegrations", () => {
+  const saved = process.env.RUN_ADAPTER;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.RUN_ADAPTER;
+    else process.env.RUN_ADAPTER = saved;
+    _resetCacheForTesting();
+  });
+
+  it("is false under the process adapter, which cannot isolate a runner", () => {
+    process.env.RUN_ADAPTER = "process";
+    _resetCacheForTesting();
+    expect(buildAppConfig().features.localIntegrations).toBe(false);
+  });
+
+  it("is true under an adapter that isolates runners", () => {
+    process.env.RUN_ADAPTER = "docker";
+    _resetCacheForTesting();
+    expect(buildAppConfig().features.localIntegrations).toBe(true);
+  });
+});

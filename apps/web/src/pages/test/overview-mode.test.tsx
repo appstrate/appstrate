@@ -378,7 +378,7 @@ describe("the integration index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
     expect(html).toMatch(
-      /title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span><\/span><span aria-hidden="true">·<\/span>2 connexions/,
+      /title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span><\/span><span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
@@ -428,7 +428,12 @@ describe("the files gallery in the mode", () => {
         "get",
         "/api/orgs/{orgId}/files",
         "paged",
-        { path: { orgId: "org_1" }, query: { purpose: undefined, q: undefined, limit: 25 } },
+        {
+          params: {
+            path: { orgId: "org_1" },
+            query: { purpose: undefined, q: undefined, limit: 25 },
+          },
+        },
       ],
       {
         pages: [
@@ -459,7 +464,12 @@ describe("the files gallery in the mode", () => {
           "get",
           "/api/orgs/{orgId}/files",
           "paged",
-          { path: { orgId: "org_1" }, query: { purpose: undefined, q: undefined, limit: 25 } },
+          {
+            params: {
+              path: { orgId: "org_1" },
+              query: { purpose: undefined, q: undefined, limit: 25 },
+            },
+          },
         ],
         {
           pages: [
@@ -500,14 +510,20 @@ describe("the dashboard in the mode", () => {
         undefined,
         undefined,
         15,
-        0,
       ],
       {
-        data: [
-          makeRun({ id: "run_b", spaceId: "spc_b", packageId: "@acme/reporter" }),
-          makeRun({ id: "run_a", spaceId: "spc_a", packageId: "@acme/reporter" }),
+        pages: [
+          {
+            object: "list",
+            hasMore: false,
+            data: [
+              makeRun({ id: "run_b", spaceId: "spc_b", packageId: "@acme/reporter" }),
+              makeRun({ id: "run_a", spaceId: "spc_a", packageId: "@acme/reporter" }),
+            ],
+            total: 2,
+          },
         ],
-        total: 2,
+        pageParams: [undefined],
       },
     );
     queryClient.setQueryData(["schedules", "org_1", "across-spaces"], []);
@@ -533,7 +549,7 @@ describe("the dashboard in the mode", () => {
 
   it("offers the assistant, and an agent's run on its card where a space grants it", () => {
     const { html } = renderIn(true, <DashboardPage />, "/", seed);
-    expect(html).toContain("Demander à l’IA");
+    expect(html).toContain("data-page-actions-trigger");
     // One card for the agent of two spaces; only spc_a grants `agents:run`.
     expect(html.match(/aria-label="Lancer"/g)).toHaveLength(1);
     // Out of the mode, a working space that reads runs offers the assistant and the agent's run.
@@ -556,14 +572,16 @@ describe("the dashboard in the mode", () => {
             undefined,
             undefined,
             15,
-            0,
           ],
-          { data: [], total: 0 },
+          {
+            pages: [{ object: "list", hasMore: false, data: [], total: 0 }],
+            pageParams: [undefined],
+          },
         );
       },
       [space("spc_a", [...SPACES[0]!.permissions, "runs:read"]), SPACES[1]!],
     ).html;
-    expect(here).toContain("Demander à l’IA");
+    expect(here).toContain("data-page-actions-trigger");
     expect(here).toContain('aria-label="Lancer"');
   });
 
@@ -574,7 +592,7 @@ describe("the dashboard in the mode", () => {
 
   it("offers the assistant while the space listing has not answered, as once it has", () => {
     // No org, so no listing: whether the mode is on is not known yet, and nothing waits on it.
-    expect(render(<DashboardPage />)).toContain("Demander à l’IA");
+    expect(render(<DashboardPage />)).toContain("data-page-actions-trigger");
   });
 });
 

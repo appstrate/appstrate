@@ -41,7 +41,14 @@ function integrationManifest(): Record<string, unknown> {
     name: INTEGRATION_ID,
     version: "1.0.0",
     display_name: "Gmail",
-    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       primary: {
         type: "api_key",

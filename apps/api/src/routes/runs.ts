@@ -24,9 +24,8 @@ import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict, internalError, type ResolutionFieldError } from "../lib/errors.ts";
 import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
 import { callerSpaceGrant } from "../lib/permissions.ts";
-import { listResponse } from "../lib/list-response.ts";
-import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { listResponse, parseListLimit } from "@appstrate/core/list-query";
+import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import {
   assertConnectionOverridesAllowed,
   connectionOverridesSchema,
@@ -429,33 +428,34 @@ export function createRunsRouter() {
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const limit = parseListLimit(c, { defaultLimit: 20 });
     const { status, search } = parseRunListFilters({
       status: c.req.query("status"),
       q: c.req.query("q"),
     });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
-      offset,
+      startingAfter: c.req.query("startingAfter") || undefined,
       actor: getActor(c),
       status,
       search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
     return c.json(result);
   });
 
-  // GET /api/runs — global paginated run list across the space. The filters
-  // are `parseGlobalRunListQuery`'s, shared with `GET /api/orgs/{orgId}/runs`.
+  // GET /api/runs — global run list across the space, keyset-paged on `startingAfter` (a run
+  // id) + `limit`. The filters are `parseGlobalRunListQuery`'s, shared with
+  // `GET /api/orgs/{orgId}/runs`.
   router.get("/runs", requireRunsRead, async (c) => {
     const filters = parseGlobalRunListQuery(c);
     const result = await listGlobalRuns(getSpaceScope(c).orgId, [callerSpaceGrant(c)], {
       ...filters,
       actor: getActor(c),
     });
-    setOffsetLinkHeader({ c, limit: filters.limit, offset: filters.offset, total: result.total });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
     return c.json(result);
   });
 
@@ -570,11 +570,8 @@ export function createRunsRouter() {
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
 
-    // Log pages are limit-only (`since` is the cursor), so the helper's
-    // `offset` is dropped. The old inline form also carried a `.default(1000)`
-    // ahead of `.catch(1000)`: dead, because `.catch` already absorbs the
-    // `undefined` an absent `?limit=` produces.
-    const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
+    // Log pages are limit-only (`since` is the cursor), so the helper's `offset` is unused.
+    const limit = parseListLimit(c, { defaultLimit: 1000, maxLimit: 1000 });
 
     // Visibility was just verified via `assertRunVisible` above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so
