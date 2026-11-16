@@ -352,8 +352,8 @@ describe("the integration index in the mode", () => {
     queryClient.setQueryData(
       ["packages", "integrations", "org_1", "across-spaces"],
       [
-        packageRow("spc_a", { source_kind: "remote", server: null }),
-        packageRow("spc_b", { source_kind: "remote", server: null }),
+        packageRow("spc_a", { source_kind: "remote", server: null, authenticated: true }),
+        packageRow("spc_b", { source_kind: "remote", server: null, authenticated: true }),
       ],
     );
     // The caller's connections: one org-scoped, one in the second space only.
