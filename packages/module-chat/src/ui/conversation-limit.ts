@@ -8,11 +8,12 @@
  * failure) that keeps the session detail and every list row in step.
  */
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { ConversationCreation } from "./chat-route.ts";
 import type { ConversationScope } from "./conversation-scope.ts";
 import type { ChatTransport } from "./runtime-context.ts";
+import { useLatest } from "./use-latest.ts";
 import {
   patchSessionsCache,
   sessionQueryKey,
@@ -138,15 +139,12 @@ export function useConversationLimit({
     : draftRestricted && originSpaceId !== null;
 
   // Read at request time: the turn's transport outlives the render that built it.
-  const latest = useRef({ selectedSpaceId, draftRestricted });
-  useLayoutEffect(() => {
-    latest.current = { selectedSpaceId, draftRestricted };
-  }, [selectedSpaceId, draftRestricted]);
+  const getLatest = useLatest({ selectedSpaceId, draftRestricted });
 
   // A conversation started here sends its frozen origin until the server acknowledges a turn
   // (see `creationGate`).
   const gate = (gateRef.current ??= creationGate(() => {
-    const { selectedSpaceId: space, draftRestricted: draft } = latest.current;
+    const { selectedSpaceId: space, draftRestricted: draft } = getLatest();
     return { spaceId: space ?? null, restricted: draft && !!space };
   }));
   const getCreation = useCallback((): ConversationCreation | undefined => {

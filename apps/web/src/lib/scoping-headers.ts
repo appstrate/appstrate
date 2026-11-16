@@ -34,8 +34,7 @@ export const isOrgRoute = (url: string) =>
  */
 export function missingScopingHeaders(
   present: Headers,
-  scoping: Record<string, string> = buildScopingHeaders(),
-  url?: string,
+  { scoping = buildScopingHeaders(), url }: { scoping?: Record<string, string>; url?: string } = {},
 ): Record<string, string> {
   const otherOrg = present.has("X-Org-Id") && present.get("X-Org-Id") !== scoping["X-Org-Id"];
   const noSpace = url !== undefined && isOrgRoute(url);

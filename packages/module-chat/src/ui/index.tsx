@@ -34,6 +34,7 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
+import { useLatest } from "./use-latest.ts";
 import { Thread } from "./thread.tsx";
 import { createMessageQueue } from "./message-queue.ts";
 import {
@@ -184,6 +185,8 @@ export interface ChatPageProps {
   actingSpaceIds: ChatHost["actingSpaceIds"];
   /** Whether the composer may stage a file (see `ChatHost`). */
   canAttach?: ChatHost["canAttach"];
+  /** The host's working space, where an upload lands (see `ChatHost`). */
+  workingSpaceId?: ChatHost["workingSpaceId"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -215,6 +218,7 @@ export function ChatPage({
   canIn,
   actingSpaceIds,
   canAttach,
+  workingSpaceId,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -320,6 +324,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       canAttach,
+      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -337,6 +342,7 @@ export function ChatPage({
       canIn,
       actingSpaceIds,
       canAttach,
+      workingSpaceId,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -577,15 +583,6 @@ function ConversationNotFound({
       ) : null}
     </div>
   );
-}
-
-/** A getter of the latest `value`, for callbacks that outlive the render that made them. */
-function useLatest<T>(value: T): () => T {
-  const ref = useRef(value);
-  useLayoutEffect(() => {
-    ref.current = value;
-  }, [value]);
-  return useCallback(() => ref.current, []);
 }
 
 function ConversationInner({

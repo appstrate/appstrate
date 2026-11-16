@@ -17,11 +17,10 @@
 import { useTranslation } from "react-i18next";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { $api } from "@/api/client";
-import { useCurrentOrgId } from "@/hooks/use-org";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 import { ShellTrailContent } from "@/components/shell-breadcrumb";
 import { chatTrailEntries, resolveCrumbTitle } from "./chat-crumb-title";
+import { useChatSessionDetail } from "./use-chat-session-detail";
 
 export function ChatTitleCrumb({
   conversationId,
@@ -33,19 +32,12 @@ export function ChatTitleCrumb({
 }) {
   const { t } = useTranslation(["chat", "common"]);
   const { data: sessions, isLoading } = useSessions();
-  const orgId = useCurrentOrgId();
   const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   // The conversation itself, whatever the list's filter: its name when the list lacks the row.
-  // The same query as the info panel's, refetched by the session signal.
-  const detail = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/chat/sessions/{id}",
-    { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
-    { enabled: !!orgId && !!conversationId && !pending },
-  );
+  const detail = useChatSessionDetail(conversationId, !pending);
   const title = resolveCrumbTitle(listed, detail.data, t("threads.new"));
 
-  // `isLoading`: the read is off without a space, and would wait forever.
+  // `isLoading` is the sessions list's; the conversation's own read only matters when the list lacks the row.
   const loading =
     conversationId !== null && (pending || isLoading || (!listed && detail.isLoading));
 

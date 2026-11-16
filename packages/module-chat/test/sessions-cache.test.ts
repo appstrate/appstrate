@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
 import {
+  dropSessionFromLists,
+  sessionsQueryKey,
+  sessionsSearchQueryKey,
   flattenSessions,
   patchSessionsCache,
   type SessionsCache,
@@ -43,5 +47,27 @@ describe("session-list cache", () => {
     expect(patchSessionsCache(undefined, (rows) => rows)).toBeUndefined();
     const seeded = patchSessionsCache(undefined, (rows) => rows, row("new"));
     expect(flattenSessions(seeded!).map((s) => s.id)).toEqual(["new"]);
+  });
+});
+
+describe("a deleted conversation", () => {
+  const ids = (cache: SessionsCache | undefined) =>
+    cache?.pages.flatMap((p) => p.data.map((s) => s.id));
+
+  it("leaves every cached list: each space filter, the overview and a title search", async () => {
+    const queryClient = new QueryClient();
+    const keys = [
+      sessionsQueryKey("spc_a"),
+      sessionsQueryKey("spc_b"),
+      sessionsQueryKey(null),
+      sessionsSearchQueryKey(null, "plan"),
+    ];
+    for (const key of keys) queryClient.setQueryData(key, twoPages());
+
+    await dropSessionFromLists(queryClient, "b");
+
+    for (const key of keys) {
+      expect(ids(queryClient.getQueryData<SessionsCache>(key))).toEqual(["a", "c"]);
+    }
   });
 });

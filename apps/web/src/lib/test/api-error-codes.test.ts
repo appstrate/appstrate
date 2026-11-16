@@ -50,10 +50,10 @@ const SOURCES = [
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
 ];
-// The MCP module's `code` literals, and `core`'s MCP tool-result helpers (`missing_argument`,
-// `unknown_space`), are tool-result refusals read by the model, never a problem body.
+// The MCP module's `code` literals, and `core`'s MCP tool-result helpers (`mcp-result.ts`,
+// `mcp-spaces.ts`: `missing_argument`, `unknown_space`), are tool-result refusals read by the model, never a problem body.
 const NOT_A_SOURCE =
-  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\/|^packages\/core\/src\/mcp-result\.ts$/;
+  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\/|^packages\/core\/src\/mcp-(?:result|spaces)\.ts$/;
 
 /** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [

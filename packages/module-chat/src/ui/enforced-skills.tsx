@@ -156,7 +156,7 @@ interface SkillChipsProps {
   selection: ChatSkillSelection;
   /** Absent for a member who cannot pick: the pill is then read-only and enforced-only. */
   onOpenPicker?: () => void;
-  /** Drawn when no skill is loaded: today's entry to the picker (its summary chip). */
+  /** Drawn when no skill is loaded: the entry to the picker (its summary chip). */
   fallback?: ReactNode;
 }
 

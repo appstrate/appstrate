@@ -16,7 +16,7 @@ import { CountBadge } from "@/components/count-badge";
 import { useSpacesFor } from "@/hooks/use-space-action";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
-import { useShellChatTransport } from "@/modules/chat/use-chat-runtime";
+import { useChatCan, useShellChatTransport } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
@@ -34,10 +34,11 @@ interface Product {
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  // In « Vue d'ensemble » the chat opens as it is (its sessions act across spaces, no space to
-  // ask): it is offered where some space opens it and some space lets the reader write.
+  // The chat serves the organization in every mode (its sessions act across spaces): it is offered
+  // where some space opens it, and writable where it may act (the acting set), whatever the
+  // working space grants.
   const { offered: chatReachable } = useSpacesFor({ route: "/chat" });
-  const { offered: canWrite } = useSpacesFor({ permission: "chat:write" });
+  const canWrite = useChatCan()("chat:write");
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   // The chat has no entry in the Studio's navigation: its unread count rides on this tab, the

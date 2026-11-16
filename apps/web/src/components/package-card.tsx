@@ -16,7 +16,7 @@ import { useSpaceLink } from "../hooks/use-current-space";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
-import { SpaceNamesOf } from "./space-name";
+import { SpaceTilesOf } from "./space-name";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -74,7 +74,7 @@ export function PackageCard({
   const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors">
+    <Card className="hover:border-foreground/20 hover:bg-muted/50 relative flex h-full w-full flex-col p-4 transition-colors hover:[--space-tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
@@ -153,7 +153,7 @@ export function PackageCard({
                   v{version}
                 </UIBadge>
               )}
-              {showSpace && <SpaceNamesOf spaceIds={spaceIds ?? []} />}
+              {showSpace && <SpaceTilesOf spaceIds={spaceIds ?? []} />}
               {showSpace && meta && <span aria-hidden>·</span>}
               {meta}
             </div>

@@ -22,6 +22,7 @@ import {
   limitAccessibleNames,
   ConversationScopeProvider,
   attachAvailability,
+  useAttachAvailability,
   limitAvailability,
   pinnedSpaceOf,
   type ConversationScope,
@@ -314,5 +315,30 @@ describe("attaching a file in a limited conversation", () => {
       available: false,
       reason: "outside",
     });
+  });
+  it("reads the host's working space, not the list filter: opened in the overview, on its origin", () => {
+    const host = {
+      can: () => true,
+      canAttach: true,
+      actingSpaceIds: ["spc_a"],
+    } as unknown as ChatHost;
+    function Verdict() {
+      const verdict = useAttachAvailability();
+      return <b data-available={String(verdict.available)} />;
+    }
+    const render = (workingSpaceId: string | null) =>
+      renderToStaticMarkup(
+        // No transport is published: the overview's list filter is null whatever the working space.
+        <ChatHostProvider value={{ ...host, workingSpaceId }}>
+          <ConversationScopeProvider
+            value={{ originSpaceId: "spc_a", restricted: true, setRestricted: () => {} }}
+          >
+            <Verdict />
+          </ConversationScopeProvider>
+        </ChatHostProvider>,
+      );
+    expect(render("spc_a")).toContain('data-available="true"');
+    expect(render("spc_b")).toContain('data-available="false"');
+    expect(render(null)).toContain('data-available="false"');
   });
 });

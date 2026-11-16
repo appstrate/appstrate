@@ -26,6 +26,7 @@ import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { canAttachFrom } from "../../lib/space-lists";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
@@ -41,7 +42,6 @@ import { ConversationSpaces } from "./conversation-spaces";
 import {
   useChatActingSpaceIds,
   useChatCan,
-  useChatCanIn,
   useChatFilter,
   useChatTransport,
   useChatTranslate,
@@ -105,7 +105,8 @@ export function ChatModulePage() {
   const { known } = useChatFilter();
   // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
-  const canIn = useChatCanIn();
+  // A call's grant is judged in the space the call acted in.
+  const canIn = useRowSpaceGrants();
   const actingSpaceIds = useChatActingSpaceIds();
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
@@ -194,6 +195,7 @@ export function ChatModulePage() {
               can={can}
               canIn={canIn}
               canAttach={canAttach}
+              workingSpaceId={currentSpaceId}
               actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}

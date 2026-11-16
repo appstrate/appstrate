@@ -16,7 +16,7 @@ const {
   holdsOverview,
   listAdmits,
   overviewLapsed,
-  overviewRouteVerdict,
+  spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
   spacesWhere,
@@ -120,31 +120,48 @@ describe("holdsOverview", () => {
   });
 });
 
-describe("overviewRouteVerdict", () => {
-  it("opens a list where some space admits it, and says nothing of other routes", () => {
-    expect(overviewRouteVerdict("/files", TWO)).toBe("granted");
-    expect(overviewRouteVerdict("/schedules", TWO)).toBe("denied");
-    expect(overviewRouteVerdict("/agents", TWO)).toBe("denied");
-    expect(overviewRouteVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])])).toBe(
+describe("spanningRouteVerdict", () => {
+  it("opens a list where some space admits it in the overview, and says nothing of other routes", () => {
+    expect(spanningRouteVerdict("/files", TWO, true)).toBe("granted");
+    expect(spanningRouteVerdict("/schedules", TWO, true)).toBe("denied");
+    expect(spanningRouteVerdict("/agents", TWO, true)).toBe("denied");
+    expect(spanningRouteVerdict("/agents", [...TWO, space("spc_c", ["agents:run"])], true)).toBe(
       "granted",
     );
-    expect(overviewRouteVerdict("/", TWO)).toBeUndefined();
-    expect(overviewRouteVerdict("/agents/:scope/:name", TWO)).toBeUndefined();
+    expect(spanningRouteVerdict("/", TWO, true)).toBeUndefined();
+    expect(spanningRouteVerdict("/agents/:scope/:name", TWO, true)).toBeUndefined();
+  });
+
+  it("leaves a list to the working space outside the overview", () => {
+    expect(spanningRouteVerdict("/files", TWO, false)).toBeUndefined();
+  });
+
+  it("says nothing before the space listing has answered", () => {
+    expect(spanningRouteVerdict("/chat", undefined, false)).toBeUndefined();
+    expect(spanningRouteVerdict("/files", undefined, true)).toBeUndefined();
   });
 });
 
-describe("overviewRouteVerdict on the chat", () => {
+describe("spanningRouteVerdict on the chat", () => {
+  const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read"])];
+
   it("opens the chat where some space admits it, whatever the working space grants", () => {
-    const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read"])];
-    expect(overviewRouteVerdict("/chat", spaces)).toBe("granted");
-    expect(overviewRouteVerdict("/chat/:conversationId", spaces)).toBe("granted");
+    expect(spanningRouteVerdict("/chat", spaces, true)).toBe("granted");
+    expect(spanningRouteVerdict("/chat/:conversationId", spaces, true)).toBe("granted");
   });
 
-  it("refuses it where no space admits it", () => {
-    expect(overviewRouteVerdict("/chat", TWO)).toBe("denied");
-    expect(overviewRouteVerdict("/chat", [space("spc_closed", ["chat:read"], "none")])).toBe(
-      "denied",
-    );
+  it("opens it the same way outside the overview", () => {
+    expect(spanningRouteVerdict("/chat", spaces, false)).toBe("granted");
+    expect(spanningRouteVerdict("/chat/:conversationId", spaces, false)).toBe("granted");
+  });
+
+  it("refuses it where no space admits it, in every mode", () => {
+    for (const overview of [true, false]) {
+      expect(spanningRouteVerdict("/chat", TWO, overview)).toBe("denied");
+      expect(
+        spanningRouteVerdict("/chat", [space("spc_closed", ["chat:read"], "none")], overview),
+      ).toBe("denied");
+    }
   });
 });
 

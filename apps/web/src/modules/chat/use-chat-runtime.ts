@@ -9,7 +9,6 @@ import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { useSpaces } from "../../hooks/use-spaces";
 import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
 import { chatTransport } from "./chat-transport";
@@ -90,7 +89,8 @@ export function useChatCan() {
 
 /**
  * The ids of the spaces the chat acts in (the backend's acting set). The module lists the skills
- * of these and sends the selected space only when it is one of them.
+ * of these, and a new conversation takes the selected space as its origin only when it is one of
+ * them.
  */
 export function useChatActingSpaceIds(): string[] {
   const { data: spaces } = useSpaces();
@@ -99,9 +99,4 @@ export function useChatActingSpaceIds(): string[] {
     () => actingSpaces(spaces, orgPermissions).map((space) => space.id),
     [spaces, orgPermissions],
   );
-}
-
-/** The caller's grant in a named space: what a call of a conversation did there (its run, its files). */
-export function useChatCanIn() {
-  return useRowSpaceGrants();
 }

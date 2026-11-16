@@ -7,12 +7,12 @@ import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { overviewRouteVerdict } from "../lib/space-lists";
+import { spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
- * permissions, except a route spanning spaces (a list, the chat) in « Vue d'ensemble », which
- * opens where some space admits it. A route the module does not load stays absent in the mode.
+ * permissions, except a route spanning spaces: the chat in every mode, a list in « Vue d'ensemble »,
+ * which open where some space admits them. A route the module does not load stays absent.
  */
 export function useRouteVerdict() {
   const { can, inPersonalSpace } = usePermissions();
@@ -22,7 +22,7 @@ export function useRouteVerdict() {
   return useCallback(
     (path: RoutePath) => {
       const own = routeVerdict(path, can, features, inPersonalSpace);
-      return (on && own !== "absent" && overviewRouteVerdict(path, spaces)) || own;
+      return (own !== "absent" && spanningRouteVerdict(path, spaces, on)) || own;
     },
     [on, spaces, can, features, inPersonalSpace],
   );

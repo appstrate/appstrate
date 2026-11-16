@@ -7,7 +7,7 @@
  * - on a ROW, in the row's space: `useRowSpaceGrants` says whether the row's space grants the
  *   action, and the action names that space itself (an explicit `X-Space-Id`, or the row's space
  *   entered as the working space when the action continues there, `RunAgentButton`);
- * - naming NO space (create, import, the catalogue, the chat): `useSpaceAction` offers it where
+ * - naming NO space (create, import, the catalogue): `useSpaceAction` offers it where
  *   some space grants it, asks « Dans quel espace ? » between several (the only one is taken
  *   without asking), enters the space picked as the working space, then continues the action,
  *   which therefore renders and requests in that space. Out of the mode it is the working

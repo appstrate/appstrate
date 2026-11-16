@@ -70,8 +70,6 @@ describe("a finalized assistant message keeps each call's space", () => {
   it("is what the card reads back, live and after reload", async () => {
     const part = await persistedToolPart("spc_origin", { operation_id: "listRuns" });
     // The runtime hands the card the stored `callProviderMetadata` as `providerMetadata`.
-    expect(callSpaceOf({ providerMetadata: part.callProviderMetadata, args: part.input })).toBe(
-      "spc_origin",
-    );
+    expect(callSpaceOf({ providerMetadata: part.callProviderMetadata })).toBe("spc_origin");
   });
 });

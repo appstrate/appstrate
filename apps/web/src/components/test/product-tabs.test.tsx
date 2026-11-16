@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The products toggle draws nothing when only one product remains: one choice is no choice. In
- * « Vue d'ensemble » the Chat tab is offered where some space opens the chat, as out of it.
+ * The products toggle draws nothing when only one product remains: one choice is no choice. The
+ * Chat tab is offered where some space opens the chat and the chat may act (the acting set),
+ * whichever space is working and whatever the mode.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -53,8 +54,14 @@ describe("the products toggle", () => {
     }
   });
 
-  it("draws the Chat tab in « Vue d'ensemble » where a space opens the chat", () => {
-    const tabs = (overview: boolean, workingPermissions: string[], seedUnread = false) => {
+  it("draws the Chat tab where a space opens the chat and the chat may act, in every mode", () => {
+    const OTHER_ACTING = ["runs:read", "chat:read", "chat:write", "mcp:read"];
+    const tabs = (
+      overview: boolean,
+      workingPermissions: string[],
+      seedUnread = false,
+      otherPermissions = OTHER_ACTING,
+    ) => {
       const stubs = [
         spyOn(orgStore, "getInitialState").mockReturnValue({
           ...orgStore.getInitialState(),
@@ -77,7 +84,7 @@ describe("the products toggle", () => {
       window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
       const queryClient = new QueryClient();
       queryClient.setQueryData(["orgs"], [ORG]);
-      // Two spaces reading runs offer the mode; the other one writes in the chat.
+      // Two spaces reading runs offer the mode; the other one is where the chat acts.
       const space = (id: string, permissions: string[]) => ({
         id,
         object: "space",
@@ -93,10 +100,7 @@ describe("the products toggle", () => {
         {
           object: "list",
           hasMore: false,
-          data: [
-            space("spc_a", workingPermissions),
-            space("spc_b", ["runs:read", "chat:read", "chat:write"]),
-          ],
+          data: [space("spc_a", workingPermissions), space("spc_b", otherPermissions)],
         },
       );
       if (seedUnread) {
@@ -120,12 +124,16 @@ describe("the products toggle", () => {
         for (const stub of stubs) stub.mockRestore();
       }
     };
-    const chatter = ["runs:read", "chat:read", "chat:write"];
+    const chatter = OTHER_ACTING;
     expect(tabs(false, chatter)).toContain('href="/chat"');
     expect(tabs(true, chatter)).toContain('href="/chat"');
-    // The working space opens no chat: offered in the mode (another space does), not out of it.
+    // The working space opens no chat: offered in either mode, another space opens it and acts.
     expect(tabs(true, ["runs:read"])).toContain('href="/chat"');
-    expect(tabs(false, ["runs:read"])).toBe("");
+    expect(tabs(false, ["runs:read"])).toContain('href="/chat"');
+    // Another space opens the chat but the chat cannot act in it (no `mcp:read`): nothing to write.
+    const readOnlyElsewhere = ["runs:read", "chat:read", "chat:write"];
+    expect(tabs(false, ["runs:read"], false, readOnlyElsewhere)).not.toContain('href="/chat"');
+    expect(tabs(true, ["runs:read"], false, readOnlyElsewhere)).not.toContain('href="/chat"');
 
     // In the mode the chat opens as it is (no space to ask), and its badge counts the
     // overview's list: three unread, which the selected space's filter never sees.

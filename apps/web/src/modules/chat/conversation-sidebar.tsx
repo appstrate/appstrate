@@ -42,6 +42,7 @@ import type {
   SidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
+import { useChatSessionDetail } from "./use-chat-session-detail";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
@@ -297,14 +298,7 @@ function ConversationDetails({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const orgId = useCurrentOrgId();
-  // The conversation is read from the organization's routes, which name no space.
-  const query = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/chat/sessions/{id}",
-    { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
-    { enabled: !!orgId && active && !!conversationId },
-  );
+  const query = useChatSessionDetail(conversationId, active);
 
   if (!conversationId) {
     return <p className="text-muted-foreground text-sm">{t("context.unsaved")}</p>;

@@ -10,7 +10,10 @@
  * draws while loading, so the chunk and the data wait under one shape.
  */
 
-import { ConversationSkeleton } from "@appstrate/module-chat/conversation-skeleton";
+import {
+  ConversationRowSkeleton,
+  ConversationSkeleton,
+} from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
 import { CardList } from "./card-list";
 import { PackageCardSkeleton } from "./package-card";
@@ -853,7 +856,7 @@ export function ChatConversationSkeleton() {
  * The conversation list's shape, drawn while its permissions and chunk load:
  * the "new conversation" row (the chat's primary action, so it is real, not
  * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
- * space line under it, as the module's `ConversationRowSkeleton` (same height, same two 16px lines).
+ * space line under it, drawn by the module's own `ConversationRowSkeleton`.
  */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
@@ -874,13 +877,7 @@ export function ChatSidebarSkeleton() {
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>
-              <div
-                data-sidebar="menu-skeleton"
-                className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
-              >
-                <Skeleton className="h-4 w-3/5" />
-                <Skeleton className="h-4 w-2/5" />
-              </div>
+              <ConversationRowSkeleton />
             </SidebarMenuItem>
           ))}
         </SidebarMenu>

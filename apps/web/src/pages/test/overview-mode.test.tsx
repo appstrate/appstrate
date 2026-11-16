@@ -274,9 +274,13 @@ describe("the agent index in the mode", () => {
     // The row opens in its first space, the working one here.
     expect(html).toContain('href="/agents/@acme/reporter"');
     expect(html).not.toContain("enterSpace=");
-    // The « Espace » column names the first space and counts the other, named in its title.
+    // The « Espace » column stacks one tile per space, then names them joined.
     expect(html).toContain(">Espace<");
-    expect(html).toMatch(/title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span>/);
+    expect(html.match(/ring-\(--space-tile-ring,var\(--background\)\)/g)).toHaveLength(2);
+    expect(html).toContain('title="Studio, spc_b">Studio, spc_b</span>');
+    // The table sets the ring for its rows: the surface at rest, the hover surface on a link row.
+    expect(html).toContain("[--space-tile-ring:var(--dt-surface)]");
+    expect(html).toContain("hover:[--space-tile-ring:var(--dt-surface-hover)]");
     expect(html).toContain("1 élément");
   });
 
@@ -377,8 +381,13 @@ describe("the integration index in the mode", () => {
     expect(html).toContain('href="/integrations/@acme/crm"');
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
+    // The card rings the tiles in its background, and in its translucent hover one made opaque.
+    expect(html).toContain("[--space-tile-ring:var(--color-card)]");
+    expect(html).toContain(
+      "hover:[--space-tile-ring:color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]",
+    );
     expect(html).toMatch(
-      /title="Studio">Studio<\/span><span[^>]*title="spc_b">\+1<\/span><\/span><span aria-hidden="true">·<\/span>.*?2 connexions/,
+      /data-testid="space-tile-stack".*?title="Studio, spc_b">Studio, spc_b<\/span><\/span><span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
@@ -617,7 +626,7 @@ describe("the gate", () => {
     expect(html).not.toContain("ouvert");
   });
 
-  describe("the chat, which serves the organization in the mode", () => {
+  describe("the chat, which serves the organization in every mode", () => {
     const chatGate = (
       <RouteGate path="/chat/:conversationId" pending={<p>attente</p>}>
         <p>ouvert</p>
@@ -639,8 +648,23 @@ describe("the gate", () => {
       expect(withChat({ chat: true }, true)).toContain("ouvert");
     });
 
-    it("judges it by the working space out of the mode", () => {
-      expect(withChat({ chat: true }, false)).not.toContain("ouvert");
+    it("opens it the same way out of the mode, whatever the working space grants", () => {
+      expect(withChat({ chat: true }, false)).toContain("ouvert");
+    });
+
+    it("stays shut where no space admits the chat, in either mode", () => {
+      const none = [SPACES[0]!, space("spc_b", ["runs:read"])];
+      const config = window.__APP_CONFIG__;
+      window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
+      try {
+        for (const on of [true, false]) {
+          expect(renderIn(on, chatGate, "/chat/chs_1", () => {}, none).html).not.toContain(
+            "ouvert",
+          );
+        }
+      } finally {
+        window.__APP_CONFIG__ = config;
+      }
     });
 
     it("keeps the page absent where the module is not loaded, whatever a space admits", () => {

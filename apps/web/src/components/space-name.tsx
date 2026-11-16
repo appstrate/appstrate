@@ -5,11 +5,12 @@ import { useTranslation } from "react-i18next";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
 import { useViewer } from "../hooks/use-auth";
-import { useSpaceLabelOf, useSpaces, useSpacesOf } from "../hooks/use-spaces";
+import { useSpaces, useSpacesOf } from "../hooks/use-spaces";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel } from "../lib/space-label";
 
-type SpaceListed = Parameters<typeof spaceTile>[0];
+/** A listed space as the tile and name components take it. */
+export type SpaceListed = Parameters<typeof spaceTile>[0];
 
 /** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row. */
 const SIZES = {
@@ -18,7 +19,7 @@ const SIZES = {
 } as const;
 
 /** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
-export function SpaceTile({
+function SpaceTile({
   space,
   size = "sm",
   className,
@@ -36,39 +37,37 @@ export function SpaceTile({
   );
 }
 
+/** The ring of a stacked tile: the container's `--space-tile-ring`, else the page background. */
+const RING = "ring-(--space-tile-ring,var(--background))";
+
 /**
- * Several spaces' tiles stacked, each overlapping the previous one, ringed in `ringClassName` (the
- * colour of the surface they sit on) so the edges stay readable. Past `max`, the rest is counted.
+ * Several spaces' tiles stacked, each overlapping the previous one, ringed in `--space-tile-ring`
+ * (the colour of the surface they sit on, which the container sets for each of its states: Card
+ * and DataTable do, a list row or a trigger sets its own; `--background` when none does) so the
+ * edges stay readable. Past `max`, the rest is counted.
  */
 export function SpaceTileStack({
   spaces,
   size = "sm",
   max,
-  ringClassName = "ring-background",
 }: {
   spaces: readonly (SpaceListed & { id: string })[];
   size?: keyof typeof SIZES;
   max?: number;
-  ringClassName?: string;
 }) {
   const shown = max === undefined ? spaces : spaces.slice(0, max);
   const hidden = spaces.length - shown.length;
   return (
     <span className="flex shrink-0 items-center -space-x-1" data-testid="space-tile-stack">
       {shown.map((space) => (
-        <SpaceTile
-          key={space.id}
-          space={space}
-          size={size}
-          className={cn("ring-2", ringClassName)}
-        />
+        <SpaceTile key={space.id} space={space} size={size} className={cn("ring-2", RING)} />
       ))}
       {hidden > 0 && (
         <span
           className={cn(
             "bg-muted text-muted-foreground flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
             SIZES[size].tile,
-            ringClassName,
+            RING,
           )}
         >
           +{hidden}
@@ -118,42 +117,18 @@ export function SpaceNameOf({
 }
 
 /**
- * The spaces of a row listed once for several (`onePerPackage`): the first named, the others
- * counted (« +2 »), their names in `title`.
- */
-export function SpaceNamesOf({
-  spaceIds,
-  ...props
-}: { spaceIds: readonly string[] } & Omit<Parameters<typeof SpaceName>[0], "space" | "children">) {
-  const labelOf = useSpaceLabelOf();
-  const others = spaceIds.slice(1).flatMap((id) => labelOf(id) ?? []);
-  return (
-    <SpaceNameOf spaceId={spaceIds[0]} {...props}>
-      {others.length > 0 && (
-        <span className="shrink-0 tabular-nums" title={others.join(", ")}>
-          +{others.length}
-        </span>
-      )}
-    </SpaceNameOf>
-  );
-}
-
-/**
  * Every space a row touched, none counted away: all the tiles in a row, then the names joined
  * (« Studio, Coffre »), truncated with the full names in `title`. One space reads as
- * {@link SpaceName}. For a list of conversations; {@link SpaceNamesOf} stays the cards' line.
+ * {@link SpaceName}. The one « spaces of a row » line: cards, tables, conversation lists.
  */
 export function SpaceTilesOf({
   spaceIds,
   size = "sm",
   className,
-  ringClassName,
 }: {
   spaceIds: readonly string[];
   size?: keyof typeof SIZES;
   className?: string;
-  /** The surface colour the stacked tiles are ringed in (see {@link SpaceTileStack}). */
-  ringClassName?: string;
 }) {
   const { t } = useTranslation();
   const spaces = useSpacesOf(spaceIds);
@@ -166,7 +141,7 @@ export function SpaceTilesOf({
       className={cn("flex min-w-0 items-center", SIZES[size].box, className)}
       data-testid="space-tiles"
     >
-      <SpaceTileStack spaces={spaces} size={size} ringClassName={ringClassName} />
+      <SpaceTileStack spaces={spaces} size={size} />
       <span className="truncate" title={names}>
         {names}
       </span>

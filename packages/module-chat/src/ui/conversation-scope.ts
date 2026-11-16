@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react";
-import { useChatHost, useChatTransport, type ChatTranslate } from "./runtime-context.ts";
+import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 
 export interface ConversationScope {
   /**
@@ -75,9 +75,8 @@ export function attachAvailability(
 
 /** {@link attachAvailability} of the open conversation, in the host's working space. */
 export function useAttachAvailability(): ReturnType<typeof attachAvailability> {
-  const { canAttach = true } = useChatHost();
-  const scope = useConversationScope();
-  return attachAvailability(canAttach, scope, useChatTransport()?.spaceId);
+  const { canAttach = true, workingSpaceId } = useChatHost();
+  return attachAvailability(canAttach, useConversationScope(), workingSpaceId);
 }
 
 const noLabels = () => undefined;
@@ -113,20 +112,14 @@ export function pinnedSpaceOf(
  * The space a tool call acted in: the one the engine stamped on the call when it dispatched it
  * (`providerMetadata.appstrate.spaceId`, which the AI SDK stores as `callProviderMetadata` and
  * the runtime hands the card as `providerMetadata`: the origin of a limited conversation, the
- * named `space_id` otherwise), else the `space_id` the call's own arguments name (a call on the
- * organization endpoint always names it, so a conversation persisted before the stamp still
- * reads right). Read from the call itself, never from the conversation's present limit, which can
- * change after the call was made. `undefined` for a call that acts in no space.
+ * named `space_id` otherwise). The engine stamps every call that acts in a space. Read from the
+ * call itself, never from the conversation's present limit, which can change after the call was
+ * made. `undefined` for a call that acts in no space.
  */
-export function callSpaceOf(part: {
-  providerMetadata?: unknown;
-  args?: unknown;
-}): string | undefined {
+export function callSpaceOf(part: { providerMetadata?: unknown }): string | undefined {
   const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)
     ?.appstrate?.spaceId;
-  if (typeof stamp === "string" && stamp) return stamp;
-  const named = (part.args as { space_id?: unknown } | null | undefined)?.space_id;
-  return typeof named === "string" && named ? named : undefined;
+  return typeof stamp === "string" && stamp ? stamp : undefined;
 }
 
 /**

@@ -7,7 +7,7 @@
  * only session list/CRUD + history load.
  */
 
-import type { InfiniteData } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
@@ -95,6 +95,18 @@ export function patchSessionsCache(
   if (!prev)
     return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [undefined] } : prev;
   return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
+}
+
+/**
+ * Reflect a deleted conversation in every cached list, whatever its space filter or title search.
+ * Cancels the in-flight reads first so a stale (pre-delete) response cannot land afterwards and
+ * resurrect the row; the server is already updated and the periodic poll reconciles later drift.
+ */
+export async function dropSessionFromLists(queryClient: QueryClient, id: string): Promise<void> {
+  await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
+  queryClient.setQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY }, (prev) =>
+    patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== id)),
+  );
 }
 
 /** Flatten the loaded pages; a row seen twice (bumped mid-walk) keeps its first occurrence. */

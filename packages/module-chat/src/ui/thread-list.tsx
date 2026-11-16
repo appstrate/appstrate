@@ -33,7 +33,6 @@ import {
 import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -73,12 +72,11 @@ import {
 import {
   renameSession,
   deleteSession,
-  patchSessionsCache,
-  sessionsQueryKey,
+  dropSessionFromLists,
   SESSIONS_QUERY_KEY,
-  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
+import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import { useSessions } from "./use-sessions.ts";
 
@@ -319,22 +317,6 @@ export function ChatConversationList({
   );
 }
 
-/**
- * A row's place while the list loads, with the space line's: the same height and the same two
- * 16px lines as `ConversationRow`, so the list does not shift on load.
- */
-function ConversationRowSkeleton() {
-  return (
-    <div
-      data-sidebar="menu-skeleton"
-      className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
-    >
-      <Skeleton className="h-4 w-3/5" />
-      <Skeleton className="h-4 w-2/5" />
-    </div>
-  );
-}
-
 /** The spaces a conversation touched, named by the host; « Vue d'ensemble » when it touched none. */
 function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
   return session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("threads.overview");
@@ -382,16 +364,7 @@ function ConversationRow({
     }
     setConfirmingDelete(false);
     setDeleting(false);
-    // Reflect the delete in the cached list. Cancel any in-flight poll first so
-    // its stale (pre-delete) response can't land afterwards and resurrect the
-    // row; then drop the row. The server is already updated and the periodic
-    // poll reconciles any later drift.
-    await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    // The prefix reaches the filtered (search) lists as well as the plain one.
-    queryClient.setQueriesData<SessionsCache>(
-      { queryKey: sessionsQueryKey(transport.spaceId) },
-      (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
-    );
+    await dropSessionFromLists(queryClient, session.id);
     if (active) select?.(null);
   };
 

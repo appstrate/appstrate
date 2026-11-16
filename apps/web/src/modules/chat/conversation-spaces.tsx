@@ -3,31 +3,23 @@
 /**
  * The spaces the open conversation touched, as icons at the right of the chat's top bar: the
  * tiles of the first ones (the rest counted « +N ») in one button that never wraps. Hover or
- * focus names them, a click lists each (tile and name), read-only. A conversation that touched
+ * focus names them, a click opens a read-only list of each (tile and name). A conversation that touched
  * none draws nothing. The spaces come from the conversation itself (the list's row meanwhile):
  * they follow its refetch when it touches a new one.
  */
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { useSessions } from "@appstrate/module-chat/unread";
-import { $api } from "../../api/client";
-import { SpaceName, SpaceTile, SpaceTileStack } from "../../components/space-name";
-import { useCurrentOrgId } from "../../hooks/use-org";
+import { SpaceName, SpaceTileStack, type SpaceListed } from "../../components/space-name";
 import { useSpacesOf } from "../../hooks/use-spaces";
 import { spaceLabel } from "../../lib/space-label";
+import { useChatSessionDetail } from "./use-chat-session-detail";
 
 /** Tiles drawn in the trigger before the rest is counted. */
 const VISIBLE_SPACE_TILES = 3;
-
-type SpaceListed = Parameters<typeof SpaceTile>[0]["space"];
 
 /** The control for spaces already read: the trigger and its read-only list. */
 export function ConversationSpacesControl({
@@ -40,10 +32,10 @@ export function ConversationSpacesControl({
   const names = spaces.map((space) => spaceLabel(space, t)).join(", ");
   const label = t("chat:spaces.trigger", { names });
   return (
-    <DropdownMenu>
+    <Popover>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
+          <PopoverTrigger asChild>
             <Button
               type="button"
               variant="ghost"
@@ -53,42 +45,32 @@ export function ConversationSpacesControl({
               aria-label={label}
               data-testid="conversation-spaces"
             >
-              <SpaceTileStack
-                spaces={spaces}
-                max={VISIBLE_SPACE_TILES}
-                ringClassName="ring-(--space-tile-ring,var(--canvas))"
-              />
+              <SpaceTileStack spaces={spaces} max={VISIBLE_SPACE_TILES} />
             </Button>
-          </DropdownMenuTrigger>
+          </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="bottom">{names}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="min-w-48">
-        <DropdownMenuLabel>{t("chat:spaces.title")}</DropdownMenuLabel>
-        <ul className="flex flex-col gap-2 px-2 py-1.5">
+      <PopoverContent align="end" className="w-auto min-w-48 p-3">
+        <p className="text-muted-foreground text-xs font-medium">{t("chat:spaces.title")}</p>
+        <ul className="mt-2 flex flex-col gap-2">
           {spaces.map((space) => (
             <li key={space.id} className="flex min-w-0">
               <SpaceName space={space} />
             </li>
           ))}
         </ul>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 }
 
 /** {@link ConversationSpacesControl} of a stored conversation, read by id. */
 export function ConversationSpaces({ conversationId }: { conversationId: string | null }) {
-  const orgId = useCurrentOrgId();
   const { data: sessions } = useSessions();
   const listed = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   // The same query as the title crumb's and the info panel's, refetched by the session signal.
-  const detail = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/chat/sessions/{id}",
-    { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
-    { enabled: !!orgId && !!conversationId },
-  );
+  const detail = useChatSessionDetail(conversationId);
   const spaces = useSpacesOf(detail.data?.space_ids ?? listed?.space_ids ?? []);
   return <ConversationSpacesControl spaces={spaces} />;
 }

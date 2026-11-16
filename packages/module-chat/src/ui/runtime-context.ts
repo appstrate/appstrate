@@ -44,9 +44,9 @@ export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response
 
 /**
  * What the chat page reads. A conversation belongs to the organization and its author, so every
- * chat call goes to `/api/orgs/{orgId}/chat/*`; `spaceId` is the space the host is looking at,
- * which filters the conversation list (`?spaceId=`) and is the space a new conversation or a turn
- * touches. `null` in « Vue d'ensemble »: the list holds every conversation and none is touched.
+ * chat call goes to `/api/orgs/{orgId}/chat/*`; `spaceId` is the conversation list's filter
+ * (`?spaceId=`): the space the host is looking at, `null` in « Vue d'ensemble », where the list
+ * holds every conversation. It is also the origin of a new conversation, when the chat acts there.
  */
 export interface ChatTransport {
   getHeaders: GetHeaders;
@@ -56,7 +56,7 @@ export interface ChatTransport {
 }
 
 /**
- * The host's rendering of spaces by id (its tile and name, « +2 » for the others). The module
+ * The host's rendering of spaces by id (its tile and name, every space shown). The module
  * names the spaces a conversation touched, and the space of a tool call, through it.
  */
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
@@ -176,8 +176,9 @@ export interface ChatHost {
    */
   canIn?: ChatCanIn;
   /**
-   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and the
-   * selected space (`ChatTransport.spaceId`) is sent to the server only when it is one of them.
+   * The spaces the chat acts in (the host's acting set). The skills picker lists them, and a new
+   * conversation takes the selected space (`ChatTransport.spaceId`) as its origin only when it is
+   * one of them.
    */
   actingSpaceIds: readonly string[];
   /**
@@ -185,6 +186,13 @@ export interface ChatHost {
    * resolves only where the chat acts. Absent means attachable.
    */
   canAttach?: boolean;
+  /**
+   * The host's working space, where an upload lands, `null` when it has none. Distinct from
+   * `ChatTransport.spaceId`, the list filter, which is `null` in « Vue d'ensemble » while the
+   * working space stays the one entered. A limited conversation takes a file only while this is
+   * its origin space.
+   */
+  workingSpaceId?: string | null;
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal

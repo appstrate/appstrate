@@ -5,31 +5,21 @@ import { callSpaceOf } from "../src/ui/conversation-scope.ts";
 
 describe("callSpaceOf", () => {
   it("reads the stamp the engine put on the call", () => {
-    expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: "spc_a" } }, args: {} })).toBe(
-      "spc_a",
-    );
+    expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: "spc_a" } } })).toBe("spc_a");
   });
 
-  it("prefers the stamp over the space the arguments name", () => {
+  it("never reads the space the call's arguments name", () => {
+    const named = { args: { operation_id: "x", space_id: "spc_b" } };
+    expect(callSpaceOf(named)).toBeUndefined();
+    expect(callSpaceOf({ ...named, providerMetadata: {} })).toBeUndefined();
     expect(
-      callSpaceOf({
-        providerMetadata: { appstrate: { spaceId: "spc_origin" } },
-        args: { space_id: "spc_other" },
-      }),
+      callSpaceOf({ ...named, providerMetadata: { appstrate: { spaceId: "spc_origin" } } }),
     ).toBe("spc_origin");
   });
 
-  it("falls back to the space_id the call names when it carries no stamp", () => {
-    expect(callSpaceOf({ args: { operation_id: "x", space_id: "spc_b" } })).toBe("spc_b");
-    expect(callSpaceOf({ providerMetadata: {}, args: { space_id: "spc_b" } })).toBe("spc_b");
-  });
-
-  it("is undefined when neither exists", () => {
+  it("is undefined without a usable stamp", () => {
     expect(callSpaceOf({})).toBeUndefined();
-    expect(callSpaceOf({ args: { operation_id: "x" } })).toBeUndefined();
-    expect(callSpaceOf({ providerMetadata: { appstrate: {} }, args: { space_id: "" } })).toBe(
-      undefined,
-    );
-    expect(callSpaceOf({ args: null })).toBeUndefined();
+    expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();
+    expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: "" } } })).toBeUndefined();
   });
 });

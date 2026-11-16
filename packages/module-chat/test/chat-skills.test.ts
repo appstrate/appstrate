@@ -66,6 +66,20 @@ describe("fetchSkills", () => {
     expect(await fetchSkills(transport, [])).toEqual([]);
   });
 
+  it("drops a row that names no space, whatever it lists", async () => {
+    const request = requestAnswering(() =>
+      Response.json({
+        data: [
+          { id: "@acme/a", name: "A", description: null, version: "1.0.0" },
+          { id: "@acme/b", name: "B", description: null, version: "1.0.0", spaceId: 7 },
+          { id: "@acme/c", name: "C", description: null, version: "1.0.0", spaceId: "spc_a" },
+        ],
+      }),
+    );
+    const got = await fetchSkills(transportOver(request), ["spc_a"]);
+    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/c"]);
+  });
+
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
     await expect(fetchSkills(transportOver(request), [])).rejects.toMatchObject({ status: 403 });

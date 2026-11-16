@@ -221,21 +221,35 @@ describe("a file of another space in the context panel", () => {
 });
 
 describe("the stream's chat channel", () => {
-  // `useGlobalRunSync` opens it when the chat is reachable: in the overview, where any space reads it.
+  // `useGlobalRunSync` opens it when the chat is reachable: wherever some space reads it, whichever
+  // space is working and whatever the mode.
   function Reach() {
     return <p>{String(useCanReach()("/chat"))}</p>;
   }
-
-  it("is wanted in the overview when another space than the working one reads the chat", () => {
+  const withChat = (check: () => void) => {
     const config = window.__APP_CONFIG__;
     window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
     try {
-      const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read", "runs:read"])];
-      expect(renderOverview(<Reach />, spaces, true).html).toContain("true");
-      expect(renderOverview(<Reach />, spaces, false).html).toContain("false");
+      check();
     } finally {
       window.__APP_CONFIG__ = config;
     }
+  };
+
+  it("is wanted, in the overview or not, when another space than the working one reads the chat", () => {
+    withChat(() => {
+      const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read", "runs:read"])];
+      expect(renderOverview(<Reach />, spaces, true).html).toContain("true");
+      expect(renderOverview(<Reach />, spaces, false).html).toContain("true");
+    });
+  });
+
+  it("is not wanted, in either mode, when no space reads the chat", () => {
+    withChat(() => {
+      const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["files:read"])];
+      expect(renderOverview(<Reach />, spaces, true).html).toContain("false");
+      expect(renderOverview(<Reach />, spaces, false).html).toContain("false");
+    });
   });
 });
 
@@ -255,6 +269,11 @@ describe("the spaces a conversation touched", () => {
     expect(tiles(html)).toBe(3);
     expect(html).toContain("Studio, Coffre, Atelier");
     expect(html).not.toContain("+2");
+  });
+
+  it("rings the stacked tiles in the container's variable, the page background by default", () => {
+    const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_a", "spc_b"]} />, spaces);
+    expect(html.match(/ring-\(--space-tile-ring,var\(--background\)\)/g)).toHaveLength(2);
   });
 
   it("reads a single space as the usual tile and name", () => {
