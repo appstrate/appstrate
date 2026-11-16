@@ -12,16 +12,8 @@
  * | member session                             | custom role without run read (Trois)          | none                                  |
  * | member session                             | `closed` space, not joined (Fermé)            | none                                  |
  * | member session                             | `private` space, not a member (Privé)         | none                                  |
- * | owner session                              | every team space (preset `admin`)             | every run                             |
- * | guest session                              | explicit `runs:read` row (Un)                 | the guest's own runs of Un            |
- * | guest session                              | no row anywhere                               | empty page, 200                       |
- * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)   | the owner's own runs of Default       |
- * | API key pinned to Un (creator: owner)      | Un only                                       | every run of Un                       |
- * | API key without a run-read scope           | —                                             | 403 (ceiling guard)                   |
- * | API key + `Appstrate-User` (end-user)      | —                                             | 403, malformed query included         |
- * | member session, unknown query parameter    | —                                             | 400                                   |
+ * | guest session                              | explicit `operator` row (Un)                  | the guest's own runs of Un            |
  * | chat loopback bearer (user, ceiling)       | the session's reach, capped by the ceiling    | ceiling `runs:read` → own runs only   |
- * | any                                        | another organization                          | never; its path → 403                 |
  * | member session                             | own live personal space                       | the member's runs there               |
  * | owner / admin session                      | a member's live personal space                | never                                 |
  * | owner / admin session                      | an orphaned personal space (listed, no role)  | never                                 |
@@ -32,7 +24,9 @@
  * core test helper mints one; it shares the API key's `principalKind`, which is
  * what `callerPersonalOwnerId` reads.
  *
- * The MCP door (`invoke_operation` with a minted instance token) is covered in
+ * The reach every list shares (owner, guest, role preview, pinned and unscoped
+ * API keys, end-user, unknown parameter, another organization) is in
+ * `cross-space-reads.test.ts`; the MCP door in
  * `modules/mcp/test/integration/org-reads.test.ts`.
  */
 
@@ -48,12 +42,11 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
   seedSpaceMember,
-  seedSpaceRole,
+  seedSpaceGrant,
 } from "../../helpers/seed.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
@@ -83,7 +76,6 @@ describe("GET /api/orgs/{orgId}/runs", () => {
   /** Run ids by space and launcher. */
   let r: Record<string, string>;
   let foreignRun: string;
-  let foreignOrgId: string;
 
   async function seedSpaceRun(spaceId: string, userId: string, orgId = owner.orgId) {
     const pkg = await seedPackage({
@@ -113,30 +105,11 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     trois = (await seedSpace({ orgId: owner.orgId, name: "Trois", visibility: "closed" })).id;
     ferme = (await seedSpace({ orgId: owner.orgId, name: "Fermé", visibility: "closed" })).id;
     prive = (await seedSpace({ orgId: owner.orgId, name: "Privé", visibility: "private" })).id;
-    const readAll = await seedSpaceRole({
-      orgId: owner.orgId,
-      permissions: ["runs:read-all", "agents:read"],
-    });
-    const readOwn = await seedSpaceRole({ orgId: owner.orgId, permissions: ["runs:read"] });
-    await seedSpaceMember({
-      spaceId: un,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: readAll.id,
-    });
-    await seedSpaceMember({
-      spaceId: deux,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: readOwn.id,
-    });
-    const noRunRead = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
-    await seedSpaceMember({
-      spaceId: trois,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: noRunRead.id,
-    });
+    const grant = (spaceId: string, permissions: string[]) =>
+      seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
+    await grant(un, ["runs:read-all", "agents:read"]);
+    await grant(deux, ["runs:read"]);
+    await grant(trois, ["agents:read"]);
     r = {
       unOwner: await seedSpaceRun(un, owner.user.id),
       unMember: await seedSpaceRun(un, member.user.id),
@@ -150,12 +123,11 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     };
     // Another organization, where the member also belongs: its runs never leak in.
     const foreign = await createTestContext({ orgSlug: "orgruns-foreign" });
-    foreignOrgId = foreign.orgId;
     await addOrgMember(foreign.orgId, member.user.id, "member");
     foreignRun = await seedSpaceRun(foreign.defaultSpaceId, member.user.id, foreign.orgId);
   });
 
-  const path = (query = "", orgId = owner.orgId) => `/api/orgs/${orgId}/runs${query}`;
+  const path = (query = "") => `/api/orgs/${owner.orgId}/runs${query}`;
   const session = (ctx: TestContext, extra: Record<string, string> = {}) => ({
     Cookie: ctx.cookie,
     ...extra,
@@ -246,12 +218,6 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     }
   });
 
-  it("refuses an unknown query parameter", async () => {
-    const res = await app.request(path(`?spaceId=${un}`), { headers: session(member) });
-    expect(res.status).toBe(400);
-    expect(res.headers.get("content-type")).toContain("application/problem+json");
-  });
-
   it("narrows to the caller's own runs with user=me, even where they read all", async () => {
     expect(ids(await list(session(member), "?user=me"))).toEqual(
       sorted(r.unMember!, r.deuxMember!, r.defaultMember!),
@@ -264,63 +230,13 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("serves the owner every run of every team space, private included", async () => {
-    const page = await list(session(owner));
-    expect(ids(page)).toEqual(sorted(...Object.values(r)));
-  });
-
-  it("serves a guest its own runs where it holds a row, and an empty page otherwise", async () => {
+  it("serves a guest its own runs where it holds a row", async () => {
     const guestUser = await createTestUser();
     await addOrgMember(owner.orgId, guestUser.id, "guest");
     const guest = { ...owner, user: guestUser, cookie: guestUser.cookie };
-    expect(await list(session(guest))).toMatchObject({ data: [], total: 0, hasMore: false });
-
     await seedSpaceMember({ spaceId: un, userId: guestUser.id, presetRole: "operator" });
     const guestRun = await seedSpaceRun(un, guestUser.id);
     expect(ids(await list(session(guest)))).toEqual([guestRun]);
-  });
-
-  it("answers the persona of a role preview, not the previewer", async () => {
-    // As a member: Default is open (implicit `operator`, own runs), every other space is closed or private.
-    const page = await list(session(owner, { "X-View-As": "org_role=member" }));
-    expect(ids(page)).toEqual([r.defaultOwner!]);
-  });
-
-  it("bounds a space-pinned API key to its space", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: un,
-      createdBy: owner.user.id,
-      scopes: ["runs:read-all"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}` };
-    expect(ids(await list(headers))).toEqual(sorted(r.unOwner!, r.unMember!));
-    const otherOrg = await app.request(path("", foreignOrgId), { headers });
-    expect(otherOrg.status).toBe(403);
-  });
-
-  it("refuses an API key whose scopes hold no run-read permission", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: un,
-      createdBy: owner.user.id,
-      scopes: ["agents:read"],
-    });
-    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses an end-user", async () => {
-    const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: un,
-      createdBy: owner.user.id,
-      scopes: ["runs:read"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
-    expect((await app.request(path(), { headers })).status).toBe(403);
-    expect((await app.request(path("?kind=inlinee"), { headers })).status).toBe(403);
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
@@ -341,11 +257,6 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     const capped = await list(loopback(["runs:read"]));
     expect(ids(capped)).toEqual(sorted(r.unMember!, r.deuxMember!, r.defaultMember!));
     expect(capped.data.every((run) => run.input === null)).toBe(true);
-  });
-
-  it("refuses an organization the caller is not a member of", async () => {
-    const res = await app.request(path("", foreignOrgId), { headers: session(owner) });
-    expect(res.status).toBe(403);
   });
 
   describe("personal spaces (RBAC spec §3.6)", () => {
@@ -413,12 +324,5 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       const previewed = await list(session(owner, { "X-View-As": "org_role=member" }));
       expect(ids(previewed)).not.toContain(run);
     });
-  });
-
-  it("leaves GET /api/runs requiring X-Space-Id", async () => {
-    const res = await app.request("/api/runs", {
-      headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId },
-    });
-    expect(res.status).toBe(400);
   });
 });

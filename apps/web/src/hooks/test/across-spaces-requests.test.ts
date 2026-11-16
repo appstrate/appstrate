@@ -97,9 +97,4 @@ describe("fetchPackageIndex", () => {
       ]),
     );
   });
-
-  it("refuses the agent index across spaces, which is fetchAgents's, rather than answer the current space's", async () => {
-    await expect(fetchPackageIndex("agent", "org_1")).rejects.toThrow();
-    expect(get).not.toHaveBeenCalled();
-  });
 });

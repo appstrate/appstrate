@@ -359,6 +359,22 @@ export async function seedSpaceMember(
   return row!;
 }
 
+/** Grant `userId` a custom space role holding exactly `permissions` in `spaceId`. */
+export async function seedSpaceGrant(args: {
+  orgId: string;
+  spaceId: string;
+  userId: string;
+  permissions: string[];
+}): Promise<void> {
+  const role = await seedSpaceRole({ orgId: args.orgId, permissions: args.permissions });
+  await seedSpaceMember({
+    spaceId: args.spaceId,
+    userId: args.userId,
+    presetRole: null,
+    customRoleId: role.id,
+  });
+}
+
 // ─── End Users ────────────────────────────────────────────
 
 type EndUserInsert = Partial<InferInsertModel<typeof endUsers>> & {

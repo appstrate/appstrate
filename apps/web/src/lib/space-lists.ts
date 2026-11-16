@@ -49,17 +49,12 @@ interface ListedSpace {
   permissions: readonly string[];
 }
 
-/** A space admits what `admits` asks when it is held with a role and its permissions answer. */
-const admittedIn =
-  (admits: Admits) =>
-  (space: ListedSpace): boolean =>
-    isSpaceEnterable(space) && admits(space.permissions);
-
+/** The spaces held with a role whose permissions answer what `admits` asks. */
 export function admittingSpaces<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
   admits: Admits,
 ): S[] {
-  return (spaces ?? []).filter(admittedIn(admits));
+  return (spaces ?? []).filter((space) => isSpaceEnterable(space) && admits(space.permissions));
 }
 
 /** What the caller may do in one space: its effective set there, the org-level grants included. */
@@ -87,23 +82,7 @@ export function spacesWhere<S extends ListedSpace>(
   );
 }
 
-/**
- * How an action naming no space finds one in « Vue d'ensemble »: not offered without an eligible
- * space, the only one taken without asking, the reader asked between several.
- */
-type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
-
-export function spaceChoice(eligible: readonly { id: string }[]): SpaceChoice {
-  if (eligible.length === 0) return { kind: "none" };
-  if (eligible.length === 1) return { kind: "one", spaceId: eligible[0]!.id };
-  return { kind: "ask" };
-}
-
-/**
- * Whether `permission` holds in a row's space, where an action on that row acts: the working
- * space's gate when the row has no space or is the working space's, else the listed space's
- * (held with a role). A space the listing does not hold grants nothing.
- */
+/** Whether `permission` holds in a row's space: the working space's gate, or the row's own. */
 export function grantsInRowSpace(
   rowSpaceId: string | undefined,
   workingSpaceId: string | null,
@@ -117,12 +96,16 @@ export function grantsInRowSpace(
   return !!space && isSpaceEnterable(space) && gateIn(space, orgPermissions)(permission);
 }
 
-/** Whether some space grants `permission`: in the mode, what opens a section drawn across spaces. */
-export function grantedInSomeSpace(
-  spaces: readonly ListedSpace[] | undefined,
-  permission: string,
-): boolean {
-  return (spaces ?? []).some(admittedIn((permissions) => permissions.includes(permission)));
+/**
+ * How an action naming no space finds one in « Vue d'ensemble »: not offered without an eligible
+ * space, the only one taken without asking, the reader asked between several.
+ */
+type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
+
+export function spaceChoice(eligible: readonly { id: string }[]): SpaceChoice {
+  if (eligible.length === 0) return { kind: "none" };
+  if (eligible.length === 1) return { kind: "one", spaceId: eligible[0]!.id };
+  return { kind: "ask" };
 }
 
 /** The « Vue d'ensemble » is offered from two spaces admitting at least one of the lists. */
@@ -200,7 +183,7 @@ export function spanningRouteVerdict(
       ? routeAdmits(path)
       : undefined;
   if (!admits || !spaces) return undefined;
-  return spaces.some(admittedIn(admits)) ? "granted" : "denied";
+  return admittingSpaces(spaces, admits).length > 0 ? "granted" : "denied";
 }
 
 /**

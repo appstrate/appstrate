@@ -1836,8 +1836,8 @@ export async function listGlobalRuns(
     actor = null,
   } = options;
 
-  const conditions = [eq(runs.orgId, orgId), runReadCondition(grants, actor, ownOnly)];
-  conditions.push(...runListConditions({ status, search }));
+  const reach = and(eq(runs.orgId, orgId), runReadCondition(grants, actor, ownOnly))!;
+  const conditions = [reach, ...runListConditions({ status, search })];
   if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
@@ -1878,7 +1878,7 @@ export async function listGlobalRuns(
     grants.filter((g) => readsAgentContent(g.permissions)).map((g) => g.spaceId),
   );
   return listRunsWithFilter(
-    and(eq(runs.orgId, orgId), runReadCondition(grants, actor, ownOnly))!,
+    reach,
     and(...conditions)!,
     { limit, startingAfter },
     actor,

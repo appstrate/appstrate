@@ -49,7 +49,6 @@ export function useIntegrationListColumns(
             <PackageSharedFrom
               homeSpaceId={integration.home_space_id}
               system={integration.source === "system"}
-              variant="icon"
             />
           )}
         </div>

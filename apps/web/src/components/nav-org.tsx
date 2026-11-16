@@ -39,7 +39,7 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
  * they are asked separately.
  */
 function useWorkingSpaceRunning(enabled: boolean): boolean {
-  const { data: agents } = useAgents(false, enabled);
+  const { data: agents } = useAgents({ enabled });
   const { data: runningInline } = useFirstRunsPage({
     kind: "inline",
     status: ["running"],
@@ -68,7 +68,7 @@ export function NavOrg() {
   // shows nor asks what feeds them (no list it already holds counts every space's unread and
   // running runs, inline ones included).
   const { on: overview } = useOverviewMode();
-  const unread = useUnreadRunCount(!overview);
+  const unread = useUnreadRunCount({ enabled: !overview });
   const hasRunning = useWorkingSpaceRunning(!overview);
   const canReach = useCanReach();
   const ready = useReachReady();

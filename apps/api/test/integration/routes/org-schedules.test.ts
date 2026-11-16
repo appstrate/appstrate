@@ -16,16 +16,11 @@
  * | member session                               | Default (open, implicit `operator`)                   | listed    | 1 (own run)    |
  * | member session                               | Fermé (`closed`, not joined) / Privé (not a member)   | none      | —              |
  * | owner session                                | every team space (preset `admin`)                     | all       | 2 everywhere   |
- * | guest session                                | no row anywhere                                       | empty list, 200 | —        |
- * | owner session + `X-View-As: org_role=member` | the persona's reach (Default, `operator`)             | Default   | 1 (own run)    |
  * | API key pinned to Un, scopes `schedules:read`| Un only, ceiling applied                              | Un        | 1 (own run)    |
- * | API key without `schedules:read` in scopes   | —                                                     | 403 (ceiling guard) | —    |
- * | API key + `Appstrate-User` (end-user)        | —                                                     | 403       | —              |
- * | member session, unknown query parameter      | —                                                     | 400       | —              |
  * | chat loopback bearer (user, ceiling)         | the session's reach, capped by the ceiling            | ceiling without `runs:read-all` → Un counts own run only | |
- * | any                                          | another organization                                  | never; its path → 403 | — |
  *
- * The MCP door is covered in `modules/mcp/test/integration/org-reads.test.ts`.
+ * The reach every list shares is in `cross-space-reads.test.ts`; the MCP door
+ * in `modules/mcp/test/integration/org-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -34,19 +29,16 @@ import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
   createTestContext,
-  createTestUser,
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedEndUser,
   seedPackage,
   seedRun,
   seedSchedule,
   seedSpace,
-  seedSpaceMember,
-  seedSpaceRole,
+  seedSpaceGrant,
 } from "../../helpers/seed.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
@@ -65,7 +57,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
   let s: Record<"un" | "deux" | "trois" | "ferme" | "prive", string>;
   /** Schedule ids by space key (`default` included). */
   let sched: Record<string, string>;
-  let foreignOrgId: string;
   let foreignSchedule: string;
 
   async function seedFiredSchedule(spaceId: string, orgId = owner.orgId, userId = owner.user.id) {
@@ -103,16 +94,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     return schedule.id;
   }
 
-  async function join(spaceId: string, permissions: string[]) {
-    const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
-    await seedSpaceMember({
-      spaceId,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: role.id,
-    });
-  }
-
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "orgsched" });
@@ -126,6 +107,8 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
       ferme: await space("Fermé"),
       prive: await space("Privé", "private"),
     };
+    const join = (spaceId: string, permissions: string[]) =>
+      seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
     await join(s.un, ["schedules:read", "runs:read-all"]);
     await join(s.deux, ["schedules:read"]);
     await join(s.trois, ["runs:read-all"]);
@@ -133,7 +116,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     for (const [key, spaceId] of Object.entries(s)) sched[key] = await seedFiredSchedule(spaceId);
 
     const foreign = await createTestContext({ orgSlug: "orgsched-foreign" });
-    foreignOrgId = foreign.orgId;
     await addOrgMember(foreign.orgId, member.user.id, "member");
     foreignSchedule = await seedFiredSchedule(
       foreign.defaultSpaceId,
@@ -142,7 +124,7 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     );
   });
 
-  const path = (query = "", orgId = owner.orgId) => `/api/orgs/${orgId}/schedules${query}`;
+  const path = (query = "") => `/api/orgs/${owner.orgId}/schedules${query}`;
 
   /** `running_runs` by schedule id. */
   async function list(headers: Record<string, string>, query = "") {
@@ -189,30 +171,13 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     expect(body.data.find((row) => row.id === bare.id)!.agent_name).toBe(pkgId);
   });
 
-  it("refuses an unknown query parameter", async () => {
-    const res = await app.request(path(`?spaceId=${s.un}`), { headers: { Cookie: member.cookie } });
-    expect(res.status).toBe(400);
-    expect(res.headers.get("content-type")).toContain("application/problem+json");
-  });
-
-  it("serves the owner every schedule of every team space, private included", async () => {
+  it("counts every run of every schedule for the owner", async () => {
     expect((await list({ Cookie: owner.cookie })).counters).toEqual(
       expected({ default: 2, un: 2, deux: 2, trois: 2, ferme: 2, prive: 2 }),
     );
   });
 
-  it("serves a guest with no role an empty list", async () => {
-    const guestUser = await createTestUser();
-    await addOrgMember(owner.orgId, guestUser.id, "guest");
-    expect((await list({ Cookie: guestUser.cookie })).counters).toEqual({});
-  });
-
-  it("answers the persona of a role preview, not the previewer", async () => {
-    const { counters } = await list({ Cookie: owner.cookie, "X-View-As": "org_role=member" });
-    expect(counters).toEqual(expected({ default: 1 }));
-  });
-
-  it("bounds a space-pinned API key to its space and its scopes", async () => {
+  it("caps a space-pinned API key's counters with its scopes", async () => {
     const key = await seedApiKey({
       orgId: owner.orgId,
       spaceId: s.un,
@@ -222,33 +187,6 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     const headers = { Authorization: `Bearer ${key.rawKey}` };
     // The creator's own run only: `runs:read-all` is outside the key's scopes.
     expect((await list(headers)).counters).toEqual(expected({ un: 1 }));
-    const otherOrg = await app.request(path("", foreignOrgId), { headers });
-    expect(otherOrg.status).toBe(403);
-  });
-
-  it("refuses an API key whose scopes hold no schedules:read", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["agents:read"],
-    });
-    const res = await app.request(path(), { headers: { Authorization: `Bearer ${key.rawKey}` } });
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses an end-user", async () => {
-    const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.un });
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["schedules:read"],
-    });
-    const res = await app.request(path(), {
-      headers: { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id },
-    });
-    expect(res.status).toBe(403);
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
@@ -269,17 +207,5 @@ describe("GET /api/orgs/{orgId}/schedules", () => {
     expect((await list(loopback(["schedules:read"]))).counters).toEqual(
       expected({ un: 1, deux: 1, default: 1 }),
     );
-  });
-
-  it("refuses an organization the caller is not a member of", async () => {
-    const res = await app.request(path("", foreignOrgId), { headers: { Cookie: owner.cookie } });
-    expect(res.status).toBe(403);
-  });
-
-  it("leaves GET /api/schedules requiring X-Space-Id", async () => {
-    const res = await app.request("/api/schedules", {
-      headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId },
-    });
-    expect(res.status).toBe(400);
   });
 });

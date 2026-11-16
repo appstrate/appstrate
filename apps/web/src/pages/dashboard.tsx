@@ -26,9 +26,9 @@ export function DashboardPage() {
     isLoading: runsLoading,
     error: runsError,
   } = useFirstRunsPage({ limit: 15, spanning });
-  const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents(spanning);
+  const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents({ spanning });
   // The same query as the agents above: no second request.
-  const agentName = useRunAgentName(undefined, spanning);
+  const agentName = useRunAgentName({ spanning });
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
   const { data: schedules, isLoading: schedulesLoading } = useAllSchedules(spanning);
   const firstName = useFirstName();

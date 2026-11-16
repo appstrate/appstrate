@@ -11,6 +11,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -135,7 +136,8 @@ const runListPageResponses = {
     },
   },
   "400": {
-    description: "Invalid query parameter (unknown `user` value, malformed date, …)",
+    description:
+      "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -911,7 +913,9 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the organization's spaces",
       description:
-        "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
+        "Read-only list of the runs of every space of the organization where the caller reads runs, in one page ordered by start time. Each space contributes what its own role grants there: every run where the caller holds `runs:read-all`, the caller's own runs where they hold `runs:read` only, nothing elsewhere. " +
+        ORG_READ_REACH +
+        " Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. `input` follows the row's space: it is `null` on a registered agent's run where the caller lacks `agents:read`. Takes the filters of `GET /api/runs`; any other query parameter is rejected with `400`. No `X-Space-Id`: the organization is the path's. A caller who reads runs in no space gets an empty page. An end-user is refused with `403`.",
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, ...runListQueryParameters],
       responses: {
         ...runListPageResponses,

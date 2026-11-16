@@ -236,6 +236,7 @@ export async function getUnreadRunCountsByAgent(
     .where(
       and(
         eq(runReads.orgId, orgId),
+        // Implied by `runReadCondition`, stated on `run_reads` for `idx_run_reads_unread`.
         inArray(
           runReads.spaceId,
           grants.map((g) => g.spaceId),

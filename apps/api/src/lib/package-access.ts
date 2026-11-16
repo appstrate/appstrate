@@ -26,7 +26,7 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
-import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
+import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
@@ -34,7 +34,7 @@ import { isUserPrincipal } from "./principal.ts";
 import { callerOrgRole, callerPersonalOwnerId } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces } from "./reachable-spaces.ts";
+import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -79,22 +79,11 @@ export async function assertExistingPackageActivationAccess(
     await makePermissionGuard(spacePackagePermission(type, "activate"))(c, async () => {});
 }
 
-/**
- * One space of the caller's reach, with their effective permissions in it.
- *
- * Written out rather than inferred from the resolver: the memo that returns it
- * lives on the Hono context, so `AppEnv` names this type and inferring it back
- * off the resolver would close the loop through the environment.
- */
-export interface PackageAccessSpace {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  visibility: SpaceVisibility;
-  defaultRole: SpaceRolePreset;
-  ownerUserId: string | null;
-  permissions: ReadonlySet<string>;
-}
+/** One space of the caller's reach, with their effective permissions in it. */
+export type PackageAccessSpace = Pick<
+  ReachableSpace,
+  "id" | "name" | "isDefault" | "visibility" | "defaultRole" | "ownerUserId"
+> & { permissions: ReadonlySet<string> };
 
 /**
  * A package read that crosses into ANOTHER organization, with the standing the
@@ -121,42 +110,16 @@ export interface ForeignOrgStanding {
  * failure is silent and it fails OPEN, which is why the role is not an optional
  * parameter with a default.
  */
-export async function packageAccessSpaces(c: Context<AppEnv>, foreign?: ForeignOrgStanding) {
-  const orgId = foreign?.orgId ?? c.get("orgId");
-  const orgRole = foreign?.orgRole ?? callerOrgRole(c, orgId);
-  // MEMOIZED per request. Every authority and reachability decision needs this
-  // set, so a single route resolved it up to four times over; an optional
-  // `resolvedSpaces` parameter threaded through the signatures instead would
-  // cost a query when forgotten and a wrong answer when stale. The cache lives
-  // on the Hono context, so it dies with the request and cannot outlive the
-  // standing it describes.
-  //
-  // Keyed on the org AND the role, not the org alone: one request can ask about
-  // two organizations (the cross-organization fork), and a key that dropped the
-  // role would let whichever call ran first decide for the other.
-  const cache =
-    c.get("packageAccessSpacesCache") ?? new Map<string, Promise<PackageAccessSpace[]>>();
-  if (!c.get("packageAccessSpacesCache")) c.set("packageAccessSpacesCache", cache);
-  const key = `${orgId}:${orgRole}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const pending = resolvePackageAccessSpaces(c, orgId, orgRole);
-  cache.set(key, pending);
-  return pending;
-}
-
-/**
- * The read itself — {@link packageAccessSpaces} is the memo in front of it: the
- * caller's reach (`callerReachableSpaces`, one pin rule for every read spanning
- * spaces), or, for an end-user token, which holds no org role, its own space
- * with its fixed allowlist.
- */
-async function resolvePackageAccessSpaces(
+export async function packageAccessSpaces(
   c: Context<AppEnv>,
-  orgId: string,
-  orgRole: OrgRole,
+  foreign?: ForeignOrgStanding,
 ): Promise<PackageAccessSpace[]> {
-  if (!c.get("endUser") || c.get("orgRole")) return callerReachableSpaces(c, orgId, orgRole);
+  const orgId = foreign?.orgId ?? c.get("orgId");
+  // Memoized per request by `callerReachableSpaces`.
+  if (!c.get("endUser") || c.get("orgRole")) {
+    return callerReachableSpaces(c, orgId, foreign?.orgRole ?? callerOrgRole(c, orgId));
+  }
+  // An end-user token holds no org role: its own space, with its fixed allowlist.
   const spaceId = c.get("credentialSpaceId");
   if (spaceId === undefined) return [];
   const [space] = await db

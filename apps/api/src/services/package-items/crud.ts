@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, ne, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, spaces } from "@appstrate/db/schema";
+import { packages, spaces } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -26,8 +26,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
-import { activeHereSql } from "../package-activation.ts";
-import { placementRowJoin } from "../package-placement.ts";
+import { activeInSpaces } from "../space-packages.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(public packageId: string) {
@@ -302,10 +301,10 @@ export async function listOrgItems(
   spaceIds: readonly string[],
 ) {
   if (spaceIds.length === 0) return [];
-  // The index lists the active set only ({@link activeHereSql}, shared with the
+  // The index lists the active set only ({@link activeInSpaces}, shared with the
   // hints and the run gate); placed-but-off packages live in the space library.
   // `draftContent` is not projected: the mapper never reads it.
-  const dataQuery = db
+  const query = db
     .select({
       id: packages.id,
       spaceId: spaces.id,
@@ -322,22 +321,13 @@ export async function listOrgItems(
       lockVersion: packages.lockVersion,
     })
     .from(packages)
-    .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(
-      and(
-        orgOrSystemFilter(orgId),
-        eq(packages.type, cfg.type),
-        notEphemeralFilter(),
-        activeHereSql(),
-      ),
-    )
-    .orderBy(
-      sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
-      desc(packages.createdAt),
-      packages.id,
-      spaces.id,
-    );
+    .$dynamic();
+  const dataQuery = activeInSpaces(query, orgId, spaceIds, cfg.type).orderBy(
+    sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
+    desc(packages.createdAt),
+    packages.id,
+    spaces.id,
+  );
 
   // The catalog page and the usage counts are independent reads over the same
   // tenant — issued concurrently rather than one after the other.

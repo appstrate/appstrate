@@ -64,11 +64,7 @@ export function usePackageNameColumn(holds?: PackageType, spanning = false): Dat
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{item.displayName}</span>
             {!spanning && (
-              <PackageSharedFrom
-                homeSpaceId={item.homeSpaceId}
-                system={item.source === "system"}
-                variant="icon"
-              />
+              <PackageSharedFrom homeSpaceId={item.homeSpaceId} system={item.source === "system"} />
             )}
             <CountBadge
               count={item.unreadCount ?? 0}

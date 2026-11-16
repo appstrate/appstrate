@@ -73,7 +73,7 @@ function caller(
     principalKind?: PrincipalKind;
   },
   /**
-   * The caller's reach, seeded into the per-request memo `packageAccessSpaces`
+   * The caller's reach, seeded into the per-request memo `callerReachableSpaces`
    * reads, under the key that function uses — organization AND role.
    */
   accessible?: AccessibleSpaces,
@@ -86,7 +86,7 @@ function caller(
     permissions: new Set(opts.permissions),
     ...(accessible
       ? {
-          packageAccessSpacesCache: new Map([
+          reachableSpacesCache: new Map([
             [`${ctx.orgId}:${opts.orgRole}`, Promise.resolve(accessible)],
           ]),
         }

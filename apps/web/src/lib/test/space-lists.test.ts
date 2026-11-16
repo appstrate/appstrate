@@ -9,8 +9,8 @@ installFakeStorage();
 
 const {
   actingSpaces,
+  admittingSpaces,
   grantedInSomeActingSpace,
-  grantedInSomeSpace,
   grantsInRowSpace,
   holdsOverview,
   listAdmits,
@@ -65,13 +65,15 @@ describe("listAdmits", () => {
   });
 });
 
-describe("grantedInSomeSpace", () => {
+describe("admittingSpaces", () => {
   it("asks every space with a role, none without one", () => {
-    expect(grantedInSomeSpace(TWO, "files:read")).toBe(true);
-    expect(grantedInSomeSpace(TWO, "schedules:read")).toBe(false);
-    expect(grantedInSomeSpace([space("spc_c", ["schedules:read"], "none")], "schedules:read")).toBe(
-      false,
-    );
+    const reads = (permission: string) => (permissions: readonly string[]) =>
+      permissions.includes(permission);
+    expect(admittingSpaces(TWO, reads("files:read")).map((s) => s.id)).toEqual(["spc_b"]);
+    expect(admittingSpaces(TWO, reads("schedules:read"))).toEqual([]);
+    expect(
+      admittingSpaces([space("spc_c", ["schedules:read"], "none")], reads("schedules:read")),
+    ).toEqual([]);
   });
 });
 

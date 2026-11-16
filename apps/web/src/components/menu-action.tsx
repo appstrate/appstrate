@@ -3,7 +3,7 @@
 import { cn } from "@appstrate/ui/cn";
 import { Link } from "react-router-dom";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import type { MenuAction } from "../lib/menu-action";
+import { replacingNavigation, type MenuAction } from "../lib/menu-action";
 
 /** A deed as a menu entry. A page's deed is marked `data-page-action` with its id. */
 export function MenuActionItem({
@@ -29,12 +29,12 @@ export function MenuActionItem({
     <DropdownMenuItem
       className={cn(action.destructive && "text-destructive focus:text-destructive")}
       disabled={action.disabled}
-      onSelect={action.onSelect}
+      onSelect={action.to !== undefined ? undefined : action.onSelect}
       asChild={linked}
       {...(linked ? {} : marks)}
     >
       {action.to !== undefined ? (
-        <Link to={action.to} {...marks}>
+        <Link to={action.to} onClick={replacingNavigation(action.onSelect)} {...marks}>
           {body}
         </Link>
       ) : action.href !== undefined ? (

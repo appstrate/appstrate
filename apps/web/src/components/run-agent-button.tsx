@@ -10,14 +10,13 @@ import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
-import { SpacePickerModal } from "./space-picker-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { packageDetailQueryOptions, usePackageDetail } from "../hooks/use-packages";
-import { useActInSpace, useRowSpaceGrants } from "../hooks/use-space-action";
+import { useSpaceAction } from "../hooks/use-space-action";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useSpaces } from "../hooks/use-spaces";
+import { spaceStore } from "../stores/space-store";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { agentHasInput, runInputOpens } from "../lib/run-input";
@@ -66,22 +65,18 @@ export function RunAgentButton({
   connectionWarning = false,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
-  const grants = useRowSpaceGrants();
-  const { data: spaces } = useSpaces();
-  const runnableIn = spaceIds.filter((id) => grants(id, "agents:run"));
-  const canRun = spaceIds.length > 0 ? runnableIn.length > 0 : grants(undefined, "agents:run");
-  const [asking, setAsking] = useState(false);
-  // Where the run goes: the only space granting it, else the one the reader picked.
-  const [picked, setPicked] = useState<string>();
-  const spaceId = runnableIn.length === 1 ? runnableIn[0] : picked;
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
-  const actInSpace = useActInSpace();
-  // A row of another space than the working one (or of several, none picked yet): the detail
-  // query below reads the working space, so nothing it holds is this row's until a click enters
-  // the row's space.
-  const elsewhere = spaceIds.length > 0 && spaceId !== workingSpaceId;
+  // Among the row's spaces, or the working space's alone.
+  const runAction = useSpaceAction(
+    { permission: "agents:run" },
+    spaceIds.length > 0 ? spaceIds : workingSpaceId ? [workingSpaceId] : NO_SPACES,
+  );
+  const canRun = runAction.offered;
+  // A row not of the working space: the detail query below reads the working space, so nothing
+  // it holds is this row's until a click enters the row's space.
+  const elsewhere = spaceIds.length > 0 && !spaceIds.includes(workingSpaceId ?? "");
   const launcher = useRunLauncher(packageId);
   const [inputOpen, setInputOpen] = useState(false);
 
@@ -121,28 +116,24 @@ export function RunAgentButton({
     e.preventDefault();
     e.stopPropagation();
 
-    if (spaceIds.length > 0 && runnableIn.length > 1) setAsking(true);
-    else runIn(spaceId);
+    // Runs in the space the action entered: the requests `start` sends read it when they leave.
+    runAction.run(start);
   };
 
-  const runIn = (rowSpaceId: string | undefined) => {
-    const target = rowSpaceId ?? workingSpaceId;
-    const start = () => {
-      // Detail already available (provided, or cached from a previous click in this space).
-      if (detail) {
-        startRun(detail);
-        return;
-      }
-      // Deferred fetch, on the key the detail query reads in the target space — `isFetching`
-      // drives the pending spinner meanwhile.
-      qc.fetchQuery(packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId)).then(
-        startRun,
-        () => toast.error(t("error.generic", { ns: "common" })),
-      );
-    };
-    // In the row's space: the requests `start` sends read the working space when they leave.
-    if (rowSpaceId) actInSpace(rowSpaceId, start);
-    else start();
+  const start = () => {
+    const target = spaceStore.getState().id;
+    // Detail already available (provided, or cached from a previous click) when it is the
+    // target's: the one held is the working space's at the click.
+    if (detail && target === workingSpaceId) {
+      startRun(detail);
+      return;
+    }
+    // Deferred fetch, on the key the detail query reads in the target space — `isFetching`
+    // drives the pending spinner meanwhile.
+    qc.fetchQuery(packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId)).then(
+      startRun,
+      () => toast.error(t("error.generic", { ns: "common" })),
+    );
   };
 
   const neverPublished = isNeverPublishedForReader(detail);
@@ -206,17 +197,7 @@ export function RunAgentButton({
         />
       )}
 
-      {asking && (
-        <SpacePickerModal
-          spaces={(spaces ?? []).filter((space) => runnableIn.includes(space.id))}
-          onPick={(id) => {
-            setAsking(false);
-            setPicked(id);
-            runIn(id);
-          }}
-          onClose={() => setAsking(false)}
-        />
-      )}
+      {runAction.picker}
 
       <RunLaunchRecovery
         launcher={launcher}

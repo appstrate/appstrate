@@ -13,33 +13,23 @@
  * | member session                              | Trois (`skills:read`, `integrations:read`)                        | agent C not listed; skill S3; integration I2 |
  * | member session                              | Fermé (`closed`, not joined)                                      | nothing |
  * | owner session                               | every team space (preset `admin`)                                 | every row |
- * | API key pinned to Un, scopes `agents:read`  | Un only                                                           | agent A in Un |
  * | API key pinned to Deux, scopes `integrations:read` | Deux only, which grants no `integrations:read`             | empty list |
  * | chat loopback bearer, ceiling `agents:run`  | Un (`agents:read` capped away), Deux                              | summary rows everywhere |
- * | API key without the type's read in scopes   | —                                                                 | 403 (ceiling guard) |
- * | member session, unknown query parameter     | —                                                                 | 400 |
- * | API key + `Appstrate-User` (end-user)       | —                                                                 | 403 |
- * | API key of this organization                | another organization's path                                       | 403 |
+ *
+ * The reach every list shares is in `cross-space-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  addOrgMember,
-  createTestContext,
-  memberContext,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
-  seedSpaceMember,
   seedSpacePackage,
-  seedSpaceRole,
+  seedSpaceGrant,
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -60,17 +50,6 @@ describe("package indexes across the organization's spaces", () => {
   let owner: TestContext;
   let member: TestContext;
   let s: Record<"un" | "deux" | "trois" | "ferme", string>;
-  let foreignOrgId: string;
-
-  async function join(spaceId: string, permissions: string[]) {
-    const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
-    await seedSpaceMember({
-      spaceId,
-      userId: member.user.id,
-      presetRole: null,
-      customRoleId: role.id,
-    });
-  }
 
   /** A package homed in `home` and active in each of `activeIn`. */
   async function seedIndexed(
@@ -126,6 +105,8 @@ describe("package indexes across the organization's spaces", () => {
       trois: await space("Trois"),
       ferme: await space("Fermé"),
     };
+    const join = (spaceId: string, permissions: string[]) =>
+      seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
     await join(s.un, [
       "agents:read",
       "agents:run",
@@ -150,13 +131,9 @@ describe("package indexes across the organization's spaces", () => {
     await seedIndexed("s3", "skill", s.trois, [s.trois]);
     await seedIndexed("i1", "integration", s.un, [s.un]);
     await seedIndexed("i2", "integration", s.trois, [s.trois]);
-
-    const foreign = await createTestContext({ orgSlug: "orgpkg-foreign" });
-    foreignOrgId = foreign.orgId;
-    await addOrgMember(foreign.orgId, member.user.id, "member");
   });
 
-  const path = (list: string, orgId = owner.orgId) => `/api/orgs/${orgId}/${list}`;
+  const path = (list: string) => `/api/orgs/${owner.orgId}/${list}`;
 
   /** The seeded rows of `list` (system packages left out), keyed `name@space`. */
   async function rows(list: string, headers: Record<string, string>) {
@@ -191,17 +168,6 @@ describe("package indexes across the organization's spaces", () => {
   it("lists skills and integrations of the spaces granting their read", async () => {
     expect(await keys("packages/skills", session(member))).toEqual(["s1@un", "s3@trois"]);
     expect(await keys("packages/integrations", session(member))).toEqual(["i1@un", "i2@trois"]);
-  });
-
-  it("serves the owner every row of every team space", async () => {
-    expect(await keys("agents", session(owner))).toEqual([
-      "a@deux",
-      "a@un",
-      "b@deux",
-      "c@trois",
-      "d@ferme",
-    ]);
-    expect(await keys("packages/skills", session(owner))).toEqual(["s1@un", "s2@deux", "s3@trois"]);
   });
 
   it("orders the rows as the single-space index, a package's spaces side by side", async () => {
@@ -252,54 +218,6 @@ describe("package indexes across the organization's spaces", () => {
     // keeps `agents:run` alone of them.
     expect(agents["a@un"]!.dependencies).not.toHaveProperty("skills");
     expect(agents["a@un"]!.running_runs).toBe(1);
-  });
-
-  it("refuses an unknown query parameter", async () => {
-    for (const list of ["agents", "packages/skills", "packages/integrations"]) {
-      const res = await app.request(path(`${list}?spaceId=${s.un}`), { headers: session(member) });
-      expect(res.status).toBe(400);
-      expect(res.headers.get("content-type")).toContain("application/problem+json");
-    }
-  });
-
-  it("bounds a space-pinned API key to its space", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["agents:read"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}` };
-    expect(await keys("agents", headers)).toEqual(["a@un"]);
-    const otherOrg = await app.request(path("agents", foreignOrgId), { headers });
-    expect(otherOrg.status).toBe(403);
-  });
-
-  it("refuses an API key whose scopes hold no read of the type", async () => {
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["runs:read"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}` };
-    for (const list of ["agents", "packages/skills", "packages/integrations"]) {
-      expect((await app.request(path(list), { headers })).status).toBe(403);
-    }
-  });
-
-  it("refuses an end-user", async () => {
-    const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.un });
-    const key = await seedApiKey({
-      orgId: owner.orgId,
-      spaceId: s.un,
-      createdBy: owner.user.id,
-      scopes: ["agents:read", "skills:read"],
-    });
-    const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
-    for (const list of ["agents", "packages/skills"]) {
-      expect((await app.request(path(list), { headers })).status).toBe(403);
-    }
   });
 
   it("stamps the single-space index rows with their space", async () => {

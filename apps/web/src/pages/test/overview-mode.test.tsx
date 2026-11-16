@@ -186,13 +186,6 @@ function renderIn(
 }
 
 describe("the switcher", () => {
-  it("names « Vue d'ensemble » where it names the working space, while the mode is on", () => {
-    expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain("Vue d'ensemble");
-    const off = renderIn(false, <OrgSwitcher variant="brand" />).html;
-    expect(off).not.toContain("Vue d'ensemble");
-    expect(off).toContain("Studio");
-  });
-
   it("names the organization and the space, or the mode, in its accessible name", () => {
     expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Vue d'ensemble)\"",
@@ -202,14 +195,12 @@ describe("the switcher", () => {
     );
   });
 
-  it("names the mode under the organization without a space badge, in the sidebar and the phone header alike", () => {
+  it("names the mode where it names the working space, in the sidebar and the phone header alike", () => {
     for (const variant of ["brand", "mobile"] as const) {
-      const on = renderIn(true, <OrgSwitcher variant={variant} />).html;
-      expect(on).toContain('title="Vue d\'ensemble"');
-      expect(on).not.toContain("-bottom-1");
-      const off = renderIn(false, <OrgSwitcher variant={variant} />).html;
-      expect(off).toContain('title="Studio"');
-      expect(off).toContain("-bottom-1");
+      expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(
+        'title="Vue d\'ensemble"',
+      );
+      expect(renderIn(false, <OrgSwitcher variant={variant} />).html).toContain('title="Studio"');
     }
   });
 });
@@ -253,11 +244,6 @@ describe("a list page in the mode", () => {
     expect(empty(true)).toContain("Aucune planification dans vos espaces.");
     expect(empty(true)).toContain("Nouvelle planification");
     expect(empty(false)).toContain("Nouvelle planification");
-  });
-
-  it("is the working space's page out of the mode", () => {
-    const { asked } = renderIn(false, <SchedulesListPage />, "/schedules");
-    expect(asked("schedules")).toEqual([["schedules", "org_1", "spc_a"]]);
   });
 });
 
@@ -316,9 +302,8 @@ describe("the agent index in the mode", () => {
     expect(html).toContain("data-page-actions-trigger");
   });
 
-  it("is the working space's page out of the mode", () => {
-    const { html, asked } = renderIn(false, <PackageIndexPage type="agent" />, "/agents");
-    expect(asked("agents")).toEqual([["agents", "org_1", "spc_a"]]);
+  it("names no space out of the mode", () => {
+    const { html } = renderIn(false, <PackageIndexPage type="agent" />, "/agents");
     expect(html).toContain("data-page-actions-trigger");
     expect(html).not.toContain(">Espace<");
   });

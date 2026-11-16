@@ -2,6 +2,7 @@
 
 import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
@@ -283,7 +284,9 @@ export const filesPaths = {
       tags: ["Files"],
       summary: "List files across the organization's spaces",
       description:
-        "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
+        "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. " +
+        ORG_READ_REACH +
+        " Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.",
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, ...fileListQueryParameters],
       responses: fileListResponses,
     },

@@ -14,31 +14,24 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { LibraryBig, Plus, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useListParams } from "../lib/list-params";
-import { catalogueHref } from "../lib/catalogue-link";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
 import { PageHeader } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
 import { usePackageColumns } from "../components/package-columns";
 import { EmptyStateAction } from "../components/page-states";
-import { PageActionsMenu } from "../components/page-actions-menu";
-import type { MenuAction } from "../lib/menu-action";
 import { useListView } from "../stores/list-view-store";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
-import { usePermissions } from "../hooks/use-permissions";
 import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
-import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { useOverviewMode } from "../hooks/use-overview-mode";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 
 type IndexType = Extract<PackageType, "agent" | "skill">;
 
@@ -68,7 +61,7 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
 /** Agents also carry their unread runs. */
 function AgentIndex() {
   const { on: spanning } = useOverviewMode();
-  const { data: agents, isLoading, error } = useAgents(spanning);
+  const { data: agents, isLoading, error } = useAgents({ spanning });
   const items = agents?.map((agent) => agentCardItem(agent));
   return (
     <PackageIndexBody
@@ -114,8 +107,6 @@ function PackageIndexBody({
   error: Error | null;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const { can } = usePermissions();
-  const [importing, setImporting] = useState(false);
   const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
@@ -124,15 +115,9 @@ function PackageIndexBody({
     usePackageColumns(type, spanning),
     type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
   );
-  // Creating — by hand, with the chat or by import — is a write on the package
-  // type, as its routes are. The import names the type, so the server refuses
-  // an archive of another one. Offered where a space grants it; the dialogs open
-  // in the working space, which the action entered when it asked for one.
-  const write = packagePermission(type, "write");
-  const create = useSpaceAction({ permission: write });
-  const browse = useSpaceAction({ permission: spacePackagePermission(type, "activate") });
-  const canCreate = can(write);
-  const creation = useCreationHandoff(type, canCreate);
+  const words = presentation(type, t);
+  const { canCreate, creation, importing, setImporting, createAction, actionsMenu, pickers } =
+    usePackageIndexActions(type, words.create);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
   const integrationDetail = useIntegrationDetail(
     creation.isOpen ? (creation.integrationId ?? undefined) : undefined,
@@ -144,44 +129,13 @@ function PackageIndexBody({
           name: integrationDetail.manifest.display_name ?? creation.integrationId,
         }
       : undefined;
-  const words = presentation(type, t);
-  const createAction: MenuAction = {
-    id: "create",
-    label: words.create,
-    icon: Plus,
-    onSelect: () => create.run(creation.open),
-    hidden: !create.offered,
-  };
-
   return (
     <>
       <PageHeader
         title={words.title}
         variant="collection"
         breadcrumbs={[{ label: words.title }]}
-        actions={
-          create.offered || browse.offered ? (
-            <PageActionsMenu
-              actions={[
-                {
-                  id: "catalogue",
-                  label: t("catalogue.browse", { ns: "settings" }),
-                  icon: LibraryBig,
-                  ...browse.link(catalogueHref(type)),
-                  hidden: !browse.offered,
-                },
-                {
-                  id: "import",
-                  label: t("nav.import", { ns: "common" }),
-                  icon: Upload,
-                  onSelect: () => create.run(() => setImporting(true)),
-                  hidden: !create.offered,
-                },
-                createAction,
-              ]}
-            />
-          ) : undefined
-        }
+        actions={actionsMenu}
       />
       <PackageCollection
         columns={columns}
@@ -225,8 +179,7 @@ function PackageIndexBody({
           integration={integration}
         />
       )}
-      {create.picker}
-      {browse.picker}
+      {pickers}
     </>
   );
 }

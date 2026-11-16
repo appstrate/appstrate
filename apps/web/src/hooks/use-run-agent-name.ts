@@ -32,13 +32,16 @@ export function resolveRunAgentName(run: EnrichedRun, naming: RunAgentNaming): s
   return naming.byPackageId.get(run.packageId) ?? run.agent_name ?? run.packageId;
 }
 
-/** `spanning`: the runs are every space's, named from the agents of every space (`useAgents`). */
-export function useRunAgentName(
-  fixedAgentName?: string,
+/**
+ * `fixed`: the one name every run takes (a list of one agent's runs). `spanning`: the runs are
+ * every space's, named from the agents of every space (`useAgents`).
+ */
+export function useRunAgentName({
+  fixed: fixedAgentName,
   spanning = false,
-): (run: EnrichedRun) => string {
+}: { fixed?: string; spanning?: boolean } = {}): (run: EnrichedRun) => string {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents(spanning);
+  const { data: agents } = useAgents({ spanning });
 
   const byPackageId = new Map<string, string>();
   if (!fixedAgentName && agents) {
