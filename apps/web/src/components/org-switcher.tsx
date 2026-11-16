@@ -284,12 +284,12 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       : undefined;
   const spaceName: ReactNode = overview.on ? (
     <>
-      <OverviewTile className="size-3.5 rounded-sm" />
+      <OverviewTile className="size-5 rounded-[5px]" />
       <span className="truncate">{overviewLabel}</span>
     </>
   ) : currentSpace ? (
     <>
-      <IdentityTile {...spaceTile(currentSpace, viewer)} className="size-3.5 rounded-sm" />
+      <IdentityTile {...spaceTile(currentSpace, viewer)} className="size-5 rounded-[5px]" />
       <span className="truncate">{spaceLabel(currentSpace, t)}</span>
     </>
   ) : (
@@ -331,7 +331,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
             <span className="truncate font-semibold">{currentOrg.name}</span>
             {spaceName && (
-              <span className="text-muted-foreground flex items-center gap-1 text-xs">
+              <span className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-xs">
                 {spaceName}
               </span>
             )}
