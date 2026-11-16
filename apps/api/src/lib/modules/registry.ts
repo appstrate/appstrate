@@ -33,8 +33,8 @@ import {
   listEnforcedChatSkills,
   loadEnforcedChatSkills,
 } from "../../services/chat-enforced-skills.ts";
-import { readableSpacesAcross } from "../reachable-spaces.ts";
-import type { Permission } from "../permissions.ts";
+import { reachAcrossSpaces } from "../reachable-spaces.ts";
+import { toSpaceRoleWire } from "../space-role.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -100,10 +100,13 @@ function buildPlatformServices(): PlatformServices {
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
-    reachableSpaceIds: async (c, orgId, permission) =>
-      (await readableSpacesAcross(c as Context<AppEnv>, orgId, [permission as Permission])).map(
-        (grant) => grant.spaceId,
-      ),
+    reachableSpaces: async (c, orgId) =>
+      (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
+        id: space.id,
+        name: space.name,
+        role: toSpaceRoleWire(space.role)!.name,
+        permissions: [...space.permissions],
+      })),
     // Module routes run behind the platform middleware chain, so the context
     // carries the same org / actor / request variables a core route audits from.
     audit: {

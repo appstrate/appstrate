@@ -520,7 +520,6 @@ type OperationObject = {
 /**
  * The session operations the organization mount serves — the same handlers as
  * the space mount, under `/api/orgs/{orgId}/chat`, each with its own operation id.
- * The turn and the enforced skills are not served there yet.
  */
 const ORG_MOUNT_OPERATION_IDS: Readonly<Record<string, string>> = {
   listChatSessions: "listOrgChatSessions",
@@ -531,10 +530,20 @@ const ORG_MOUNT_OPERATION_IDS: Readonly<Record<string, string>> = {
   markChatSessionRead: "markOrgChatSessionRead",
   resumeChatStream: "resumeOrgChatStream",
   stopChatStream: "stopOrgChatStream",
+  listChatEnforcedSkills: "listOrgChatEnforcedSkills",
+  streamChat: "streamOrgChat",
 };
 
 const ORG_MOUNT_LIST_DESCRIPTION =
   "List every chat session the caller can open in the organization, most recent activity (`updatedAt`) first: the sessions of every space where the caller holds `chat:read`, plus their organization sessions whose touched spaces they all reach with `chat:read` (`spaceId` is `null` on those). Reads no `X-Space-Id`; admitted when some reachable space grants `chat:read`. Keyset-paginated like the space list; a `startingAfter` that is not one of the caller's listed sessions is a 400.";
+
+const ORG_MOUNT_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  listOrgChatSessions: ORG_MOUNT_LIST_DESCRIPTION,
+  listOrgChatEnforcedSkills:
+    "The skills the spaces where the caller holds `chat:write` impose on their chat conversations, one entry per package (the union over those spaces). Names only — the content is never returned here. Sorted by id. Reads no `X-Space-Id`; admitted when some reachable space grants `chat:write`.",
+  streamOrgChat:
+    "Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`. A session id that belongs to a space session is a 404. Reads no `X-Space-Id` (a 400 when sent); admitted when some reachable space grants `chat:write`. Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+};
 
 function orgMountOperation(operation: OperationObject): OperationObject {
   const operationId = ORG_MOUNT_OPERATION_IDS[operation.operationId]!;
@@ -545,8 +554,7 @@ function orgMountOperation(operation: OperationObject): OperationObject {
         ? []
         : [parameter],
   );
-  const description =
-    operationId === "listOrgChatSessions" ? ORG_MOUNT_LIST_DESCRIPTION : operation.description;
+  const description = ORG_MOUNT_DESCRIPTIONS[operationId] ?? operation.description;
   return { ...operation, operationId, parameters, ...(description ? { description } : {}) };
 }
 
@@ -559,7 +567,7 @@ const orgChatPaths = Object.fromEntries(
       ? []
       : [
           [
-            path.replace("/api/chat/", "/api/orgs/{orgId}/chat/"),
+            path.replace(/^\/api\/chat(?=\/|$)/, "/api/orgs/{orgId}/chat"),
             Object.fromEntries(
               operations.map(([method, operation]) => [
                 method,

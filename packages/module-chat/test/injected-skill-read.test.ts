@@ -73,7 +73,7 @@ async function strictTurn(
     {
       origin: "http://localhost",
       headers,
-      spaceId: owner.defaultSpaceId,
+      scope: { kind: "space", spaceId: owner.defaultSpaceId },
       user,
       deps: buildChatPlatformDeps(buildModuleInitContext()),
       capabilities: turnCapabilities((p) => permissions.includes(p)),

@@ -29,9 +29,10 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
+import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
 import {
   CHAT_MESSAGE_MAX_BYTES,
@@ -49,17 +50,18 @@ import {
   type ChatAttachmentRequest,
   type ChatUsageRecord,
 } from "@appstrate/core/chat-contract";
-import type { ModuleInitContext, PrincipalKind } from "@appstrate/core/module";
+import type { ModuleInitContext, PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
-import { buildSystemPrompt } from "../src/prompt.ts";
+import { buildSystemPrompt, type ChatScope } from "../src/prompt.ts";
 import { SKILL_DEFINITION_META_KEY, type SkillEntry } from "@appstrate/core/skill-uri";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
+import { ensureSession } from "../src/persistence.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -289,6 +291,7 @@ describe("handleChatStream", () => {
     engine?: ChatEngine,
     permissions: Set<string> = new Set<string>(),
     principalKind: PrincipalKind = "user",
+    chatScope: ChatScope = { kind: "space", spaceId: ctx.defaultSpaceId },
   ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
@@ -302,9 +305,9 @@ describe("handleChatStream", () => {
       c.set("requestId", TEST_REQUEST_ID);
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
-      // What `enterSpaceContext` writes on every `/api/chat/*` route in
-      // production — the session's space and the scope of the turn's reads.
-      c.set("space", { id: ctx.defaultSpaceId });
+      // What the mount writes on every `/api/chat/*` route in production — the
+      // session's space and the scope of the turn's reads.
+      c.set("chatScope", chatScope);
       c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
       c.set("orgName", ctx.org.name);
@@ -342,6 +345,8 @@ describe("handleChatStream", () => {
       principalKind?: PrincipalKind;
       /** The composer's package-authoring switch for this turn; omitted = on. */
       packageAuthoring?: boolean;
+      /** What the mount entered; omitted = the test context's default space. */
+      chatScope?: ChatScope;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
       /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
@@ -374,7 +379,13 @@ describe("handleChatStream", () => {
         ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
     };
-    const app = buildApp(deps, engine, overrides?.permissions, overrides?.principalKind);
+    const app = buildApp(
+      deps,
+      engine,
+      overrides?.permissions,
+      overrides?.principalKind,
+      overrides?.chatScope,
+    );
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
@@ -442,14 +453,21 @@ describe("handleChatStream", () => {
       ],
       resolveChatAttachment: async (request) => {
         requests.push(request);
-        return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+        return {
+          uri: request.uri,
+          name: "r.txt",
+          mime: "text/plain",
+          size: 12,
+          spaceId: request.spaces[0]!.id,
+        };
       },
     });
 
     expect(res.status).toBe(200);
     await collectUiChunks(res);
     expect(requests).toHaveLength(1);
-    expect([...requests[0]!.permissions]).toEqual(["runs:read-all"]);
+    expect(requests[0]!.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
+    expect([...requests[0]!.spaces[0]!.permissions]).toEqual(["runs:read-all"]);
     await waitForAssistantPersist(sessionId);
   });
 
@@ -945,7 +963,13 @@ describe("handleChatStream", () => {
         ],
         resolveChatAttachment: async (request) => {
           resolved.push(request.uri);
-          return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+          return {
+            uri: request.uri,
+            name: "r.txt",
+            mime: "text/plain",
+            size: 12,
+            spaceId: request.spaces[0]!.id,
+          };
         },
         loadEnforcedChatSkills: async () => {
           throw new Error("storage outage");
@@ -1457,6 +1481,262 @@ describe("handleChatStream", () => {
       const { system: blind } = await turn(new Set(["agents:read"]), true);
       expect(blind).not.toContain("listRuns");
       expect(blind).not.toContain("Never quote run metrics");
+    });
+  });
+
+  describe("an organization session turn", () => {
+    let spaceB: string;
+    let reach: ReachableSpaceGrant[];
+    let orgScope: ChatScope;
+
+    beforeEach(async () => {
+      spaceB = (await seedSpace({ orgId: ctx.orgId, name: "Beta" })).id;
+      reach = [
+        {
+          id: ctx.defaultSpaceId,
+          name: "Alpha",
+          role: "operator",
+          permissions: ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "agents:run"],
+        },
+        {
+          id: spaceB,
+          name: "Beta",
+          role: "builder",
+          permissions: ["chat:read", "mcp:read", "mcp:invoke", "agents:write", "skills:write"],
+        },
+      ];
+      orgScope = { kind: "organization", reachable: reach };
+    });
+
+    /** The turn `postChat` runs on the organization mount's scope. */
+    async function orgTurn(
+      sessionId: string,
+      overrides: Parameters<typeof postChat>[3] = {},
+      scope: ChatScope = orgScope,
+    ) {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, { ...overrides, chatScope: scope });
+      return { res, calls };
+    }
+
+    it("hands the engine the organization endpoint and a ceiling over the whole reach", async () => {
+      const sessionId = mintSessionId();
+      const { res, calls } = await orgTurn(sessionId);
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      const input = calls[0]!;
+      const url = new URL(input.platformMcp.url);
+      expect(url.pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
+      expect(url.searchParams.get("context")).toBe("injected");
+      expect(input.platformMcp.spaceId).toBeNull();
+      // A permission held in Beta alone is in the ceiling: each call is decided in the space it
+      // names, which recomputes `(org ∪ role) ∩ ceiling` there.
+      expect(await tokenPermissions(input)).toEqual(
+        [
+          "agents:run",
+          "agents:write",
+          "chat:read",
+          "chat:write",
+          "mcp:invoke",
+          "mcp:read",
+          "skills:write",
+        ].sort(),
+      );
+      // The ceiling is keyed with the spaces it lists, and the session is a persisted organization one.
+      expect(input.platformMcp.surfaceKey).toBe(
+        platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), reach),
+      );
+      const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(row!.spaceId).toBeNull();
+    });
+
+    it("narrows the union by the authoring switch", async () => {
+      const { res, calls } = await orgTurn(mintSessionId(), { packageAuthoring: false });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const granted = await tokenPermissions(calls[0]!);
+      expect(granted).not.toContain("agents:write");
+      expect(granted).not.toContain("skills:write");
+      expect(granted).toContain("agents:run");
+    });
+
+    it("lists the spaces in the prompt instead of a current space", async () => {
+      const { res, calls } = await orgTurn(mintSessionId());
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const system = calls[0]!.system;
+      expect(system).not.toContain("Current space");
+      expect(system).not.toContain("Role in this space");
+      expect(system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
+      expect(system).toContain(`- \`${spaceB}\` — Beta (role builder)`);
+      expect(system).toContain("takes the `space_id` of one of them");
+      expect(system).toContain("Ask the user which space when the request does not say");
+      expect(system).toContain("never moved to another space");
+      // `/api/me/context` needs a space: an organization session never reads it.
+      expect(system).not.toContain(CONTEXT_ORG_MARKER);
+    });
+
+    it("leaves a space session turn on its pinned endpoint, its own set and its current space", async () => {
+      const permissions = new Set(["chat:write", "mcp:read", "mcp:invoke"]);
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, { permissions });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(new URL(input.platformMcp.url).pathname).toBe(
+        `/api/mcp/o/${ctx.orgId}/s/${ctx.defaultSpaceId}`,
+      );
+      expect(input.platformMcp.spaceId).toBe(ctx.defaultSpaceId);
+      expect("organization" in input.platformMcp).toBe(false);
+      expect(await tokenPermissions(input)).toEqual([...permissions].sort());
+      expect(input.system).toContain(`Current space: \`${ctx.defaultSpaceId}\``);
+      expect(input.system).not.toContain("Spaces you can act in");
+      expect(input.platformMcp.surfaceKey).toBe(
+        platformMcpSurfaceKey(input.platformMcp.url, [...permissions]),
+      );
+    });
+
+    it("keeps a session to its kind: a space session id is a 404 on the organization turn and the reverse", async () => {
+      const inSpace = mintSessionId();
+      await ensureSession(inSpace, ctx.orgId, ctx.user.id, { spaceId: ctx.defaultSpaceId });
+      const orgSession = mintSessionId();
+      await ensureSession(orgSession, ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+
+      const asOrg = await orgTurn(inSpace);
+      expect(asOrg.res.status).toBe(404);
+      const asSpace = await orgTurn(orgSession, {}, { kind: "space", spaceId: ctx.defaultSpaceId });
+      expect(asSpace.res.status).toBe(404);
+      expect([...asOrg.calls, ...asSpace.calls]).toEqual([]);
+    });
+
+    it("refuses a turn on an organization session that touched a space its author no longer reads", async () => {
+      const sessionId = mintSessionId();
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+      await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB });
+
+      const lostBeta: ChatScope = {
+        kind: "organization",
+        reachable: [{ ...reach[0]! }, { ...reach[1]!, permissions: ["mcp:read"] }],
+      };
+      const refused = await orgTurn(sessionId, {}, lostBeta);
+      expect(refused.res.status).toBe(404);
+      expect(refused.calls).toEqual([]);
+      // Still reading Beta: the same session answers.
+      const open = await orgTurn(sessionId);
+      expect(open.res.status).toBe(200);
+      await collectUiChunks(open.res);
+    });
+
+    describe("recording the spaces it touches", () => {
+      const touched = async (sessionId: string) =>
+        (
+          await db
+            .select({ spaceId: chatSessionSpaces.spaceId })
+            .from(chatSessionSpaces)
+            .where(eq(chatSessionSpaces.sessionId, sessionId))
+        ).map((row) => row.spaceId);
+
+      async function organizationOf(sessionId: string, scope: ChatScope = orgScope) {
+        const { res, calls } = await orgTurn(sessionId, {}, scope);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        const input = calls[0]!;
+        if (input.platformMcp.spaceId !== null) throw new Error("expected an organization turn");
+        return input.platformMcp.organization;
+      }
+
+      it("records a named space once, notifies on growth only, and reads the space of a URI", async () => {
+        const sessionId = mintSessionId();
+        const organization = await organizationOf(sessionId);
+        expect(organization.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId, spaceB]);
+
+        const notified = spyOn(db, "execute");
+        try {
+          await organization.touch(spaceB);
+          await organization.touch(spaceB);
+          const signals = notified.mock.calls.filter((call) =>
+            JSON.stringify(call[0]).includes("chat_session_update"),
+          );
+          expect(signals).toHaveLength(1);
+        } finally {
+          notified.mockRestore();
+        }
+        expect(await touched(sessionId)).toEqual([spaceB]);
+
+        expect(await organization.spaceOfUri(`skill://${spaceB}/acme/tone/tone/SKILL.md`)).toBe(
+          spaceB,
+        );
+        expect(await organization.spaceOfUri("appfile://file_missing00")).toBeUndefined();
+        expect(await organization.spaceOfUri("https://example.com")).toBeUndefined();
+      });
+
+      it("does not record a space the caller does not reach, and refuses one it cannot read", async () => {
+        const sessionId = mintSessionId();
+        const organization = await organizationOf(sessionId);
+        await organization.touch("spc_not_reached");
+        expect(await touched(sessionId)).toEqual([]);
+
+        // Reached with `mcp:read` alone: recording it would hide the session from its author.
+        const unreadableId = mintSessionId();
+        const unreadable = await organizationOf(unreadableId, {
+          kind: "organization",
+          reachable: [reach[0]!, { ...reach[1]!, permissions: ["mcp:read"] }],
+        });
+        await expect(unreadable.touch(spaceB)).rejects.toThrow(/no chat:read there/);
+        expect(await touched(unreadableId)).toEqual([]);
+      });
+
+      it("records nothing for a space session", async () => {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine);
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect("organization" in calls[0]!.platformMcp).toBe(false);
+        expect(await touched(sessionId)).toEqual([]);
+      });
+
+      it("hands an attachment the spaces the caller may chat in and records the space it resolved in", async () => {
+        const sessionId = mintSessionId();
+        const requests: ChatAttachmentRequest[] = [];
+        const both: ChatScope = {
+          kind: "organization",
+          reachable: reach.map((space) => ({
+            ...space,
+            permissions: [...new Set([...space.permissions, "chat:read", "chat:write"])],
+          })),
+        };
+        const { res } = await orgTurn(
+          sessionId,
+          {
+            parts: [
+              { type: "text", text: "lis ceci" },
+              { type: "file", url: "upload://upl_x", mediaType: "text/plain", filename: "b.txt" },
+            ],
+            resolveChatAttachment: async (request) => {
+              requests.push(request);
+              return {
+                uri: "appfile://file_abcdefgh",
+                name: "b.txt",
+                mime: "text/plain",
+                size: 3,
+                spaceId: spaceB,
+              };
+            },
+          },
+          both,
+        );
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+
+        expect(requests[0]!.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId, spaceB]);
+        expect([...requests[0]!.spaces[1]!.permissions]).toContain("agents:write");
+        expect(await touched(sessionId)).toEqual([spaceB]);
+      });
     });
   });
 });

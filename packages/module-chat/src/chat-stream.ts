@@ -24,14 +24,15 @@ import { z } from "zod";
 import { invalidRequest, conflict } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
-import { isAttachmentUri } from "@appstrate/core/file-uri";
+import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
+import { parseSkillUri } from "@appstrate/core/skill-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
-import type { InjectedSkills } from "@appstrate/core/chat-contract";
+import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
@@ -44,10 +45,17 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
-import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
+import {
+  ensureSession,
+  fileSpaceId,
+  persistUserMessage,
+  persistAssistantMessage,
+  touchSessionSpace,
+} from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
-import type { ChatPlatformDeps } from "./platform-services.ts";
+import { spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
+import type { OrganizationSpaces, PlatformMcpSpaces } from "./pi-chat/mcp-tools.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
@@ -241,9 +249,18 @@ export async function handleChatStream(
   const orgId = c.get("orgId");
   const user = c.get("user");
   const requestId = c.get("requestId");
-  // The space the router entered — the session's space, and the scope of every
-  // space-scoped read this turn makes.
-  const spaceId = c.get("space").id;
+  // What the mount entered: the session's one space (the scope of every space-scoped
+  // read this turn makes), or, for an organization session, the spaces its author
+  // reaches — each call of the turn is then decided in the space it names.
+  const scope = c.get("chatScope");
+  const spaceId = scope.kind === "space" ? scope.spaceId : null;
+  // The caller's grants this turn starts from: their set in the entered space, or the
+  // union over their reach. It is a CEILING on the bearer (each space entry recomputes
+  // `(org ∪ role) ∩ ceiling`, `lib/auth-pipeline.ts`), so no space's grants reach another.
+  const callerPermissions: ReadonlySet<string> =
+    scope.kind === "space"
+      ? c.get("permissions")
+      : new Set(scope.reachable.flatMap((space) => space.permissions));
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
@@ -267,6 +284,30 @@ export async function handleChatStream(
   const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
   const turnStart = Date.now();
+
+  // An organization session records every space it acts in, before the act (see
+  // `touchSessionSpace`). Only a space the caller reaches is recorded; one where they lack
+  // `chat:read` would hide the session from them, so the act is refused instead.
+  const organization: OrganizationSpaces | undefined =
+    scope.kind === "organization"
+      ? {
+          spaces: spacesHolding(scope.reachable, "mcp:read"),
+          touch: async (touchedSpaceId) => {
+            const space = scope.reachable.find((candidate) => candidate.id === touchedSpaceId);
+            if (!space || !sessionId || !lastMessage?.id) return;
+            if (!space.permissions.includes("chat:read")) {
+              throw new Error(
+                `This conversation cannot act in ${space.name} (\`${space.id}\`): you hold no chat:read there, so it would no longer open for you.`,
+              );
+            }
+            await touchSessionSpace({ id: sessionId, orgId, userId: user.id }, space.id);
+          },
+          spaceOfUri: async (uri) => {
+            const fileId = parseFileUri(uri);
+            return fileId ? fileSpaceId(orgId, fileId) : parseSkillUri(uri)?.spaceId;
+          },
+        }
+      : undefined;
 
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
@@ -294,7 +335,18 @@ export async function handleChatStream(
       : undefined;
   const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId, bodySkills)
+      ? ensureSession(
+          sessionId,
+          orgId,
+          user.id,
+          scope.kind === "space"
+            ? { spaceId: scope.spaceId }
+            : {
+                spaceId: null,
+                readable: spacesHolding(scope.reachable, "chat:read").map((space) => space.id),
+              },
+          bodySkills,
+        )
       : Promise.resolve(bodySkills ?? DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
@@ -348,7 +400,7 @@ export async function handleChatStream(
   // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode
   // lives on the session row, so the turn's grants follow its upsert.
   const turn = sessionSkills.then((skills) => {
-    const permissions = turnPermissions(c.get("permissions"), {
+    const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
       skillMode: skills.skillMode,
     });
@@ -364,7 +416,8 @@ export async function handleChatStream(
   // The space's enforced skills depend on nothing but the ids, so they start
   // now; phase A's join awaits them, so their 503 refuses the turn before any
   // file is materialized.
-  const enforcedSkills = deps.loadEnforcedSkills(orgId, spaceId);
+  const enforcedSkills: Promise<EnforcedChatSkill[]> =
+    scope.kind === "space" ? deps.loadEnforcedSkills(orgId, scope.spaceId) : Promise.resolve([]);
   // Then the caller-context block. It depends on the space id and the caller's
   // headers and the session row (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
@@ -389,13 +442,14 @@ export async function handleChatStream(
   const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<
-    { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
+    | { ok: true; block: string; injectedSkills: InjectedSkills | undefined }
+    | { ok: false; error: unknown }
   > = turn
     .then(({ skills, permissions, capabilities }) =>
       buildCallerContextBlock(c, {
         origin,
         headers,
-        spaceId,
+        scope,
         user,
         deps,
         // UI language forwarded by the client; validated/defaulted in the builder.
@@ -421,7 +475,7 @@ export async function handleChatStream(
                 name: user.name,
                 orgId,
                 orgRole,
-                permissions: [...c.get("permissions")],
+                permissions: [...callerPermissions],
                 viewAs: persona,
               })}`,
               "x-org-id": orgId,
@@ -480,20 +534,30 @@ export async function handleChatStream(
   // error with no MCP/stop-controller to leak. Only the last message can carry
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage) {
-    lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
-      deps.resolveChatAttachment({
+    // The spaces an attachment may resolve in, each under the caller's set there: the
+    // session's own, or every space they may chat in. The container ACL reads as wide as
+    // the caller does: an `appfile://` the user picked from the gallery — which
+    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
+    // they attach it. Picker and attach answer the same set.
+    const attachmentSpaces =
+      scope.kind === "space"
+        ? [{ id: scope.spaceId, permissions: c.get("permissions") }]
+        : spacesHolding(scope.reachable, "chat:write").map((space) => ({
+            id: space.id,
+            permissions: new Set(space.permissions),
+          }));
+    lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
+      const resolved = await deps.resolveChatAttachment({
         orgId,
-        spaceId,
         userId: user.id,
         chatSessionId: sessionId,
         uri,
-        // The container ACL reads as wide as the caller does: an `appfile://`
-        // the user picked from the gallery — which `runs:read-all` widens to
-        // the whole space's run outputs — must still resolve when they attach
-        // it. Picker and attach answer the same set.
-        permissions: c.get("permissions"),
-      }),
-    );
+        spaces: attachmentSpaces,
+      });
+      // The file's space is touched by the session that now holds it.
+      await organization?.touch(resolved.spaceId);
+      return resolved;
+    });
     messages[messages.length - 1] = lastMessage;
   }
 
@@ -671,11 +735,13 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org/s/:space`), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org/s/:space`, or
+  // `/api/mcp/o/:org` for an organization session), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
-  // permissions (the caller's resolved set, narrowed by `turnPermissions`) and
+  // permissions (the caller's resolved set — over their reach for an organization
+  // session — narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
   const mcpToken = mintMcpLoopbackToken(
     {
@@ -698,6 +764,9 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   const mcpUrl = platformMcpUrl(origin, orgId, spaceId);
+  const platformSpaces: PlatformMcpSpaces = organization
+    ? { spaceId: null, organization }
+    : { spaceId: spaceId! };
   try {
     const response = await finalize(
       runEngine({
@@ -718,13 +787,17 @@ export async function handleChatStream(
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,
-          spaceId,
+          ...platformSpaces,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
-          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
+          surfaceKey: platformMcpSurfaceKey(
+            mcpUrl,
+            permissions,
+            scope.kind === "organization" ? scope.reachable : undefined,
+          ),
           listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).

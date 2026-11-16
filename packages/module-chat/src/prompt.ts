@@ -26,7 +26,7 @@ import {
   skillFileDigest,
 } from "@appstrate/core/skill-uri";
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
-import type { PrincipalKind } from "@appstrate/core/module";
+import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
@@ -35,7 +35,7 @@ import {
 } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
-import type { ChatPlatformDeps } from "./platform-services.ts";
+import { spacesHolding, type ChatPlatformDeps } from "./platform-services.ts";
 import {
   injectedSkills,
   injectsSkills,
@@ -57,6 +57,11 @@ type SpaceRoleRefLike =
   | { kind: "preset"; preset: string }
   | { kind: "custom"; role: { id: string; name?: string | null } };
 
+/** The spaces a chat request acts in: its one entered space, or every space the caller reaches. */
+export type ChatScope =
+  | { kind: "space"; spaceId: string }
+  | { kind: "organization"; reachable: readonly ReachableSpaceGrant[] };
+
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
  * routes — the single typed view of the request context, shared with
@@ -74,14 +79,15 @@ export type ChatEnv = {
      */
     principalKind: PrincipalKind;
     /**
-     * Space the router entered (`enterSpaceContext`, mounted on every
-     * `/api/chat/*` route): entering is what makes the space-level `chat:*`
-     * guards satisfiable, and a caller that names no space is refused there
-     * before any handler runs. NOT set on the organization mount
-     * (`/api/orgs/:orgId/chat/*`), which enters none: only the handlers
-     * registered on `/api/chat` read it.
+     * What the router entered, set by the mount's middleware before any
+     * handler: the space `enterSpaceContext` entered on `/api/chat/*`, or on
+     * the organization mount (`/api/orgs/:orgId/chat/*`), which enters none, the
+     * spaces the caller reaches. Handlers read this alone, never the platform's
+     * own `space`.
      */
-    space: { id: string };
+    chatScope: ChatScope;
+    /** The space `enterSpaceContext` entered; set on `/api/chat/*` only, read by that mount alone. */
+    space?: { id: string };
     orgRole?: string;
     /**
      * Role preview (`X-View-As`), as the platform resolved it. `orgRole` is the
@@ -95,13 +101,10 @@ export type ChatEnv = {
     orgName?: string;
     orgSlug?: string;
     /**
-     * Caller's resolved RBAC permission set. Always set, for the same reason
-     * `space` above is: entering the space is what writes it, and every
-     * `/api/chat/*` route enters one before a handler runs. Two things read it,
-     * and both need the whole set — the scoped platform-MCP bearer the Pi engine
-     * hands its external binary (so the meta-tools authorize with exactly the
-     * caller's own permissions, no amplification), and the container ACL of an
-     * `appfile://` attachment.
+     * Caller's resolved RBAC permission set in the entered space. Meaningful on
+     * a space scope only (entering the space writes it): there it is what the
+     * scoped platform-MCP bearer carries, narrowed by the turn. An organization
+     * scope carries each reachable space's own set in `chatScope` instead.
      */
     permissions: Set<string>;
   };
@@ -218,13 +221,13 @@ Then read \`result.summary\` from the \`run_and_wait\` result and reply to the u
 )}
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": ["<connection id>", …] }\` map (always an array, even for one id), used to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\` — pick from those, don't go list connections; never pick one with \`needs_reconnection: true\`, the run fails on it — ask the user to reconnect it instead; and a candidate with \`owned_by_actor: false\` is a colleague's shared account, so use it only when the user named it, otherwise ask), and to bind several connections of one integration when the task needs them all; \`[]\` runs without that integration (refused for one the agent marks \`required\`, unless an admin imposes connections on it: \`[]\` then adds nothing); connections an admin imposes on an integration stay bound whatever you pass, so there the map only adds to them, and an addition the admin closed answers \`override_outranked\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
-After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in this space, which someone allowed to manage the space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
+After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in the space the failed call named, which someone allowed to manage that space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
 
 `,
   "\n",
 )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call named — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
@@ -414,6 +417,11 @@ type CallerContextOpts = {
   rolePreview: boolean;
   spaceRole: string | null;
   spaceId?: string;
+  /**
+   * An organization session's reach, in place of `spaceId`/`spaceRole`: the spaces its
+   * calls name, listed instead of a current space.
+   */
+  spaces?: readonly ReachableSpaceGrant[];
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
@@ -474,6 +482,13 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
       `Role in this space: ${opts.spaceRole}${opts.rolePreview ? " — role preview active" : ""}`,
     );
   }
+  if (opts.spaces) {
+    lines.push(
+      `Spaces you can act in${opts.rolePreview ? " (role preview active)" : ""}; every tool that acts in a space takes the \`space_id\` of one of them:`,
+      ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
+      "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
+    );
+  }
   lines.push(
     `Permissions this turn: ${
       opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
@@ -526,7 +541,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
         ? `Integrations the user has connected and could attach to an agent: ${list}.`
         : `Integrations the user has connected: ${list}.`,
     );
-  } else {
+  } else if (!opts.spaces) {
     lines.push("The user has no connected integrations yet.");
   }
   // No launch, no section: better absent than every entry marked unreachable.
@@ -757,20 +772,24 @@ async function readCallerContext(
  * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
  * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
  *
- * `spaceId` is the space the chat router entered, so it is always known here.
- * A 400 from the dispatch (the caller lost the space between the entry and this
- * read) degrades to an identity-only block built from the already-authenticated
- * request context (name/email/role/org); any other failure degrades to the
- * skills section alone. Identity survives the first so date/role grounding
- * holds; the space's skills survive both. A rejected `enforced` rejects the
- * block: the turn is refused rather than run without them.
+ * A space scope is always known here. A 400 from the dispatch (the caller lost
+ * the space between the entry and this read) degrades to an identity-only block
+ * built from the already-authenticated request context (name/email/role/org);
+ * any other failure degrades to the skills section alone. Identity survives the
+ * first so date/role grounding holds; the space's skills survive both. A
+ * rejected `enforced` rejects the block: the turn is refused rather than run
+ * without them.
+ *
+ * An organization scope has no space to read `/api/me/context` in: its block
+ * carries the identity, the spaces its calls name and the turn's permissions.
+ * Its skills are not read here (they are per space, named in each call).
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
     origin: string;
     headers: Record<string, string>;
-    spaceId: string;
+    scope: ChatScope;
     user: { id: string; name?: string | null; email?: string | null };
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
@@ -783,16 +802,48 @@ export async function buildCallerContextBlock(
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
-): Promise<{ text: string; injected: InjectedSkills }> {
-  const { origin, headers, spaceId, user, deps, locale, capabilities, skills } = args;
+): Promise<{ text: string; injected: InjectedSkills | undefined }> {
+  const { origin, headers, scope, user, deps, locale, capabilities, skills } = args;
+  // The persona's while previewing: this block tells the model what the caller
+  // may do, and every operation it names is checked against the persona.
+  const persona = c.get("viewAs");
+  const identity = {
+    user: { name: user.name ?? null, email: user.email ?? null },
+    org: {
+      role: persona?.orgRole ?? c.get("orgRole") ?? null,
+      name: c.get("orgName") ?? null,
+      slug: c.get("orgSlug") ?? null,
+    },
+  };
+  const common = {
+    locale,
+    capabilities,
+    rolePreview: persona !== undefined,
+    permissions: args.permissions,
+  };
+  // Degraded: nothing says which chosen skills are active, so none is named, but
+  // the mode (strict's note) stays.
+  const unresolved: ChatSkillSelection = { skillMode: skills.skillMode, pinnedSkills: [] };
+  if (scope.kind === "organization") {
+    const enforced = await args.enforced;
+    const spaces = spacesHolding(scope.reachable, "mcp:read");
+    return {
+      text: formatCallerContext(identity, {
+        ...common,
+        spaceRole: null,
+        spaces,
+        skills: unresolved,
+        enforced,
+      }).text,
+      injected: undefined,
+    };
+  }
+  const { spaceId } = scope;
   // Bound to this space: `resources/read` honours the claim only for it.
   const claimed = ({ text, injected }: RenderedContext) => ({
     text,
     injected: { spaceId, skills: injected },
   });
-  // The persona's while previewing: this block tells the model what the caller
-  // may do, and every operation it names is checked against the persona.
-  const persona = c.get("viewAs");
   const ctxHeaders = new Headers(headers);
   ctxHeaders.set("x-space-id", spaceId);
   const injects = injectsSkills(skills.skillMode);
@@ -807,15 +858,7 @@ export async function buildCallerContextBlock(
     }),
     args.enforced,
   ]);
-  const opts = {
-    locale,
-    capabilities,
-    rolePreview: persona !== undefined,
-    spaceRole: spaceRoleLabel(c.get("spaceRole")),
-    spaceId,
-    permissions: args.permissions,
-    enforced,
-  };
+  const opts = { ...common, spaceRole: spaceRoleLabel(c.get("spaceRole")), spaceId, enforced };
   if (context && context !== 400) {
     return claimed(
       formatCallerContext(context, {
@@ -826,24 +869,9 @@ export async function buildCallerContextBlock(
       }),
     );
   }
-  // Degraded: nothing says which chosen skills are active here, so none is named,
-  // but the mode (strict's note) and the space's skills stay.
-  const unresolved: ChatSkillSelection = { skillMode: skills.skillMode, pinnedSkills: [] };
   if (context === 400) {
     // Identity/role straight off the request context.
-    return claimed(
-      formatCallerContext(
-        {
-          user: { name: user.name ?? null, email: user.email ?? null },
-          org: {
-            role: persona?.orgRole ?? c.get("orgRole") ?? null,
-            name: c.get("orgName") ?? null,
-            slug: c.get("orgSlug") ?? null,
-          },
-        },
-        { ...opts, skills: unresolved },
-      ),
-    );
+    return claimed(formatCallerContext(identity, { ...opts, skills: unresolved }));
   }
   return claimed(
     formatSkillsSection({

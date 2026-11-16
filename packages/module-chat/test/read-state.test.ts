@@ -336,7 +336,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     // whose xmin never moves, and would be proving nothing.
     const id = await createSessionAs(owner);
     const before = await xminOf(id);
-    await ensureSession(id, owner.orgId, owner.user.id, owner.defaultSpaceId);
+    await ensureSession(id, owner.orgId, owner.user.id, { spaceId: owner.defaultSpaceId });
     expect(await xminOf(id)).not.toBe(before);
   });
 
@@ -345,7 +345,9 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     const before = await xminOf(id);
 
     await expect(
-      ensureSession(id, stranger.orgId, stranger.user.id, stranger.defaultSpaceId),
+      ensureSession(id, stranger.orgId, stranger.user.id, {
+        spaceId: stranger.defaultSpaceId,
+      }),
     ).rejects.toThrow(/not found/i);
 
     expect(await xminOf(id)).toBe(before);

@@ -155,13 +155,42 @@ export interface PiTurnBudget {
   now?: () => number;
 }
 
-interface BuildPlatformMcpToolsOptions {
-  /** Platform MCP endpoint, pinned to the space (`/api/mcp/o/:org/s/:space?context=injected`). */
+/** A space an organization connection may name, with the caller's role there. */
+interface NamedSpace {
+  id: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * What an organization connection (`/api/mcp/o/:org`, whose space-acting tools
+ * each take a `space_id`) needs from its session: the spaces a call may name,
+ * and the record of the spaces a session touched.
+ */
+export interface OrganizationSpaces {
+  spaces: readonly NamedSpace[];
+  /**
+   * Record `spaceId` on the session BEFORE the call naming it is dispatched. Quiet on a
+   * space the caller does not reach (the server refuses that call itself); throws when
+   * the space cannot be recorded, and the call is not made.
+   */
+  touch(spaceId: string): Promise<void>;
+  /** The space a `skill://` or `appfile://` URI belongs to, when it names one. */
+  spaceOfUri(uri: string): Promise<string | undefined>;
+}
+
+/**
+ * How the connection names its space: pinned by its URL (`run_and_wait`'s REST hops
+ * carry it in `X-Space-Id`), or per call on the organization endpoint.
+ */
+export type PlatformMcpSpaces =
+  { spaceId: string } | { spaceId: null; organization: OrganizationSpaces };
+
+type BuildPlatformMcpToolsOptions = PlatformMcpSpaces & {
+  /** Platform MCP endpoint (`/api/mcp/o/:org[/s/:space]?context=injected`). */
   url: string;
   /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
-  /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
-  spaceId: string;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
   writeChunk: (chunk: UIMessageChunk) => void;
   /** Cancellation for tool calls + the run_and_wait poll loop. */
@@ -187,7 +216,7 @@ interface BuildPlatformMcpToolsOptions {
   surfaceKey?: string;
   /** Registers `list_skills`: the `manual` skill mode, on a turn holding `skills:read`. */
   listsSkills?: boolean;
-}
+};
 
 /**
  * Append the turn-budget line to a tool result's MODEL channel (A5).
@@ -311,11 +340,13 @@ export async function buildPlatformMcpTools(
   };
 
   const runOrigin = new URL(opts.url).origin;
+  const organization = opts.spaceId === null ? opts.organization : undefined;
   const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
-          headers: { ...opts.headers, "x-space-id": opts.spaceId },
+          headers: opts.headers,
+          space: opts.spaceId === null ? opts.organization : { spaceId: opts.spaceId },
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,
@@ -323,11 +354,11 @@ export async function buildPlatformMcpTools(
           signal: opts.signal,
           turnBudget: opts.turnBudget,
         })
-      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget),
+      : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization),
   );
   const extensionFactories = [
     ...toolFactories,
-    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget),
+    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget, organization),
     ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
@@ -365,6 +396,7 @@ function makeForwardExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
+  organization?: OrganizationSpaces,
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -377,9 +409,14 @@ function makeForwardExtension(
       ),
       async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
+        const args = (params as Record<string, unknown>) ?? {};
+        // On the organization endpoint the call names its space: recorded before it is made.
+        if (organization && typeof args.space_id === "string") {
+          await organization.touch(args.space_id);
+        }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
-          { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
+          { name: tool.name, arguments: args },
           { signal: callSignal },
         );
         return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
@@ -400,6 +437,7 @@ function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   signal: AbortSignal,
   turnBudget: PiTurnBudget,
+  organization?: OrganizationSpaces,
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.registerTool({
@@ -425,6 +463,9 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
+        // A resource of a space the organization session reads from touches it.
+        const resourceSpace = organization ? await organization.spaceOfUri(uri) : undefined;
+        if (organization && resourceSpace) await organization.touch(resourceSpace);
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
         const content = result.contents.map((c) => ({
@@ -538,6 +579,47 @@ function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
 }
 
 /**
+ * The space an organization `run_and_wait` names, with the other arguments, after
+ * recording it on the session; or the refusal the server gives any space-acting tool
+ * (`spaceArgumentRefusal`, `apps/api/src/modules/mcp/spaces.ts`): the space is never
+ * defaulted.
+ */
+async function namedSpace(
+  params: unknown,
+  organization: OrganizationSpaces,
+): Promise<
+  { spaceId: string; args: Record<string, unknown> } | { refusal: Record<string, unknown> }
+> {
+  const { space_id: named, ...args } = (params as Record<string, unknown> | null) ?? {};
+  const accepted = organization.spaces.map((space) => space.id);
+  const list = organization.spaces
+    .map((space) => `${space.name} (\`${space.id}\`, role ${space.role})`)
+    .join("; ");
+  if (named === undefined || named === null) {
+    return {
+      refusal: {
+        code: "missing_argument",
+        error: `space_id is required. Spaces you can act in: ${list}.`,
+        arguments: ["space_id"],
+        accepted,
+      },
+    };
+  }
+  if (typeof named !== "string" || !accepted.includes(named)) {
+    return {
+      refusal: {
+        code: "unknown_space",
+        error: `Unknown space_id: ${String(named)}. Spaces you can act in: ${list}.`,
+        arguments: ["space_id"],
+        accepted,
+      },
+    };
+  }
+  await organization.touch(named);
+  return { spaceId: named, args };
+}
+
+/**
  * `run_and_wait` Pi tool: launch a run, stream the preliminary + progress cards
  * live into the UI stream, and return the FINAL run payload as the tool result.
  * The intermediate cards and the final tool output share the tool call id, so
@@ -547,7 +629,10 @@ function makeRunAndWaitExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   ctx: {
     origin: string;
+    /** Auth + org headers; the space rides in `X-Space-Id`, set per call from `space`. */
     headers: Record<string, string>;
+    /** The pinned space, or the organization's spaces, one of which each call names. */
+    space: { spaceId: string } | OrganizationSpaces;
     /** Transport for the launch POST and the poll loop — see the option above. */
     fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
@@ -562,15 +647,25 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        // Pinned: the URL's space. Organization: the one the call names, taken out of the
+        // arguments (the shared launch refuses an argument it does not declare) and recorded
+        // before anything is launched.
+        const target =
+          "spaceId" in ctx.space
+            ? { spaceId: ctx.space.spaceId, args: params }
+            : await namedSpace(params, ctx.space);
+        if ("refusal" in target) {
+          return withTurnBudgetNote(toPiToolResult(target.refusal), ctx.turnBudget);
+        }
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
         };
         // The run's wait budget descends from the TURN's deadline (never the
         // 30-minute client default), and a launch with no room left is refused
         // here — before any run row exists.
-        for await (const step of runAndWaitStepsWithinTurnBudget(params, {
+        for await (const step of runAndWaitStepsWithinTurnBudget(target.args, {
           origin: ctx.origin,
-          headers: ctx.headers,
+          headers: { ...ctx.headers, "x-space-id": target.spaceId },
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
           // The chat holds the connect capability itself — the link goes to a

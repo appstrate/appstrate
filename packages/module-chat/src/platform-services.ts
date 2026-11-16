@@ -25,7 +25,11 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import type { db } from "@appstrate/db/client";
-import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
+import type {
+  ModuleInitContext,
+  ReachableSpaceGrant,
+  UsageRejection,
+} from "@appstrate/core/module";
 import { ApiError } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 
@@ -42,6 +46,14 @@ import type {
 
 /** The permissions the chat's session routes ask. */
 export type ChatPermission = "chat:read" | "chat:write";
+
+/** The spaces of `spaces` whose effective set grants `permission`. */
+export function spacesHolding(
+  spaces: readonly ReachableSpaceGrant[],
+  permission: string,
+): ReachableSpaceGrant[] {
+  return spaces.filter((space) => space.permissions.includes(permission));
+}
 
 export interface ChatPlatformDeps {
   /**
@@ -109,11 +121,11 @@ export interface ChatPlatformDeps {
    */
   loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
   /**
-   * The ids of the spaces the caller reaches with `permission`, for the routes
-   * that serve the organization as a whole (no space entered). A 403 for an
-   * end-user.
+   * The spaces the caller reaches, with their role and effective permissions
+   * there, for the routes that serve the organization as a whole (no space
+   * entered). A 403 for an end-user.
    */
-  reachableSpaceIds(c: Context, orgId: string, permission: ChatPermission): Promise<string[]>;
+  reachableSpaces(c: Context, orgId: string): Promise<ReachableSpaceGrant[]>;
   /** Their names only, from the database (no archive read); same 503 on failure. */
   listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
 }
@@ -159,8 +171,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
-    reachableSpaceIds: (c, orgId, permission) =>
-      ctx.services.reachableSpaceIds(c, orgId, permission),
+    reachableSpaces: (c, orgId) => ctx.services.reachableSpaces(c, orgId),
     loadEnforcedSkills: (orgId, spaceId) =>
       enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
     listEnforcedSkills: (orgId, spaceId) =>

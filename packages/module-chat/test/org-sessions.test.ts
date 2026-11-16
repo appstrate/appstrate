@@ -261,6 +261,37 @@ describe("organization chat sessions", () => {
     expect(foreign.status).toBe(403);
   });
 
+  describe("POST /api/orgs/{orgId}/chat", () => {
+    const turn = (caller: TestContext, headers = orgOnlyHeaders(caller)) =>
+      app.request(`/api/orgs/${caller.orgId}/chat`, {
+        method: "POST",
+        headers: { ...headers, ...JSON_HEADERS },
+        body: JSON.stringify({
+          id: "chs_org_turn_admission",
+          messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "salut" }] }],
+        }),
+      });
+
+    it("is admitted by chat:write in some space only, reads no X-Space-Id, refuses another organization", async () => {
+      // A caller whose one space grants chat:read alone holds chat:write nowhere.
+      const readerOrg = await createTestContext({ orgSlug: "readerorg" });
+      const reader = await memberHolding(readerOrg, ["chat:read"]);
+      expect((await turn(reader)).status).toBe(403);
+
+      const withHeader = await turn(ctx, authHeaders(ctx));
+      expect(withHeader.status).toBe(400);
+      expect(((await withHeader.json()) as { param?: string }).param).toBe("X-Space-Id");
+
+      const otherOrg = await createTestContext({ orgSlug: "otherturn" });
+      const foreign = await app.request(`/api/orgs/${otherOrg.orgId}/chat`, {
+        method: "POST",
+        headers: { ...orgOnlyHeaders(ctx), ...JSON_HEADERS },
+        body: "{}",
+      });
+      expect(foreign.status).toBe(403);
+    });
+  });
+
   it("refuses an API key", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -290,19 +321,38 @@ describe("organization chat sessions", () => {
 });
 
 describe("ensureSession keeps a session's kind", () => {
+  it("opens an existing organization session only while every touched space is readable", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "ensurevisible" });
+    const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+    await touch("chs_org_visible", other);
+
+    await expect(
+      ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, {
+        spaceId: null,
+        readable: [ctx.defaultSpaceId],
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, {
+      spaceId: null,
+      readable: [ctx.defaultSpaceId, other],
+    });
+  });
+
   it("refuses an organization session id in a space, and a space session id as organization", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "ensurekind" });
 
-    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, null);
-    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, null);
+    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
+    await ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] });
     await expect(
-      ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, ctx.defaultSpaceId),
+      ensureSession("chs_org_kind", ctx.orgId, ctx.user.id, { spaceId: ctx.defaultSpaceId }),
     ).rejects.toMatchObject({ status: 404 });
 
-    await ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, ctx.defaultSpaceId);
+    await ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, { spaceId: ctx.defaultSpaceId });
     await expect(
-      ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, null),
+      ensureSession("chs_space_kind", ctx.orgId, ctx.user.id, { spaceId: null, readable: [] }),
     ).rejects.toMatchObject({ status: 404 });
   });
 });

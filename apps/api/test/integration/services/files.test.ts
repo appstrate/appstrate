@@ -54,6 +54,7 @@ import {
   reconcileOrgFileBytes,
   setOrgFileStorageLimit,
   deleteFile,
+  listFilesForActor,
   resolveChatAttachment,
   FILES_BUCKET,
 } from "../../../src/services/files.ts";
@@ -1318,11 +1319,10 @@ describe("files service + routes", () => {
     const attach = (fileId: string, permissions: ReadonlySet<string>) =>
       resolveChatAttachment({
         orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         chatSessionId,
         uri: `appfile://${fileId}`,
-        permissions,
+        spaces: [{ id: ctx.defaultSpaceId, permissions }],
       });
 
     // The colleague's run output: readable with the grant, indistinguishable
@@ -1334,6 +1334,111 @@ describe("files service + routes", () => {
     // widens the set, it never gates ownership.
     expect((await attach(ownOutput.id, NO_GRANTS)).uri).toBe(`appfile://${ownOutput.id}`);
     expect((await attach(ownOutput.id, READS_EVERY_RUN)).uri).toBe(`appfile://${ownOutput.id}`);
+  });
+
+  it("an organization session's conversation resolves the files of its runs across the listed spaces", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    const otherScope = { orgId: ctx.orgId, spaceId: other.id };
+    // No `space_id`: an organization session belongs to its author alone.
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      userId: ctx.user.id,
+    });
+    const inDefault = await seedRunRow(scope, { chatSessionId: sessionId });
+    const { row: first } = await publishStream(scope, inDefault, "first.txt", "first");
+    const inOther = await seedRunRow(otherScope, { chatSessionId: sessionId });
+    const { row: second } = await publishStream(otherScope, inOther, "second.txt", "second");
+    // A run of the same space that belongs to no conversation is not context.
+    const unrelated = await seedRunRow(otherScope);
+    await publishStream(otherScope, unrelated, "unrelated.txt", "unrelated");
+
+    const grants = [
+      { spaceId: ctx.defaultSpaceId, permissions: READS_EVERY_RUN },
+      { spaceId: other.id, permissions: READS_EVERY_RUN },
+    ];
+    const ids = async (listed: typeof grants) =>
+      new Set(
+        (
+          await listFilesForActor(ctx.orgId, listed, userActor, { contextChatSessionId: sessionId })
+        ).data.map((file) => file.id),
+      );
+    expect(await ids(grants)).toEqual(new Set([first.id, second.id]));
+    // The session's runs are read in the listed spaces only.
+    expect(await ids(grants.slice(0, 1))).toEqual(new Set([first.id]));
+
+    // Someone else's organization session resolves nothing.
+    const stranger = await createTestUser({ email: "org-session-stranger@docs.test" });
+    await addOrgMember(ctx.orgId, stranger.id, "member");
+    expect(
+      (
+        await listFilesForActor(
+          ctx.orgId,
+          grants,
+          { type: "user", id: stranger.id },
+          { contextChatSessionId: sessionId },
+        )
+      ).data,
+    ).toEqual([]);
+  });
+
+  it("a chat attachment resolves in the space its file belongs to, under the caller's set there", async () => {
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    const otherScope = { orgId: ctx.orgId, spaceId: other.id };
+    const colleague = await createTestUser({ email: "colleague@orgattach.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const theirRun = await seedRunRow(otherScope, { userId: colleague.id });
+    const { row: output } = await publishStream(otherScope, theirRun, "leur.txt", "leur livrable");
+
+    const chatSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: chatSessionId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      userId: ctx.user.id,
+    });
+    const attach = (uri: string, spaces: Array<{ id: string; permissions: ReadonlySet<string> }>) =>
+      resolveChatAttachment({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        chatSessionId,
+        uri,
+        spaces,
+      });
+    const here = { id: ctx.defaultSpaceId, permissions: READS_EVERY_RUN };
+
+    // Resolved in the other space, under its set: readable with the grant there, not without.
+    const resolved = await attach(`appfile://${output.id}`, [
+      here,
+      { id: other.id, permissions: READS_EVERY_RUN },
+    ]);
+    expect(resolved).toMatchObject({ uri: `appfile://${output.id}`, spaceId: other.id });
+    await expect(
+      attach(`appfile://${output.id}`, [here, { id: other.id, permissions: NO_GRANTS }]),
+    ).rejects.toMatchObject({ status: 404 });
+    // A space the caller may not attach in is as absent as a missing file.
+    await expect(attach(`appfile://${output.id}`, [here])).rejects.toMatchObject({ status: 404 });
+
+    // An upload is materialized in the space it was staged in, which the result names.
+    const upload = await stageUpload(
+      otherScope,
+      ctx.user.id,
+      "depuis-l-autre.txt",
+      new TextEncoder().encode("contenu"),
+    );
+    await expect(attach(`upload://${upload}`, [here])).rejects.toMatchObject({ status: 404 });
+    const materialized = await attach(`upload://${upload}`, [
+      here,
+      { id: other.id, permissions: NO_GRANTS },
+    ]);
+    expect(materialized.spaceId).toBe(other.id);
+    const [row] = await db
+      .select({ spaceId: files.spaceId, chatSessionId: files.chatSessionId })
+      .from(files)
+      .where(eq(files.id, materialized.uri.replace("appfile://", "")));
+    expect(row).toEqual({ spaceId: other.id, chatSessionId });
   });
 
   it("a non-creator run reader gets a degraded DTO, a 403 on /content, and no preview token", async () => {

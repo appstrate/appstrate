@@ -21,9 +21,15 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, notExists, notInArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, type ChatMessageContent } from "@appstrate/db/schema";
+import {
+  chatMessages,
+  chatSessions,
+  chatSessionSpaces,
+  files,
+  type ChatMessageContent,
+} from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
@@ -46,6 +52,56 @@ function toContent(message: UIMessage): ChatMessageContent {
 }
 
 /**
+ * An organization session is visible while every space it touched is readable:
+ * no touched space outside `readable`. One predicate for the open, the list and
+ * the turn, so none can drift from the others.
+ */
+export function organizationSessionVisible(readable: readonly string[]): SQL {
+  return and(
+    isNull(chatSessions.spaceId),
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(chatSessionSpaces)
+        .where(
+          and(
+            eq(chatSessionSpaces.sessionId, chatSessions.id),
+            notInArray(chatSessionSpaces.spaceId, [...readable]),
+          ),
+        ),
+    ),
+  )!;
+}
+
+/**
+ * Record that an organization session acted in `spaceId` (idempotent), BEFORE
+ * the act is dispatched: the session is then listed and opened only while its
+ * author reaches that space too. The session list is told when the record grew,
+ * so its space line refreshes.
+ */
+export async function touchSessionSpace(
+  session: { id: string; orgId: string; userId: string },
+  spaceId: string,
+): Promise<void> {
+  const inserted = await db
+    .insert(chatSessionSpaces)
+    .values({ sessionId: session.id, spaceId })
+    .onConflictDoNothing()
+    .returning({ spaceId: chatSessionSpaces.spaceId });
+  if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
+}
+
+/** The space a file belongs to, or undefined when `orgId` holds no such file. */
+export async function fileSpaceId(orgId: string, fileId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ spaceId: files.spaceId })
+    .from(files)
+    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
+    .limit(1);
+  return row?.spaceId;
+}
+
+/**
  * Create the session row if it does not exist yet (idempotent). The client
  * mints the id; the stream route creates the row through here, writing the
  * turn's skill `selection` in the same statement when it carries one. Returns
@@ -55,10 +111,15 @@ export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
-  /** The session's space, or null for an organization session. A session never changes kind. */
-  spaceId: string | null,
+  /**
+   * Where the session lives: a space, or — for an organization session, which
+   * never changes kind — the spaces its author still reads, an existing one
+   * opening only while every space it touched is among them.
+   */
+  scope: { spaceId: string } | { spaceId: null; readable: readonly string[] },
   selection?: ChatSkillSelection,
 ): Promise<ChatSkillSelection> {
+  const { spaceId } = scope;
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -88,7 +149,9 @@ export async function ensureSession(
       setWhere: and(
         eq(chatSessions.orgId, orgId),
         eq(chatSessions.userId, userId),
-        spaceId === null ? isNull(chatSessions.spaceId) : eq(chatSessions.spaceId, spaceId),
+        "readable" in scope
+          ? organizationSessionVisible(scope.readable)
+          : eq(chatSessions.spaceId, scope.spaceId),
       ),
     })
     .returning({

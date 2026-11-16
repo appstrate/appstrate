@@ -313,6 +313,29 @@ describe("platform MCP surface cache", () => {
     ).not.toBe(key);
   });
 
+  it("keys the pinned endpoint and the organization's apart, and the organization's by its spaces", () => {
+    const perms = uniquePermissions("runs:read");
+    const org = `${ORIGIN}/api/mcp/o/org_1?context=injected`;
+    const alpha = { id: "spc_a", name: "Alpha", role: "operator", permissions: ["agents:run"] };
+    const beta = { id: "spc_b", name: "Beta", role: "admin", permissions: ["agents:write"] };
+
+    // Same origin, context and permissions, but the organization's tools take a `space_id`.
+    expect(platformMcpSurfaceKey(org, perms)).not.toBe(platformMcpSurfaceKey(MCP_URL, perms));
+    // The ids in the path reach no descriptor.
+    expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_2/s/spc_2?context=injected`, perms)).toBe(
+      platformMcpSurfaceKey(MCP_URL, perms),
+    );
+    // The spaces are written into every descriptor: another caller's reach is another surface.
+    const both = platformMcpSurfaceKey(org, perms, [alpha, beta]);
+    expect(platformMcpSurfaceKey(org, perms, [beta, alpha])).toBe(both);
+    expect(platformMcpSurfaceKey(org, perms, [alpha])).not.toBe(both);
+    expect(platformMcpSurfaceKey(org, perms, [alpha, { ...beta, name: "Other" }])).not.toBe(both);
+    expect(platformMcpSurfaceKey(org, perms, [alpha, { ...beta, role: "viewer" }])).not.toBe(both);
+    expect(
+      platformMcpSurfaceKey(org, perms, [alpha, { ...beta, permissions: ["agents:run"] }]),
+    ).not.toBe(both);
+  });
+
   it("surfaces a failed lazy connect as the tool call's error, retries it, and evicts the entry", async () => {
     const stub = mcpStub();
     const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());

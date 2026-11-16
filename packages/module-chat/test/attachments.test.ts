@@ -89,13 +89,12 @@ function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, 
   return (uri: string) =>
     resolveChatAttachment({
       orgId: scope.orgId,
-      spaceId: scope.spaceId,
       userId,
       chatSessionId: sessionId,
       uri,
       // These cases materialize the session owner's own uploads; the container
       // ACL never widens, so the narrowest set is the honest one to hand it.
-      permissions: new Set(),
+      spaces: [{ id: scope.spaceId, permissions: new Set() }],
     });
 }
 

@@ -44,7 +44,7 @@ import { logger } from "../logger.ts";
 import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
-import { buildPlatformMcpTools } from "./mcp-tools.ts";
+import { buildPlatformMcpTools, type PlatformMcpSpaces } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -88,11 +88,9 @@ export interface PiChatInput {
    * app directly rather than opening real loopback sockets to this same process.
    * Omitted → global `fetch`.
    */
-  platformMcp: {
+  platformMcp: PlatformMcpSpaces & {
     url: string;
     headers: Record<string, string>;
-    /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
-    spaceId: string;
     fetch?: typeof fetch;
     surfaceKey?: string;
     /** Registers the `list_skills` tool (`manual` skill mode with `skills:read`). */

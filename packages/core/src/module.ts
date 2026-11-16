@@ -1375,6 +1375,16 @@ export interface LlmUsageLedgerRow {
  */
 export type AuditPayload = { [key: string]: unknown; [key: `${string}_${string}`]: never };
 
+/** A space the caller reaches, as {@link PlatformServices.reachableSpaces} lists it. */
+export interface ReachableSpaceGrant {
+  id: string;
+  name: string;
+  /** The caller's role there, as `GET /api/spaces` names it. */
+  role: string;
+  /** The caller's effective permissions there (`resource:action`). */
+  permissions: string[];
+}
+
 export interface PlatformServices {
   /**
    * Structured JSON logger — the platform's OWN pino instance, so module output
@@ -1588,13 +1598,13 @@ export interface PlatformServices {
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
   /**
-   * The ids of the spaces the caller reaches whose effective permission set
-   * grants `permission` (`resource:action`, as a module declares it), for a
-   * route that serves the organization as a whole and so enters no space. The
-   * same reach every cross-space list reads, persona and credential ceiling
-   * included; an end-user is refused with a 403.
+   * The spaces the caller reaches, each with their role (as `GET /api/spaces`
+   * names it) and their effective permission set there, for a route that
+   * serves the organization as a whole and so enters no space. The same reach
+   * every cross-space list reads, persona and credential ceiling included; an
+   * end-user is refused with a 403. Memoized per request.
    */
-  reachableSpaceIds(c: Context, orgId: string, permission: string): Promise<string[]>;
+  reachableSpaces(c: Context, orgId: string): Promise<ReachableSpaceGrant[]>;
   /**
    * Append one `audit_events` row for a module route's state change; org, space,
    * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;

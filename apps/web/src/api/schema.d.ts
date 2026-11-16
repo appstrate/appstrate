@@ -3199,6 +3199,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a conversational turn (streaming)
+         * @description Runs a turn of an organization session (opened from the overview): the same streaming loop as `POST /api/chat`, entering no space. The turn's tools are the organization MCP endpoint's, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names (and every attachment's space) is recorded on the session, which stays openable only while the caller reaches all of them with `chat:read`. A session id that belongs to a space session is a 404. Reads no `X-Space-Id` (a 400 when sent); admitted when some reachable space grants `chat:write`. Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         */
+        post: operations["streamOrgChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/enforced-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the skills the space enforces in chat
+         * @description The skills the spaces where the caller holds `chat:write` impose on their chat conversations, one entry per package (the union over those spaces). Names only — the content is never returned here. Sorted by id. Reads no `X-Space-Id`; admitted when some reachable space grants `chat:write`.
+         */
+        get: operations["listOrgChatEnforcedSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/chat/sessions": {
         parameters: {
             query?: never;
@@ -20743,6 +20783,134 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    streamOrgChat: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Org model (preset id) override; defaults to the org default model. */
+                "X-Model-Id"?: string;
+            };
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    messages: Record<string, never>[];
+                    modelId?: string;
+                    generation?: components["schemas"]["ModelGenerationSettings"];
+                    /** @description Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them. */
+                    package_authoring?: boolean;
+                    /**
+                     * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
+                     * @enum {string}
+                     */
+                    skill_mode?: "auto" | "manual" | "strict";
+                    /** @description The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent. */
+                    pinned_skills?: string[];
+                    /** @description Session id (the assistant-ui thread id) */
+                    id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description AI SDK UIMessage stream (text/event-stream) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
+            400: components["responses"]["ValidationError"];
+            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
+            429: components["responses"]["RateLimited"];
+            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listOrgChatEnforcedSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID — the organization a list spanning its spaces reads. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enforced skills */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @description `@scope/name` package id */
+                            id: string;
+                            /** @description Display name, else the id */
+                            name: string;
+                            /** @description Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable). */
+                            version: string | null;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
+            /** @description `enforced_skills_unavailable` — the space's enforced skills could not be loaded. RFC 9457 problem+json. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listOrgChatSessions: {

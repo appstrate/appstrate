@@ -34,20 +34,7 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  isNull,
-  notExists,
-  notInArray,
-  or,
-  sql,
-  type SQL,
-} from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
 import {
@@ -60,13 +47,16 @@ import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
+import type { EnforcedChatSkillRef } from "@appstrate/core/chat-contract";
+import { handleChatStream } from "./chat-stream.ts";
+import type { ChatEnv, ChatScope } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import type { ChatPermission, ChatPlatformDeps } from "./platform-services.ts";
+import { organizationSessionVisible } from "./persistence.ts";
+import { spacesHolding, type ChatPermission, type ChatPlatformDeps } from "./platform-services.ts";
 
 const SESSIONS_PAGE_SIZE = 100;
 
@@ -150,28 +140,6 @@ type SessionScope = { orgId: string; userId: string } & (
   { spaceId: string } | { spaceId: null; readable: readonly string[] }
 );
 
-/**
- * An organization session is visible while every space it touched is readable:
- * no touched space outside the set. One predicate for the open and the list, so
- * neither can drift from the other.
- */
-function organizationSessionVisible(readable: readonly string[]): SQL {
-  return and(
-    isNull(chatSessions.spaceId),
-    notExists(
-      db
-        .select({ one: sql`1` })
-        .from(chatSessionSpaces)
-        .where(
-          and(
-            eq(chatSessionSpaces.sessionId, chatSessions.id),
-            notInArray(chatSessionSpaces.spaceId, [...readable]),
-          ),
-        ),
-    ),
-  )!;
-}
-
 const ownedBy = (scope: SessionScope): SQL =>
   and(eq(chatSessions.orgId, scope.orgId), eq(chatSessions.userId, scope.userId))!;
 
@@ -240,6 +208,40 @@ interface SessionMount {
   scope(c: Context<ChatEnv>): Promise<SessionScope>;
 }
 
+/** The space a space-mount request entered. */
+function spaceOf(c: Context<ChatEnv>): string {
+  const scope = c.get("chatScope");
+  if (scope.kind !== "space") throw new Error("a space route ran without a space scope");
+  return scope.spaceId;
+}
+
+/** The reach of an organization-mount request. */
+function organizationScope(c: Context<ChatEnv>) {
+  const scope = c.get("chatScope");
+  if (scope.kind !== "organization") {
+    throw new Error("an organization route ran without an organization scope");
+  }
+  return scope;
+}
+
+/**
+ * The enforced skills of a scope: its space's, or for an organization scope the
+ * union over the spaces where the caller may chat, one entry per package.
+ */
+async function listEnforcedSkillRefs(
+  deps: ChatPlatformDeps,
+  orgId: string,
+  scope: ChatScope,
+): Promise<EnforcedChatSkillRef[]> {
+  if (scope.kind === "space") return deps.listEnforcedSkills(orgId, scope.spaceId);
+  const perSpace = await Promise.all(
+    spacesHolding(scope.reachable, "chat:write").map((space) =>
+      deps.listEnforcedSkills(orgId, space.id),
+    ),
+  );
+  return [...new Map(perSpace.flat().map((skill) => [skill.packageId, skill])).values()];
+}
+
 export function createChatRouter(deps: ChatPlatformDeps) {
   const router = new Hono<ChatEnv>();
 
@@ -256,6 +258,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // for a direct caller), and one with no role in the space is refused there.
   router.use("/api/chat/*", async (c, next) => {
     await enterSpaceContext(c);
+    c.set("chatScope", { kind: "space", spaceId: c.get("space")!.id });
     return next();
   });
 
@@ -264,7 +267,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     scope: async (c) => ({
       orgId: c.get("orgId"),
       userId: c.get("user").id,
-      spaceId: c.get("space").id,
+      spaceId: spaceOf(c),
     }),
   };
 
@@ -272,7 +275,8 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // never pass: a route is admitted when SOME space the caller reaches grants
   // its permission (the platform's reach: persona and credential ceiling
   // included; an end-user is refused there), and each handler then narrows by
-  // the spaces the caller reads.
+  // the spaces the caller reads. The reach is read once, here, and rides the
+  // context as the request's scope.
   router.use("/api/orgs/:orgId/chat/*", async (c, next) => {
     const orgId = c.req.param("orgId");
     // Set by the org-path context for a member (or pinned by the credential); absent otherwise.
@@ -285,18 +289,21 @@ export function createChatRouter(deps: ChatPlatformDeps) {
         "X-Space-Id",
       );
     }
+    c.set("chatScope", {
+      kind: "organization",
+      reachable: await deps.reachableSpaces(c, orgId),
+    });
     return next();
   });
 
   const reachGuard = (permission: ChatPermission): PermissionGuard => {
     const guard: PermissionGuard = async (c, next) => {
       // The guard type sees the context through its `get` alone; it is the router's own.
-      const reachable = await deps.reachableSpaceIds(
-        c as Context<ChatEnv>,
-        (c as Context<ChatEnv>).get("orgId"),
-        permission,
-      );
-      if (reachable.length === 0) {
+      const scope = (c as Context<ChatEnv>).get("chatScope");
+      if (
+        scope.kind !== "organization" ||
+        spacesHolding(scope.reachable, permission).length === 0
+      ) {
         throw forbidden(`You hold ${permission} in no space of this organization.`);
       }
       return next();
@@ -311,7 +318,9 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       orgId: c.get("orgId"),
       userId: c.get("user").id,
       spaceId: null,
-      readable: await deps.reachableSpaceIds(c, c.get("orgId"), "chat:read"),
+      readable: organizationScope(c).reachable.flatMap((space) =>
+        space.permissions.includes("chat:read") ? [space.id] : [],
+      ),
     }),
   };
 
@@ -391,26 +400,36 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     handlers.stop(organizationMount),
   );
 
-  // GET /api/chat/enforced-skills — names only, from the database: a member
-  // without `skills:read` may call it. Gated like the turn that injects them.
+  // GET …/enforced-skills — names only, from the database: a member without
+  // `skills:read` may call it. Gated like the turn that injects them.
+  const enforcedSkills: SessionHandler = async (c) => {
+    const skills = await listEnforcedSkillRefs(deps, c.get("orgId"), c.get("chatScope"));
+    return c.json({
+      object: "list",
+      data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
+    });
+  };
   router.get(
     "/api/chat/enforced-skills",
     rateLimited(120),
     requireModulePermission("chat", "write"),
-    async (c) => {
-      const skills = await deps.listEnforcedSkills(c.get("orgId"), c.get("space").id);
-      return c.json({
-        object: "list",
-        data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
-      });
-    },
+    enforcedSkills,
+  );
+  router.get(
+    "/api/orgs/:orgId/chat/enforced-skills",
+    rateLimited(120),
+    organizationMount.guard("write"),
+    enforcedSkills,
   );
 
-  // POST /api/chat — the conversational loop (AI SDK UIMessage stream).
+  // POST …/chat — the conversational loop (AI SDK UIMessage stream).
   // 20/min: every call fans out into metered LLM traffic. The server is the
   // single writer of messages (user before inference, assistant on finalize) —
   // there is no client message-write endpoint.
   router.post("/api/chat", rateLimited(20), requireModulePermission("chat", "write"), (c) =>
+    handleChatStream(c, deps),
+  );
+  router.post("/api/orgs/:orgId/chat", rateLimited(20), organizationMount.guard("write"), (c) =>
     handleChatStream(c, deps),
   );
 

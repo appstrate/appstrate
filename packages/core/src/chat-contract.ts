@@ -84,7 +84,6 @@ export type ChatModelResolution =
  */
 export interface ChatAttachmentRequest {
   orgId: string;
-  spaceId: string;
   /** The chat session owner (chat sessions are per dashboard user). */
   userId: string;
   /** Container the materialized file is anchored to (session-scoped ACL). */
@@ -94,13 +93,16 @@ export interface ChatAttachmentRequest {
    */
   uri: string;
   /**
-   * The caller's effective permission set in the space, as the platform auth
-   * pipeline resolved it. It decides how wide a container ACL reads: with
+   * The spaces the attachment may resolve in, each with the caller's effective
+   * permission set there: the session's own space, or for an organization
+   * session every space the caller may chat in. The attachment resolves in the
+   * space its file (or upload) belongs to, which must be one of these; a
+   * permission set decides how wide a container ACL reads there — with
    * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
    * which is what the file gallery the user picked it from already shows;
    * without it only the session owner's own runs.
    */
-  permissions: ReadonlySet<string>;
+  spaces: readonly { id: string; permissions: ReadonlySet<string> }[];
 }
 
 /**
@@ -115,6 +117,8 @@ export interface ResolvedChatAttachment {
   name: string;
   mime: string;
   size: number;
+  /** The space the file belongs to: where it resolved. */
+  spaceId: string;
 }
 
 /** One chat turn's metered usage — inserted as an `llm_usage` row (runId null). */

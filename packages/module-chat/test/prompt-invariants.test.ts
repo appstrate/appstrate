@@ -192,7 +192,7 @@ describe("full persona invariants", () => {
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {
       expect(persona).toMatch(
-        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in this space/,
+        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in the space the failed call named/,
       );
       expect(persona).toContain(
         "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",

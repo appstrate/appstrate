@@ -1101,7 +1101,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: { cookie: "session=abc", "x-org-id": "org_1" },
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1143,7 +1143,7 @@ describe("buildCallerContextBlock", () => {
       {
         origin: "http://127.0.0.1:3000",
         headers: { cookie: "session=abc" },
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         // Strict: the turn holds no `skills:read`, the skills connection still reads.
@@ -1195,7 +1195,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1221,7 +1221,7 @@ describe("buildCallerContextBlock", () => {
       {
         origin: "http://127.0.0.1:3000",
         headers: {},
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         capabilities: caps(BUILDER),
@@ -1252,7 +1252,7 @@ describe("buildCallerContextBlock", () => {
       {
         origin: "http://127.0.0.1:3000",
         headers: {},
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         capabilities: caps(BUILDER),
@@ -1285,7 +1285,7 @@ describe("buildCallerContextBlock", () => {
       {
         origin: "http://127.0.0.1:3000",
         headers: {},
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         capabilities: caps(BUILDER),
@@ -1321,7 +1321,7 @@ describe("buildCallerContextBlock", () => {
       {
         origin: "http://127.0.0.1:3000",
         headers: {},
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         capabilities: caps(BUILDER),
@@ -1354,7 +1354,7 @@ describe("buildCallerContextBlock", () => {
     const readOnlyOut = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1372,7 +1372,7 @@ describe("buildCallerContextBlock", () => {
     await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
@@ -1396,7 +1396,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1420,7 +1420,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps([]),
@@ -1452,7 +1452,7 @@ describe("buildCallerContextBlock", () => {
     const args = {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(NO_AUTHORING),
@@ -1484,7 +1484,7 @@ describe("buildCallerContextBlock", () => {
     const args = {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(NO_AUTHORING),
@@ -1522,7 +1522,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1542,7 +1542,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER.filter((p) => !p.startsWith("skills:"))),
@@ -1560,7 +1560,7 @@ describe("buildCallerContextBlock", () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      spaceId: "spc_1",
+      scope: { kind: "space", spaceId: "spc_1" },
       user,
       deps,
       capabilities: caps(BUILDER),
@@ -1586,7 +1586,7 @@ describe("buildCallerContextBlock", () => {
       blockText(fakeContext({ orgRole: "member" }), {
         origin: "http://127.0.0.1:3000",
         headers: {},
-        spaceId: "spc_1",
+        scope: { kind: "space", spaceId: "spc_1" },
         user,
         deps,
         capabilities: caps(BUILDER),

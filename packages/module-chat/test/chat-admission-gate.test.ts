@@ -86,8 +86,8 @@ function fakeContext(opts: {
   const vars: Record<string, unknown> = {
     orgId: opts.orgId,
     user: opts.user,
-    // What `enterSpaceContext` writes on every `/api/chat/*` route.
-    space: { id: opts.spaceId },
+    // What the space mount writes on every `/api/chat/*` route.
+    chatScope: { kind: "space", spaceId: opts.spaceId },
     principalKind: "user",
     orgRole: "member",
     // A Set, as `enterSpaceContext` writes and `ChatEnv` declares.

@@ -96,22 +96,34 @@ async function resolveReachableSpaces(
 }
 
 /**
+ * The caller's reach for a route that serves the organization as a whole: the
+ * spaces of {@link callerReachableSpaces}, after refusing an end-user — it acts
+ * in its own space only (RBAC spec §7.2), so it is refused before the route
+ * reads any query parameter.
+ */
+export async function reachAcrossSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  if (c.get("principalKind") === "end_user") {
+    throw forbidden("An end-user cannot list across spaces");
+  }
+  return callerReachableSpaces(c, orgId);
+}
+
+/**
  * The preamble of every list spanning the spaces of `orgId`: the caller's
  * reach, kept where the effective set grants one of `permissions` (the list's
  * read permission — the same list its route caps the credential with), as one
  * grant per space. A space reached but not admitting the list contributes no
- * row. An end-user acts in its own space only (RBAC spec §7.2), so it is
- * refused — before the route reads any query parameter.
+ * row.
  */
 export async function readableSpacesAcross(
   c: Context<AppEnv>,
   orgId: string,
   permissions: readonly Permission[],
 ): Promise<SpaceGrant[]> {
-  if (c.get("principalKind") === "end_user") {
-    throw forbidden("An end-user cannot list across spaces");
-  }
-  const reachable = await callerReachableSpaces(c, orgId);
+  const reachable = await reachAcrossSpaces(c, orgId);
   return reachable.flatMap((space) =>
     permissions.some((permission) => space.permissions.has(permission))
       ? [{ spaceId: space.id, permissions: space.permissions }]

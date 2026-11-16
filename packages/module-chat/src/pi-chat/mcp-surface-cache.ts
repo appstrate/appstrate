@@ -2,12 +2,15 @@
 
 /**
  * Keyed completely: the server derives `instructions` and `tools/list` from `permissions`,
- * `ceiling`, `actor.type`, `contextInjected` and the boot-time catalog alone, which for
- * the chat's bearer reduce to the minted list and the URL's `context` (enforced by
- * `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a narrower surface a mid-handshake
- * role change stored under the wider key; tool calls are authorized live regardless.
+ * `ceiling`, `actor.type`, `contextInjected`, the boot-time catalog and, on the organization
+ * endpoint, the caller's reachable spaces (every space-acting tool lists them in its
+ * `space_id`), which for the chat's bearer reduce to the minted list, the URL's `context` and
+ * pin, and those spaces (enforced by `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a
+ * narrower surface a mid-handshake role change stored under the wider key; tool calls are
+ * authorized live regardless.
  */
 
+import type { ReachableSpaceGrant } from "@appstrate/core/module";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 
 export interface PlatformMcpSurface {
@@ -17,13 +20,25 @@ export interface PlatformMcpSurface {
 
 export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 
-/** `permissions` MUST be the list minted into the bearer. The org path segment reaches no descriptor. */
-export function platformMcpSurfaceKey(url: string, permissions: readonly string[]): string {
+/**
+ * `permissions` MUST be the list minted into the bearer. The org and space ids of the path
+ * reach no descriptor; whether it names a space does, and on the organization endpoint
+ * `spaces` (the caller's reach: ids, names, roles and sets) are written into every one.
+ */
+export function platformMcpSurfaceKey(
+  url: string,
+  permissions: readonly string[],
+  spaces: readonly ReachableSpaceGrant[] = [],
+): string {
   const parsed = new URL(url);
   return JSON.stringify([
     parsed.origin,
     parsed.searchParams.get("context"),
+    /\/s\/[^/]+$/.test(parsed.pathname),
     [...new Set(permissions)].sort(),
+    spaces
+      .map((space) => [space.id, space.name, space.role, [...space.permissions].sort()])
+      .sort(([a], [b]) => String(a).localeCompare(String(b))),
   ]);
 }
 
