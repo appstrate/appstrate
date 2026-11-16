@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useId, useMemo, useRef, type ReactNode } from "react";
+import { useState, useEffect, useEffectEvent, useId, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -16,7 +16,8 @@ import {
   CircleSlash2,
   CircleHelp,
   MessageSquareText,
-  Bug,
+  Cog,
+  ChevronRight,
   ScrollText,
   SearchX,
   X,
@@ -32,15 +33,18 @@ import { formatDuration } from "../lib/format-duration";
 import {
   formatTimestamp,
   journalLevel,
-  levelColors,
   filterJournal,
+  journalGroupElapsedMs,
   journalIntegrationIds,
+  journalRows,
   journalType,
   toolLabel,
   JOURNAL_TYPE_VALUES,
   type ExecutionEntry,
   type IntegrationLook,
+  type JournalGroup,
   type JournalIntegrations,
+  type JournalRow,
   type JournalTypeFilter,
   type ToolExecutionEntry,
   type ToolExecutionStatus,
@@ -67,27 +71,45 @@ import { useFillHeight } from "../hooks/use-fill-height";
 /** From this width the inspector stands beside the list; below, it opens in a sheet. */
 const INSPECTOR_BESIDE = "(min-width: 1024px)";
 
-const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
-  debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
-  info: { icon: Info, className: "text-primary", label: "INFO" },
-  warn: { icon: AlertTriangle, className: "text-warning", label: "WARN" },
-  error: { icon: XCircle, className: "text-destructive", label: "ERROR" },
-};
+interface EntryLook {
+  icon: typeof Info;
+  /** The icon's colour. */
+  className: string;
+  /** The event's colour, when it is not the foreground's. */
+  text?: string;
+}
 
-function ExecutionEntryIcon({ entry }: { entry: ExecutionEntry }) {
-  if (entry.kind === "agent") {
-    return <MessageSquareText className="text-primary size-3.5" />;
-  }
-  if (entry.kind === "runtime" && (!entry.level || entry.level === "debug")) {
-    return <span className="bg-primary size-1.5 rounded-full opacity-60" />;
-  }
+/** A row's icon and tone by type; a warning or an error overrides them on any type. */
+const ENTRY_LOOKS = {
+  agent: { icon: MessageSquareText, className: "text-primary" },
+  log: { icon: Info, className: "text-primary" },
+  runtime: { icon: Cog, className: "text-muted-foreground", text: "text-muted-foreground" },
+  warn: { icon: AlertTriangle, className: "text-warning", text: "text-amber-400" },
+  error: { icon: XCircle, className: "text-destructive", text: "text-destructive" },
+} satisfies Record<Exclude<ExecutionEntry["kind"], "tool"> | "warn" | "error", EntryLook>;
 
-  const config = levelIconConfig[entry.level ?? "debug"] ?? levelIconConfig.debug!;
-  const Icon = config.icon;
-  return (
-    <Icon className={cn("size-3.5", config.className)} role="img" aria-label={config.label}>
-      <title>{config.label}</title>
-    </Icon>
+/** A tool call has no look of its own while it is fine: its status icon stands for it. */
+function entryLook(entry: ExecutionEntry): EntryLook | undefined {
+  const level = journalLevel(entry);
+  if (level !== "info") return ENTRY_LOOKS[level];
+  return entry.kind === "tool" ? undefined : ENTRY_LOOKS[entry.kind];
+}
+
+/** A row's leading icon: a tool's status, else its look. It speaks a level, never the type. */
+function EntryIcon({ entry }: { entry: ExecutionEntry }) {
+  const { t } = useTranslation("agents");
+  if (entry.kind === "tool") return <ToolStatus status={entry.status} />;
+  const level = journalLevel(entry);
+  const look = entryLook(entry)!;
+  const Icon = look.icon;
+  return level === "info" ? (
+    <Icon className={cn("size-3.5", look.className)} aria-hidden />
+  ) : (
+    <Icon
+      className={cn("size-3.5", look.className)}
+      role="img"
+      aria-label={t(`log.level.${level}`)}
+    />
   );
 }
 
@@ -315,35 +337,26 @@ export function LogRow({
   onToggle: () => void;
 }) {
   const { t, i18n } = useTranslation("agents");
-  const duration =
-    entry.kind === "tool" && entry.durationMs !== undefined
-      ? formatDuration(entry.durationMs)
-      : null;
-  const time = showTimestamp ? formatTimestamp(entry.createdAt, i18n.language) : null;
   return (
-    <button
-      type="button"
-      className={cn(
-        "hover:bg-muted/50 flex w-full cursor-pointer items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors",
-        open && "bg-muted/40",
-      )}
+    <RowShell
+      icon={<EntryIcon entry={entry} />}
+      expanded={open}
+      controls={open ? inspectorId : undefined}
       onClick={onToggle}
-      aria-expanded={open}
-      aria-controls={open ? inspectorId : undefined}
+      className={cn(open && "bg-muted/40")}
+      duration={
+        entry.kind === "tool" && entry.durationMs !== undefined
+          ? formatDuration(entry.durationMs)
+          : null
+      }
+      time={showTimestamp ? formatTimestamp(entry.createdAt, i18n.language) : null}
     >
       <span className="sr-only">{t(`log.type.${journalType(entry)}`)}</span>
-      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
-        {entry.kind === "tool" ? (
-          <ToolStatus status={entry.status} />
-        ) : (
-          <ExecutionEntryIcon entry={entry} />
-        )}
-      </span>
       <span
         className={cn(
           "text-foreground min-w-0 flex-1",
           entry.kind === "tool" ? "flex items-center gap-1.5" : "break-words whitespace-pre-wrap",
-          entry.level && levelColors[entry.level],
+          entryLook(entry)?.text,
         )}
       >
         {entry.kind === "tool" ? (
@@ -352,6 +365,77 @@ export function LogRow({
           entry.message
         )}
       </span>
+    </RowShell>
+  );
+}
+
+/** A group of runner lines: one disclosure row that opens them in place, below it. */
+export function LogGroupRow({
+  group,
+  showTimestamp,
+  expanded,
+  onToggle,
+}: {
+  group: JournalGroup;
+  showTimestamp: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t, i18n } = useTranslation("agents");
+  const elapsed = journalGroupElapsedMs(group);
+  const look = ENTRY_LOOKS.runtime;
+  return (
+    <RowShell
+      icon={<look.icon className={cn("size-3.5", look.className)} aria-hidden />}
+      expanded={expanded}
+      onClick={onToggle}
+      duration={elapsed > 0 ? formatDuration(elapsed) : null}
+      time={showTimestamp ? formatTimestamp(group.entries[0]?.createdAt, i18n.language) : null}
+    >
+      <span className={cn("flex min-w-0 flex-1 items-center gap-1.5", look.text)}>
+        <span className="truncate">{t("log.systemSteps", { count: group.entries.length })}</span>
+        <ChevronRight
+          className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")}
+          aria-hidden
+        />
+      </span>
+    </RowShell>
+  );
+}
+
+/** A journal line: its leading icon, the event, then its duration and its time when present. */
+function RowShell({
+  icon,
+  expanded,
+  controls,
+  onClick,
+  className,
+  duration,
+  time,
+  children,
+}: {
+  icon: ReactNode;
+  expanded: boolean;
+  controls?: string;
+  onClick: () => void;
+  className?: string;
+  duration: string | null;
+  time: string | null;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "hover:bg-muted/50 flex w-full cursor-pointer items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors",
+        className,
+      )}
+      onClick={onClick}
+      aria-expanded={expanded}
+      aria-controls={controls}
+    >
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center">{icon}</span>
+      {children}
       {(duration || time) && (
         <span className="text-muted-foreground flex shrink-0 gap-3 text-xs leading-5 whitespace-nowrap tabular-nums">
           {duration && <span>{duration}</span>}
@@ -466,6 +550,46 @@ export function LogViewer({
       typeFilters,
     ],
   );
+  const rows = useMemo(
+    () =>
+      journalRows(visibleEntries, {
+        levels: levelFilters,
+        types: typeFilters,
+        query: normalizedQuery,
+      }),
+    [levelFilters, normalizedQuery, typeFilters, visibleEntries],
+  );
+  // A group is folded until opened. A live run's last group is still booting: it opens as its
+  // lines arrive and stays as the reader left it, so no row ever folds under them.
+  const [groupOpen, setGroupOpen] = useState<Readonly<Record<string, boolean>>>({});
+  const tail = rows[rows.length - 1];
+  if (live && tail?.kind === "group" && groupOpen[tail.id] === undefined) {
+    setGroupOpen({ ...groupOpen, [tail.id]: true });
+  }
+  // A folded group holding the open row (a reload, a shared link) opens to show it.
+  const selectedGroupId =
+    rows.find(
+      (row) =>
+        row.kind === "group" &&
+        !groupOpen[row.id] &&
+        row.entries.some((entry) => entry.id === selectedEntryId),
+    )?.id ?? null;
+  const drawnRows = useMemo(
+    () =>
+      rows.flatMap((row): JournalRow[] =>
+        row.kind === "group" && (groupOpen[row.id] || row.id === selectedGroupId)
+          ? [row, ...row.entries]
+          : [row],
+      ),
+    [groupOpen, rows, selectedGroupId],
+  );
+  const toggleGroup = (group: JournalGroup, expanded: boolean) => {
+    setGroupOpen((open) => ({ ...open, [group.id]: !expanded }));
+    // Folding hides the open row: its inspector closes with it.
+    if (expanded && group.entries.some((entry) => entry.id === selectedEntryId)) {
+      onSelectEntry(null);
+    }
+  };
   const availableLevels = (["info", "warn", "error"] as const).filter((value) =>
     entries.some((entry) => journalLevel(entry) === value),
   );
@@ -515,7 +639,7 @@ export function LogViewer({
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
-    count: visibleEntries.length,
+    count: drawnRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 40,
     overscan: 10,
@@ -525,32 +649,36 @@ export function LogViewer({
     positionedRef.current = false;
   }, [integrationFilters, levelFilters, normalizedQuery, showTools, typeFilters]);
 
+  // Read by the first positioning, not depended on: choosing a row does not move the list.
+  const openRowIndex = useEffectEvent((rows: readonly JournalRow[]) =>
+    selectedEntryId ? rows.findIndex((row) => row.id === selectedEntryId) : -1,
+  );
+
   // Auto-scroll when entries are added OR a running tool row settles in place.
   useEffect(() => {
-    if (visibleEntries.length === 0) return;
+    if (drawnRows.length === 0) return;
     if (!positionedRef.current) {
       // The open row (a reload, a shared link) first, then the causal error, else the end.
-      let anchor = selectedEntryId
-        ? visibleEntries.findIndex((entry) => entry.id === selectedEntryId)
-        : -1;
+      let anchor = openRowIndex(drawnRows);
       if (anchor < 0 && focusError) {
-        for (let index = visibleEntries.length - 1; index >= 0; index -= 1) {
-          if (journalLevel(visibleEntries[index]!) === "error") {
+        for (let index = drawnRows.length - 1; index >= 0; index -= 1) {
+          const row = drawnRows[index]!;
+          if (row.kind !== "group" && journalLevel(row) === "error") {
             anchor = index;
             break;
           }
         }
       }
-      virtualizer.scrollToIndex(anchor >= 0 ? anchor : visibleEntries.length - 1, {
+      virtualizer.scrollToIndex(anchor >= 0 ? anchor : drawnRows.length - 1, {
         align: anchor >= 0 ? "center" : "end",
       });
       positionedRef.current = true;
       return;
     }
     if (autoScroll) {
-      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+      virtualizer.scrollToIndex(drawnRows.length - 1, { align: "end" });
     }
-  }, [visibleEntries, autoScroll, focusError, selectedEntryId, virtualizer]);
+  }, [drawnRows, autoScroll, focusError, virtualizer]);
 
   // Disable auto-scroll when user scrolls up
   useEffect(() => {
@@ -589,8 +717,8 @@ export function LogViewer({
 
   const followLatest = () => {
     setAutoScroll(true);
-    if (visibleEntries.length > 0) {
-      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+    if (drawnRows.length > 0) {
+      virtualizer.scrollToIndex(drawnRows.length - 1, { align: "end" });
     }
   };
 
@@ -679,11 +807,12 @@ export function LogViewer({
                 }}
               >
                 {virtualizer.getVirtualItems().map((virtualRow) => {
-                  const entry = visibleEntries[virtualRow.index]!;
-                  const open = selectedEntryId === entry.id;
+                  const row = drawnRows[virtualRow.index]!;
+                  const open = selectedEntryId === row.id;
+                  const expanded = !!groupOpen[row.id] || row.id === selectedGroupId;
                   return (
                     <div
-                      key={entry.id}
+                      key={row.id}
                       data-index={virtualRow.index}
                       ref={virtualizer.measureElement}
                       style={{
@@ -694,14 +823,23 @@ export function LogViewer({
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                     >
-                      <LogRow
-                        entry={entry}
-                        integrations={integrations}
-                        showTimestamp={showTimestamps}
-                        open={open}
-                        inspectorId={inspectorId}
-                        onToggle={() => onSelectEntry(open ? null : entry.id)}
-                      />
+                      {row.kind === "group" ? (
+                        <LogGroupRow
+                          group={row}
+                          showTimestamp={showTimestamps}
+                          expanded={expanded}
+                          onToggle={() => toggleGroup(row, expanded)}
+                        />
+                      ) : (
+                        <LogRow
+                          entry={row}
+                          integrations={integrations}
+                          showTimestamp={showTimestamps}
+                          open={open}
+                          inspectorId={inspectorId}
+                          onToggle={() => onSelectEntry(open ? null : row.id)}
+                        />
+                      )}
                     </div>
                   );
                 })}

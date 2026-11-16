@@ -34,16 +34,8 @@ export function RunExecutionView({
   // Read here once, for the list and the inspector alike.
   const integrations = useJournalIntegrations(logs);
 
-  const selectEntry = (entryId: string | null) => {
-    if (entryId === null) {
-      entryParam.close();
-      return;
-    }
-    // One click, one history entry: a selection reported twice before the URL re-renders
-    // finds it already written.
-    if (new URLSearchParams(window.location.search).get(ENTRY_PARAM) === entryId) return;
-    entryParam.open(entryId);
-  };
+  const selectEntry = (entryId: string | null) =>
+    entryId === null ? entryParam.close() : entryParam.open(entryId);
 
   // Laid on the page like every list tab: the viewer draws its toolbar, then its own card
   // holding the event list and, when a row is open, the inspector.
@@ -64,7 +56,7 @@ export function RunExecutionView({
           <LogEntryInspector
             entry={selectedEntry}
             integrations={integrations}
-            onClose={() => selectEntry(null)}
+            onClose={entryParam.close}
           />
         )
       }

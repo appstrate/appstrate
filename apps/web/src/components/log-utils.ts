@@ -481,6 +481,63 @@ export function filterJournal(
   });
 }
 
+/** Consecutive lines of the runner, drawn as one row that opens in place. */
+export interface JournalGroup {
+  kind: "group";
+  /** Its first entry's id, which later lines of the run do not change. */
+  id: string;
+  entries: ExecutionEntry[];
+}
+
+/** What the journal draws on one line: an entry, or a group of them. */
+export type JournalRow = ExecutionEntry | JournalGroup;
+
+function foldable(entry: ExecutionEntry): boolean {
+  return entry.kind === "runtime" && journalLevel(entry) === "info";
+}
+
+/**
+ * The rows the journal draws from its filtered entries: each run of two or more consecutive
+ * `runtime` entries of level info or debug is one group (a warning or an error stays a row of
+ * its own and ends the run). A search or a level or type filter in force folds nothing: the
+ * reader is looking for lines.
+ */
+export function journalRows(
+  entries: readonly ExecutionEntry[],
+  filters: Pick<JournalFilters, "levels" | "types" | "query">,
+): JournalRow[] {
+  if (filters.query || filters.levels.length > 0 || filters.types.length > 0) return [...entries];
+  const rows: JournalRow[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    let end = index;
+    while (end < entries.length && foldable(entries[end]!)) end += 1;
+    if (end - index >= 2) {
+      rows.push({
+        kind: "group",
+        id: `group:${entries[index]!.id}`,
+        entries: entries.slice(index, end),
+      });
+      index = end;
+    } else {
+      rows.push(entries[index]!);
+      index += 1;
+    }
+  }
+  return rows;
+}
+
+function timeOf(value: Date | string | null | undefined): number {
+  return value ? new Date(value).getTime() : Number.NaN;
+}
+
+/** The time between a group's first and last lines, 0 when either was not dated. */
+export function journalGroupElapsedMs(group: JournalGroup): number {
+  const { entries } = group;
+  const elapsed = timeOf(entries[entries.length - 1]?.createdAt) - timeOf(entries[0]?.createdAt);
+  return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
+}
+
 /** The tools the runner itself offers the model (`@appstrate/runner-pi` harness tools). */
 const HARNESS_TOOL_LABELS = new Map([
   ["output", "log.harness.output"],
@@ -534,9 +591,3 @@ export function formatTimestamp(d: Date | string | null | undefined, lang: strin
     return "\u2014";
   }
 }
-
-/** Text color by severity level (overrides type color when set). */
-export const levelColors: Record<string, string> = {
-  warn: "text-amber-400",
-  error: "text-destructive",
-};

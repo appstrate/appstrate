@@ -532,6 +532,8 @@
   "log.type.tool": "Outil",
   "log.type.journal": "Journal",
   "log.type.system": "Système",
+  "log.systemSteps_one": "{{count}} étape système",
+  "log.systemSteps_other": "{{count}} étapes système",
   "log.noMatches": "Aucun log correspondant",
   "log.noMatchesHint": "Modifiez la recherche ou effacez les filtres pour retrouver les autres événements.",
   "log.empty": "Aucun événement dans ce journal",

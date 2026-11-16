@@ -6,18 +6,24 @@
  * draws its type as an icon and says it to assistive technology, its metadata
  * after the event. A tool row is named by the integration tool it reached, and
  * the inspector reads a call of the platform's `recall_memory` as the memories
- * it returned.
+ * it returned. The runner's consecutive lines read as one disclosure row.
  */
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import type { ExecutionEntry, JournalIntegrations, ToolExecutionEntry } from "../log-utils.ts";
+import type {
+  ExecutionEntry,
+  JournalGroup,
+  JournalIntegrations,
+  ToolExecutionEntry,
+} from "../log-utils.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { LogEntryInspector, LogRow, LogViewer, ToolCallEvent } = await import("../log-viewer.tsx");
+const { LogEntryInspector, LogGroupRow, LogRow, LogViewer, ToolCallEvent } =
+  await import("../log-viewer.tsx");
 const { formatTimestamp } = await import("../log-utils.ts");
 const { formatDuration } = await import("../../lib/format-duration.ts");
 const { render } = await import("../../test/render.tsx");
@@ -142,6 +148,42 @@ describe("LogRow — one event per line", () => {
     expect(open).toContain('aria-expanded="true"');
     expect(open).toContain('aria-controls="journal-inspector"');
     expect(open).not.toContain("aria-pressed");
+  });
+});
+
+describe("LogGroupRow — the runner's lines folded into one row", () => {
+  const step = (id: string, at: string): ExecutionEntry => ({
+    id,
+    kind: "runtime",
+    level: "info",
+    message: id,
+    sourceType: "progress",
+    createdAt: at,
+  });
+  const group: JournalGroup = {
+    kind: "group",
+    id: "group:a",
+    entries: [
+      step("a", "2026-07-01T10:00:00.000Z"),
+      step("b", "2026-07-01T10:00:01.000Z"),
+      step("c", "2026-07-01T10:00:03.000Z"),
+    ],
+  };
+  const row = (expanded: boolean) =>
+    render(
+      <LogGroupRow group={group} showTimestamp={false} expanded={expanded} onToggle={() => {}} />,
+    );
+
+  it("counts its lines, and says whether they are shown", () => {
+    const html = row(false);
+    expect(html).toContain("3 étapes système");
+    expect(html).toContain('aria-expanded="false"');
+    expect(row(true)).toContain('aria-expanded="true"');
+  });
+
+  it("puts the time its lines took after the label", () => {
+    const html = row(false);
+    expect(html.indexOf(formatDuration(3000))).toBeGreaterThan(html.indexOf("3 étapes système"));
   });
 });
 
