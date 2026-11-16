@@ -44,23 +44,32 @@ function ColumnHeader({ label }: { label: string }) {
   );
 }
 
-/** The last row of a column, under its list: where one more of what it lists is created. */
+/**
+ * The last row of a column, under its list: where one more of what it lists is created.
+ * `onPick` replaces the link's own navigation, for a creation that changes organization first.
+ */
 function AddRow({
   to,
   state,
   label,
   onNavigate,
+  onPick,
 }: {
   to: string;
   state?: unknown;
   label: string;
   onNavigate: () => void;
+  onPick?: () => void;
 }) {
   return (
     <Link
       to={to}
       state={state}
-      onClick={onNavigate}
+      onClick={(event) => {
+        if (!onPick) return onNavigate();
+        event.preventDefault();
+        onPick();
+      }}
       className="text-muted-foreground hover:bg-accent hover:text-foreground mt-1 flex items-center gap-2.5 rounded-md border-t p-2 text-sm"
     >
       <span className="flex size-6 shrink-0 items-center justify-center">
@@ -134,6 +143,9 @@ function OverviewTile({ className }: { className?: string }) {
     </span>
   );
 }
+
+/** Where a space is created: the organization's spaces settings, its creation dialog open. */
+const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
 
 /** A column's rows: it scrolls past eight of them, under a header that stays. */
 const LIST_BOX = "max-h-80 overflow-y-auto";
@@ -217,6 +229,16 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         switchOrg(exploredId);
         navigate("/");
       } else if (!holdsOverview(routeOf(pathname))) navigate("/");
+      closeSwitcherAndSidebar();
+    });
+  const maySpaceWrite = isExploringElsewhere
+    ? !!orgs.find((org) => org.id === exploredId)?.permissions.includes("spaces:write")
+    : can("spaces:write");
+  /** « Nouvel espace » of another organization: switch there, then open its creation. */
+  const createSpaceElsewhere = () =>
+    requestScopeChange(() => {
+      if (exploredId) switchOrg(exploredId);
+      navigate(NEW_SPACE_ADDRESS);
       closeSwitcherAndSidebar();
     });
   const overviewLabel = t("overview.title");
@@ -457,14 +479,15 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   })}
                 </div>
               )}
-              {/* Adding a workspace lands in the CURRENT org's settings, so it is offered only
-                  while you are looking at your own — elsewhere it would create it in the wrong
-                  place. Creating is `spaces:write`. */}
-              {!isExploringElsewhere && can("spaces:write") && (
+              {/* Adding a workspace happens in the settings of the organization being explored:
+                  in another one, the pick switches there first. Creating is `spaces:write`,
+                  an organization-level permission the org listing carries. */}
+              {maySpaceWrite && (
                 <AddRow
-                  to={`/org-settings/spaces?${NEW_SPACE_PARAM}=1`}
+                  to={NEW_SPACE_ADDRESS}
                   label={t("spaces.create", { ns: "settings" })}
                   onNavigate={closeSwitcherAndSidebar}
+                  onPick={isExploringElsewhere ? createSpaceElsewhere : undefined}
                 />
               )}
             </div>
