@@ -35,7 +35,7 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
-import { useViewer } from "../../hooks/use-auth";
+import { useViewer } from "../../hooks/use-viewer";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";

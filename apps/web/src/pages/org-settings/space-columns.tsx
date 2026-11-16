@@ -27,7 +27,7 @@ import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { spaceLabel } from "../../lib/space-label";
 import { spaceTile } from "../../lib/identity-tile-props";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
-import { useViewer } from "../../hooks/use-auth";
+import { useViewer } from "../../hooks/use-viewer";
 
 export interface SpaceRow {
   id: string;

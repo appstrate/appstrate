@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
-import { useViewer } from "../hooks/use-auth";
+import { useViewer } from "../hooks/use-viewer";
 import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel } from "../lib/space-label";
