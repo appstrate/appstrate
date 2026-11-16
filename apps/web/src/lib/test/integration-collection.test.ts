@@ -35,6 +35,7 @@ function integration({
     home_shareable: false,
     source_kind: sourceKind,
     server: sourceKind === "local" ? { type: "node", entry_point: "server/index.js" } : null,
+    authenticated: true,
   };
 }
 

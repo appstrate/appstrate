@@ -1949,7 +1949,7 @@ export const schemas = {
   OrgPackageItem: ORG_PACKAGE_ITEM_SCHEMA,
   IntegrationIndexItem: {
     ...ORG_PACKAGE_ITEM_SCHEMA,
-    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server"],
+    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server", "authenticated"],
     properties: {
       ...ORG_PACKAGE_ITEM_SCHEMA.properties,
       source_kind: {
@@ -1970,6 +1970,11 @@ export const schemas = {
         },
         description:
           "`source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source.",
+      },
+      authenticated: {
+        type: "boolean",
+        description:
+          "Whether the integration declares `auths`. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection.",
       },
     },
   },
