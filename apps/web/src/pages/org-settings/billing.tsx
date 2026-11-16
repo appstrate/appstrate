@@ -3,7 +3,7 @@
 import { Card } from "@appstrate/ui/components/card";
 import { Alert } from "@appstrate/ui/components/alert";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, CreditCard } from "lucide-react";
+import { CreditCard } from "lucide-react";
 import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -219,17 +219,13 @@ function BillingOverview() {
 
       {billing.status === "past_due" && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle />
           <AlertTitle>{t("billing.pastDueWarning")}</AlertTitle>
-          <AlertDescription className="text-muted-foreground">
-            {t("billing.pastDueDescription")}
-          </AlertDescription>
+          <AlertDescription>{t("billing.pastDueDescription")}</AlertDescription>
         </Alert>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle />
           <AlertTitle>
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
           </AlertTitle>

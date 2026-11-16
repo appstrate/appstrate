@@ -169,9 +169,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
-   (`packages/ui`; variants `destructive`, `warning`, `info`, `success`), its
-   icon on the first line of text; a button inside it sits on that first line
-   (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
+   (`packages/ui`) — see § 8 « Notice »; its button goes in `action`. What _happened_ (a run's failure, an integration that lost its
    connection mid-run, files not saved) is never a band: it opens the run's
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
 4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
@@ -639,6 +637,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `packages/ui` `Badge`: `ScheduleStatusBadge`, `ModelUnavailableBadge`,
   `HealthIssueBadge`. The status tones (`success`, `warning`, `running`, `pending`, `failed`…) are variants
   of the `packages/ui` `Badge`, and `info` / `warning` / `success` of `Alert`: no wrapper.
+- **Notice**: every inline notice is the `packages/ui` `Alert` — never a hand-built
+  tinted `div`. One anatomy: the tone's icon (drawn by `Alert`; `icon` swaps it,
+  `icon={false}` drops it), the text (`AlertTitle` over `AlertDescription`, or a
+  description alone, which then reads in the foreground colour), and at most one
+  control in `action`, centred at the end of the row. Tones: `default` (neutral:
+  a role limit, a fact), `info`, `warning`, `destructive`, `success`; the tone
+  tints the surface, border and icon, never the text. `size="sm"` inside a form
+  or a dialog. A static fact passes `role="note"` (`RoleLimitNotice`).
   `MetaBadge` (same file) is the outline badge that says WHAT
   a row is (Inline, Supprimé), not how it ended. A version is a `secondary` badge
   with `font-mono`; an agent whose working copy differs from its last published

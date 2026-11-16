@@ -251,11 +251,9 @@ export function SharePackageDialog({
           <Alert
             variant="warning"
             data-testid="share-needs-version"
-            className="bg-warning/10 mt-2 rounded-md p-3"
-          >
-            <AlertDescription className="flex flex-col items-start gap-2">
-              <p>{t("packages.shareNeedsVersion")}</p>
-              {canPublish ? (
+            className="mt-2"
+            action={
+              canPublish && (
                 <PendingButton
                   type="button"
                   size="sm"
@@ -265,7 +263,12 @@ export function SharePackageDialog({
                 >
                   {t("packages.sharePublishAndShare")}
                 </PendingButton>
-              ) : (
+              )
+            }
+          >
+            <AlertDescription>
+              <p>{t("packages.shareNeedsVersion")}</p>
+              {!canPublish && (
                 <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
               )}
             </AlertDescription>

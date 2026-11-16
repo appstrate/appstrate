@@ -10,7 +10,6 @@
 import { Alert } from "@appstrate/ui/components/alert";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -100,7 +99,6 @@ function DocumentsCollection({
 
       {overLimit && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle size={16} />
           <AlertDescription>{t("storage.limitReached")}</AlertDescription>
         </Alert>
       )}

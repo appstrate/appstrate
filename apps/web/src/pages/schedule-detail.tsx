@@ -123,21 +123,24 @@ export function ScheduleDetailPage() {
             blocks it. A lost connection is repaired in the form's connection
             choice, so the alert opens it. */}
         {disabledReason && (
-          <Alert variant="warning" className="mb-4">
-            <Pause aria-hidden />
-            <AlertDescription className="flex items-start justify-between gap-3">
-              <span className="min-w-0">{disabledReason}</span>
-              {mayWrite && schedule.disabled_reason?.startsWith("connection_") && (
+          <Alert
+            variant="warning"
+            icon={Pause}
+            className="mb-4"
+            action={
+              mayWrite &&
+              schedule.disabled_reason?.startsWith("connection_") && (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="-my-1.5 shrink-0"
                   onClick={() => navigate(scheduleSettingsHref(schedule.id, "connections"))}
                 >
                   {t("schedule.chooseConnections")}
                 </Button>
-              )}
-            </AlertDescription>
+              )
+            }
+          >
+            <AlertDescription>{disabledReason}</AlertDescription>
           </Alert>
         )}
         <DetailTabPanel value="runs">

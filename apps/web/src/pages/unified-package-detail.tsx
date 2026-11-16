@@ -103,7 +103,6 @@ function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentMo
 
   return (
     <Alert variant="destructive" className="mb-4">
-      <TriangleAlert className="h-4 w-4" />
       <AlertTitle>{t(copy.title)}</AlertTitle>
       {/* Only `models:write` can act on it (POST /api/models, PUT /api/models/default). */}
       <AlertDescription>
