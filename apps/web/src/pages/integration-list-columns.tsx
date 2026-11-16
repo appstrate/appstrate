@@ -12,7 +12,9 @@ import { useOrg } from "../hooks/use-org";
 
 /**
  * One comparable integration fact per column. `connectionCounts` is the caller's own connections
- * per integration here (`useConnectionCounts`); `undefined` while unknown, drawn as « — ».
+ * per integration here (`useConnectionCounts`); `undefined` while unknown, when the cell stays
+ * empty. An integration that binds no connection (`authenticated: false`) has no count at all,
+ * drawn « — » like every other fact that does not apply.
  */
 export function useIntegrationListColumns(
   connectionCounts?: ReadonlyMap<string, number>,
@@ -44,10 +46,19 @@ export function useIntegrationListColumns(
       width: 112,
       align: "end",
       cell: (integration) => {
-        const count = connectionCounts && (connectionCounts.get(integration.id) ?? 0);
+        if (!integration.authenticated) {
+          return (
+            <span className="text-muted-foreground" title={t("integrations.connectionNotRequired")}>
+              <span aria-hidden>—</span>
+              <span className="sr-only">{t("integrations.connectionNotRequired")}</span>
+            </span>
+          );
+        }
+        if (!connectionCounts) return null;
+        const count = connectionCounts.get(integration.id) ?? 0;
         return (
           <span className={count ? "tabular-nums" : "text-muted-foreground tabular-nums"}>
-            {count ?? "—"}
+            {count}
           </span>
         );
       },

@@ -15,6 +15,7 @@ import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
 import {
   getIntegrationSourceKind,
   getLocalServer,
+  isUnauthenticatedIntegration,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import {
@@ -275,12 +276,15 @@ export async function updateOrgItem(
  * reaches its service (`source.kind`) and, for a local one, the server it
  * carries (`source.server`: runtime type + entry point). A source that is neither `local` nor `remote` has no MCP
  * backing, which is what `none` states and what the runtime does with it.
+ * `authenticated` is false for an integration that declares no `auths` (AFPS §7.2): it binds no
+ * connection, so the index has no connection count to draw for it.
  */
 function integrationIndexFields(manifest: IntegrationManifest) {
   const server = getLocalServer(manifest);
   return {
     source_kind: getIntegrationSourceKind(manifest) ?? "none",
     server: server ? { type: server.type, entry_point: server.entry_point } : null,
+    authenticated: !isUnauthenticatedIntegration(manifest),
   };
 }
 

@@ -174,7 +174,8 @@ export function IntegrationsPage() {
               meta={
                 <>
                   <IntegrationSourceLabel source={integration.source_kind} />
-                  {connectionCounts && (
+                  {/* An integration that binds no connection has no count to give. */}
+                  {integration.authenticated && connectionCounts && (
                     <>
                       <span aria-hidden>·</span>
                       <span className="shrink-0">
