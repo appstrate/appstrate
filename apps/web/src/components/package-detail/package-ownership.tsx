@@ -2,7 +2,7 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Info } from "lucide-react";
+import { GitFork } from "lucide-react";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import type { PackageType } from "@appstrate/core/validation";
@@ -45,7 +45,6 @@ export function PackageOwnershipNotice({
       )}
       {!isOwned && type !== "agent" && (
         <Alert variant="info" className="mb-4">
-          <Info />
           <AlertDescription className="flex flex-wrap items-center gap-x-3">
             <span>{t("ownership.readOnly")}</span>
             {origin}
@@ -53,9 +52,9 @@ export function PackageOwnershipNotice({
         </Alert>
       )}
       {isOwned && origin && (
-        <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-          {origin}
-        </div>
+        <Alert role="note" icon={GitFork} className="mb-4">
+          <AlertDescription>{origin}</AlertDescription>
+        </Alert>
       )}
     </>
   );

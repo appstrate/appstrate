@@ -9,7 +9,7 @@
  * one not shared to the reader's space would 404. A skill also carries a per-space
  * `chat_enforced` switch.
  */
-import { Alert } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,7 +28,6 @@ import {
   Wrench,
 } from "lucide-react";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
-import { AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -93,36 +92,6 @@ function inputNames(detail: AgentDetail): string[] {
   const properties = schema?.properties ?? {};
   const order = detail.input?.property_order ?? Object.keys(properties);
   return order.map((key) => properties[key]?.title ?? key);
-}
-
-/** An alert with its icon, a title over a muted line, and at most one action on the right. */
-function BannerAlert({
-  variant,
-  className,
-  icon,
-  title,
-  body,
-  action,
-}: {
-  variant: "info" | "warning";
-  className: string;
-  icon: ReactNode;
-  title: string;
-  body: string;
-  action: ReactNode;
-}) {
-  return (
-    <Alert variant={variant} className={className}>
-      {icon}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <AlertTitle>{title}</AlertTitle>
-          <p className="text-muted-foreground mt-0.5 text-xs">{body}</p>
-        </div>
-        {action}
-      </div>
-    </Alert>
-  );
 }
 
 /** One fact about the package: icon and label on the left, value on the right. */
@@ -390,15 +359,10 @@ export function CataloguePreview({
       {/* A version read by address is not the one the spaces run: say so, and
           offer the way back, rather than leave the reader to infer it from a badge. */}
       {(pinState === "missing" || pinState === "behind") && (
-        <BannerAlert
+        <Alert
           variant={pinState === "missing" ? "warning" : "info"}
+          icon={History}
           className="mt-4"
-          icon={<History className="h-4 w-4" />}
-          title={t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
-          body={t(PINNED_ALERT_KEYS[pinState].body, {
-            version: pinnedVersion,
-            latest: versionInfo?.latest_published_version,
-          })}
           action={
             onUnpin && (
               <Button variant="outline" size="sm" onClick={onUnpin}>
@@ -406,7 +370,17 @@ export function CataloguePreview({
               </Button>
             )
           }
-        />
+        >
+          <AlertTitle>
+            {t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
+          </AlertTitle>
+          <AlertDescription>
+            {t(PINNED_ALERT_KEYS[pinState].body, {
+              version: pinnedVersion,
+              latest: versionInfo?.latest_published_version,
+            })}
+          </AlertDescription>
+        </Alert>
       )}
 
       {description && <p className="mt-4 text-sm">{description}</p>}

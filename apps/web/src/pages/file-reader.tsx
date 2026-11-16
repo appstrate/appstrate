@@ -73,8 +73,7 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
         />
       )}
       {file?.preview_kind === "html" && (
-        <Alert variant="warning">
-          <ShieldAlert size={16} />
+        <Alert variant="warning" icon={ShieldAlert}>
           <AlertDescription>{t("reader.htmlNotice")}</AlertDescription>
         </Alert>
       )}

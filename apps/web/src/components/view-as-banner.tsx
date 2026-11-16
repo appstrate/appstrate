@@ -6,7 +6,8 @@ import { useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Alert } from "@appstrate/ui/components/alert";
+import { Eye } from "lucide-react";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -82,14 +83,20 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   return (
     <Alert
       variant="warning"
+      icon={Eye}
       data-testid="view-as-banner"
       className={cn(
-        "flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-2",
+        "shrink-0 rounded-none border-x-0 border-t-0 py-2",
         // In an overlay the band runs under the dialog's close button.
         inOverlay && "pr-14",
       )}
+      action={
+        <Button variant="outline" size="sm" onClick={exit}>
+          {t("viewAs.exit")}
+        </Button>
+      }
     >
-      <span className="min-w-64 flex-1">
+      <AlertDescription>
         <Trans
           t={t}
           i18nKey={key}
@@ -119,11 +126,8 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
           </>
         )}
         {noSpace && <> {t("viewAs.bannerNoSpace")}</>}
-        <span className="block text-xs font-normal opacity-80">{t("viewAs.bannerOwn")}</span>
-      </span>
-      <Button variant="outline" size="sm" onClick={exit}>
-        {t("viewAs.exit")}
-      </Button>
+        <span className="text-muted-foreground block text-xs">{t("viewAs.bannerOwn")}</span>
+      </AlertDescription>
     </Alert>
   );
 }

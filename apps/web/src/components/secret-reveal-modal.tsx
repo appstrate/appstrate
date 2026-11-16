@@ -31,7 +31,7 @@ export function SecretRevealModal({ onClose, title, secret, warning, children, c
       className={className}
       actions={<Button onClick={onClose}>{t("btn.done")}</Button>}
     >
-      <Alert variant="warning" className="px-3 py-2">
+      <Alert variant="warning" size="sm">
         <AlertDescription>{warning}</AlertDescription>
       </Alert>
       <CopyBlock value={secret} />

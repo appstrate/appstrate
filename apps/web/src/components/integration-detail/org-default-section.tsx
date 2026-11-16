@@ -4,7 +4,6 @@ import { Alert } from "@appstrate/ui/components/alert";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { ManualSave } from "../settings/manual-save";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Button } from "@appstrate/ui/components/button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
@@ -87,18 +86,13 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   return (
     <div className="flex flex-col gap-4" data-testid="org-default-section">
       {unavailableIds.length > 0 && (
-        <Alert variant="warning" data-testid="org-default-unavailable-warning">
-          <AlertTriangle className="size-4" />
-          <AlertDescription className="flex flex-wrap items-start justify-between gap-3">
-            <span>
-              {t("integration.admin.orgDefault.unavailableWarning", {
-                count: unavailableIds.length,
-              })}
-            </span>
+        <Alert
+          variant="warning"
+          data-testid="org-default-unavailable-warning"
+          action={
             <Button
               size="sm"
               variant="outline"
-              className="-my-1.5"
               disabled={pending}
               onClick={() => edit(connectionIds, mode)}
               data-testid="org-default-drop-unavailable"
@@ -107,6 +101,12 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
                 count: unavailableIds.length,
               })}
             </Button>
+          }
+        >
+          <AlertDescription>
+            {t("integration.admin.orgDefault.unavailableWarning", {
+              count: unavailableIds.length,
+            })}
           </AlertDescription>
         </Alert>
       )}
