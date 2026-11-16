@@ -309,6 +309,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   listEnforcedChatSkills: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
+  reachableSpaces: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["module-ee"] },
   audit: { owners: ["module-ee"] },
 };
