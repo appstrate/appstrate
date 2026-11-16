@@ -1383,6 +1383,8 @@ export interface ReachableSpaceGrant {
   role: string;
   /** The caller's effective permissions there (`resource:action`). */
   permissions: string[];
+  /** The space's direct-access switch (`spaces.credential_proxy_open`): the MCP surface depends on it. */
+  credentialProxyOpen: boolean;
 }
 
 /** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential pins it. */

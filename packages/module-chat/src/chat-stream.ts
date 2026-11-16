@@ -554,7 +554,7 @@ export async function handleChatStream(
         ? [{ id: scope.spaceId, permissions: c.get("permissions") }]
         : acting.map((space) => ({ id: space.id, permissions: new Set(space.permissions) }));
     lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
-      const resolved = await deps.resolveChatAttachment({
+      return deps.resolveChatAttachment({
         orgId,
         userId: user.id,
         chatSessionId: sessionId,
@@ -564,7 +564,6 @@ export async function handleChatStream(
         // before anything is materialized there.
         beforeResolve: organization?.touch,
       });
-      return resolved;
     });
     messages[messages.length - 1] = lastMessage;
   }

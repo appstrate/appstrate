@@ -8,6 +8,8 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage();
 
 const {
+  actingSpaces,
+  canAttachFrom,
   grantedInSomeActingSpace,
   grantedInSomeSpace,
   grantsInRowSpace,
@@ -169,6 +171,24 @@ describe("grantedInSomeActingSpace", () => {
     expect(
       grantedInSomeActingSpace([space("spc_c", ["chat:write", "chat:read"])], [], "chat:read"),
     ).toBe(false);
+  });
+});
+
+describe("actingSpaces and canAttachFrom", () => {
+  const spaces = [
+    space("spc_a", ["chat:read", "chat:write", "mcp:read"]),
+    space("spc_viewer", ["chat:read", "mcp:read"]),
+  ];
+
+  it("keeps the spaces holding the whole acting triple", () => {
+    expect(actingSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
+  });
+
+  it("attaches freely outside an organization session, and there only from an acting working space", () => {
+    expect(canAttachFrom(undefined, null)).toBe(true);
+    expect(canAttachFrom(["spc_a"], "spc_a")).toBe(true);
+    expect(canAttachFrom(["spc_a"], "spc_viewer")).toBe(false);
+    expect(canAttachFrom(["spc_a"], null)).toBe(false);
   });
 });
 

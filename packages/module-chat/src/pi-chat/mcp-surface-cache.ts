@@ -4,7 +4,7 @@
  * Keyed completely: the server derives `instructions` and `tools/list` from `permissions`,
  * `ceiling`, `actor.type`, `contextInjected`, the boot-time catalog and, on the organization
  * endpoint, the caller's reachable spaces (every space-acting tool lists them in its
- * `space_id`), which for the chat's bearer reduce to the minted list, the URL's `context` and
+ * `space_id`, and a space's `credentialProxyOpen` decides which tools it declares), which for the chat's bearer reduce to the minted list, the URL's `context` and
  * pin, and those spaces (enforced by `pi-chat-mcp-surface-key.test.ts`). The TTL evicts a
  * narrower surface a mid-handshake role change stored under the wider key; tool calls are
  * authorized live regardless.
@@ -23,7 +23,7 @@ export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 /**
  * `permissions` MUST be the list minted into the bearer. The org and space ids of the path
  * reach no descriptor; whether it names a space does, and on the organization endpoint
- * `spaces` (the caller's reach: ids, names, roles and sets) are written into every one.
+ * `spaces` (the caller's reach: ids, names, roles, sets and direct-access switches) are written into every one.
  */
 export function platformMcpSurfaceKey(
   url: string,
@@ -37,7 +37,13 @@ export function platformMcpSurfaceKey(
     /\/s\/[^/]+$/.test(parsed.pathname),
     [...new Set(permissions)].sort(),
     spaces
-      .map((space) => [space.id, space.name, space.role, [...space.permissions].sort()])
+      .map((space) => [
+        space.id,
+        space.name,
+        space.role,
+        [...space.permissions].sort(),
+        space.credentialProxyOpen,
+      ])
       .sort(([a], [b]) => String(a).localeCompare(String(b))),
   ]);
 }

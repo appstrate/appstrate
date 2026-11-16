@@ -285,6 +285,17 @@ describe("run-events helpers", () => {
       id: "file_efgh5678",
     });
 
+    // The server's stamp names the space the file lives in: its download reads there.
+    expect(
+      resolveAttachmentContent([
+        {
+          type: "file",
+          data: "appfile://file_abcd1234",
+          providerMetadata: { appstrate: { size: 3, spaceId: "spc_b" } },
+        },
+      ]),
+    ).toEqual({ kind: "file", id: "file_abcd1234", spaceId: "spc_b" });
+
     // Just-sent optimistic upload:// (not yet materialized to appfile://) →
     // inert, but the raw URI is kept so the staged-image cache can be probed.
     expect(resolveAttachmentContent([{ type: "file", data: "upload://upl_abcd1234" }])).toEqual({

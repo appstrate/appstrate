@@ -86,7 +86,7 @@ describe("the session routes of an organization scope", () => {
     ]);
   });
 
-  it("lists the skills of every space, one row per package", async () => {
+  it("lists the skills of the acting spaces, one row per package", async () => {
     const row = (spaceId: string, id: string) => ({
       id,
       name: id,
@@ -101,7 +101,7 @@ describe("the session routes of an organization scope", () => {
       }),
     );
 
-    const skills = await fetchSkills(transportOver(request, org));
+    const skills = await fetchSkills(transportOver(request, org), ["spc_a", "spc_b"]);
 
     expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
     expect(skills.map((s) => s.packageId)).toEqual(["@acme/tone", "@acme/seo"]);

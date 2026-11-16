@@ -82,13 +82,13 @@ export function Thread({
   useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
-  const { can, t } = useChatHost();
+  const { can, t, canAttach = true } = useChatHost();
   return (
     // The whole thread is the drop target, welcome screen and transcript alike;
     // dropped files take the same adapter path as the picker. A reader gets no
     // drop target (and no overlay: `data-dragging` is only set when enabled).
     <ComposerPrimitive.AttachmentDropzone
-      disabled={!can("chat:write")}
+      disabled={!can("chat:write") || !canAttach}
       className="group/drop relative h-full min-h-0"
     >
       <ThreadPrimitive.Root
@@ -350,7 +350,11 @@ function SentAttachmentChip() {
 
   // A resolved `appfile://` is interactive: the unified renderer shows an image
   // thumbnail or a download/preview chip, resolving the opener-vs-download action.
-  return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
+  return (
+    <FileAttachment
+      file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
+    />
+  );
 }
 
 /** Why a picked file did not become a chip: a refused file has no attachment to carry the error. */

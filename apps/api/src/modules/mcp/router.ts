@@ -79,7 +79,7 @@ import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
+import { CHAT_ACTING_PERMISSIONS, CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { ceilingAllows } from "../../lib/permissions.ts";
 import { followRunLogs } from "../../services/realtime-access.ts";
@@ -527,8 +527,15 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
-    const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
-      deriveMcpSurface(permissions, ceiling, actor, proxied, space),
+    // A chat's bearer acts in the chat's acting set alone: the spaces its tools name, the
+    // skills it lists and the `space_id` it may send all come from this one list.
+    const chatActs = c.get("authMethod") === CHAT_LOOPBACK_AUTH_METHOD;
+    const reachable = (
+      await listReachableSpaces(c, orgId, (permissions, space) =>
+        deriveMcpSurface(permissions, ceiling, actor, proxied, space),
+      )
+    ).filter(
+      (space) => !chatActs || CHAT_ACTING_PERMISSIONS.every((p) => space.permissions.has(p)),
     );
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];

@@ -106,15 +106,15 @@ export function SkillsPicker({
   onOpenChange,
   children,
 }: SkillsPickerProps) {
-  const { t, can } = useChatHost();
+  const { t, can, actingSpaceIds } = useChatHost();
   const scopeKey = chatScopeKey(transport);
   const readable = !!scopeKey && !!transport && can("skills:read");
   const catalogue = useQuery({
     // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
     // skill change reach this entry; `consumer` keeps it a separate cache entry
     // (a different projection of the same route), and the scope (a space, or the organization) keys it.
-    queryKey: ["packages", "skills", { consumer: "chat" }, scopeKey],
-    queryFn: () => fetchSkills(transport!),
+    queryKey: ["packages", "skills", { consumer: "chat" }, scopeKey, actingSpaceIds ?? null],
+    queryFn: () => fetchSkills(transport!, actingSpaceIds),
     enabled: readable,
     staleTime: 60_000,
   });

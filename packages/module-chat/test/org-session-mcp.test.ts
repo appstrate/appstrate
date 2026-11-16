@@ -13,8 +13,16 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { packageDistTags } from "@appstrate/db/schema";
+import { zipArtifact } from "@appstrate/core/zip";
+import { computeIntegrity } from "@appstrate/core/integrity";
+import * as storage from "@appstrate/db/storage";
+import {
+  AGENT_PACKAGES_BUCKET,
+  versionZipKey,
+} from "../../../apps/api/src/services/package-storage-keys.ts";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
-import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
+import { db, truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
   createTestContext,
   memberContext,
@@ -22,6 +30,7 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import {
   seedPackage,
+  seedPackageVersion,
   seedRun,
   seedSpace,
   seedSpaceMember,
@@ -143,19 +152,78 @@ describe("an organization session's loopback bearer on /api/mcp/o/:org", () => {
     expect((inDefault.data.space as { id: string }).id).toBe(owner.defaultSpaceId);
   });
 
-  it("refuses an act in a space whose role lacks it, and a space the caller does not reach", async () => {
+  it("refuses a space outside the chat's acting set (a viewer there) like one the caller does not reach", async () => {
     const headers = bearer(caller, ceiling);
-    // A viewer cannot invoke at all, however much the ceiling holds.
+    // The caller reaches Lecture as a viewer, who holds no `chat:write`: the chat acts nowhere there.
+    expect(presetPermissions("viewer")).not.toContain("chat:write");
     const inLecture = await invoke(headers, lecture.id, "listAgents");
     expect(inLecture.isError).toBe(true);
-    expect(inLecture.data.granted_in as string[]).not.toContain(lecture.id);
-    expect(inLecture.data.granted_in as string[]).toContain(gestion.id);
+    expect(inLecture.data.code).toBe("unknown_space");
+    expect(inLecture.data.accepted as string[]).not.toContain(lecture.id);
+    expect(inLecture.data.accepted as string[]).toContain(gestion.id);
 
     const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
     const unknown = await invoke(headers, foreign.id, "listAgents");
     expect(unknown.isError).toBe(true);
     expect(unknown.data.code).toBe("unknown_space");
     expect(unknown.data.accepted as string[]).not.toContain(foreign.id);
+  });
+
+  it("serves an external org-wide client every space it reaches, the viewer one included", async () => {
+    const envelope = await rpc(
+      { Cookie: caller.cookie, "X-Org-Id": owner.orgId },
+      "tools/list",
+      {},
+    );
+    const tools = envelope.result?.tools as Array<{
+      name: string;
+      inputSchema: { properties: { space_id: { enum: string[] } } };
+    }>;
+    const listed = tools.find((tool) => tool.name === "invoke_operation")!.inputSchema.properties
+      .space_id.enum;
+    expect(listed).toContain(lecture.id);
+  });
+
+  it("lists the skills of the acting set alone", async () => {
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const seedSkill = async (id: string, name: string, spaceId: string) => {
+      await seedPackage({
+        id,
+        orgId: owner.orgId,
+        type: "skill",
+        homeSpaceId: spaceId,
+        draftManifest: { name: id, version: "0.0.0", type: "skill" },
+        draftContent: `---\nname: ${name}\ndescription: ${name}.\n---\nBody\n`,
+      });
+      await seedSpacePackage(spaceId, id);
+      const manifest = { name: id, version: "1.0.0", type: "skill" };
+      const zip = zipArtifact({
+        "manifest.json": encode(JSON.stringify(manifest)),
+        "SKILL.md": encode(`---\nname: ${name}\ndescription: ${name}.\n---\nBody\n`),
+      });
+      await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(id, "1.0.0"), zip);
+      const row = await seedPackageVersion({
+        packageId: id,
+        version: "1.0.0",
+        manifest,
+        integrity: computeIntegrity(zip),
+        artifactSize: zip.byteLength,
+      });
+      await db.insert(packageDistTags).values({ packageId: id, tag: "latest", versionId: row.id });
+    };
+    await seedSkill("@chatorg/in-gestion", "in-gestion", gestion.id);
+    await seedSkill("@chatorg/in-lecture", "in-lecture", lecture.id);
+
+    const listUris = async (headers: Record<string, string>) => {
+      const envelope = await rpc(headers, "skills/list", {});
+      return (envelope.result?.skills as Array<{ uri: string }>).map((entry) => entry.uri);
+    };
+    const chat = await listUris(bearer(caller, ceiling));
+    expect(chat.some((uri) => uri.startsWith(`skill://${gestion.id}/`))).toBe(true);
+    expect(chat.some((uri) => uri.startsWith(`skill://${lecture.id}/`))).toBe(false);
+    // An external client reads every space it reaches.
+    const external = await listUris({ Cookie: caller.cookie, "X-Org-Id": owner.orgId });
+    expect(external.some((uri) => uri.startsWith(`skill://${lecture.id}/`))).toBe(true);
   });
 
   it("is narrowed by the turn: without authoring the write is refused in Gestion too", async () => {
@@ -206,7 +274,7 @@ describe("an organization session's loopback bearer on /api/mcp/o/:org", () => {
     expect(ids).not.toContain(inGestion.id);
   });
 
-  it("lists the caller's own spaces in every tool, so a surface is never another caller's", async () => {
+  it("lists the acting set in every tool, so a surface is never another caller's", async () => {
     const listed = async (user: TestContext) => {
       const envelope = await rpc(bearer(user, ceiling), "tools/list", {});
       const tools = envelope.result?.tools as Array<{
@@ -219,9 +287,8 @@ describe("an organization session's loopback bearer on /api/mcp/o/:org", () => {
     // Same bearer permissions, different reach: a cache keyed on the permissions alone would hand
     // one caller the other's spaces.
     const stranger = await memberContext(owner, "member", "operator");
-    expect((await listed(caller)).sort()).toEqual(
-      [owner.defaultSpaceId, gestion.id, lecture.id].sort(),
-    );
+    // Lecture (viewer: no `chat:write`) is reached but is no place the chat acts.
+    expect((await listed(caller)).sort()).toEqual([owner.defaultSpaceId, gestion.id].sort());
     expect(await listed(stranger)).toEqual([owner.defaultSpaceId]);
   });
 });

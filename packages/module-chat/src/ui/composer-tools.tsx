@@ -49,7 +49,7 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t } = useChatHost();
+  const { t, canAttach = true } = useChatHost();
   const creationMode = usePackageAuthoringEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
   // A popover opened while the menu is closing loses to the menu's focus
@@ -81,12 +81,25 @@ export function ComposerTools({
             setSkillsOpen(true);
           }}
         >
-          <ComposerPrimitive.AddAttachment multiple asChild>
-            <DropdownMenuItem>
+          {canAttach ? (
+            <ComposerPrimitive.AddAttachment multiple asChild>
+              <DropdownMenuItem>
+                <PaperclipIcon />
+                {t("composer.attach")}
+              </DropdownMenuItem>
+            </ComposerPrimitive.AddAttachment>
+          ) : (
+            // An upload lands in the working space, where this organization session does not act.
+            <DropdownMenuItem disabled title={t("composer.attachUnavailable")}>
               <PaperclipIcon />
-              {t("composer.attach")}
+              <span className="flex flex-col">
+                {t("composer.attach")}
+                <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
+                  {t("composer.attachUnavailable")}
+                </span>
+              </span>
             </DropdownMenuItem>
-          </ComposerPrimitive.AddAttachment>
+          )}
           {showPicker && (
             <DropdownMenuItem
               onSelect={() => {

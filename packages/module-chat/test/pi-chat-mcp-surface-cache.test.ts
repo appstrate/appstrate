@@ -316,8 +316,20 @@ describe("platform MCP surface cache", () => {
   it("keys the pinned endpoint and the organization's apart, and the organization's by its spaces", () => {
     const perms = uniquePermissions("runs:read");
     const org = `${ORIGIN}/api/mcp/o/org_1?context=injected`;
-    const alpha = { id: "spc_a", name: "Alpha", role: "operator", permissions: ["agents:run"] };
-    const beta = { id: "spc_b", name: "Beta", role: "admin", permissions: ["agents:write"] };
+    const alpha = {
+      id: "spc_a",
+      name: "Alpha",
+      role: "operator",
+      permissions: ["agents:run"],
+      credentialProxyOpen: true,
+    };
+    const beta = {
+      id: "spc_b",
+      name: "Beta",
+      role: "admin",
+      permissions: ["agents:write"],
+      credentialProxyOpen: true,
+    };
 
     // Same origin, context and permissions, but the organization's tools take a `space_id`.
     expect(platformMcpSurfaceKey(org, perms)).not.toBe(platformMcpSurfaceKey(MCP_URL, perms));
@@ -333,6 +345,10 @@ describe("platform MCP surface cache", () => {
     expect(platformMcpSurfaceKey(org, perms, [alpha, { ...beta, role: "viewer" }])).not.toBe(both);
     expect(
       platformMcpSurfaceKey(org, perms, [alpha, { ...beta, permissions: ["agents:run"] }]),
+    ).not.toBe(both);
+    // A closed direct-access switch drops tools from that space's surface.
+    expect(
+      platformMcpSurfaceKey(org, perms, [alpha, { ...beta, credentialProxyOpen: false }]),
     ).not.toBe(both);
   });
 

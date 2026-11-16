@@ -174,6 +174,10 @@ export interface ChatPageProps {
   can: ChatCan;
   /** The caller's grants in a named space (see `ChatHost`). Pass a stable function. */
   canIn?: ChatHost["canIn"];
+  /** The spaces an organization session acts in (see `ChatHost`). Pass a stable array. */
+  actingSpaceIds?: ChatHost["actingSpaceIds"];
+  /** Whether the composer may stage a file (see `ChatHost`). */
+  canAttach?: ChatHost["canAttach"];
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
   /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
@@ -201,6 +205,8 @@ export function ChatPage({
   t,
   can,
   canIn,
+  actingSpaceIds,
+  canAttach,
   personalModelCredentials,
   modelCredentials,
   formatBytes,
@@ -304,6 +310,8 @@ export function ChatPage({
       t,
       can,
       canIn,
+      actingSpaceIds,
+      canAttach,
       personalModelCredentials,
       modelCredentials,
       formatBytes,
@@ -318,6 +326,8 @@ export function ChatPage({
       t,
       can,
       canIn,
+      actingSpaceIds,
+      canAttach,
       personalModelCredentials,
       modelCredentials,
       formatBytes,

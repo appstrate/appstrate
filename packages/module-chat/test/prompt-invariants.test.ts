@@ -679,7 +679,9 @@ describe("the persona per session kind", () => {
   });
 
   it("words the permissions of an organization context as the union, each call decided where it is named", () => {
-    const spaces = [{ id: "spc_a", name: "Alpha", role: "operator", permissions: [] }];
+    const spaces = [
+      { id: "spc_a", name: "Alpha", role: "operator", permissions: [], credentialProxyOpen: true },
+    ];
     const org = contextText(
       { user: { name: "Ada" } },
       { ...CONTEXT_OPTS, spaceRole: null, spaces },

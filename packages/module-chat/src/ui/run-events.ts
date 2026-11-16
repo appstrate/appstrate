@@ -641,13 +641,16 @@ export function mergeRunFiles(a: readonly ChatRunFile[], b: readonly ChatRunFile
  * carried along so the renderer can still resolve a local preview for it (the
  * staged-image cache is keyed by `upload://` URI).
  */
-type ResolvedAttachment = { kind: "file"; id: string } | { kind: "inert"; uri?: string };
+type ResolvedAttachment =
+  { kind: "file"; id: string; spaceId?: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {
   type: string;
   image?: string;
   data?: string;
+  /** The server's stamp on a materialized part (`appstrate.spaceId`: where the file lives). */
+  providerMetadata?: { appstrate?: { spaceId?: unknown } };
 }
 
 export function resolveAttachmentContent(
@@ -656,7 +659,10 @@ export function resolveAttachmentContent(
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
   const id = typeof uri === "string" ? parseFileUri(uri) : null;
-  if (id) return { kind: "file", id };
+  if (id) {
+    const spaceId = part?.providerMetadata?.appstrate?.spaceId;
+    return { kind: "file", id, ...(typeof spaceId === "string" ? { spaceId } : {}) };
+  }
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 

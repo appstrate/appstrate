@@ -30,6 +30,37 @@ describe("fetchSkills", () => {
     ]);
   });
 
+  it("keeps, in an organization scope, the skills of the spaces the session acts in, one per package", async () => {
+    const row = (id: string, spaceId: string) => ({
+      id,
+      name: id,
+      description: null,
+      version: "1.0.0",
+      spaceId,
+    });
+    const request = requestAnswering(() =>
+      Response.json({
+        data: [
+          row("@acme/a", "spc_view"),
+          row("@acme/b", "spc_act"),
+          row("@acme/b", "spc_other"),
+          row("@acme/c", "spc_act"),
+        ],
+      }),
+    );
+    const transport = {
+      ...transportOver(request),
+      scope: { kind: "organization", orgId: "org_1" },
+    } as const;
+
+    const got = await fetchSkills(transport, ["spc_act"]);
+
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
+    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/b", "@acme/c"]);
+    // No acting space: nothing is offered.
+    expect(await fetchSkills(transport, [])).toEqual([]);
+  });
+
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
     await expect(fetchSkills(transportOver(request))).rejects.toMatchObject({ status: 403 });

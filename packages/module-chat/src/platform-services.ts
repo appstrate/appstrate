@@ -45,6 +45,7 @@ import type {
   EnforcedChatSkill,
   EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
+import { CHAT_ACTING_PERMISSIONS } from "@appstrate/core/chat-contract";
 
 /** The permissions the chat's session routes ask. */
 export type ChatPermission = "chat:read" | "chat:write";
@@ -57,9 +58,6 @@ export function spacesHolding(
   return spaces.filter((space) => space.permissions.includes(permission));
 }
 
-/** What an organization session's turn needs in a space to act in it (see {@link actingSpaces}). */
-const ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
-
 /**
  * The spaces an organization session's turn may act in: those of the caller's reach where
  * they hold `chat:write` (the turn is theirs to run), `chat:read` (the session must stay
@@ -69,7 +67,9 @@ const ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
  * outside it is neither listed nor acted in. Visibility of a session stays `chat:read`.
  */
 export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
-  return spaces.filter((space) => ACTING_PERMISSIONS.every((p) => space.permissions.includes(p)));
+  return spaces.filter((space) =>
+    CHAT_ACTING_PERMISSIONS.every((p) => space.permissions.includes(p)),
+  );
 }
 
 /**

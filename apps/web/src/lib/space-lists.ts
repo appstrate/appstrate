@@ -7,6 +7,7 @@
  * it each list is the current space's.
  */
 
+import { CHAT_ACTING_PERMISSIONS } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
 import { isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
 import { isSpaceEnterable } from "../hooks/use-current-space";
@@ -201,26 +202,39 @@ export function overviewRouteVerdict(
 }
 
 /**
- * The permissions the chat's tool surface needs in a space for an organization session to act
- * there (the backend's acting set): the chat itself, and the MCP the session calls through.
+ * The spaces an organization session acts in, as the backend's acting set judges them: held with
+ * a role, the caller's gate granting the chat's acting permissions there.
  */
-const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+export function actingSpaces<S extends ListedSpace>(
+  spaces: readonly S[] | undefined,
+  orgPermissions: readonly string[] | undefined,
+): S[] {
+  return spacesWhere(spaces, orgPermissions, (can) => CHAT_ACTING_PERMISSIONS.every(can));
+}
 
 /**
  * What an organization session may do, as the module's `can` reads it: `permission` holds in some
- * space where the chat may act (held with a role, the acting permissions granted there). The
- * working space's grants do not decide: the session acts in the spaces the caller names.
+ * space where the chat may act. The working space's grants do not decide: the session acts in the
+ * spaces the caller names.
  */
 export function grantedInSomeActingSpace(
   spaces: readonly ListedSpace[] | undefined,
   orgPermissions: readonly string[] | undefined,
   permission: string,
 ): boolean {
-  return (
-    spacesWhere(
-      spaces,
-      orgPermissions,
-      (can) => CHAT_ACTING_PERMISSIONS.every(can) && can(permission),
-    ).length > 0
+  return actingSpaces(spaces, orgPermissions).some((space) =>
+    gateIn(space, orgPermissions)(permission),
   );
+}
+
+/**
+ * Whether the composer may stage a file: an upload lands in the working space, and the turn
+ * resolves it only where the session acts. `actingIds` is undefined outside an organization
+ * session, where the working space is the session's own.
+ */
+export function canAttachFrom(
+  actingIds: readonly string[] | undefined,
+  workingSpaceId: string | null,
+): boolean {
+  return actingIds === undefined || (workingSpaceId !== null && actingIds.includes(workingSpaceId));
 }

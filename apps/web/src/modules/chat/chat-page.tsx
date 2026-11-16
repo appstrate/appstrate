@@ -27,6 +27,7 @@ import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { otherSpaceFileContext } from "../../lib/file-link";
+import { canAttachFrom } from "../../lib/space-lists";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -37,6 +38,7 @@ import {
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import {
+  useChatActingSpaceIds,
   useChatCan,
   useChatCanIn,
   useChatScope,
@@ -103,6 +105,7 @@ export function ChatModulePage() {
   // What an organization session may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
   const canIn = useChatCanIn();
+  const actingSpaceIds = useChatActingSpaceIds();
   // A conversation belongs to the scope that opened it: changing the scope starts a new one.
   useLeaveConversationOnScopeChange(conversationId ?? null);
   // Absent means allowed (the setting is opt-out): the chat only drops its
@@ -138,6 +141,8 @@ export function ChatModulePage() {
   // A file of another space (a call of an organization session) is read in its own.
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
+  // An upload lands in the working space: an organization session may attach only where it acts.
+  const canAttach = canAttachFrom(actingSpaceIds, currentSpaceId);
   const onDownloadFile = useCallback(
     (id: string, name: string, spaceId?: string) =>
       void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
@@ -188,6 +193,8 @@ export function ChatModulePage() {
               t={translate}
               can={can}
               canIn={canIn}
+              canAttach={canAttach}
+              actingSpaceIds={actingSpaceIds}
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}

@@ -9,19 +9,29 @@ import type { ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./scope.ts";
 
 /**
- * The active skills the picker chooses from: the space's, or, in an organization scope, every
- * reachable space's (one per package).
+ * The active skills the picker chooses from: the space's, or, in an organization scope, those of
+ * the spaces the session acts in (`actingSpaceIds`; one per package).
  */
-export async function fetchSkills(transport: ChatTransport): Promise<SkillHint[]> {
+export async function fetchSkills(
+  transport: ChatTransport,
+  actingSpaceIds?: readonly string[],
+): Promise<SkillHint[]> {
   const { scope } = transport;
   const res = await transport.request(
     scope.kind === "organization"
       ? `/api/orgs/${scope.orgId}/packages/skills`
       : "/api/packages/skills",
   );
-  // An organization index lists a package once per space it is active in: one row each.
+  const body: unknown = await res.json();
+  // An organization index lists a package once per space it is active in (each row names its
+  // `spaceId`): keep the rows of the spaces the session acts in, then one per package.
+  const acting = scope.kind === "organization" ? new Set(actingSpaceIds ?? []) : null;
+  const rows = (body as { data?: unknown } | null)?.data;
+  const kept = acting
+    ? { data: (Array.isArray(rows) ? rows : []).filter((row) => acting.has(row?.spaceId)) }
+    : body;
   const seen = new Set<string>();
-  return parseSkillList(await res.json()).filter(
+  return parseSkillList(kept).filter(
     (skill) => !seen.has(skill.packageId) && seen.add(skill.packageId),
   );
 }

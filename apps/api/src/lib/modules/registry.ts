@@ -106,6 +106,7 @@ function buildPlatformServices(): PlatformServices {
         name: space.name,
         role: toSpaceRoleWire(space.role)!.name,
         permissions: [...space.permissions],
+        credentialProxyOpen: space.credentialProxyOpen,
       })),
       pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
     }),

@@ -179,6 +179,16 @@ export interface ChatHost {
    */
   canIn?: ChatCanIn;
   /**
+   * The spaces an organization session acts in (the host's acting set); absent in a space scope.
+   * What the module lists across spaces is narrowed to them: a space outside it is never acted in.
+   */
+  actingSpaceIds?: readonly string[];
+  /**
+   * The composer may stage a file: the upload lands in the host's working space, which an
+   * organization session resolves only where it acts. Absent means attachable.
+   */
+  canAttach?: boolean;
+  /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
    * credential would fix names no link to add one. `undefined` until the

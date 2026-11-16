@@ -201,13 +201,13 @@ async function loadMessages(sessionId: string): Promise<MessageRow[]> {
 // `ctx.services` (rate limiter + in-process dispatch + subscription-model resolution).
 // ---------------------------------------------------------------------------
 
+/** The shape `requireModulePermission` returns — what a route's permission guard is. */
+type PermissionGuard = ReturnType<typeof requireModulePermission>;
+
 /**
  * How one mount of the session handlers enters its scope: the permission guard
  * of each route and the {@link SessionScope} its handlers query with.
  */
-/** The shape `requireModulePermission` returns — what a route's permission guard is. */
-type PermissionGuard = ReturnType<typeof requireModulePermission>;
-
 interface SessionMount {
   guard(action: "read" | "write"): PermissionGuard;
   scope(c: Context<ChatEnv>): Promise<SessionScope>;

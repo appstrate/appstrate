@@ -14,7 +14,7 @@ import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { useSpaces } from "../../hooks/use-spaces";
-import { grantedInSomeActingSpace } from "../../lib/space-lists";
+import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
 import {
   chatScopeId,
   chatTransport,
@@ -102,6 +102,23 @@ export function useChatCan() {
         ? can(permission)
         : grantedInSomeActingSpace(spaces, orgPermissions, permission),
     [scope.kind, can, spaces, orgPermissions],
+  );
+}
+
+/**
+ * The ids of the spaces an organization session acts in (the backend's acting set); undefined in a
+ * space scope. The module narrows what it lists across spaces to them (the skills picker).
+ */
+export function useChatActingSpaceIds(): string[] | undefined {
+  const { scope } = useChatScope();
+  const { data: spaces } = useSpaces();
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return useMemo(
+    () =>
+      scope.kind === "space"
+        ? undefined
+        : actingSpaces(spaces, orgPermissions).map((space) => space.id),
+    [scope.kind, spaces, orgPermissions],
   );
 }
 

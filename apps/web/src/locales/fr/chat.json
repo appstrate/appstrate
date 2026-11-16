@@ -177,6 +177,7 @@
   "composer.creationMode": "Mode création",
   "composer.creationOff": "Création désactivée",
   "composer.creationOff.undo": "Réactiver le mode création",
+  "composer.attachUnavailable": "Pour joindre un fichier, choisissez un espace de travail où ce chat peut agir.",
   "composer.dropzone": "Déposez vos fichiers pour les joindre",
   "skills.chip": "Compétences · {{n}}",
   "context.show": "Afficher le contexte",

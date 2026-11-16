@@ -191,6 +191,14 @@ export interface EnforcedChatSkillRef {
   version: string | null;
 }
 
+/**
+ * What an organization session's turn needs in a space to act in it: the turn is the caller's to
+ * run (`chat:write`), the session stays openable once the space is touched (`chat:read`), and the
+ * tools can name the space (`mcp:read`). The one definition behind the chat's acting set
+ * (`actingSpaces`), the MCP server's reach for a chat's bearer and the web shell's judgement.
+ */
+export const CHAT_ACTING_PERMISSIONS = ["chat:write", "chat:read", "mcp:read"] as const;
+
 /** The chat loopback strategy's auth method — the only source `skill://` reads trust for an injected-skills claim. */
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 
