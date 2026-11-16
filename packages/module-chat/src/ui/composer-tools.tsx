@@ -33,15 +33,16 @@ import {
   limitAvailability,
   useAttachAvailability,
   useConversationScope,
+  useOriginSpaceNode,
   useSpaceLabel,
 } from "./conversation-scope.ts";
-import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
+import { SkillChips } from "./enforced-skills.tsx";
 import { SkillsChip, SkillsPicker } from "./skills-picker.tsx";
 
 export interface ComposerToolsProps {
@@ -64,7 +65,7 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds, renderSpaces } = useChatHost();
+  const { t, actingSpaceIds } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
   // The plain name, for the accessible names: the node above carries a tile the name does not.
@@ -74,10 +75,7 @@ export function ComposerTools({
   );
   const limit = limitAvailability(scope, actingSpaceIds);
   // The space as the host names it; without the host's rendering, the sentence stays generic.
-  const spaceNode =
-    scope.originSpaceId && renderSpaces
-      ? renderSpaces([scope.originSpaceId])
-      : t("composer.limit.thisSpace");
+  const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
   // A popover opened while the menu is closing loses to the menu's focus
@@ -211,7 +209,7 @@ export function ComposerTools({
           )}
         >
           <MapPinIcon className="size-3.5 shrink-0" />
-          <span className="flex min-w-0 items-center truncate">
+          <span className="block min-w-0 truncate">
             {sentenceWithNode(t, "composer.limitChip", spaceNode)}
           </span>
           <button
@@ -224,14 +222,22 @@ export function ComposerTools({
           </button>
         </span>
       )}
-      {showPicker ? (
-        <SkillsChip
+      {(showPicker || showEnforced) && (
+        <SkillChips
           transport={transport}
           selection={selection}
-          onClick={() => setSkillsOpen(true)}
+          onSelectionChange={onSelectionChange}
+          onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
+          fallback={
+            showPicker ? (
+              <SkillsChip
+                transport={transport}
+                selection={selection}
+                onClick={() => setSkillsOpen(true)}
+              />
+            ) : null
+          }
         />
-      ) : (
-        showEnforced && <EnforcedSkillsIndicator transport={transport} />
       )}
     </div>
   );

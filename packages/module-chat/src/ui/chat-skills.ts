@@ -94,3 +94,23 @@ export function skillPickerRows(
     })),
   ];
 }
+
+/** Chips drawn before the « +N » chip: a fixed count keeps the row on one line without measuring. */
+export const MAX_VISIBLE_SKILL_CHIPS = 2;
+
+export interface SkillChipModel {
+  packageId: string;
+  name: string;
+  /** Imposed by the origin space: locked. */
+  enforced: boolean;
+}
+
+/** Enforced first, then the user's own pins; the first `max` are shown, the rest overflow. */
+export function splitSkillChips(
+  chips: readonly SkillChipModel[],
+  max: number = MAX_VISIBLE_SKILL_CHIPS,
+): { visible: SkillChipModel[]; overflow: SkillChipModel[] } {
+  // A lone overflowing chip would cost as much room as the chip itself: show it.
+  const shown = chips.length === max + 1 ? chips.length : max;
+  return { visible: chips.slice(0, shown), overflow: chips.slice(shown) };
+}

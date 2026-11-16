@@ -7,7 +7,7 @@
  * it from the host's selected space — the one thing that does NOT define an existing conversation.
  */
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { useChatHost, useChatTransport, type ChatTranslate } from "./runtime-context.ts";
 
 export interface ConversationScope {
@@ -87,6 +87,19 @@ const useNoLabels = () => noLabels;
 export function useSpaceLabel(spaceId: string | null | undefined): string | undefined {
   const { useSpaceLabelOf = useNoLabels } = useChatHost();
   return useSpaceLabelOf()(spaceId);
+}
+
+/**
+ * The conversation's origin space as the host renders it (tile and name); without the host's
+ * rendering or an origin, the generic « this space ». Never a plain string for an accessible name:
+ * use {@link useSpaceLabel} for those.
+ */
+export function useOriginSpaceNode(): ReactNode {
+  const { t, renderSpaces } = useChatHost();
+  const { originSpaceId } = useConversationScope();
+  return originSpaceId && renderSpaces
+    ? renderSpaces([originSpaceId])
+    : t("composer.limit.thisSpace");
 }
 
 /** The origin space as the pinned endpoint sees it: set only while the conversation is limited. */

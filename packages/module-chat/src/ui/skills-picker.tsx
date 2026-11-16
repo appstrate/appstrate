@@ -5,8 +5,7 @@
 // space imposes are listed first, locked: no selection removes them.
 
 import type { ChatSkillMode } from "@appstrate/db/schema";
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
 import { Badge, badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -20,15 +19,9 @@ import {
   MAX_PINNED_SKILLS,
   type ChatSkillSelection,
 } from "../skills.ts";
-import {
-  fetchSkills,
-  ownPins,
-  pinCapReached,
-  skillPickerRows,
-  togglePinned,
-} from "./chat-skills.ts";
-import { pinnedSpaceOf, useConversationScope } from "./conversation-scope.ts";
+import { ownPins, pinCapReached, skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
+import { useSkillCatalogue } from "./use-skill-catalogue.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -106,24 +99,8 @@ export function SkillsPicker({
   onOpenChange,
   children,
 }: SkillsPickerProps) {
-  const { t, can, actingSpaceIds } = useChatHost();
-  // A limited conversation reaches its origin space alone: its skills, not the acting set's.
-  const scope = useConversationScope();
-  const pinnedSpaceId = pinnedSpaceOf(scope);
-  const catalogueSpaceIds = useMemo(
-    () => (pinnedSpaceId ? [pinnedSpaceId] : actingSpaceIds),
-    [pinnedSpaceId, actingSpaceIds],
-  );
-  const readable = !!transport && can("skills:read");
-  const catalogue = useQuery({
-    // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
-    // skill change reach this entry; `consumer` keeps it a separate cache entry
-    // (a different projection of the same route), and the acting set keys it.
-    queryKey: ["packages", "skills", { consumer: "chat" }, catalogueSpaceIds],
-    queryFn: () => fetchSkills(transport!, catalogueSpaceIds),
-    enabled: readable,
-    staleTime: 60_000,
-  });
+  const { t } = useChatHost();
+  const { catalogue, readable } = useSkillCatalogue(transport);
   const skills = catalogue.data ?? [];
   const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];

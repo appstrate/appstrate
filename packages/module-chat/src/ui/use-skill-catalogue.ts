@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchSkills } from "./chat-skills.ts";
+import { pinnedSpaceOf, useConversationScope } from "./conversation-scope.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+
+/**
+ * The skills the picker chooses from, shared with the composer's chips (one cache entry, so a
+ * pinned chip is named by what the picker lists). Read only with `skills:read`.
+ */
+export function useSkillCatalogue(transport: ChatTransport | undefined) {
+  const { can, actingSpaceIds } = useChatHost();
+  // A limited conversation reaches its origin space alone: its skills, not the acting set's.
+  const scope = useConversationScope();
+  const pinnedSpaceId = pinnedSpaceOf(scope);
+  const catalogueSpaceIds = useMemo(
+    () => (pinnedSpaceId ? [pinnedSpaceId] : actingSpaceIds),
+    [pinnedSpaceId, actingSpaceIds],
+  );
+  const readable = !!transport && can("skills:read");
+  const catalogue = useQuery({
+    // Under the shell's `["packages","skills"]` prefix, so its invalidations on a
+    // skill change reach this entry; `consumer` keeps it a separate cache entry
+    // (a different projection of the same route), and the acting set keys it.
+    queryKey: ["packages", "skills", { consumer: "chat" }, catalogueSpaceIds],
+    queryFn: () => fetchSkills(transport!, catalogueSpaceIds),
+    enabled: readable,
+    staleTime: 60_000,
+  });
+  return { catalogue, readable };
+}
