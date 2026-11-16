@@ -1348,7 +1348,6 @@
   "spaces.personal.title": "My space",
   "spaces.personal.orphanedName": "Former member's personal space",
   "spaces.personal.badge": "Personal",
-  "spaces.personal.teamGroup": "Team spaces",
   "spaces.personal.settingsLocked": "A personal space is always private and has you as its only member: only its name can be changed.",
   "spaces.personal.orphanedSince": "Orphaned since {{date}}",
   "spaces.personal.convert": "Convert to a team space",

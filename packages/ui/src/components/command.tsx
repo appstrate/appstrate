@@ -44,7 +44,9 @@ const CommandInput = React.forwardRef<
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
-        "placeholder:text-muted-foreground flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        // The field of a panel, not of a form: the wrapper draws its only line, so the base
+        // `input` border, padding and focus ring are taken off.
+        "placeholder:text-muted-foreground flex h-11 w-full rounded-none border-0 bg-transparent px-0 py-3 text-sm outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

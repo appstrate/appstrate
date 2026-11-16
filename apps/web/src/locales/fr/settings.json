@@ -1349,7 +1349,6 @@
   "spaces.personal.title": "Mon espace",
   "spaces.personal.orphanedName": "Espace personnel d'un ancien membre",
   "spaces.personal.badge": "Personnel",
-  "spaces.personal.teamGroup": "Espaces d'équipe",
   "spaces.personal.settingsLocked": "Un espace personnel est toujours privé et n'a que vous pour membre : seul son nom est modifiable.",
   "spaces.personal.orphanedSince": "Orphelin depuis le {{date}}",
   "spaces.personal.convert": "Convertir en espace d'équipe",
