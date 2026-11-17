@@ -79,6 +79,8 @@ function fakeContext(opts: {
         role: "owner",
         permissions: ["chat:read", "chat:write", "mcp:read", "mcp:invoke"],
         credentialProxyOpen: false,
+        isDefault: false,
+        personal: false,
       },
     ],
     principalKind: "user",

@@ -8,6 +8,7 @@ import {
   PACKAGE_WRITE_PERMISSIONS,
   type RunLevel,
 } from "@appstrate/core/permissions";
+import type { ReachableSpaceGrant } from "@appstrate/core/module";
 
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
 
@@ -25,9 +26,24 @@ export interface TurnCapabilities {
    * dispatch needed. In the `manual` skill mode, `list_skills` lists them on the user's request.
    */
   readonly readsSkills: boolean;
+  /**
+   * `search_integration_tools` / `call_integration_tool` are offered: in at least one of the
+   * turn's spaces, `mcp:invoke` and a credential-proxy permission hold and the space leaves the
+   * proxy open (`credentialProxyOpen`) — the MCP server's per-space `proxies`, unioned org-wide.
+   */
+  readonly callsIntegrationTools: boolean;
 }
 
-export function turnCapabilities(has: (permission: string) => boolean): TurnCapabilities {
+const PROXY_PERMISSIONS = ["credential-proxy:call", "credential-proxy:call-own"];
+
+/**
+ * `has` is the turn's set; `spaces` are the turn's spaces, each acting with its own permissions
+ * within that set. Without them (the web shell's judgement) no integration tool is counted.
+ */
+export function turnCapabilities(
+  has: (permission: string) => boolean,
+  spaces: readonly Pick<ReachableSpaceGrant, "permissions" | "credentialProxyOpen">[] = [],
+): TurnCapabilities {
   const transport = has("mcp:read");
   const invokes = transport && has("mcp:invoke");
   return {
@@ -36,6 +52,13 @@ export function turnCapabilities(has: (permission: string) => boolean): TurnCapa
     ...agentCapabilities(has, invokes),
     authorsPackages: invokes && PACKAGE_WRITE_PERMISSIONS.some(has),
     readsSkills: transport && has("skills:read"),
+    callsIntegrationTools:
+      invokes &&
+      spaces.some((space) => {
+        const holds = (permission: string) =>
+          has(permission) && space.permissions.includes(permission);
+        return space.credentialProxyOpen && holds("mcp:invoke") && PROXY_PERMISSIONS.some(holds);
+      }),
   };
 }
 

@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
   `data.integration`.
 - **`ReachableSpaceGrant`, `ReachedSpaces`** (`@appstrate/core/module`, #1886): a space the caller reaches, with
-  their role, effective permissions and direct-access switch (`credentialProxyOpen`) there, and whether the credential pins the reach, as
+  their role, effective permissions and direct-access switch (`credentialProxyOpen`) there, whether it is the organization's
+  default space (`isDefault`) or the caller's own personal space (`personal`), and whether the credential pins the reach, as
   `PlatformServices.reachableSpaces` answers.
 - **`chatActsIn`** (`@appstrate/core/chat-contract`, #1886): whether a space's effective permissions
   (an array) let a chat conversation act in it (`chat:write`, `chat:read` and `mcp:read`): the one

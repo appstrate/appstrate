@@ -43,8 +43,24 @@ const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write", "skills:read"]);
 
 /** The spaces a conversation can act in. */
 const SPACES = [
-  { id: "spc_a", name: "Alpha", role: "operator", permissions: [], credentialProxyOpen: true },
-  { id: "spc_b", name: "Beta", role: "admin", permissions: [], credentialProxyOpen: true },
+  {
+    id: "spc_a",
+    name: "Alpha",
+    role: "operator",
+    permissions: [],
+    credentialProxyOpen: true,
+    isDefault: false,
+    personal: false,
+  },
+  {
+    id: "spc_b",
+    name: "Beta",
+    role: "admin",
+    permissions: [],
+    credentialProxyOpen: true,
+    isDefault: false,
+    personal: false,
+  },
 ];
 
 /** The identity the block renders, as `buildCallerContextBlock` reads it off the request. */
@@ -445,6 +461,49 @@ describe("the persona without inline composition", () => {
   });
 });
 
+describe("the integration tools", () => {
+  const PROXY = [...BUILDER, "credential-proxy:call-own"];
+  const space = (permissions: string[], credentialProxyOpen: boolean) => ({
+    permissions,
+    credentialProxyOpen,
+  });
+  const withTools = buildSystemPrompt(
+    turnCapabilities((p) => PROXY.includes(p), [space(PROXY, true)]),
+  );
+
+  it("are offered only where a turn space holds `mcp:invoke` and a proxy grant and leaves the proxy open", () => {
+    const offered = (turn: string[], spaces: ReturnType<typeof space>[]) =>
+      turnCapabilities((p) => turn.includes(p), spaces).callsIntegrationTools;
+    expect(offered(PROXY, [space(PROXY, true)])).toBe(true);
+    expect(offered(PROXY, [space(PROXY, false)])).toBe(false);
+    expect(offered(PROXY, [space(BUILDER, true)])).toBe(false);
+    // The turn's set is a ceiling over each space's.
+    expect(offered(BUILDER, [space(PROXY, true)])).toBe(false);
+    expect(offered(PROXY, [space(BUILDER, true), space(PROXY, true)])).toBe(true);
+    expect(offered(PROXY, [])).toBe(false);
+  });
+
+  it("are preferred over a run when offered, the inline guidance kept for a run", () => {
+    expect(withTools).toContain("`search_integration_tools`");
+    expect(withTools).toContain("call it with `call_integration_tool`, and answer from its result");
+    expect(withTools).toContain("Run an agent instead when the task needs a runtime");
+    expect(withTools).not.toContain("MUST be carried out by running an agent");
+    expect(withTools).not.toContain("use any integration or MCP directly");
+    expect(withTools).toContain('kind:"inline"');
+    expect(withTools).toContain(INLINE_MANIFEST_RULE);
+  });
+
+  it("are absent when not offered, the run rule unchanged", () => {
+    expect(FULL).not.toContain("search_integration_tools");
+    expect(FULL).not.toContain("call_integration_tool");
+    expect(FULL).toContain("MUST be carried out by running an agent");
+    expect(FULL).toContain(
+      "- If the request needs an integration, an MCP, or any external action, run an agent:",
+    );
+    expect(FULL).toContain('kind:"inline"');
+  });
+});
+
 describe("the persona without agent runs", () => {
   // `run_and_wait` is declared on `mcp:invoke` ∧ launch ∧ run-read; a turn
   // missing any of the three is never shown the tool, so the persona must not
@@ -650,6 +709,41 @@ describe("the persona and the spaces", () => {
       expect(out).toContain(
         "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
       );
+    });
+
+    describe("without an origin space (the overview)", () => {
+      const fallback = (id: string, label: string) =>
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`; never move a refused action into another space.`;
+      const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
+      const DEFAULT = { ...SPACES[1]!, isDefault: true };
+
+      it("defaults to the caller's personal space, ahead of the organization's default space", () => {
+        const out = contextText(identityOf("Ada"), {
+          ...CONTEXT_OPTS,
+          spaces: [DEFAULT, PERSONAL],
+        });
+        expect(out).toContain(fallback("spc_p", "Mine, your personal space"));
+        expect(out).not.toContain("Ask the user which space");
+      });
+
+      it("falls back to the organization's default space when the turn has no personal space", () => {
+        const out = contextText(identityOf("Ada"), {
+          ...CONTEXT_OPTS,
+          spaces: [SPACES[0]!, DEFAULT],
+        });
+        expect(out).toContain(fallback("spc_b", "Beta, the organization's default space"));
+        expect(out).not.toContain("Ask the user which space");
+      });
+
+      it("gives way to the origin space", () => {
+        const out = contextText(identityOf("Ada"), {
+          ...CONTEXT_OPTS,
+          spaces: [DEFAULT, PERSONAL],
+          origin: { id: "spc_b", name: "Beta" },
+        });
+        expect(out).toContain(sentence("Beta", "spc_b"));
+        expect(out).not.toContain("When the user names no space, pass");
+      });
     });
 
     it("names the one space a limited conversation acts in, and that the user lifts the limit", () => {

@@ -331,6 +331,8 @@ describe("platform MCP surface cache", () => {
       role: "operator",
       permissions: ["agents:run"],
       credentialProxyOpen: true,
+      isDefault: false,
+      personal: false,
     };
     const beta = {
       id: "spc_b",
@@ -338,6 +340,8 @@ describe("platform MCP surface cache", () => {
       role: "admin",
       permissions: ["agents:write"],
       credentialProxyOpen: true,
+      isDefault: false,
+      personal: false,
     };
 
     // The org id in the path reaches no descriptor.

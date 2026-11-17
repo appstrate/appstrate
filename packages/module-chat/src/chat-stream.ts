@@ -406,7 +406,7 @@ export async function handleChatStream(
       authoring: body.package_authoring !== false,
       skillMode: conv.selection.skillMode,
     });
-    const capabilities = turnCapabilities((permission) => permissions.includes(permission));
+    const capabilities = turnCapabilities((permission) => permissions.includes(permission), spaces);
     // `auto` shows the whole catalogue in the context and `strict` lists nothing:
     // only a `manual` turn lists the spaces' skills on the user's request.
     const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";

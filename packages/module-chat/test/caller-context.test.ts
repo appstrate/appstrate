@@ -80,6 +80,8 @@ const REACH = [
     role: "builder",
     permissions: ["chat:read", "chat:write", ...BUILDER],
     credentialProxyOpen: true,
+    isDefault: false,
+    personal: false,
   },
 ];
 

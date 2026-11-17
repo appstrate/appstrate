@@ -1403,6 +1403,10 @@ export interface ReachableSpaceGrant {
   permissions: string[];
   /** The space's direct-access switch (`spaces.credential_proxy_open`): the MCP surface depends on it. */
   credentialProxyOpen: boolean;
+  /** The organization's default space (`spaces.is_default`). */
+  isDefault: boolean;
+  /** The caller's own personal space in this organization (`spaces.owner_user_id` is the caller). */
+  personal: boolean;
 }
 
 /** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential pins it. */

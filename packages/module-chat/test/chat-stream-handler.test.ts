@@ -283,6 +283,8 @@ describe("handleChatStream", () => {
       role: "owner",
       permissions: [...new Set(["chat:read", "chat:write", "mcp:read", ...permissions])],
       credentialProxyOpen: false,
+      isDefault: false,
+      personal: false,
     };
   }
 
@@ -1550,7 +1552,25 @@ describe("handleChatStream", () => {
         expect(await touchedBy(sessionId)).toEqual([]);
       });
 
-      it("has no default from the overview: nothing stored, the assistant asks", async () => {
+      it("defaults the overview to the organization's default space, storing no origin", async () => {
+        const sessionId = mintSessionId();
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          reachable: reach.map((space) =>
+            space.id === spaceB ? { ...space, isDefault: true } : space,
+          ),
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(calls[0]!.system).toContain(
+          `When the user names no space, pass \`${spaceB}\` (Beta, the organization's default space) as the \`space_id\``,
+        );
+        expect(calls[0]!.system).not.toContain("Ask the user which space");
+        expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
+      });
+
+      it("has no default from the overview without a personal or default space: nothing stored, the assistant asks", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, { reachable: reach });

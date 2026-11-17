@@ -76,6 +76,8 @@ async function strictTurn(
           role: orgRole,
           permissions: [...new Set([...granted, "chat:read"])],
           credentialProxyOpen: false,
+          isDefault: false,
+          personal: false,
         },
       ],
       user,

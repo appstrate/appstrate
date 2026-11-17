@@ -34,6 +34,7 @@ import {
   loadEnforcedChatSkills,
 } from "../../services/chat-enforced-skills.ts";
 import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
+import { callerPersonalOwnerId } from "../view-as.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -99,13 +100,19 @@ function buildPlatformServices(): PlatformServices {
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
-    reachableSpaces: async (c, orgId) => ({
-      spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
-        ...toReachableSpaceWire(space),
-        permissions: [...space.permissions],
-      })),
-      pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
-    }),
+    reachableSpaces: async (c, orgId) => {
+      // The caller's own personal space; none under a role preview, which acts as nobody's.
+      const personalOwner = callerPersonalOwnerId(c as Context<AppEnv>, orgId);
+      return {
+        spaces: (await reachAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
+          ...toReachableSpaceWire(space),
+          permissions: [...space.permissions],
+          isDefault: space.isDefault,
+          personal: personalOwner !== null && space.ownerUserId === personalOwner,
+        })),
+        pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
+      };
+    },
     // Module routes run behind the platform middleware chain, so the context
     // carries the same org / actor / request variables a core route audits from.
     audit: {

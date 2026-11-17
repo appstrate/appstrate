@@ -67,6 +67,8 @@ const reachOf = (
     permissions: [...permissions],
     // The default space opens the credential proxy, as seeded.
     credentialProxyOpen: true,
+    isDefault: true,
+    personal: false,
   },
 ];
 
@@ -207,6 +209,8 @@ describe("platform MCP surface key purity", () => {
           role: "owner",
           permissions: [...grant],
           credentialProxyOpen: false,
+          isDefault: false,
+          personal: false,
         },
       ],
     };

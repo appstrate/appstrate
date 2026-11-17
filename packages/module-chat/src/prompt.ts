@@ -116,7 +116,7 @@ const SKILLS_STRICT_NOTE =
  * the platform, not this text, refuses the act.
  */
 export function buildSystemPrompt(capabilities: TurnCapabilities): string {
-  const { invokes, authors, authorsPackages, readsSkills } = capabilities;
+  const { invokes, authors, authorsPackages, readsSkills, callsIntegrationTools } = capabilities;
   const mayRun = reaches(capabilities.runLevel, "run");
   const mayRead = reaches(capabilities.runLevel, "read");
   const mayCompose = reaches(capabilities.runLevel, "compose");
@@ -126,6 +126,7 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const author = (yes: string, no = "") => (authors ? yes : no);
   const invoke = (yes: string, no = "") => (invokes ? yes : no);
   const skills = (yes: string, no = "") => (readsSkills ? yes : no);
+  const tools = (yes: string, no = "") => (callsIntegrationTools ? yes : no);
   // Dropped whole when no target applies: a bullet naming none misleads.
   const idVerbatimTargets = [
     ...(authors ? ["`dependencies.integrations`"] : []),
@@ -140,7 +141,10 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
         )}.\n`;
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
-**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
+**You have no ability of your own to act on the outside world.** ${tools(
+    `You cannot browse the web, read email or call third-party APIs yourself. Your only powers are invoking Appstrate operations and calling the tools of the integrations connected in a space, with \`search_integration_tools\` then \`call_integration_tool\`.${runs(" For work those tools cannot do, your hands are Appstrate agents: run one and read its result back.")} Never claim an external action that no tool result shows.`,
+    `You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}`,
+  )}
 
 Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
     "search for the right operation with `search_operations`, read its schema with `describe_operation`, then invoke it with `invoke_operation`",
@@ -155,9 +159,14 @@ ${invoke(
       : "- Do not create, import or modify any package (agent, skill, integration) in this turn, not even through `invoke_operation`.\n"
   }`,
 )}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
-${runs(
-  `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated in the space concerned — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
-- If the request needs an integration, an MCP, or any external action, run an agent:
+${tools(
+  "- If the request needs a connected integration's data or action, call it directly: find the tool with `search_integration_tools` in the space concerned, call it with `call_integration_tool`, and answer from its result. A missing connection comes back as a connect card: offer to connect it.\n",
+)}${runs(
+    `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated in the space concerned — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
+${tools(
+  "- Run an agent instead when the task needs a runtime — a shell, a filesystem, code execution, files written to `outputs/`, long multi-step processing, a fan-out — or the integration tools cannot do it:",
+  "- If the request needs an integration, an MCP, or any external action, run an agent:",
+)}
   1. Prefer an existing agent the user can run when one matches the intent (look the agents of the space concerned up with \`get_me\`, naming its \`space_id\` where the tool asks for one) — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent declares an input schema (it is validated against it); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent with no published version runs only as \`version:"draft"\`, and only for a user who authors it: for anyone else it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
 ${inline(
   `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a \`manifest\` plus a top-level \`prompt\`. ${INLINE_MANIFEST_RULE} Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"); the platform derives the matching \`@inline/<kebab-case-slug>\` name. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version, looked up for the space concerned), then select that integration's tools under \`integrations_configuration.<id>.tools\`: list the exact tool names the task needs (\`api_call\` covers most third-party REST calls); omit the entry to inherit the integration's \`default_tools\` (read with \`getIntegration\`) only when the task needs that whole default. A run can call, and loads the schema of, every tool it is given, so never give it more than the task needs. To know which tools an integration offers, read it with \`invoke_operation\` (\`operation_id: "getIntegration"\`, \`GET /api/integrations/{packageId}\`): its \`default_tools\` holds the default's names, its \`tool_catalog\` every tool you may select. Then name those tools. A declared integration is optional: without a usable connection the run starts without it and lists it in \`warnings\`. Set \`integrations_configuration.<id>.required: true\` when the task means nothing without it, to refuse the launch instead.${skills(' When one of the skills listed in your context fits the task, attach it under `dependencies.skills` keyed by its `@scope/name` id with a satisfiable range (use the version shown in your context, e.g. `"^1.2.0"`, or `"*"` if none); the agent then has that skill\'s instructions available.')} In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
@@ -200,8 +209,8 @@ You already have the exact shape for \`run_and_wait\`: for existing agents pass 
 After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in the space the failed call acted in (the conversation's space when it is limited to one), which someone allowed to manage that space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
 
 `,
-  "\n",
-)}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
+    "\n",
+  )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
 `)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated in the space the failed call acted in — the space the call's \`space_id\` named, or the conversation's space when it is limited to one and its calls carry none — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it in that space instead: call \`activatePackage\` (\`POST /api/spaces/{id}/packages\`, with \`spaceId\` that space's id and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
@@ -378,10 +387,14 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // The spaces the turn acts in, then its origin space: a default for a request naming no
-  // space, never a pin (a conversation without one has none, and the model asks). A limited
-  // conversation's spaces are its origin alone, which every call still names.
+  // The spaces the turn acts in, then the default of a request naming no space, never a pin:
+  // the origin space, else the caller's personal space, else the organization's default space,
+  // when the turn acts there (with none, the model asks). A limited conversation's spaces are
+  // its origin alone, which every call still names.
   const preview = opts.rolePreview ? " (role preview active)" : "";
+  const fallback = opts.origin
+    ? undefined
+    : (opts.spaces.find((space) => space.personal) ?? opts.spaces.find((space) => space.isDefault));
   lines.push(
     `Spaces you can act in${preview}; every tool that acts in a space takes the \`space_id\` of one of them:`,
     ...opts.spaces.map((space) => `- \`${space.id}\` — ${space.name} (role ${space.role})`),
@@ -389,7 +402,9 @@ export function formatCallerContext(
       ? `This conversation is limited to ${opts.origin.name} (\`${opts.origin.id}\`): pass \`${opts.origin.id}\` as the \`space_id\` of every call; no other space can be reached. The user lifts the limit in the composer; never move a refused action elsewhere.`
       : opts.origin
         ? `This conversation was started in ${opts.origin.name} (\`${opts.origin.id}\`): when the user names no space, pass \`${opts.origin.id}\` as the \`space_id\`; never move a refused action into another space.`
-        : "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
+        : fallback
+          ? `When the user names no space, pass \`${fallback.id}\` (${fallback.name}, ${fallback.personal ? "your personal space" : "the organization's default space"}) as the \`space_id\`; never move a refused action into another space.`
+          : "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
   );
   // The set is the union over the spaces listed above: it bounds what the turn may attempt,
   // while each call is decided by the role held in the space it names. Permissions are in the
