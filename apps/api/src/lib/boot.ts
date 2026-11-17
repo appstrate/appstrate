@@ -269,8 +269,8 @@ export async function bootCritical(): Promise<void> {
 
   // Read the `.afps` archives off disk into the in-memory registry. Cheap
   // and consulted by request-path helpers (`isSystemPackage`), so it
-  // stays pre-bind; the DB + S3 reconciliation it used to be bundled with is
-  // the slow half and runs in `bootServing`.
+  // stays pre-bind; the DB + S3 reconciliation is the slow half and runs in
+  // `bootServing`.
   await bootStep("critical", "init-system-packages", () =>
     initSystemPackages().catch((err) => {
       logger.warn("Could not load system packages", {
@@ -285,8 +285,7 @@ export async function bootCritical(): Promise<void> {
  * `index.ts`, which answers 503 on every route until this resolves; reads, auth
  * and the dashboard need nothing more. Nothing here changes the route table.
  *
- * A rejection is fatal exactly as it was when this code lived in a blocking
- * `await boot()`: the caller in `index.ts` exits the process.
+ * A rejection is fatal: the caller in `index.ts` exits the process.
  */
 export async function bootServing(): Promise<void> {
   // Reconcile the loaded system packages into the DB + S3.
@@ -386,11 +385,9 @@ export async function bootRunCapacity(): Promise<void> {
         // Concurrency is capped well under the postgres.js pool (`max: 20`)
         // because `synthesiseFinalize` writes.
         // The pool aborts on the first rejection (no new orphan is picked up
-        // once one worker throws). That is a real change from the pool this used
-        // to call, which kept draining the queue regardless — but it cannot fire
-        // here: the callback body below catches everything it can raise and
-        // degrades to a `logger.warn`, so a boot with N orphans still attempts
-        // all N. The abort is the safety net for the day that stops being true.
+        // once one worker throws). It cannot fire here: the callback body below
+        // catches everything it can raise and degrades to a `logger.warn`, so a
+        // boot with N orphans still attempts all N.
         await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
           try {
             // An orphaned run may still have a live remote workload — a
@@ -478,18 +475,16 @@ export async function bootRunCapacity(): Promise<void> {
     // owns its own artifact locality. `initialize()` above pre-pulls once;
     // this is what keeps that true against host-level image pruning between
     // runs (see services/orchestrator/runtime-image-warmer.ts).
-    bootStep("run-capacity", "runtime-image-warmer", () =>
-      Promise.resolve().then(() => {
-        if (getExecutionMode() !== "docker") return;
-        startRuntimeImageWarmer({
-          intervalSeconds: env.RUNTIME_IMAGE_WARM_INTERVAL_SECONDS,
-          images: [
-            { image: env.PI_IMAGE, slot: "pi" },
-            { image: env.SIDECAR_IMAGE, slot: "sidecar" },
-          ],
-        });
-      }),
-    ),
+    bootStep("run-capacity", "runtime-image-warmer", () => {
+      if (getExecutionMode() !== "docker") return;
+      startRuntimeImageWarmer({
+        intervalSeconds: env.RUNTIME_IMAGE_WARM_INTERVAL_SECONDS,
+        images: [
+          { image: env.PI_IMAGE, slot: "pi" },
+          { image: env.SIDECAR_IMAGE, slot: "sidecar" },
+        ],
+      });
+    }),
   ]);
 }
 

@@ -135,7 +135,8 @@ export const integrationConnections = pgTable(
     shareAllSpaces: boolean("share_all_spaces").notNull().default(false),
     // Read only by scripts/migration/0044 and the `0044` entry of
     // `PENDING_DATA_SCRIPTS` (apps/api/src/lib/boot-guards/pending-data-scripts.ts); no code writes
-    // it. Dropped with its CHECKs and that entry in the next release. Shares live in `integration_connection_shares`.
+    // it. Dropped with its CHECKs and that entry in the next release. Shares live in
+    // `integration_connection_shares`.
     sharedSpaceIds: text("shared_space_ids")
       .array()
       .notNull()

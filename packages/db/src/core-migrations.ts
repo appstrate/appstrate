@@ -6,8 +6,8 @@
  * Deliberately free of `./client.ts` and of `getEnv()`: the standalone migrator
  * (`migrate.ts`, the compose `appstrate-migrate` service) runs in a container that
  * carries `DATABASE_URL` and nothing else, and the application's boot calls the same
- * functions on PostgreSQL (PGlite keeps `apps/api/src/lib/pglite-migrate.ts`). One implementation, so "apply" and "verify" cannot disagree about what
- * is pending.
+ * functions on PostgreSQL (PGlite keeps `apps/api/src/lib/pglite-migrate.ts`). One
+ * implementation, so "apply" and "verify" cannot disagree about what is pending.
  *
  * Scope: the core journal (`drizzle.__drizzle_migrations`) only. `@appstrate/module-ee`
  * keeps its own journal (`drizzle.ee_migrations`) and applies it itself at `init()`.

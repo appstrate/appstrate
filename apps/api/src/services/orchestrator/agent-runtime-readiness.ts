@@ -35,7 +35,7 @@ export function _resetAgentRuntimeReadinessForTesting(): void {
  * Run-capacity readiness: the boot's orphan pass (stop + finalize, resource
  * cleanup) and the runtime's FIRST `initialize()` attempt are done. It is NOT
  * "the runtime is healthy" — a failed `initialize()` still sets it, and runs
- * go through and fail visibly exactly as before. Until it is set the runtime
+ * go through and fail visibly. Until it is set the runtime
  * has not been initialised (images not yet pulled, no runner handshake) and the
  * orphan sweep is still reclaiming resources, so every launch door refuses via
  * {@link assertRunCapacityReady}. The orphan pass itself spares a fresh run (it
@@ -43,10 +43,6 @@ export function _resetAgentRuntimeReadinessForTesting(): void {
  */
 export function markRunCapacityReady(): void {
   runCapacityReady = true;
-}
-
-export function isRunCapacityReady(): boolean {
-  return runCapacityReady;
 }
 
 export function _resetRunCapacityReadyForTesting(): void {

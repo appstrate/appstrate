@@ -14,7 +14,6 @@
  * catalog queries. Collisions are prevented by the 128-bit UUID payload.
  */
 
-import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, runs } from "@appstrate/db/schema";
@@ -30,6 +29,7 @@ import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appst
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import { INLINE_SHADOW_SCOPE } from "@appstrate/core/naming";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 
 /**
  * Return true when the package id belongs to the reserved inline scope.

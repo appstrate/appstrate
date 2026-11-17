@@ -37,7 +37,6 @@
  * the sentinel below — plaintext bundle bytes never touch stdout/stderr/logs.
  */
 
-import { assertRunCapacityReady } from "../orchestrator/agent-runtime-readiness.ts";
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
@@ -67,6 +66,7 @@ import {
   type IsolationBoundary,
   type WorkloadHandle,
 } from "../orchestrator/index.ts";
+import { assertRunCapacityReady } from "../orchestrator/agent-runtime-readiness.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
 import {
   CONNECT_ID_PREFIX,

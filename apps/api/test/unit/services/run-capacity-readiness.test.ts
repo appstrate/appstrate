@@ -10,7 +10,6 @@ import { ApiError } from "../../../src/lib/errors.ts";
 import {
   _resetRunCapacityReadyForTesting,
   assertRunCapacityReady,
-  isRunCapacityReady,
   markRunCapacityReady,
 } from "../../../src/services/orchestrator/agent-runtime-readiness.ts";
 
@@ -18,14 +17,6 @@ describe("run capacity readiness", () => {
   beforeEach(() => _resetRunCapacityReadyForTesting());
   // The preload marks the flag ready for the whole process: restore it.
   afterEach(() => markRunCapacityReady());
-
-  it("starts not ready and flips with markRunCapacityReady()", () => {
-    expect(isRunCapacityReady()).toBe(false);
-    markRunCapacityReady();
-    expect(isRunCapacityReady()).toBe(true);
-    _resetRunCapacityReadyForTesting();
-    expect(isRunCapacityReady()).toBe(false);
-  });
 
   it("assertRunCapacityReady() throws a 503 run_capacity_starting with Retry-After while not ready", () => {
     let caught: unknown;

@@ -468,9 +468,9 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 //      `markRunCapacityReady()`, every run launch is refused with 503
 //      `run_capacity_starting` (`assertRunCapacityReady`, in the services).
 //
-// A rejection anywhere is fatal, matching the previous blocking `await boot()`:
-// the metering retry worker's init is deliberately uncaught upstream because a
-// missing durable recovery channel can lose billable spend permanently.
+// A rejection anywhere is fatal: the metering retry worker's init is
+// deliberately uncaught upstream because a missing durable recovery channel can
+// lose billable spend permanently.
 const servingStartedAt = performance.now();
 void bootServing()
   .then(() => {

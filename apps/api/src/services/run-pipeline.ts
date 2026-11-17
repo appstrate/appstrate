@@ -5,7 +5,6 @@
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
-import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import { logger } from "../lib/logger.ts";
 import {
@@ -45,6 +44,7 @@ import { encrypt } from "@appstrate/connect";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
