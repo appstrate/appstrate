@@ -204,16 +204,15 @@ const FILE_BLOB_GC_TIME = 5 * 60 * 1000;
  * the query cache (keyed by file id) so a remount reuses it instead of re-fetching, and revoked
  * when the entry is removed (`lib/query-client.ts`). `undefined` while loading, `null` when there
  * is no preview (no grant, failed read). THE single implementation for image thumbnails; chat
- * gets it via `ChatPage`'s injection seam.
+ * gets it via `ChatPage`'s injection seam. Nothing is read until `enabled` (a grid tile waits to
+ * be visible).
  */
-export function useFileImageSrc(id: string, spaceId?: string): string | null | undefined {
-  const scope = useOrgScope();
-  const orgId = useCurrentOrgId();
-  const currentSpaceId = useCurrentSpaceId();
-  const readsFiles = usePermissions().can("files:read");
-  // A file of another space (a list spanning spaces) is read in its own, which the server judges.
-  const elsewhere = otherSpaceFileContext(spaceId, orgId, currentSpaceId);
-  const header = fileContextHeader(elsewhere) ?? scope.header;
+export function useFileImageSrc(
+  id: string,
+  spaceId?: string,
+  enabled = true,
+): string | null | undefined {
+  const { readable, elsewhere, header } = useFileReadScope(spaceId);
   const query = useQuery({
     queryKey: fileBlobKeys.detail(id, header),
     queryFn: async ({ signal }): Promise<string | null> => {
@@ -226,7 +225,7 @@ export function useFileImageSrc(id: string, spaceId?: string): string | null | u
       signal.throwIfAborted();
       return data ? URL.createObjectURL(data) : null;
     },
-    enabled: !!elsewhere || (readsFiles && scope.enabled),
+    enabled: enabled && readable,
     // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
     // Only leaving the cache frees it (`lib/query-client.ts`).
     staleTime: Infinity,
@@ -234,6 +233,37 @@ export function useFileImageSrc(id: string, spaceId?: string): string | null | u
     retry: false,
   });
   // Decorative failures have no preview, but remain errors so reopening retries them.
-  if ((!elsewhere && !readsFiles) || query.isError) return null;
+  if ((!elsewhere && !readable) || query.isError) return null;
   return query.data;
+}
+
+/**
+ * Where a stored file's bytes are read from: its own space when it lives in another (a list
+ * spanning spaces), which the server judges; else the current scope, behind `files:read`.
+ */
+function useFileReadScope(spaceId: string | undefined) {
+  const scope = useOrgScope();
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+  const readsFiles = usePermissions().can("files:read");
+  const elsewhere = otherSpaceFileContext(spaceId, orgId, currentSpaceId);
+  return {
+    elsewhere,
+    header: fileContextHeader(elsewhere) ?? scope.header,
+    readable: !!elsewhere || (readsFiles && scope.enabled),
+  };
+}
+
+/**
+ * A text excerpt of a stored file (grid tile preview); `null` when the type has none. Content is
+ * immutable, so it is fetched once. A file of another space is read in its own, like its image.
+ */
+export function useFileExcerpt(id: string, spaceId: string | undefined, enabled: boolean) {
+  const { readable, header } = useFileReadScope(spaceId);
+  return $api.useQuery(
+    "get",
+    "/api/files/{id}/excerpt",
+    { params: { path: { id }, header } },
+    { enabled: enabled && readable, staleTime: Infinity, select: (d) => d.excerpt },
+  );
 }
