@@ -60,7 +60,10 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
     allowSignup: false,
     signupSpaceAssignments: [{ spaceId: space.id, preset_role: "viewer" }],
   });
-  await page.keyboard.press("Escape");
+  await page
+    .getByRole("dialog", { name: /Client OAuth créé|OAuth client created/i })
+    .getByRole("button", { name: /^(Terminé|Done)$/ })
+    .click();
 
   await openRowMenuItem(page, name, "Modifier");
   // The edit modal replaces the creation one: found by the field it carries.
