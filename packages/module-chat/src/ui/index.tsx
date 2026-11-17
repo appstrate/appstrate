@@ -102,6 +102,7 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
@@ -670,6 +671,7 @@ function ConversationInner({
             messages,
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
+            inlineRunsUseChatModel: getInlineRunModelEnabled(),
             skills: getChosenSkills(),
             creation: getCreation(),
           }),

@@ -56,6 +56,8 @@ function seamFetch(forwarded: string[] = []) {
   const rpc: string[] = [];
   /** `params` of every `tools/call` that reached this transport. */
   const toolCalls: unknown[] = [];
+  /** The body of every run launch POST (`undefined` for a body-less agent launch). */
+  const launches: unknown[] = [];
   const json = (body: unknown, extra?: Record<string, string>) =>
     new Response(JSON.stringify(body), {
       status: 200,
@@ -108,8 +110,13 @@ function seamFetch(forwarded: string[] = []) {
       return reply({});
     }
 
-    // Launch POST.
+    // Launch POST, inline or agent.
+    if (req.method === "POST" && url.pathname === "/api/runs/inline") {
+      launches.push(await req.json());
+      return json({ id: RUN_ID, packageId: "@inline/demo", status: "pending" });
+    }
     if (req.method === "POST" && url.pathname.endsWith("/run")) {
+      launches.push(await req.text().then((text) => (text ? JSON.parse(text) : undefined)));
       return json({ id: RUN_ID, packageId: "@acme/demo", status: "pending" });
     }
     // Poll GET — terminal on the first read.
@@ -122,12 +129,16 @@ function seamFetch(forwarded: string[] = []) {
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
-  return { fetch: impl, seen, rpc, toolCalls };
+  return { fetch: impl, seen, rpc, toolCalls, launches };
 }
 
 /** One turn's tool layer over `transport`. */
-function buildTurn(transport: ReturnType<typeof seamFetch>) {
+function buildTurn(
+  transport: ReturnType<typeof seamFetch>,
+  extra?: Pick<Parameters<typeof buildPlatformMcpTools>[0], "inlineRunModel">,
+) {
   return buildPlatformMcpTools({
+    ...extra,
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
     organization: {
@@ -198,6 +209,40 @@ describe("buildPlatformMcpTools fetch seam", () => {
       const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
       expect(payload).toMatchObject({ code: "unknown_argument", arguments: ["wait"] });
       expect(transport.seen.some((h) => h.method === "POST" && h.url.includes("/run"))).toBe(false);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("launches an inline run on the turn's model, and leaves an agent's alone", async () => {
+    const transport = seamFetch();
+    const built = await buildTurn(transport, {
+      inlineRunModel: { modelId: "model_chat", generation: { reasoning_level: "high" } },
+    });
+
+    try {
+      const { pi, tools } = capturePi();
+      for (const factory of built.extensionFactories) factory(pi);
+      const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
+
+      await runAndWait.execute("call_1", {
+        kind: "inline",
+        manifest: { display_name: "Demo" },
+        prompt: "do it",
+        space_id: "spc_1",
+      });
+      await runAndWait.execute("call_2", {
+        kind: "agent",
+        scope: "@acme",
+        name: "demo",
+        space_id: "spc_1",
+      });
+
+      expect(transport.launches[0]).toMatchObject({
+        modelId: "model_chat",
+        generation: { reasoning_level: "high" },
+      });
+      expect(transport.launches[1]).toBeUndefined();
     } finally {
       await built.close();
     }

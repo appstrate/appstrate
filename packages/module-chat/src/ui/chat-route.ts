@@ -46,16 +46,27 @@ export function turnBody(args: {
   messages: UIMessage[];
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
+  inlineRunsUseChatModel: boolean;
   skills: ChatSkillSelection | undefined;
   creation: ConversationCreation | undefined;
 }) {
-  const { body, id, messages, generation, packageAuthoring, skills, creation } = args;
+  const {
+    body,
+    id,
+    messages,
+    generation,
+    packageAuthoring,
+    inlineRunsUseChatModel,
+    skills,
+    creation,
+  } = args;
   return {
     ...body,
     id,
     messages,
     generation,
     package_authoring: packageAuthoring,
+    inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
     ...(skills && { skill_mode: skills.skillMode, pinned_skills: skills.pinnedSkills }),
   };

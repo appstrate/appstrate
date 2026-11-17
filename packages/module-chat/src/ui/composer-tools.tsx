@@ -2,13 +2,20 @@
 
 /**
  * The composer's left cluster: an attach button, a settings menu (skills, space limit, creation
- * mode) and, after them, a removable chip for each non-default setting that is active. Settings
- * live behind the menu, so the composer shows only what differs from the defaults.
+ * mode, inline-run model) and, after them, a removable chip for each non-default setting that is
+ * active. Settings live behind the menu, so the composer shows only what differs from the defaults.
  */
 
 import { useRef, useState, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
-import { BookOpenIcon, MapPinIcon, PackageIcon, PaperclipIcon, SettingsIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  CpuIcon,
+  MapPinIcon,
+  PackageIcon,
+  PaperclipIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -18,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
@@ -30,6 +38,7 @@ import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
+import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
@@ -61,7 +70,7 @@ export function ComposerTools({
   showPicker,
   authorsPackages,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds } = useChatHost();
+  const { t, actingSpaceIds, can } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
   // The plain name, for the accessible names: the node below carries a tile the name does not.
@@ -70,6 +79,9 @@ export function ComposerTools({
   // The space as the host names it; without an origin, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
+  // Composing an inline run needs creation mode too: off, no turn launches one.
+  const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
+  const inlineRunModel = useInlineRunModelEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
   // A popover opened while the menu is closing loses to the menu's focus
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
@@ -150,6 +162,20 @@ export function ComposerTools({
               {t("composer.creationMode")}
             </DropdownMenuCheckboxItem>
           )}
+          {offersInlineRunModel && (
+            <DropdownMenuCheckboxItem
+              checked={inlineRunModel}
+              onCheckedChange={setInlineRunModelEnabled}
+              // The hint below would otherwise be read as part of the name.
+              aria-label={t("composer.inlineRunModel")}
+              data-testid="composer-inline-run-model-item"
+            >
+              <LabelWithHint
+                label={t("composer.inlineRunModel")}
+                hint={t("composer.inlineRunModel.hint")}
+              />
+            </DropdownMenuCheckboxItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -162,6 +188,17 @@ export function ComposerTools({
           onRemove={() => setPackageAuthoringEnabled(true)}
         >
           {t("composer.creationOff")}
+        </RemovableChip>
+      )}
+      {/* Off is the default, so the chip marks the departure from it. */}
+      {offersInlineRunModel && inlineRunModel && (
+        <RemovableChip
+          icon={<CpuIcon />}
+          removeLabel={t("composer.inlineRunModelChip.undo")}
+          onRemove={() => setInlineRunModelEnabled(false)}
+          data-testid="composer-inline-run-model-chip"
+        >
+          {t("composer.inlineRunModelChip")}
         </RemovableChip>
       )}
       {scope.restricted && (
@@ -215,11 +252,18 @@ function UnavailableItem({
   return (
     <DropdownMenuItem disabled data-testid={testId}>
       {icon}
-      <span className="flex flex-col">
-        {label}
-        <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">{reason}</span>
-      </span>
+      <LabelWithHint label={label} hint={reason} />
     </DropdownMenuItem>
+  );
+}
+
+/** A menu item's label with a line of explanation under it. */
+function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
+  return (
+    <span className="flex flex-col">
+      {label}
+      <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">{hint}</span>
+    </span>
   );
 }
 

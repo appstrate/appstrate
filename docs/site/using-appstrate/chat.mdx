@@ -36,6 +36,10 @@ The access chip in the composer lists, for the current organization and space, w
 
 A toggle in the composer controls whether the assistant may **create or edit agents** and compose a one-off agent on the fly for a single task. Each execution of such an agent costs a run. Turned off, the assistant sticks to your published agents and does not run drafts. The setting is remembered per account in your browser.
 
+### Model of inline runs
+
+By default, a one-off agent the assistant composes runs on the organization's default model, not on the conversation's. **Inline runs on the chat's model**, in the composer's **Assistant settings** menu, makes those runs use the conversation's model and its settings (temperature, reasoning level) instead, and a chip in the composer shows it is on. It is off by default because the assistant can split a task into several runs, and the conversation's model is often the most expensive one. It does not change a saved agent's run, which keeps its own model. The model is checked like any model chosen for a run you launch, and billed to you the same way; a model that is no longer usable falls back to the default model with a **Model replaced** notice on the run. The setting is remembered per account in your browser.
+
 ### Skills
 
 [Skills](/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:

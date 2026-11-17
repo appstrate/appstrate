@@ -403,6 +403,11 @@ export const chatPaths = {
                   description:
                     "Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them.",
                 },
+                inline_runs_use_chat_model: {
+                  type: "boolean",
+                  description:
+                    "Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model.",
+                },
                 skill_mode: {
                   type: "string",
                   enum: [...chatSkillModeValues],

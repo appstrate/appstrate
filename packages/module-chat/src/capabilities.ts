@@ -74,6 +74,11 @@ export function canAuthorPackages(has: (permission: string) => boolean): boolean
   return has("chat:write") && turnCapabilities(has, []).authorsPackages;
 }
 
+/** Composing inline runs from the chat: the composer's inline-run model switch. */
+export function canComposeInlineRuns(has: (permission: string) => boolean): boolean {
+  return has("chat:write") && turnCapabilities(has, []).runLevel === "compose";
+}
+
 /**
  * The skill picker: it writes the conversation and lists the space's skills,
  * whose content the chat then reads with the caller's own `skills:read`.

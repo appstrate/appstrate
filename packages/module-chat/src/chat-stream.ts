@@ -174,6 +174,8 @@ export const chatStreamSchema = z
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
     package_authoring: z.boolean().optional(),
+    /** Runs the inline runs this turn launches on its model and generation; absent = off. */
+    inline_runs_use_chat_model: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
@@ -851,6 +853,16 @@ export async function handleChatStream(
           fetch: platformFetch,
           surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, spaces),
           listsSkills,
+          // The launch body's `modelId`, judged by the inline route like any explicit
+          // one (it exists, the caller pays, admission). Never a tool argument.
+          ...(body.inline_runs_use_chat_model === true
+            ? {
+                inlineRunModel: {
+                  modelId: chosen.id,
+                  ...(body.generation && { generation: body.generation }),
+                },
+              }
+            : {}),
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,

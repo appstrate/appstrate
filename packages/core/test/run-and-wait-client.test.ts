@@ -818,6 +818,73 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
+  // The caller's model, never the tool's: `inlineRunModel` is an option of the
+  // client, so the model driving `run_and_wait` cannot pick what a run costs.
+  it("kind:inline writes the caller's inlineRunModel into the launch body", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+        inlineRunModel: { modelId: "model_chat", generation: { reasoning_level: "high" } },
+      },
+    );
+
+    expect(captured()?.body).toMatchObject({
+      modelId: "model_chat",
+      generation: { reasoning_level: "high" },
+    });
+  });
+
+  it("kind:inline sends no generation when inlineRunModel carries none", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+        inlineRunModel: { modelId: "model_chat" },
+      },
+    );
+
+    const body = captured()?.body as Record<string, unknown>;
+    expect(body.modelId).toBe("model_chat");
+    expect("generation" in body).toBe(false);
+  });
+
+  it("kind:agent ignores inlineRunModel: an agent keeps its own model", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      { kind: "agent", scope: "@acme", name: "triage" },
+      {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+        inlineRunModel: { modelId: "model_chat", generation: { temperature: 0.2 } },
+      },
+    );
+
+    expect(captured()?.body).toBeUndefined();
+  });
+
+  it("refuses a modelId passed as a tool argument", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", modelId: "model_x" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(captured()).toBeUndefined();
+  });
+
   it("kind:inline omits an empty context_files", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
