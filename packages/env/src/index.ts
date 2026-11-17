@@ -138,6 +138,9 @@ export const envSchema = z
       }),
     // Database (optional — falls back to PGlite embedded Postgres when absent)
     DATABASE_URL: z.string().optional(),
+    // What boot does with the core migrations: `apply` runs them, `verify` refuses to start
+    // while any is pending (a separate migrate step owns them). `verify` needs DATABASE_URL.
+    MIGRATIONS_ON_BOOT: z.enum(["apply", "verify"]).default("apply"),
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
@@ -1006,6 +1009,11 @@ export const envSchema = z
   // three is out of step and what each one currently claims — a fixed string
   // cannot, and "one of your three images is wrong" is the opaque error this
   // check exists to replace.
+  .refine((env) => env.MIGRATIONS_ON_BOOT !== "verify" || !!env.DATABASE_URL, {
+    message:
+      "MIGRATIONS_ON_BOOT=verify requires DATABASE_URL: an embedded PGlite database opens in one process, so nothing else can have migrated it. Use MIGRATIONS_ON_BOOT=apply (the default) without DATABASE_URL.",
+    path: ["MIGRATIONS_ON_BOOT"],
+  })
   .superRefine((env, ctx) => {
     const mismatch = findRuntimeImageTagMismatch({
       platformVersion: env.APP_VERSION,

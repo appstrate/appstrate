@@ -44,7 +44,7 @@ environment, its volumes) and the tag.
 ## Schema and data
 
 `appstrate-migrate` applies the pending drizzle migrations on every deployment, before the
-application starts. That is the whole of what is automatic.
+application starts; the application only verifies (`MIGRATIONS_ON_BOOT=verify`) and refuses to boot while any is pending. That is the whole of what is automatic.
 
 The scripts in `scripts/migration/` are **not** run on staging, by the workflow or by anything else:
 they are run once, deliberately, by an operator, against a deployment whose rows need them

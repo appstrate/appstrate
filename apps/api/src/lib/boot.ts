@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
+import { db, isEmbeddedDb } from "@appstrate/db/client";
+import { applyCoreMigrations, assertCoreMigrationsApplied } from "@appstrate/db/core-migrations";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -112,14 +113,19 @@ export async function bootCritical(): Promise<void> {
     } else {
       logger.info("Database: PostgreSQL", {
         url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+        migrationsOnBoot: env.MIGRATIONS_ON_BOOT,
       });
-      await applyCoreMigrations();
+      // `verify`: a separate step (the compose `appstrate-migrate` service) owns the
+      // migrations, so boot writes no schema and refuses a database behind its code.
+      if (env.MIGRATIONS_ON_BOOT === "verify") {
+        await assertCoreMigrationsApplied(env.DATABASE_URL!);
+      } else {
+        await applyCoreMigrations(env.DATABASE_URL!);
+        logger.info("Core migrations applied");
+      }
     }
   });
 
-  // Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
-  // are absent although the migrator reported nothing pending. Detection only —
-  // the repair is an operator task, see the function's doc comment.
   await bootStep("critical", "assert-oauth-resource-columns", () =>
     assertOAuthResourceColumnsPresent(),
   );
@@ -561,56 +567,6 @@ async function applyEmbeddedMigrations(): Promise<void> {
   const { resolve } = await import("node:path");
   const { applyCorePGliteMigrations } = await import("./pglite-migrate.ts");
   await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
-}
-
-/**
- * Apply Drizzle migrations for PostgreSQL using the standard migrator.
- * Idempotent — already-applied migrations are skipped via the tracking table.
- *
- * Multi-replica safety: drizzle-orm's migrator does not take a lock, so two
- * API replicas starting simultaneously can race on `__drizzle_migrations`.
- * We wrap the whole migration in a PostgreSQL session-level advisory lock
- * using a stable constant key (shared across all replicas). A second caller
- * blocks until the first finishes, then observes its entries in the tracking
- * table and skips them.
- *
- * pg_advisory_lock is session-scoped: the lock and unlock must target the
- * same backend connection. We pin them to a reserved postgres-js connection;
- * the migrator runs on the shared pool since holding the lock elsewhere is
- * enough to block concurrent replicas.
- */
-const APPSTRATE_CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
-
-async function applyCoreMigrations(): Promise<void> {
-  const { resolve } = await import("node:path");
-  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
-  const { sql: rawSql } = await import("drizzle-orm");
-
-  const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
-
-  const reserved = await reservePgConnection();
-  if (!reserved) {
-    throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
-  }
-  const { sql: reservedSql, release } = reserved;
-
-  try {
-    await reservedSql`SELECT pg_advisory_lock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
-    try {
-      await db.execute(rawSql`SET client_min_messages TO 'warning'`);
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema generic widening for migrator
-        await migrate(db as any, { migrationsFolder });
-      } finally {
-        await db.execute(rawSql`SET client_min_messages TO 'notice'`);
-      }
-    } finally {
-      await reservedSql`SELECT pg_advisory_unlock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
-    }
-  } finally {
-    release();
-  }
-  logger.info("Core migrations applied");
 }
 
 /**

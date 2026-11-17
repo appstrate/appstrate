@@ -102,6 +102,9 @@ export const CODE_DEFAULTS: Record<string, string> = {
   // `RUN_ADAPTER` code default is `process`; compose intentionally
   // overrides to `docker` (see ALLOWLIST).
   RUN_ADAPTER: "process",
+  // `MIGRATIONS_ON_BOOT` code default is `apply`; a compose with a migrate
+  // service intentionally overrides to `verify` (see ALLOWLIST).
+  MIGRATIONS_ON_BOOT: "apply",
   // `PI_IMAGE` / `SIDECAR_IMAGE` code default is Docker Hub `:latest`;
   // compose intentionally overrides to GHCR (see ALLOWLIST).
   PI_IMAGE: "appstrate-pi:latest",
@@ -131,6 +134,11 @@ export const CODE_DEFAULTS: Record<string, string> = {
 // CHANGES, update the rationale (or remove the entry if the override
 // is no longer intentional).
 export const ALLOWLIST: Record<string, { yamlDefault: string; reason: string }> = {
+  MIGRATIONS_ON_BOOT: {
+    yamlDefault: "verify",
+    reason:
+      "Code default `apply` migrates at boot; the compose runs a one-shot `appstrate-migrate` service the app depends on, so the app only verifies.",
+  },
   RUN_ADAPTER: {
     yamlDefault: "docker",
     reason:
