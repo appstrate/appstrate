@@ -265,8 +265,15 @@ app.use("*", idempotencyGuard());
 // Boot phase 1 — migrations, modules, auth, fail-fast config validation.
 // Everything the route table's shape depends on. Phase 2 is kicked off after
 // the export below, so the port binds without waiting for it.
+// A refusal here (pending migration, pending data script, missing key…) is
+// fatal like any boot failure, and logged as the same structured line rather
+// than left to Bun's uncaught-error stack trace.
 const criticalStartedAt = performance.now();
-await bootCritical();
+try {
+  await bootCritical();
+} catch (err) {
+  logBootFailureAndExit(err);
+}
 const criticalMs = Math.round(performance.now() - criticalStartedAt);
 
 // Initialize app config (async — modules may contribute structured data like OIDC client ID)
@@ -489,12 +496,15 @@ void bootServing()
       bootHousekeeping(),
     ]);
   })
-  .catch((err: unknown) => {
-    logger.error("Boot failed — exiting", {
-      error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-    });
-    process.exit(1);
+  .catch(logBootFailureAndExit);
+
+/** Any boot failure, in either phase: one structured line, then exit 1. */
+function logBootFailureAndExit(err: unknown): never {
+  logger.error("Boot failed — exiting", {
+    error: err instanceof Error ? (err.stack ?? err.message) : String(err),
   });
+  process.exit(1);
+}
 
 // Proxy-upload diagnosability: with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser
