@@ -14,7 +14,7 @@ import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { packageDetailQueryOptions, usePackageDetail } from "../hooks/use-packages";
-import { useSpaceAction } from "../hooks/use-space-action";
+import { useAgentRunSpace } from "../hooks/use-agent-run-space";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { spaceStore } from "../stores/space-store";
@@ -27,10 +27,16 @@ const NO_SPACES: readonly string[] = [];
 interface RunAgentButtonProps {
   packageId: string;
   /**
-   * The spaces of the index row offering the run: a click enters the granting space before
-   * running; several granting it, the button opens their menu. The working space when absent.
+   * The spaces the agent runs in, from its index row or its detail: a click enters the granting
+   * space before running; several granting it, the button opens their menu. The working space when
+   * absent.
    */
   spaceIds?: readonly string[];
+  /**
+   * Whether the working space runs it without asking when it is among `spaceIds` (a row of it);
+   * `false` on the agent's page, which names no working space: the reader chooses.
+   */
+  preferWorkingSpace?: boolean;
   /** When provided, skips the lazy fetch (detail page case). */
   detail?: AgentDetail;
   version?: string;
@@ -53,6 +59,7 @@ interface RunAgentButtonProps {
 export function RunAgentButton({
   packageId,
   spaceIds = NO_SPACES,
+  preferWorkingSpace,
   detail: providedDetail,
   version,
   disabled,
@@ -67,11 +74,7 @@ export function RunAgentButton({
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
-  // Among the row's spaces, or the working space's alone.
-  const runAction = useSpaceAction(
-    { permission: "agents:run" },
-    spaceIds.length > 0 ? spaceIds : workingSpaceId ? [workingSpaceId] : NO_SPACES,
-  );
+  const runAction = useAgentRunSpace(packageId, spaceIds, { preferWorkingSpace });
   const canRun = runAction.offered;
   // A row not of the working space: the detail query below reads the working space, so nothing
   // it holds is this row's until a click enters the row's space.
@@ -121,6 +124,12 @@ export function RunAgentButton({
 
   const start = () => {
     const target = spaceStore.getState().id;
+    // The target's own, read before entering it.
+    const entered = runAction.enteredDetail();
+    if (entered) {
+      startRun(entered);
+      return;
+    }
     // Detail already available (provided, or cached from a previous click) when it is the
     // target's: the one held is the working space's at the click.
     if (detail && target === workingSpaceId) {
@@ -145,7 +154,7 @@ export function RunAgentButton({
     canRun,
     detail,
   });
-  const isPending = isFetching || launcher.isPending;
+  const isPending = isFetching || runAction.entering || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
   const blockedTitle =
     disabled && disabledTitle

@@ -144,18 +144,27 @@ export function DetailPageSkeleton({
   tabCount,
   panel,
   meta,
+  spaces,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount: number;
   /** Whether the page draws a line under its title (`DetailBarSkeleton`). */
   meta?: boolean;
+  /** Whether that line opens with the resource's spaces (`DetailBarSkeleton`). */
+  spaces?: boolean;
   /** The first tab's own skeleton, when the page has one; generic blocks otherwise. */
   panel?: ReactNode;
 }) {
   return (
     <Waiting>
-      <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
+      <DetailBarSkeleton
+        title={title}
+        trail={trail}
+        tabCount={tabCount}
+        meta={meta}
+        spaces={spaces}
+      />
       {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
       {panel ?? <CardBlocks count={3} />}
     </Waiting>
@@ -292,6 +301,8 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
+      // An agent's line opens with the spaces it is active in.
+      spaces={type === "agent"}
       panel={
         tab === "settings" ? (
           <RailPanelBlocks />

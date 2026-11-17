@@ -2,7 +2,7 @@
 
 /**
  * The spaces of a package in a list: its home first with the others counted when spanning, a
- * muted label when no home is visible.
+ * muted label when no home is visible. An agent's page names its spaces the same way, in both modes.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -15,6 +15,8 @@ import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { PackageSpaces } from "../package-spaces.tsx";
+import { AgentDetailSpaces } from "../agent-detail/agent-detail-bar.tsx";
+import { overviewStore } from "../../stores/overview-store.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -105,5 +107,28 @@ describe("PackageSpaces", () => {
     );
     expect(html).toContain(">Espace non visible<");
     expect(html).toContain('aria-label="Disponible dans Coffre"');
+  });
+});
+
+describe("AgentDetailSpaces", () => {
+  const detail = { homeSpaceId: "spc_b", spaceIds: ["spc_b", "spc_a"], source: "local" };
+
+  it("names the agent's spaces as its index row does, the home first and the others stacked", () => {
+    for (const overview of [false, true]) {
+      const mode = spyOn(overviewStore, "getInitialState").mockReturnValue({
+        ...overviewStore.getInitialState(),
+        chosen: overview ? { "u_1:org_1": true } : {},
+      });
+      try {
+        const html = renderInSpaces(<AgentDetailSpaces detail={detail} />);
+        expect(html).toContain(">Studio<");
+        expect(html).toContain('data-testid="space-tile-stack"');
+        expect(html).toContain('aria-label="Partagé avec Atelier"');
+        // Named as a space, never as « Espace d'origine ».
+        expect(html).not.toContain("origine");
+      } finally {
+        mode.mockRestore();
+      }
+    }
   });
 });

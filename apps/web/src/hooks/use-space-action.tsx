@@ -86,6 +86,21 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   return { on, eligible, offered };
 }
 
+/** How {@link useSpaceAction} picks and enters a space. */
+interface SpaceActionOptions {
+  /**
+   * Whether the working space is taken without asking when it is among `among` — a row's action
+   * continues there. `false` on a page whose working space it does not name: the reader chooses.
+   * Defaults to whether `among` is given.
+   */
+  preferWorkingSpace?: boolean;
+  /**
+   * Read before entering a space other than the working one, so the screen the switch redraws has
+   * what it shows; the space is not entered when it fails, which it reports itself.
+   */
+  prepare?: (spaceId: string) => Promise<unknown>;
+}
+
 /**
  * An action naming no space. `offered`: whether to show it at all. `run(act)`: performs `act` in
  * the space that grants `need`, among `among` when given (out of the mode, the working space);
@@ -93,13 +108,24 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
  * trigger becomes — `undefined` when there is nothing to choose. `link(to)`: a link going to `to`
  * the same way.
  */
-export function useSpaceAction(need: SpaceNeed, among?: readonly string[]) {
+export function useSpaceAction(
+  need: SpaceNeed,
+  among?: readonly string[],
+  { preferWorkingSpace = among !== undefined, prepare }: SpaceActionOptions = {},
+) {
   const { on, eligible, offered } = useSpacesFor(need, among);
-  const actIn = useActInSpace();
+  const actInSpace = useActInSpace();
   const navigate = useNavigate();
   const workingSpaceId = useCurrentSpaceId();
-  // A row's action continues in the working space when it is among the row's.
-  const choice = on ? spaceChoice(eligible, among ? workingSpaceId : null) : null;
+  const choice = on ? spaceChoice(eligible, preferWorkingSpace ? workingSpaceId : null) : null;
+
+  const actIn = (spaceId: string, act: () => void) => {
+    if (!prepare || spaceId === spaceStore.getState().id) return actInSpace(spaceId, act);
+    prepare(spaceId).then(
+      () => actInSpace(spaceId, act),
+      () => undefined,
+    );
+  };
 
   const run = (act: () => void) => {
     if (!choice) return act();

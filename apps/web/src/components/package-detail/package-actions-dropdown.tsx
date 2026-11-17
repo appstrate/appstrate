@@ -47,6 +47,8 @@ import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
 import { useUrlModal } from "../../hooks/use-url-modal";
 import { useCatalogueEntry } from "./catalogue-link";
 import { menuSections, type PackageMenuEntry, type PackageMenuGroup } from "./package-menu";
+import { SpaceChoiceSubmenu } from "../space-choice-menu";
+import type { SpaceChoiceMenu } from "../../lib/menu-action";
 
 const GROUP_LABELS: Record<PackageMenuGroup, string> = {
   build: "detail.actions.agent",
@@ -77,8 +79,12 @@ interface AgentMenu {
   onDeleteRuns: () => void;
   onDeleteMemories: () => void;
   onAddSchedule: () => void;
+  /** Whether a space the reader may act in runs the agent (`useSpaceAction`'s `offered`). */
+  runOffered: boolean;
   /** Open the advanced run launcher (per-run overrides). */
   onRunWithOptions: () => void;
+  /** The spaces to open it in, when the reader chooses one first; the entry is then their sub-menu. */
+  runWithOptionsIn?: SpaceChoiceMenu;
   /** Why this caller cannot launch at all (never published, working copy not theirs, unsaved edits), translated. */
   runBlockedReason?: string;
 }
@@ -220,8 +226,9 @@ export function PackageActionsDropdown({
       icon: SlidersHorizontal,
       label: t("run.options.menuItem"),
       reason: agent?.runBlockedReason,
-      hidden: !agent || !can("agents:run"),
+      hidden: !agent?.runOffered,
       onSelect: agent?.onRunWithOptions,
+      inSpaces: agent?.runWithOptionsIn,
     },
     {
       id: "schedule",
@@ -325,17 +332,31 @@ export function PackageActionsDropdown({
           <Fragment key={group}>
             {index > 0 && <DropdownMenuSeparator />}
             {agent && <DropdownMenuLabel>{t(GROUP_LABELS[group])}</DropdownMenuLabel>}
-            {items.map((entry) => (
-              <DropdownMenuItem
-                key={entry.id}
-                disabled={entry.disabled || !!entry.reason}
-                onSelect={entry.onSelect}
-                className={cn(entry.destructive && "text-destructive focus:text-destructive")}
-              >
-                <entry.icon />
-                <DisabledItemLabel label={entry.label} reason={entry.reason} />
-              </DropdownMenuItem>
-            ))}
+            {items.map((entry) =>
+              // The reader chooses the space first: the entry opens the menu of them.
+              entry.inSpaces && !entry.disabled && !entry.reason ? (
+                <SpaceChoiceSubmenu
+                  key={entry.id}
+                  choice={entry.inSpaces}
+                  trigger={
+                    <>
+                      <entry.icon />
+                      {entry.label}
+                    </>
+                  }
+                />
+              ) : (
+                <DropdownMenuItem
+                  key={entry.id}
+                  disabled={entry.disabled || !!entry.reason}
+                  onSelect={entry.onSelect}
+                  className={cn(entry.destructive && "text-destructive focus:text-destructive")}
+                >
+                  <entry.icon />
+                  <DisabledItemLabel label={entry.label} reason={entry.reason} />
+                </DropdownMenuItem>
+              ),
+            )}
           </Fragment>
         ))}
       </PageActionsMenu>

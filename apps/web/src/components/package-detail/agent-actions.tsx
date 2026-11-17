@@ -11,6 +11,7 @@ import {
   useRunLauncher,
 } from "../../hooks/use-mutations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useAgentRunSpace } from "../../hooks/use-agent-run-space";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
@@ -63,6 +64,8 @@ export function AgentActions({
   const [confirming, setConfirming] = useState<Confirmation | null>(null);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
+  // As « Lancer »: in « Tous les espaces », the space is picked among the agent's.
+  const runSpace = useAgentRunSpace(packageId, detail?.space_ids, { preferWorkingSpace: false });
 
   if (!detail) return null;
 
@@ -70,6 +73,11 @@ export function AgentActions({
   const refusal = agentLaunchRefusal(detail);
   const runBlockedReason = refusal ? t(refusal) : unsavedReason;
   const canRunWithOptions = can("agents:run") && !runBlockedReason;
+  // Opened once in the space: the modal reads the agent of the space entered.
+  const openRunOptions = () => {
+    runSpace.enteredDetail();
+    setRunOptionsOpen(true);
+  };
   const pendingConfirmation =
     deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
@@ -103,7 +111,9 @@ export function AgentActions({
           onDeleteRuns: () => setConfirming("clearRuns"),
           onDeleteMemories: () => setConfirming("clearMemories"),
           onAddSchedule: () => setNewScheduleOpen(true),
-          onRunWithOptions: () => setRunOptionsOpen(true),
+          runOffered: runSpace.offered,
+          onRunWithOptions: () => runSpace.run(openRunOptions),
+          runWithOptionsIn: runSpace.choose(t("common:spaceChoice.run"), openRunOptions),
           runBlockedReason,
         }}
       />

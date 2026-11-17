@@ -276,6 +276,8 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
     color: type === "agent" ? agentDetail?.color : undefined,
     readsPublished: type === "agent" && agentDetail?.definition === "published",
     homeSpaceName,
+    homeSpaceId: homeSpaceId ?? null,
+    spaceIds: agentDetail?.space_ids ?? [],
   };
 
   // ── Render ──

@@ -33,6 +33,9 @@ export function AgentRunButton({
     <RunAgentButton
       packageId={packageId}
       detail={detail}
+      // In « Tous les espaces » the reader picks the space among the agent's: the page names none.
+      spaceIds={detail.space_ids}
+      preferWorkingSpace={false}
       version={versionLabel}
       disabled={blocker !== null || !!unsavedReason}
       disabledTitle={blocker ? t(blocker) : unsavedReason}

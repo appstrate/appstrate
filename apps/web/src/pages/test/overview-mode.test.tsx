@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
+import type { AgentDetail } from "@appstrate/shared-types";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({
@@ -36,6 +37,8 @@ const { FilesPage } = await import("../files.tsx");
 const { fileFixture } = await import("../../test/render.tsx");
 const { makeRun } = await import("../../test/run-fixture.ts");
 const { WorkingSpaceName } = await import("../../components/space-name.tsx");
+const { RunAgentButton } = await import("../../components/run-agent-button.tsx");
+const { useRuns } = await import("../../hooks/use-paginated-runs.ts");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -649,5 +652,89 @@ describe("the gate", () => {
     const html = renderIn(false, gate, "/runs?enterSpace=spc_b").html;
     expect(html).toContain("attente");
     expect(html).not.toContain("ouvert");
+  });
+});
+
+describe("an agent's page", () => {
+  const runner = (id: string) => space(id, ["agents:read", "agents:run", "runs:read"]);
+  const reader = (id: string) => space(id, ["agents:read", "runs:read"]);
+  const detail = (space_ids: string[]): AgentDetail => ({
+    id: "@acme/reporter",
+    icon: null,
+    color: null,
+    source: "local",
+    dependencies: { integrations: [] },
+    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
+    running_runs: 0,
+    last_run: null,
+    scope: "@acme",
+    version: "1.0.0",
+    definition: "published",
+    home_space_id: "spc_a",
+    home_writable: false,
+    home_deletable: false,
+    home_shareable: false,
+    effective_timeout_seconds: 300,
+    active: true,
+    space_ids,
+  });
+
+  /** The page's « Lancer »: its opening tag, or `null` when it is absent. */
+  const runButton = (overview: boolean, spaceIds: string[], spaces: ReturnType<typeof space>[]) => {
+    const { html } = renderIn(
+      overview,
+      <RunAgentButton
+        packageId="@acme/reporter"
+        detail={detail(spaceIds)}
+        spaceIds={spaceIds}
+        preferWorkingSpace={false}
+        showLabel
+      />,
+      "/agents/@acme/reporter",
+      () => {},
+      spaces,
+    );
+    const at = html.indexOf(">Lancer<");
+    return at < 0
+      ? null
+      : html.slice(
+          html.lastIndexOf("<button", at),
+          html.indexOf(">", html.lastIndexOf("<button", at)),
+        );
+  };
+
+  it("asks which space between the agent's spaces that run it, the working one included", () => {
+    expect(runButton(true, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")])).toContain(
+      'aria-haspopup="menu"',
+    );
+  });
+
+  it("asks nothing with one space running it, and runs in the working space out of the mode", () => {
+    const one = runButton(true, ["spc_a", "spc_b"], [reader("spc_a"), runner("spc_b")]);
+    expect(one).not.toBeNull();
+    expect(one).not.toContain('aria-haspopup="menu"');
+    expect(runButton(false, ["spc_a", "spc_b"], [runner("spc_a"), runner("spc_b")])).not.toContain(
+      'aria-haspopup="menu"',
+    );
+  });
+
+  it("offers no run where none of its spaces runs it", () => {
+    expect(runButton(true, ["spc_a", "spc_b"], [reader("spc_a"), reader("spc_b")])).toBeNull();
+  });
+
+  it("lists the agent's runs of every space in the mode, its space's out of it", () => {
+    function Probe() {
+      useRuns({ packageId: "@acme/reporter", spanning: true });
+      useRuns({ packageId: "@acme/reporter" });
+      return null;
+    }
+    const { asked } = renderIn(true, <Probe />, "/agents/@acme/reporter", () => {}, [
+      runner("spc_a"),
+      runner("spc_b"),
+    ]);
+    expect(asked("paginated-runs").map((key) => key.slice(1, 4))).toEqual([
+      ["org_1", "across-spaces", "/agents/@acme/reporter/runs"],
+      ["org_1", "spc_a", "/agents/@acme/reporter/runs"],
+    ]);
   });
 });

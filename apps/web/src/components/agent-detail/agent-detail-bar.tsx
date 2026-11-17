@@ -9,13 +9,16 @@ import { DetailBar, DetailBarId } from "../detail-bar";
 import type { DetailTab } from "../detail-tabs";
 import { PackageIcon } from "../package-icon";
 import { PackageOriginMeta } from "../package-origin-meta";
+import { PackageSpaces } from "../package-spaces";
 import { usePackageListCrumb } from "../../hooks/use-package-list-crumb";
 
 interface AgentDetailBarDetail {
   id: string;
   source: string;
-  /** Absent for a home the reader cannot enter. */
-  homeSpaceName?: string | null;
+  /** The home, when the reader reaches it (`home_space_id`). */
+  homeSpaceId: string | null;
+  /** The spaces the reader reaches where the agent is active, home first (`space_ids`). */
+  spaceIds: readonly string[];
   version?: string | null;
   /**
    * The page shows the latest PUBLISHED version, not the draft: what a caller
@@ -28,8 +31,8 @@ interface AgentDetailBarDetail {
 
 /**
  * The agent page's title, version pill, actions and tabs, in the shell header.
- * Like every package header, its meta line says where the agent comes from and where it
- * lives; its description is the catalogue sheet's.
+ * Its meta line opens with the spaces the agent is active in, as its index row names them, then
+ * says where it comes from; its description is the catalogue sheet's.
  */
 export function AgentDetailBar<T extends string>({
   title,
@@ -75,14 +78,32 @@ export function AgentDetailBar<T extends string>({
         />
       }
       trail={[listCrumb]}
+      spaces={detail.spaceIds.length > 0 ? <AgentDetailSpaces detail={detail} /> : undefined}
       meta={
         <>
           <DetailBarId id={detail.id} />
-          <PackageOriginMeta source={detail.source} homeSpaceName={detail.homeSpaceName} />
+          <PackageOriginMeta source={detail.source} />
         </>
       }
       actions={actions}
       tabs={tabs}
+    />
+  );
+}
+
+/** The spaces the agent is active in, as its index row names them: the home's tile and name first, the others stacked behind and counted. Exported for its test. */
+export function AgentDetailSpaces({
+  detail,
+}: {
+  detail: Pick<AgentDetailBarDetail, "homeSpaceId" | "spaceIds" | "source">;
+}) {
+  return (
+    <PackageSpaces
+      item={{
+        homeSpaceId: detail.homeSpaceId,
+        spaceIds: [...detail.spaceIds],
+        source: detail.source === "system" ? "system" : "local",
+      }}
     />
   );
 }
