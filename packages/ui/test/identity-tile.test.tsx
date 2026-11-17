@@ -25,7 +25,7 @@ describe("IdentityTile", () => {
 
   it("draws a chosen colour, and derives one from an unreadable value", () => {
     expect(render({ seed: SEED, label: "A", color: "violet" })).toContain(
-      "bg-identity-violet/20 text-identity-violet",
+      IDENTITY_COLOR_CLASSES.violet,
     );
     expect(render({ seed: SEED, label: "A", color: "#ff0000" })).toContain(
       IDENTITY_COLOR_CLASSES[derivedColor(SEED)],
