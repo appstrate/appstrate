@@ -66,6 +66,7 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
 import { keyringKids, opensWithKeyring } from "@appstrate/connect";
 import { warnOnUnreadEnvKeys } from "./unread-env-keys.ts";
+import { bootStep } from "./boot-step.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -91,50 +92,60 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
 export async function bootCritical(): Promise<void> {
   // First, so the unread-key line is logged even if a later boot step fails.
   // Namespace rule and limits: docs/ENV.md § Unread keys (docs/NO_TRANSITIONAL_CODE.md §4).
-  warnOnUnreadEnvKeys();
+  await bootStep("critical", "warn-unread-env-keys", () => warnOnUnreadEnvKeys());
 
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
   // module routes via `requireModulePermission`/`requireCorePermission` —
   // flows through the same `permission_denied` log line.
-  installPermissionAuditLogger();
+  await bootStep("critical", "permission-audit-logger", () => installPermissionAuditLogger());
 
   // Apply core migrations at boot (before modules, so DB is ready).
   // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();
-  if (isEmbeddedDb) {
-    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
-    await applyEmbeddedMigrations();
-  } else {
-    logger.info("Database: PostgreSQL", {
-      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
-    });
-    await applyCoreMigrations();
-  }
+  await bootStep("critical", "core-migrations", async () => {
+    if (isEmbeddedDb) {
+      logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
+      await applyEmbeddedMigrations();
+    } else {
+      logger.info("Database: PostgreSQL", {
+        url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+      });
+      await applyCoreMigrations();
+    }
+  });
 
   // Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
   // are absent although the migrator reported nothing pending. Detection only —
   // the repair is an operator task, see the function's doc comment.
-  await assertOAuthResourceColumnsPresent();
+  await bootStep("critical", "assert-oauth-resource-columns", () =>
+    assertOAuthResourceColumnsPresent(),
+  );
 
   // Refuse to boot while `oauth_clients.self_service` still disagrees with the
   // `metadata` JSON key migration 0057 left behind — a self-registered client
   // reading as operator-provisioned is a security control that is OFF.
   // Detection only; the fold is an operator task, see the function's doc comment.
-  await assertSelfServiceFoldApplied();
+  await bootStep("critical", "assert-self-service-fold", () => assertSelfServiceFoldApplied());
 
   // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
   // them. Detection only; the copy is an operator task, see the function's doc comment.
   const embeddedDataDir = isEmbeddedDb
     ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR)
     : null;
-  await assertConnectionSharesCopied(embeddedDataDir);
+  await bootStep("critical", "assert-connection-shares-copied", () =>
+    assertConnectionSharesCopied(embeddedDataDir),
+  );
 
   // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
   // Detection only; the fold is an operator task, see the function's doc comment.
-  await assertPackageSharesFolded(embeddedDataDir);
+  await bootStep("critical", "assert-package-shares-folded", () =>
+    assertPackageSharesFolded(embeddedDataDir),
+  );
 
-  await assertKeyringCoversCiphertexts();
+  await bootStep("critical", "assert-keyring-covers-ciphertexts", () =>
+    assertKeyringCoversCiphertexts(),
+  );
 
   // Bootstrap-token reconciliation. If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -142,22 +153,28 @@ export async function bootCritical(): Promise<void> {
   // boolean in AppConfig reports `false` immediately. Otherwise an operator
   // who forgot to clear .env after a successful claim sends returning
   // visitors back through `/claim`, where redemption then 410s.
-  await reconcileBootstrapTokenAtBoot().catch((err) => {
-    logger.warn("Could not reconcile bootstrap token at boot", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("critical", "reconcile-bootstrap-token", () =>
+    reconcileBootstrapTokenAtBoot().catch((err) => {
+      logger.warn("Could not reconcile bootstrap token at boot", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Load modules (oidc, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
-  await loadModules(getModuleRegistry(), buildModuleInitContext());
+  await bootStep("critical", "load-modules", () =>
+    loadModules(getModuleRegistry(), buildModuleInitContext()),
+  );
 
   // Aggregate model provider contributions from every loaded module into
   // the runtime registry. The three core API-key providers (openai,
   // anthropic, openai-compatible) ship as the `core-providers` module;
   // OAuth-flavoured providers ship as opt-in workspace modules
   // (`@appstrate/module-*`). There is no in-code seed.
-  registerModelProviders(getModuleModelProviders());
+  await bootStep("critical", "register-model-providers", () =>
+    registerModelProviders(getModuleModelProviders()),
+  );
 
   // Initialize Better Auth AFTER modules have registered their plugin +
   // schema contributions. Passed as a thunk, which `createAuth()` calls
@@ -167,19 +184,23 @@ export async function bootCritical(): Promise<void> {
   // plugin list type. Module tables (e.g. OIDC's oauth_clients/jwks) now live
   // in the core schema barrel, so the Better Auth adapter resolves them
   // directly — no module schema injection.
-  createAuth({
-    plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
-    rateLimitStorage: betterAuthRateLimitStorage(),
-    rateLimitEnabled: env.NODE_ENV === "production",
-    clientIpHeader: CLIENT_IP_HEADER,
-  });
+  await bootStep("critical", "create-auth", () =>
+    createAuth({
+      plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
+      rateLimitStorage: betterAuthRateLimitStorage(),
+      rateLimitEnabled: env.NODE_ENV === "production",
+      clientIpHeader: CLIENT_IP_HEADER,
+    }),
+  );
 
   // Wire module contributions that were declared on the module contract
-  for (const mod of getModules().values()) {
-    if (mod.emailOverrides) {
-      registerEmailOverrides(mod.emailOverrides);
+  await bootStep("critical", "wire-module-contributions", () => {
+    for (const mod of getModules().values()) {
+      if (mod.emailOverrides) {
+        registerEmailOverrides(mod.emailOverrides);
+      }
     }
-  }
+  });
   // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
   // first-match-wins like the other hooks) via `callAllHooks`: the ee module's
   // free-tier gate AND the OIDC per-client signup policy both run on every
@@ -216,40 +237,44 @@ export async function bootCritical(): Promise<void> {
   warnOnTrustProxyMisconfig(env.TRUST_PROXY, env.NODE_ENV);
 
   // Verify storage backend is accessible (fail-fast if misconfigured)
-  await ensureBucket();
+  await bootStep("critical", "ensure-bucket", () => ensureBucket());
 
   // Parse AFPS_TRUST_ROOT (fail-fast) and log the effective signature policy.
-  initBundleSignaturePolicy();
+  await bootStep("critical", "init-bundle-signature-policy", () => initBundleSignaturePolicy());
 
   // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
   // Throws at boot on invalid shape — no run can start without them.
-  initRunLimits();
+  await bootStep("critical", "init-run-limits", () => initRunLimits());
 
   // Parse + validate proxy limits (LLM_PROXY_LIMITS, CREDENTIAL_PROXY_LIMITS).
   // Same fail-fast contract as initRunLimits — strict Zod, unknown keys reject.
-  initProxyLimits();
+  await bootStep("critical", "init-proxy-limits", () => initProxyLimits());
 
   // Load system proxies from SYSTEM_PROXIES env var
-  initSystemProxies();
+  await bootStep("critical", "init-system-proxies", () => initSystemProxies());
   logger.info("System proxies loaded");
 
   // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
-  initSystemModelProviderKeys();
+  await bootStep("critical", "init-system-model-provider-keys", () =>
+    initSystemModelProviderKeys(),
+  );
   logger.info("System provider keys loaded");
 
   // Load system integrations (auto-active policy + shared OAuth clients) from
   // the SYSTEM_INTEGRATIONS env var
-  initSystemIntegrations();
+  await bootStep("critical", "init-system-integrations", () => initSystemIntegrations());
 
   // Read the `.afps` archives off disk into the in-memory registry. Cheap
-  // (~45 ms) and consulted by request-path helpers (`isSystemPackage`), so it
+  // and consulted by request-path helpers (`isSystemPackage`), so it
   // stays pre-bind; the DB + S3 reconciliation it used to be bundled with is
   // the slow half and runs in `bootBackground`.
-  await initSystemPackages().catch((err) => {
-    logger.warn("Could not load system packages", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("critical", "init-system-packages", () =>
+    initSystemPackages().catch((err) => {
+      logger.warn("Could not load system packages", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 }
 
 /**
@@ -264,45 +289,55 @@ export async function bootBackground(): Promise<void> {
   const env = (await import("@appstrate/env")).getEnv();
 
   // Reconcile the loaded system packages into the DB + S3.
-  await syncSystemPackagesToDb().catch((err) => {
-    logger.warn("Could not sync system packages", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("background", "sync-system-packages", () =>
+    syncSystemPackagesToDb().catch((err) => {
+      logger.warn("Could not sync system packages", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Surface orgs whose stored API-version pin this build cannot serve.
-  await warnOnUnserveableApiVersionPins().catch((err) => {
-    logger.warn("Could not check organization API version pins", {
-      error: getErrorMessage(err),
-    });
-  });
+  await bootStep("background", "api-version-pins", () =>
+    warnOnUnserveableApiVersionPins().catch((err) => {
+      logger.warn("Could not check organization API version pins", {
+        error: getErrorMessage(err),
+      });
+    }),
+  );
 
   // Read in the background: boot never waits on the channel.
-  startModelCatalogSync();
+  await bootStep("background", "model-catalog-sync", () => startModelCatalogSync());
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
     // `error`, not `warn`: without the triggers every dashboard SSE is silent
     // for the life of the process, and without LISTEN until a retry succeeds.
-    createNotifyTriggers(db)
-      .then(() => logger.info("NOTIFY triggers installed"))
-      .catch((err) => {
-        logger.error("Could not install NOTIFY triggers", {
-          error: getErrorMessage(err),
-        });
+    bootStep("background", "notify-triggers", () =>
+      createNotifyTriggers(db)
+        .then(() => logger.info("NOTIFY triggers installed"))
+        .catch((err) => {
+          logger.error("Could not install NOTIFY triggers", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("background", "realtime-listen", () =>
+      retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
+        initialDelayMs: 1_000,
+        level: "error",
       }),
-    retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
-      initialDelayMs: 1_000,
-      level: "error",
-    }),
+    ),
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
     // other replicas fall back to their TTL — degraded, not broken.
-    initCacheBus().catch((err) => {
-      logger.warn("Could not initialize the cache invalidation bus", {
-        error: getErrorMessage(err),
-      });
-    }),
+    bootStep("background", "cache-bus", () =>
+      initCacheBus().catch((err) => {
+        logger.warn("Could not initialize the cache invalidation bus", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
   ]);
 
   // Sequential cleanup: orphan runs must be finalized before container
@@ -314,77 +349,81 @@ export async function bootBackground(): Promise<void> {
   // makes this race-safe against a delayed metric POST that lands during
   // the same boot window.
   const orchestrator = getOrchestrator();
-  try {
-    const orphanIds = await listOrphanRunIds();
-    if (orphanIds.length > 0) {
-      let finalized = 0;
-      // Bounded parallelism, NOT a serial loop. Each orphan costs a Docker
-      // `POST /containers/{id}/stop?t=5`, which blocks for up to the full
-      // grace period when the container ignores SIGTERM — serially that is
-      // 5 s × orphan count added to boot, at exactly the moment (restart
-      // after an incident) the API should come back fastest. The grace
-      // period itself is deliberately left alone: it is what lets a still
-      // running sidecar flush its final events before the SIGKILL.
-      //
-      // Concurrency is capped well under the postgres.js pool (`max: 20`)
-      // because `synthesiseFinalize` writes.
-      // The pool aborts on the first rejection (no new orphan is picked up
-      // once one worker throws). That is a real change from the pool this used
-      // to call, which kept draining the queue regardless — but it cannot fire
-      // here: the callback body below catches everything it can raise and
-      // degrades to a `logger.warn`, so a boot with N orphans still attempts
-      // all N. The abort is the safety net for the day that stops being true.
-      await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
-        try {
-          // An orphaned run may still have a live remote workload — a
-          // firecracker microVM on the runner host keeps executing (and
-          // billing) across a platform restart, and holds a concurrency
-          // slot. Stop it before synthesising the failed terminal. This
-          // is safe for every adapter: docker stops idempotently, process
-          // finds nothing after a restart, firecracker proxies the stop
-          // to the daemon which kills the microVM. `listOrphanRunIds`
-          // already excludes runs a live sibling instance heartbeats
-          // (stall-threshold cutoff), so this never kills another
-          // instance's in-flight run.
-          await orchestrator.stopByRunId(runId).catch((err) => {
-            logger.warn("Could not stop orphaned run's workload", {
+  await bootStep("background", "orphan-runs", async () => {
+    try {
+      const orphanIds = await listOrphanRunIds();
+      if (orphanIds.length > 0) {
+        let finalized = 0;
+        // Bounded parallelism, NOT a serial loop. Each orphan costs a Docker
+        // `POST /containers/{id}/stop?t=5`, which blocks for up to the full
+        // grace period when the container ignores SIGTERM — serially that is
+        // 5 s × orphan count added to boot, at exactly the moment (restart
+        // after an incident) the API should come back fastest. The grace
+        // period itself is deliberately left alone: it is what lets a still
+        // running sidecar flush its final events before the SIGKILL.
+        //
+        // Concurrency is capped well under the postgres.js pool (`max: 20`)
+        // because `synthesiseFinalize` writes.
+        // The pool aborts on the first rejection (no new orphan is picked up
+        // once one worker throws). That is a real change from the pool this used
+        // to call, which kept draining the queue regardless — but it cannot fire
+        // here: the callback body below catches everything it can raise and
+        // degrades to a `logger.warn`, so a boot with N orphans still attempts
+        // all N. The abort is the safety net for the day that stops being true.
+        await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
+          try {
+            // An orphaned run may still have a live remote workload — a
+            // firecracker microVM on the runner host keeps executing (and
+            // billing) across a platform restart, and holds a concurrency
+            // slot. Stop it before synthesising the failed terminal. This
+            // is safe for every adapter: docker stops idempotently, process
+            // finds nothing after a restart, firecracker proxies the stop
+            // to the daemon which kills the microVM. `listOrphanRunIds`
+            // already excludes runs a live sibling instance heartbeats
+            // (stall-threshold cutoff), so this never kills another
+            // instance's in-flight run.
+            await orchestrator.stopByRunId(runId).catch((err) => {
+              logger.warn("Could not stop orphaned run's workload", {
+                runId,
+                error: getErrorMessage(err),
+              });
+            });
+            await synthesiseFinalize(runId, {
+              status: "failed",
+              error: { message: "Server restarted while run was in progress. Please retry." },
+            });
+            finalized++;
+          } catch (err) {
+            logger.warn("Could not finalize orphaned run", {
               runId,
               error: getErrorMessage(err),
             });
-          });
-          await synthesiseFinalize(runId, {
-            status: "failed",
-            error: { message: "Server restarted while run was in progress. Please retry." },
-          });
-          finalized++;
-        } catch (err) {
-          logger.warn("Could not finalize orphaned run", {
-            runId,
-            error: getErrorMessage(err),
-          });
-        }
+          }
+        });
+        logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
+      }
+    } catch (err) {
+      logger.warn("Could not clean orphaned runs", {
+        error: getErrorMessage(err),
       });
-      logger.info("Finalized orphaned runs", { count: finalized, runIds: orphanIds });
     }
-  } catch (err) {
-    logger.warn("Could not clean orphaned runs", {
-      error: getErrorMessage(err),
-    });
-  }
+  });
 
-  try {
-    const report = await orchestrator.cleanupOrphans();
-    if (report.workloads > 0 || report.isolationBoundaries > 0) {
-      logger.info("Cleaned up orphaned resources", { ...report });
+  await bootStep("background", "orphan-resources", async () => {
+    try {
+      const report = await orchestrator.cleanupOrphans();
+      if (report.workloads > 0 || report.isolationBoundaries > 0) {
+        logger.info("Cleaned up orphaned resources", { ...report });
+      }
+    } catch (err) {
+      logger.warn("Could not clean up orphaned resources", {
+        error: getErrorMessage(err),
+      });
     }
-  } catch (err) {
-    logger.warn("Could not clean up orphaned resources", {
-      error: getErrorMessage(err),
-    });
-  }
+  });
 
   // Initialize cross-instance cancel subscriber
-  await initCancelSubscriber();
+  await bootStep("background", "cancel-subscriber", () => initCancelSubscriber());
 
   // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
@@ -392,104 +431,126 @@ export async function bootBackground(): Promise<void> {
     // caught/degraded. Boot must fail if the durable metering recovery channel
     // is unavailable; otherwise a transient ledger write failure after
     // provider spend could be lost permanently.
-    initLlmUsageRetryWorker(),
-    initializeAgentRuntime(orchestrator),
-    initScheduleWorker().catch((err) => {
-      logger.warn("Could not initialize schedule worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    initInlineCompactionWorker().catch((err) => {
-      logger.warn("Could not initialize inline compaction worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    initPersonalSpaceSweeperWorker().catch((err) => {
-      logger.warn("Could not initialize personal-space sweeper", {
-        error: getErrorMessage(err),
-      });
-    }),
+    bootStep("background", "llm-usage-retry-worker", () => initLlmUsageRetryWorker()),
+    bootStep("background", "agent-runtime", () => initializeAgentRuntime(orchestrator)),
+    bootStep("background", "schedule-worker", () =>
+      initScheduleWorker().catch((err) => {
+        logger.warn("Could not initialize schedule worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    bootStep("background", "inline-compaction-worker", () =>
+      initInlineCompactionWorker().catch((err) => {
+        logger.warn("Could not initialize inline compaction worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    bootStep("background", "personal-space-sweeper-worker", () =>
+      initPersonalSpaceSweeperWorker().catch((err) => {
+        logger.warn("Could not initialize personal-space sweeper", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
     // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
     // sidecar's reactive 401-retry path and the on-demand token resolver
     // cover correctness without it; the worker only matters for credentials
     // that go dormant long enough that their refresh_token would expire
     // upstream.
-    (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
-      (err) => {
-        logger.warn("Could not initialize OAuth model refresh worker", {
-          error: getErrorMessage(err),
-        });
-      },
+    bootStep("background", "oauth-model-refresh-worker", () =>
+      (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
+        (err) => {
+          logger.warn("Could not initialize OAuth model refresh worker", {
+            error: getErrorMessage(err),
+          });
+        },
+      ),
     ),
     // Pairing-table cleanup runs unconditionally — pure table-bloat
     // janitor for `model_provider_pairings`, unrelated to the refresh
     // hot path.
-    initPairingCleanupWorker().catch((err) => {
-      logger.warn("Could not initialize OAuth model pairing cleanup worker", {
-        error: getErrorMessage(err),
-      });
-    }),
-    startRunWatchdog({
-      intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
-      stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
-      maxFinalizesPerTick: 200,
-    }).catch((err) => {
-      logger.warn("Could not start run watchdog", {
-        error: getErrorMessage(err),
-      });
-    }),
+    bootStep("background", "pairing-cleanup-worker", () =>
+      initPairingCleanupWorker().catch((err) => {
+        logger.warn("Could not initialize OAuth model pairing cleanup worker", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    bootStep("background", "run-watchdog", () =>
+      startRunWatchdog({
+        intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
+        stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
+        maxFinalizesPerTick: 200,
+      }).catch((err) => {
+        logger.warn("Could not start run watchdog", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
     // Keep the runtime images warm + pinned on the Docker host. Docker-only:
     // it reconciles Docker images and containers, and every other backend
     // owns its own artifact locality. `initialize()` above pre-pulls once;
     // this is what keeps that true against host-level image pruning between
     // runs (see services/orchestrator/runtime-image-warmer.ts).
-    Promise.resolve().then(() => {
-      if (getExecutionMode() !== "docker") return;
-      startRuntimeImageWarmer({
-        intervalSeconds: env.RUNTIME_IMAGE_WARM_INTERVAL_SECONDS,
-        images: [
-          { image: env.PI_IMAGE, slot: "pi" },
-          { image: env.SIDECAR_IMAGE, slot: "sidecar" },
-        ],
-      });
-    }),
-    expireOldInvitations()
-      .then((expiredCount) => {
-        if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
-      })
-      .catch((err) => {
-        logger.warn("Could not expire old invitations", {
-          error: getErrorMessage(err),
+    bootStep("background", "runtime-image-warmer", () =>
+      Promise.resolve().then(() => {
+        if (getExecutionMode() !== "docker") return;
+        startRuntimeImageWarmer({
+          intervalSeconds: env.RUNTIME_IMAGE_WARM_INTERVAL_SECONDS,
+          images: [
+            { image: env.PI_IMAGE, slot: "pi" },
+            { image: env.SIDECAR_IMAGE, slot: "sidecar" },
+          ],
         });
       }),
-    cleanupExpiredKeys()
-      .then((expiredKeyCount) => {
-        if (expiredKeyCount > 0)
-          logger.info("Revoked expired API keys", { count: expiredKeyCount });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired API keys", {
-          error: getErrorMessage(err),
-        });
-      }),
-    cleanupExpiredUploads()
-      .then((count) => {
-        if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired uploads", {
-          error: getErrorMessage(err),
-        });
-      }),
-    cleanupExpiredFiles()
-      .then((count) => {
-        if (count > 0) logger.info("Removed expired files", { count });
-      })
-      .catch((err) => {
-        logger.warn("Could not clean up expired files", {
-          error: getErrorMessage(err),
-        });
-      }),
+    ),
+    bootStep("background", "expire-invitations", () =>
+      expireOldInvitations()
+        .then((expiredCount) => {
+          if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
+        })
+        .catch((err) => {
+          logger.warn("Could not expire old invitations", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("background", "cleanup-expired-keys", () =>
+      cleanupExpiredKeys()
+        .then((expiredKeyCount) => {
+          if (expiredKeyCount > 0)
+            logger.info("Revoked expired API keys", { count: expiredKeyCount });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired API keys", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("background", "cleanup-expired-uploads", () =>
+      cleanupExpiredUploads()
+        .then((count) => {
+          if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired uploads", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
+    bootStep("background", "cleanup-expired-files", () =>
+      cleanupExpiredFiles()
+        .then((count) => {
+          if (count > 0) logger.info("Removed expired files", { count });
+        })
+        .catch((err) => {
+          logger.warn("Could not clean up expired files", {
+            error: getErrorMessage(err),
+          });
+        }),
+    ),
   ];
 
   await Promise.all(parallelInits);

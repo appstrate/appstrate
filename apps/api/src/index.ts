@@ -259,7 +259,9 @@ app.use("*", idempotencyGuard());
 // Boot phase 1 — migrations, modules, auth, fail-fast config validation.
 // Everything the route table's shape depends on. Phase 2 is kicked off after
 // the export below, so the port binds without waiting for it.
+const criticalStartedAt = performance.now();
 await bootCritical();
+const criticalMs = Math.round(performance.now() - criticalStartedAt);
 
 // Initialize app config (async — modules may contribute structured data like OIDC client ID)
 await initAppConfig();
@@ -453,10 +455,16 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 // metering retry worker's init is deliberately uncaught upstream because a
 // missing durable recovery channel can lose billable spend permanently.
 const bootStartedAt = Date.now();
+const backgroundStartedAt = performance.now();
 void bootBackground()
   .then(() => {
     markServerReady();
-    logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
+    logger.info("Server ready", {
+      port: env.PORT,
+      startupMs: Date.now() - bootStartedAt,
+      criticalMs,
+      backgroundMs: Math.round(performance.now() - backgroundStartedAt),
+    });
     // Fire-and-forget reachability probe for USERCONTENT_URL.
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
