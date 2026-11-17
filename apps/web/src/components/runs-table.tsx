@@ -51,7 +51,6 @@ export function RunsTable({
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`
       // would 404: that row stays static rather than leading nowhere.
-      // A run of another space (a list spanning several) names it: the detail enters it.
       rowHref={(run) =>
         run.packageId == null
           ? undefined

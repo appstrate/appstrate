@@ -27,10 +27,8 @@ const NO_SPACES: readonly string[] = [];
 interface RunAgentButtonProps {
   packageId: string;
   /**
-   * The spaces of the index row that offers the run: the run is offered where one grants it, and
-   * a click enters that space as the working space before running, so the launch, its input
-   * form and the run page all are that space's. Several granting it (a list spanning spaces),
-   * the button opens « Lancer dans… », the menu of them. The working space when absent or empty.
+   * The spaces of the index row offering the run: a click enters the granting space before
+   * running; several granting it, the button opens their menu. The working space when absent.
    */
   spaceIds?: readonly string[];
   /** When provided, skips the lazy fetch (detail page case). */

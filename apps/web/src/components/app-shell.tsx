@@ -115,7 +115,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
           <PanelLeft className="size-4" />
         </SidebarTrigger>
       </SidebarHeader>
-      <ProductTabs />
+      <div className="px-2 pt-4 pb-1">
+        <ProductTabs />
+      </div>
       <SidebarContent className={cn("gap-0", product === "chat" && "overflow-hidden")}>
         {product === "chat" ? (
           // A refused chat route says so in the page; the list would only fetch what the caller cannot read.

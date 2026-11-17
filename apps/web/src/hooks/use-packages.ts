@@ -161,9 +161,7 @@ function usePackageList<T extends PackageType>(
   const segment: Segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const scope = useListScope(spanning, useCanReadPackages(type));
   return useQuery({
-    queryKey: spanning
-      ? packageKeys.acrossSpaces(segment, scope.orgId)
-      : packageKeys.list(segment, scope.orgId, scope.spaceId),
+    queryKey: packageKeys.list(segment, scope.orgId, scope.keySpace),
     queryFn: () => fetchPackageIndex(type, scope.acrossOrgId),
     enabled: scope.enabled,
     // No poll: an index carries nothing a run moves, and the writes that move it invalidate it.
@@ -311,9 +309,7 @@ export {
 export function useAgents({ spanning = false, enabled = true } = {}) {
   const scope = useListScope(spanning, useCanSeePackage("agent"));
   return useQuery({
-    queryKey: spanning
-      ? agentsKeys.acrossSpaces(scope.orgId)
-      : agentsKeys.list(scope.orgId, scope.spaceId),
+    queryKey: agentsKeys.list(scope.orgId, scope.keySpace),
     queryFn: () => fetchAgents(scope.acrossOrgId),
     enabled: enabled && scope.enabled,
     // The running and unread counts of other spaces' agents reach no SSE stream here.

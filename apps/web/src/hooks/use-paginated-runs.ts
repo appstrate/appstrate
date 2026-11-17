@@ -70,7 +70,7 @@ export function useRuns({
   // The org route serves the global view only; inside an agent or a schedule the space is theirs.
   const acrossSpaces = !scheduleId && !packageId && !!spanning;
   const scope = useListScope(acrossSpaces, canRead);
-  const { orgId, spaceId } = scope;
+  const { orgId, keySpace } = scope;
 
   // One value in the key: an array keys on identity, so a fresh `["failed"]` each render is a new entry.
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
@@ -83,19 +83,17 @@ export function useRuns({
       : `/runs`;
 
   // use-global-run-sync and the run mutations invalidate by the key prefix.
-  const currentKey = acrossSpaces
-    ? paginatedRunsKeys.acrossSpaces(orgId, user, kind, statusKey, unread, search, limit)
-    : paginatedRunsKeys.list(
-        orgId,
-        spaceId,
-        endpoint,
-        user,
-        kind,
-        statusKey,
-        unread,
-        search,
-        limit,
-      );
+  const currentKey = paginatedRunsKeys.list(
+    orgId,
+    keySpace,
+    endpoint,
+    user,
+    kind,
+    statusKey,
+    unread,
+    search,
+    limit,
+  );
 
   return useInfiniteQuery({
     queryKey: currentKey,

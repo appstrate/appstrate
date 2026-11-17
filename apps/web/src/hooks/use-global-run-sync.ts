@@ -23,6 +23,7 @@ import {
   scheduleKeys,
   persistenceKeys,
   invalidatePaths,
+  ACROSS_SPACES,
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
@@ -250,7 +251,7 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, spaceId, scheduleId) });
     qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, spaceId) });
     // A list spanning spaces holds this space's schedules too.
-    qc.invalidateQueries({ queryKey: scheduleKeys.acrossSpaces(orgId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, ACROSS_SPACES) });
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {

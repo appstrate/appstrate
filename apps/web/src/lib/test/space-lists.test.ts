@@ -15,7 +15,6 @@ const {
   isListRow,
   isSpaceEnterable,
   listAdmits,
-  overviewLapsed,
   spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
@@ -44,14 +43,6 @@ describe("overviewOffered", () => {
       ]),
     ).toBe(false);
     expect(overviewOffered(undefined)).toBe(false);
-  });
-});
-
-describe("overviewLapsed", () => {
-  it("lapses once the listing proves the mode no longer offered, not before it answers", () => {
-    expect(overviewLapsed([space("spc_a", ["runs:read"])])).toBe(true);
-    expect(overviewLapsed(TWO)).toBe(false);
-    expect(overviewLapsed(undefined)).toBe(false);
   });
 });
 

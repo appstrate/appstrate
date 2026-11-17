@@ -44,7 +44,7 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 
 const app = getTestApp();
 
@@ -220,20 +220,12 @@ describe("lists spanning the organization's spaces: the shared reach", () => {
       });
 
       it("reaches with the chat's loopback bearer what the member's session reaches", async () => {
-        const token = mintMcpLoopbackToken({
-          userId: member.user.id,
-          email: member.user.email,
-          name: member.user.name,
-          orgId: owner.orgId,
-          orgRole: "member",
-          permissions: EVERY_READ,
-        });
         const viaSession = await spacesOf(list, session(member));
         expect(viaSession).toContain(un);
         expect(viaSession).not.toContain(ferme);
         expect(viaSession).not.toContain(prive);
         expect(
-          await spacesOf(list, { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId }),
+          await spacesOf(list, memberLoopbackHeaders(member, owner.orgId, EVERY_READ)),
         ).toEqual(viaSession);
       });
 

@@ -3,6 +3,7 @@
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
+import { ACROSS_SPACES } from "../lib/query-keys";
 
 /** Org/space context for queries. Headers are passed explicitly so they are part of the React Query key (a scope switch refetches). */
 export function useOrgScope() {
@@ -19,7 +20,8 @@ export function useOrgScope() {
 
 /**
  * The scope of a list: the current space's, or, `spanning`, every space the reader reaches, asked
- * from an org route (`acrossOrgId`, null otherwise). Each row of a spanning list is granted by
+ * from an org route (`acrossOrgId`, null otherwise); `keySpace` is what its pinned key holds at the
+ * space's position (`ACROSS_SPACES` when spanning). Each row of a spanning list is granted by
  * its own space server-side, so the current space's `canRead` does not gate it. The SSE stream
  * carries the current space only, so a spanning list a run moves polls (`refetchInterval`), or
  * it would never see another space's new rows.
@@ -29,7 +31,7 @@ export function useListScope(spanning: boolean, canRead: boolean) {
   const spaceId = useCurrentSpaceId();
   return {
     orgId,
-    spaceId,
+    keySpace: spanning ? ACROSS_SPACES : spaceId,
     acrossOrgId: spanning ? orgId : null,
     enabled: spanning ? !!orgId : canRead && !!orgId && !!spaceId,
     refetchInterval: spanning ? ACROSS_SPACES_POLL_MS : undefined,

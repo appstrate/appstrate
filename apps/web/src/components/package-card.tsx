@@ -2,7 +2,7 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Share2, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Card } from "@appstrate/ui/components/card";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -12,12 +12,11 @@ import { RunStatusBadge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
-import { useSpaceLink } from "../hooks/use-current-space";
+import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
-import { packageDetailPath } from "../lib/package-paths";
+import { useSpaceLink } from "../hooks/use-current-space";
 import { PackageSpaces } from "./package-spaces";
-import { useSharedFromText } from "../hooks/use-shared-from-text";
 
 /**
  * A package as a card, the same on every surface (the dashboard, the index
@@ -68,7 +67,6 @@ export function PackageCard({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const linkInSpace = useSpaceLink();
-  const sharedFrom = useSharedFromText(homeSpaceId, source === "system");
   // The focus ring is drawn on the stretched overlay, i.e. around the whole
   // card: on the title itself `truncate` would clip it.
   const titleClass =
@@ -148,30 +146,15 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || showSpace || sharedFrom || meta) && (
+          {(version || showSpace || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {version && (
                 <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
                   v{version}
                 </UIBadge>
               )}
-              {showSpace ? (
-                <PackageSpaces
-                  homeSpaceId={homeSpaceId}
-                  spaceIds={spaceIds ?? []}
-                  system={source === "system"}
-                />
-              ) : (
-                sharedFrom && (
-                  <span className="flex min-w-0 items-center gap-1">
-                    <Share2 className="size-3 shrink-0" aria-hidden />
-                    <span className="truncate" title={sharedFrom}>
-                      {sharedFrom}
-                    </span>
-                  </span>
-                )
-              )}
-              {(showSpace || sharedFrom) && meta && <span aria-hidden>·</span>}
+              {showSpace && <PackageSpaces item={{ homeSpaceId, spaceIds, source }} />}
+              {showSpace && meta && <span aria-hidden>·</span>}
               {meta}
             </div>
           )}

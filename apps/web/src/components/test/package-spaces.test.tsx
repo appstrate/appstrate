@@ -2,7 +2,7 @@
 
 /**
  * The spaces of a package in a list: its home first with the others counted when spanning, a
- * muted label when no home is visible, and the « Partagé depuis » cue in a single-space list.
+ * muted label when no home is visible.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -14,7 +14,7 @@ import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import { PackageSharedFrom, PackageSpaces } from "../package-spaces.tsx";
+import { PackageSpaces } from "../package-spaces.tsx";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
@@ -73,7 +73,7 @@ function renderInSpaces(node: ReactElement): string {
 describe("PackageSpaces", () => {
   it("names the home, then counts the other spaces with their names in the label", () => {
     const html = renderInSpaces(
-      <PackageSpaces homeSpaceId="spc_b" spaceIds={["spc_b", "spc_a", "spc_c"]} system={false} />,
+      <PackageSpaces item={{ homeSpaceId: "spc_b", spaceIds: ["spc_b", "spc_a", "spc_c"] }} />,
     );
     expect(html).toContain(">Studio<");
     expect(html).toContain('aria-label="Partagé avec Atelier, Coffre"');
@@ -82,7 +82,7 @@ describe("PackageSpaces", () => {
 
   it("shows no badge when the package is active in its home only", () => {
     const html = renderInSpaces(
-      <PackageSpaces homeSpaceId="spc_b" spaceIds={["spc_b"]} system={false} />,
+      <PackageSpaces item={{ homeSpaceId: "spc_b", spaceIds: ["spc_b"] }} />,
     );
     expect(html).toContain(">Studio<");
     expect(html).not.toContain("Partagé avec");
@@ -90,40 +90,20 @@ describe("PackageSpaces", () => {
 
   it("labels a system package « Plateforme » and counts every space", () => {
     const html = renderInSpaces(
-      <PackageSpaces homeSpaceId={null} spaceIds={["spc_a", "spc_b"]} system />,
+      <PackageSpaces
+        item={{ homeSpaceId: null, spaceIds: ["spc_a", "spc_b"], source: "system" }}
+      />,
     );
     expect(html).toContain(">Plateforme<");
     expect(html).toContain('aria-label="Disponible dans Atelier, Studio"');
     expect(html).toMatch(/>\+2<\/span>/);
-    // No share icon: outside the mode it means "shared from".
-    expect(html).not.toContain("<svg");
   });
 
   it("labels a withheld home « Espace non visible » and counts every space", () => {
     const html = renderInSpaces(
-      <PackageSpaces homeSpaceId={null} spaceIds={["spc_c"]} system={false} />,
+      <PackageSpaces item={{ homeSpaceId: null, spaceIds: ["spc_c"] }} />,
     );
     expect(html).toContain(">Espace non visible<");
     expect(html).toContain('aria-label="Disponible dans Coffre"');
-  });
-});
-
-describe("PackageSharedFrom", () => {
-  it("is an icon naming the home of another space's package as its label", () => {
-    const html = renderInSpaces(<PackageSharedFrom homeSpaceId="spc_b" system={false} />);
-    expect(html).toContain('aria-label="Partagé depuis Studio"');
-  });
-
-  it("stays generic when the home is withheld", () => {
-    const html = renderInSpaces(<PackageSharedFrom homeSpaceId={null} system={false} />);
-    expect(html).toContain('aria-label="Partagé depuis un autre espace"');
-  });
-
-  it.each([
-    ["at home", "spc_a", false],
-    ["a system package", "spc_b", true],
-    ["a row off an index", undefined, false],
-  ] as const)("shows nothing for %s", (_label, home, system) => {
-    expect(renderInSpaces(<PackageSharedFrom homeSpaceId={home} system={system} />)).toBe("");
   });
 });

@@ -537,6 +537,7 @@ describe("the dashboard in the mode", () => {
         "paginated-runs",
         "org_1",
         "across-spaces",
+        "/runs",
         undefined,
         undefined,
         undefined,

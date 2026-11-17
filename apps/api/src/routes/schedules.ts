@@ -71,7 +71,7 @@ import {
 } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
-import { callerSpaceGrant } from "../lib/permissions.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
@@ -448,18 +448,23 @@ function scheduleVersion(schedule: { updatedAt: string }): number {
   return Date.parse(schedule.updatedAt);
 }
 
+/**
+ * The schedule list over `grants`: `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`. The
+ * caller is the VIEWER of the run counters (`unread_count` is recipient-scoped), never the
+ * schedules' own execution actor.
+ */
+export async function respondScheduleList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  parseEmptyQuery(c);
+  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
+}
+
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/schedules — list all schedules (space-scoped)
-  router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
-    parseEmptyQuery(c);
-    const scope = getSpaceScope(c);
-    // The caller is the VIEWER of the run counters (`unread_count` is
-    // recipient-scoped), never the schedules' own execution actor.
-    const schedules = await listSchedules(scope.orgId, [callerSpaceGrant(c)], getActor(c));
-    return c.json(listResponse(schedules));
-  });
+  router.get("/schedules", requirePermission("schedules", "read"), (c) =>
+    respondScheduleList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
   router.get(

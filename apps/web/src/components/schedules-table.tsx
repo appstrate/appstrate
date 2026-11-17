@@ -39,7 +39,6 @@ export function SchedulesTable({
       error={error}
       empty={empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />}
       rowKey={(schedule) => schedule.id}
-      // A schedule of another space (a list spanning several) names it: the detail enters it.
       rowHref={(schedule) => linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       rowLabel={(schedule) => schedule.name || t("schedule.unnamed", { ns: "agents" })}
     />

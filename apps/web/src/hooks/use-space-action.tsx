@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Acting from « Tous les espaces », where the screen is the same as in a space and an action that
- * needs a space gets one:
- *
- * - on a ROW, in the row's space: the action names that space itself (an explicit `X-Space-Id`),
- *   or is a `useSpaceAction` among the row's spaces when it continues there (`RunAgentButton`),
- *   in the working space when it is one of them;
- * - naming NO space (create, import, a launch): `useSpaceAction` offers it where some space
- *   grants it; between several its own trigger is a menu of them (`choose`, drawn by
- *   `SpaceChoiceDropdown` or a menu entry's sub-menu), the only one is taken without asking. It
- *   enters the space chosen as the working space, then continues the action, which therefore
- *   renders and requests in that space (its dialog names it, `Modal`'s `inSpace`). Out of the
- *   mode it is the working space's action, unchanged.
+ * Acting from « Tous les espaces »: a row's action runs in the row's space; an action naming no
+ * space is offered where some space grants it, picked from a menu between several, and enters the
+ * chosen space before continuing. Out of the mode it is the working space's action, unchanged.
  */
 
 import { useCallback } from "react";

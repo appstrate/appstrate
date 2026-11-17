@@ -32,14 +32,11 @@ export interface ReachableSpace {
 }
 
 /**
- * The spaces of `GET /api/spaces` where the caller holds a role (persona
- * overlay included) — the reach of every read spanning spaces and of the
- * package reach (`packageAccessSpaces`). No org role, no space; a request
- * pinned to a space, by its credential (`credentialSpaceId`) or by the
- * space-pinned MCP endpoint dispatching it (`dispatchSpacePin`), reaches that
- * space only; a credential bound to a SET of spaces (`credentialSpaceIds`)
- * reaches those alone, within whatever a pin leaves. A read crossing into
- * another organization names `orgRole`.
+ * The spaces where the caller holds a role (persona overlay included): the reach of every read
+ * spanning spaces and of `packageAccessSpaces`. A request pinned to a space (its credential or
+ * `dispatchSpacePin`) reaches that space only; a credential bound to a SET of spaces
+ * (`credentialSpaceIds`) reaches those alone. A read crossing into another organization names
+ * `orgRole`.
  */
 export function callerReachableSpaces(
   c: Context<AppEnv>,
@@ -121,11 +118,9 @@ export async function reachAcrossSpaces(
 }
 
 /**
- * The preamble of every list spanning the spaces of `orgId`: the caller's
- * reach, kept where the effective set grants one of `permissions` (the list's
- * read permission — the same list its route caps the credential with), as one
- * grant per space. A space reached but not admitting the list contributes no
- * row.
+ * The preamble of every list spanning the spaces of `orgId`: one grant per reached space whose
+ * effective set grants one of `permissions`. An end-user acts in its own space only, so it is
+ * refused before the route reads any query parameter.
  */
 export async function readableSpacesAcross(
   c: Context<AppEnv>,

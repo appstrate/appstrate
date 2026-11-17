@@ -40,7 +40,6 @@ export function RunRow({
   // Its own container: a compact status follows the row's width, not the screen's.
   const rowClass = cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className);
 
-  // A run of another space (the dashboard in « Tous les espaces ») names it: the detail enters it.
   return run.packageId ? (
     <Link
       to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}

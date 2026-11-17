@@ -1,22 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The package INDEXES: what each space can LAUNCH, one row per package ACTIVE in
- * one of them, each row carrying `space_ids`, the spaces it is active in (its
- * home first when it is one of them, then in the order of a space listing). The
- * single-space index (`GET /api/agents`, `GET /api/packages/{type}`) is the
- * one-space case; the organization's (`GET /api/orgs/{orgId}/agents|packages/{type}`)
- * lists every space it admits. Each costs the same number of queries whatever
- * the number of spaces.
- *
- * The ONE activation rule decides (`services/package-activation.ts`): the
- * placement row when the package is placed in the space, the deployment's
- * default when it is not — the rule the integration resolver, the run gate and
- * the caller-context hints state. What is merely PLACED in a space — a package
- * switched off — belongs to its library (`GET /api/spaces/{spaceId}/library`).
- *
- * Order: system packages first, then the index's own order (the agent index
- * by id, a catalog index newest first, then by id).
+ * The package indexes: one row per package ACTIVE in one of the listed spaces (the activation
+ * rule of `services/package-activation.ts`), each carrying `space_ids` (its home first). The
+ * single-space index is the one-space case. Order: system packages first, then the index's own.
  */
 
 import { inArray } from "drizzle-orm";

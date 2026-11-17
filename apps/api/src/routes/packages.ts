@@ -571,14 +571,22 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
 
 /** `GET /api/packages/{type}`: the type's index of the request's space (`listPackageIndex`). */
 function makeListHandler(rcfg: PackageRouteConfig) {
-  return async (c: Context<AppEnv>) => {
+  return (c: Context<AppEnv>) => {
     const scope = getSpaceScope(c);
-    return c.json(
-      listResponse(
-        await listPackageIndex(rcfg.cfg.type, scope.orgId, [scope.spaceId], packageAccessSpaces(c)),
-      ),
-    );
+    return respondPackageIndex(c, rcfg.cfg.type, scope.orgId, [scope.spaceId]);
   };
+}
+
+/** One type's index over `spaceIds`: `GET /api/packages/{type}` and its org twin. */
+export async function respondPackageIndex(
+  c: Context<AppEnv>,
+  type: PackageType,
+  orgId: string,
+  spaceIds: string[],
+) {
+  return c.json(
+    listResponse(await listPackageIndex(type, orgId, spaceIds, packageAccessSpaces(c))),
+  );
 }
 
 function makeCreateHandler(rcfg: PackageRouteConfig) {

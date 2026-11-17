@@ -245,7 +245,6 @@ function DashboardScheduleRow({
   const linkInSpace = useSpaceLink();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
-    // A schedule of another space (« Tous les espaces ») names it: the detail enters it.
     <Link
       to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"

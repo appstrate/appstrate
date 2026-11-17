@@ -152,7 +152,6 @@ function OverviewTile({ className }: { className?: string }) {
   return (
     <span
       aria-hidden
-      data-testid="overview-tile"
       className={cn(
         "bg-muted text-muted-foreground flex shrink-0 items-center justify-center",
         className,
@@ -451,7 +450,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   {offersOverview && (
                     <div className="border-b pb-1">
                       <PickerRow
-                        data-testid="space-item-overview"
                         aria-current={overviewCurrent || undefined}
                         onClick={chooseOverview}
                         rowClassName={overviewCurrent && "bg-primary/10 hover:bg-primary/10"}

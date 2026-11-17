@@ -18,8 +18,10 @@
  * ownership question — which is why the file surfaces test whichever of the
  * two they already have loaded rather than joining back to the other.
  *
- * One semantic in every shape below — WHERE fragments, the loaded-row test,
- * the 404 assertion. Nothing re-derives ownership on its own.
+ * One semantic, four shapes — the read-all test itself, a WHERE fragment for
+ * the queries that list, an ownership test for a loaded row, and the assertion
+ * that turns it into the 404 a handler throws. Nothing re-derives ownership on
+ * its own.
  */
 
 import type { Context } from "hono";
@@ -89,12 +91,10 @@ export function runReadCondition(
   return or(...reach) ?? sql`false`;
 }
 
-/**
- * WHERE fragment narrowing `runs` to what the caller may read in the request's
- * own space; `undefined` = no narrowing.
- */
+/** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
 export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  return canReadEveryRun(callerPermissions(c)) ? undefined : ownRunsFilter(getActor(c));
+  if (canReadEveryRun(callerPermissions(c))) return undefined;
+  return ownRunsFilter(getActor(c));
 }
 
 /**

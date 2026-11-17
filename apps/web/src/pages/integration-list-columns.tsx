@@ -4,13 +4,13 @@ import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
-import { PackageSharedFrom } from "../components/package-spaces";
 import { usePackageSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
   useCatalogueSourceColumn,
 } from "../components/catalogue-columns";
 import { useOrg } from "../hooks/use-org";
+import { packageCardItem } from "../lib/package-card-item";
 
 /**
  * One comparable integration fact per column. `connectionCount` is the caller's own connections
@@ -24,11 +24,9 @@ export function useIntegrationListColumns(
   spanning: boolean,
 ): DataColumn<IntegrationIndexItem>[] {
   const { t } = useTranslation("settings");
-  const spaceColumn = usePackageSpaceColumn<IntegrationIndexItem>(spanning, (integration) => ({
-    homeSpaceId: integration.home_space_id,
-    spaceIds: integration.space_ids,
-    system: integration.source === "system",
-  }));
+  const spaceColumn = usePackageSpaceColumn<IntegrationIndexItem>(spanning, (integration) =>
+    packageCardItem(integration, "integration"),
+  );
   const origin = useCatalogueOriginColumn<IntegrationIndexItem>(useOrg().currentOrg?.name ?? "");
   const source = useCatalogueSourceColumn<IntegrationIndexItem>(
     (integration) => integration.source_kind,
@@ -44,12 +42,6 @@ export function useIntegrationListColumns(
         <div className="flex min-w-0 items-center gap-2">
           <PackageIcon type="integration" icon={integration.icon} size="sm" />
           <span className="truncate font-medium">{integration.name}</span>
-          {!spanning && (
-            <PackageSharedFrom
-              homeSpaceId={integration.home_space_id}
-              system={integration.source === "system"}
-            />
-          )}
         </div>
       ),
     },

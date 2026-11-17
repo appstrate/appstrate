@@ -48,7 +48,7 @@ import {
   seedSpaceMember,
   seedSpaceGrant,
 } from "../../helpers/seed.ts";
-import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
@@ -240,17 +240,8 @@ describe("GET /api/orgs/{orgId}/runs", () => {
   });
 
   it("caps the chat's loopback bearer with the permissions it carries", async () => {
-    const loopback = (permissions: string[]) => ({
-      Authorization: `Bearer ${mintMcpLoopbackToken({
-        userId: member.user.id,
-        email: member.user.email,
-        name: member.user.name,
-        orgId: owner.orgId,
-        orgRole: "member",
-        permissions,
-      })}`,
-      "X-Org-Id": owner.orgId,
-    });
+    const loopback = (permissions: string[]) =>
+      memberLoopbackHeaders(member, owner.orgId, permissions);
     const full = await list(loopback(["runs:read", "runs:read-all", "agents:read"]));
     expect(ids(full)).toEqual(sorted(r.unOwner!, r.unMember!, r.deuxMember!, r.defaultMember!));
     // Without `runs:read-all` in its ceiling, Un is own-only; without `agents:read`, no input.

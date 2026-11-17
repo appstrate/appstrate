@@ -312,11 +312,13 @@ export function OrgCatalogueModal({
     const icon = tileOf(item.id, row.displayName);
     // Spaces where it already runs (ticked, so nothing vanishes after a click) or where this reader may add it.
     const addable = spaces
-      .map((space) => ({
-        id: space.id,
-        name: space.name,
-        active: placement?.activeIn.includes(space.id) ?? false,
-      }))
+      // Drawn with its tile: the listing's row, which every space the library names is in.
+      .flatMap((space) => {
+        const listed = grantById.get(space.id);
+        return listed
+          ? [{ ...listed, active: placement?.activeIn.includes(space.id) ?? false }]
+          : [];
+      })
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
     const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;

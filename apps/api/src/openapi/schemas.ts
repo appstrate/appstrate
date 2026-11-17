@@ -225,6 +225,15 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
  * schema object: verify-openapi's shared-type check reads only the properties
  * declared there, never through `allOf`.
  */
+/** `space_ids` of an index row (`AgentListItem`, `OrgPackageItem`). */
+const INDEX_SPACE_IDS = {
+  type: "array",
+  minItems: 1,
+  items: { type: "string", pattern: SPACE_ID_RE.source },
+  description:
+    "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
+};
+
 const ORG_PACKAGE_ITEM_SCHEMA = {
   type: "object",
   // Always emitted by the listOrgItems mapper. `created_by_name` stays
@@ -252,13 +261,7 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
   ],
   properties: {
     id: { type: "string" },
-    space_ids: {
-      type: "array",
-      minItems: 1,
-      items: { type: "string", pattern: SPACE_ID_RE.source },
-      description:
-        "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
-    },
+    space_ids: INDEX_SPACE_IDS,
     orgId: {
       type: ["string", "null"],
       description: "Owning organization ID (null for system packages)",
@@ -1008,13 +1011,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       home_space_id: PACKAGE_HOME_PROPERTIES.home_space_id,
-      space_ids: {
-        type: "array",
-        minItems: 1,
-        items: { type: "string", pattern: SPACE_ID_RE.source },
-        description:
-          "The spaces of the index where the agent is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the agent's home first when it is one of them, then in the order of `GET /api/spaces`.",
-      },
+      space_ids: INDEX_SPACE_IDS,
       ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },

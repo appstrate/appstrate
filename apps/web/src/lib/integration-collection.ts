@@ -18,8 +18,8 @@ export function integrationOrigin(integration: IntegrationIndexItem): Integratio
   return integration.source === "system" ? "system" : "custom";
 }
 
-export function filterIntegrations<T extends IntegrationIndexItem>(
-  integrations: T[],
+export function filterIntegrations(
+  integrations: IntegrationIndexItem[],
   {
     query,
     origins,
@@ -29,7 +29,7 @@ export function filterIntegrations<T extends IntegrationIndexItem>(
     origins?: IntegrationOrigin[];
     sources?: IntegrationSource[];
   },
-): T[] {
+): IntegrationIndexItem[] {
   return integrations.filter((integration) => {
     if (origins?.length && !origins.includes(integrationOrigin(integration))) return false;
     if (sources?.length && !sources.includes(integration.source_kind)) return false;

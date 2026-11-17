@@ -32,9 +32,7 @@ export function useAllSchedules(spanning = false) {
   const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
-    queryKey: spanning
-      ? scheduleKeys.acrossSpaces(scope.orgId)
-      : scheduleKeys.list(scope.orgId, scope.spaceId),
+    queryKey: scheduleKeys.list(scope.orgId, scope.keySpace),
     queryFn: () => fetchSchedules(scope.acrossOrgId),
     enabled: scope.enabled,
     refetchInterval: scope.refetchInterval,
