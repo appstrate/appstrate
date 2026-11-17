@@ -54,6 +54,21 @@ function useWorkingSpaceRunning(enabled: boolean): boolean {
   );
 }
 
+/**
+ * Whether a run is in flight where the reader stands: the working space (above), or in « Tous les
+ * espaces » any space reached — one polled first page of their running runs, inline ones included.
+ */
+function useRunning(overview: boolean): boolean {
+  const working = useWorkingSpaceRunning(!overview);
+  const { data: across } = useFirstRunsPage({
+    status: ["running"],
+    spanning: true,
+    limit: 1,
+    enabled: overview,
+  });
+  return overview ? (across?.total ?? 0) > 0 : working;
+}
+
 type NavItem = {
   path: RoutePath;
   label: string;
@@ -69,12 +84,11 @@ export function NavOrg() {
   const overlayPath = useOverlayPath();
   const trailRootHref = useStore(breadcrumbStore, (s) => s.page.entries[0]?.href);
   const location = navLocation({ overlayPath, trailRootHref, pathname });
-  // The badge and the running spinner are the working space's: « Tous les espaces » neither
-  // shows nor asks what feeds them (no list it already holds counts every space's unread and
-  // running runs, inline ones included).
+  // The badge and the running spinner count the working space's runs, or in « Tous les espaces »
+  // every reached space's: the runs page's own unread count, one query shared with it.
   const { on: overview } = useOverviewMode();
-  const unread = useUnreadRunCount({ enabled: !overview });
-  const hasRunning = useWorkingSpaceRunning(!overview);
+  const unread = useUnreadRunCount({ spanning: overview });
+  const hasRunning = useRunning(overview);
   const canReach = useCanReach();
   const ready = useReachReady();
 
@@ -164,7 +178,7 @@ export function NavOrg() {
                     <span>{t("nav.runs")}</span>
                   </Link>
                 </SidebarMenuButton>
-                {!overview && unread > 0 && (
+                {unread > 0 && (
                   <SidebarMenuBadge>
                     <CountBadge
                       count={unread}

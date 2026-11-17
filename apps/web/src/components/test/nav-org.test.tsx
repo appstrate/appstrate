@@ -153,7 +153,7 @@ describe("the navigation in « Tous les espaces »", () => {
     expect(active[0]).toContain('href="/agents"');
   });
 
-  it("asks nothing the working space's spinner reads, which it asks out of the mode", () => {
+  it("counts runs across spaces in the mode, and reads the working space's agents only out of it", () => {
     const asked = (overview: boolean) => {
       const queryClient = new QueryClient();
       navFor(working, spaces, overview, "/", queryClient);
@@ -164,7 +164,7 @@ describe("the navigation in « Tous les espaces »", () => {
         .map((query) => query.queryKey[0]);
     };
     expect(asked(true)).not.toContain("agents");
-    expect(asked(true)).not.toContain("paginated-runs");
+    expect(asked(true)).toContain("paginated-runs");
     expect(asked(false)).toContain("agents");
   });
 });

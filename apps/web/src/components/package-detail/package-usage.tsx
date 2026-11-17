@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
 import { useAgents } from "../../hooks/use-packages";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { agentCardItem, type CardItem } from "../../lib/package-card-item";
 import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
@@ -11,11 +12,17 @@ import { usePackageColumns } from "../package-columns";
 import { ListToolbar } from "../list-toolbar";
 import { EmptyState, NoMatchState } from "../page-states";
 
+/**
+ * The agents depending on a package (`agentIds`, the organization's), as listed where the reader
+ * stands: the working space's, or in « Tous les espaces » every reached space's, each naming its
+ * space and opening there.
+ */
 export function PackageUsage({ agentIds }: { agentIds: string[] }) {
   const { t } = useTranslation("agents");
-  const { data: agents, isLoading, error } = useAgents();
+  const { on } = useOverviewMode();
+  const { data: agents, isLoading, error } = useAgents({ spanning: on });
   const list = useLocalListParams();
-  const columns = usePackageColumns("agent");
+  const columns = usePackageColumns("agent", on);
   const ids = new Set(agentIds);
   const items: CardItem[] = (agents ?? [])
     .filter((agent) => ids.has(agent.id))

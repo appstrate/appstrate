@@ -125,15 +125,21 @@ export function enterableSpaceId(
   return pick?.id ?? null;
 }
 
+/** The space a URL's search names with `?enterSpace=`, or null. */
+export function linkedSpaceIn(search: string): string | null {
+  return new URLSearchParams(search).get(ENTER_SPACE_PARAM);
+}
+
 /**
  * The only path from the remembered (or linked) space to a scope: none until `GET /api/spaces`
  * proves one enterable, dropped when it stops listing it. A link's `?enterSpace=` is the first
- * candidate, so a cold load scopes once, to it. Render inside MainLayout (router context).
+ * candidate, so a cold load scopes once, to it. `search` is the address bar's: under an overlay
+ * the page tree's `useLocation` answers the page beneath, which the link does not name. Render
+ * inside MainLayout.
  */
-export function useSpaceResolver(): void {
+export function useSpaceResolver(search: string): void {
   const queryClient = useQueryClient();
-  const [params] = useSearchParams();
-  const linked = params.get(ENTER_SPACE_PARAM);
+  const linked = linkedSpaceIn(search);
   const current = useStore(spaceStore, (s) => s.id);
   const orgId = useStore(orgStore, (s) => s.id);
   const userId = useStore(authStore, (s) => s.user?.id);

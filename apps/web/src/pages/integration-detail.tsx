@@ -38,7 +38,9 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ResourceErrorState } from "../components/page-states";
+import { UnreadableDetail } from "../components/unreadable-detail";
+import { SpaceChoiceDropdown } from "../components/space-choice-menu";
+import { WorkingSpaceName } from "../components/space-name";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { isQueryInFlight } from "../lib/query-state";
 import { SettingsSkeleton } from "../components/loading-skeletons";
@@ -68,6 +70,10 @@ import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/u
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
+import { useActivationChoice } from "../hooks/use-activation-choice";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceLabelOf } from "../hooks/use-spaces";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   integrationSettingsHref,
   isPackageCommonSection,
@@ -325,12 +331,19 @@ function IntegrationSettings({
 function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   const { mayActivate, activate, pending } = usePackageActivation(packageId);
+  // In « Tous les espaces » the working space is on no screen: the hint names it.
+  const { on } = useOverviewMode();
+  const space = useSpaceLabelOf()(useCurrentSpaceId());
   return (
     <div
       className="border-border bg-muted/40 rounded-lg border p-6 text-center"
       data-testid="activation-hint"
     >
-      <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
+      <p className="text-muted-foreground mb-3 text-sm">
+        {on && space
+          ? t("integrations.activate.hintIn", { space })
+          : t("integrations.activate.hint")}
+      </p>
       <DisabledReasonTooltip
         reason={mayActivate ? null : t("library.cannotActivate", { ns: "common" })}
       >
@@ -358,6 +371,8 @@ export function IntegrationDetailPage() {
     packageId || undefined,
   );
   const activation = usePackageActivation(packageId);
+  const { on: overview } = useOverviewMode();
+  const activationChoice = useActivationChoice("integration", packageId);
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
@@ -389,15 +404,23 @@ export function IntegrationDetailPage() {
   if (isQueryInFlight(detailQuery)) return <PackageDetailSkeleton type="integration" />;
   if (error || !detail) {
     // Not placed in this space, or gone: one answer for both, and what the
-    // member can do about either.
+    // member can do about either. In « Tous les espaces » the list names every space.
     return (
-      <ResourceErrorState error={error} hint={t("integration.notInSpace.hint")}>
+      <UnreadableDetail
+        kind="integration"
+        id={packageId}
+        error={error}
+        pending={<PackageDetailSkeleton type="integration" />}
+        hint={t("integration.notInSpace.hint")}
+      >
         {canBrowseIntegrations && (
           <Button variant="outline" asChild>
-            <Link to="/integrations">{t("integration.notInSpace.back")}</Link>
+            <Link to="/integrations">
+              {overview ? t("integration.notInSpace.backAcross") : t("integration.notInSpace.back")}
+            </Link>
           </Button>
         )}
-      </ResourceErrorState>
+      </UnreadableDetail>
     );
   }
 
@@ -425,20 +448,32 @@ export function IntegrationDetailPage() {
           version,
           icon: typeof m.icon === "string" ? m.icon : undefined,
           homeSpaceName,
+          homeSpaceId: homeSpaceId ?? null,
+          spaceIds: pkgLoading ? undefined : (pkg?.space_ids ?? []),
         }}
         isHistoricalVersion={false}
         tabs={tabs}
         status={
           <>
             {pkgLoading && <Skeleton className="h-5 w-16" />}
-            <Badge variant={active ? "success" : "warning"}>
-              {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-            </Badge>
+            {/* The working space's switch: in « Tous les espaces » the spaces it is active in say it. */}
+            {!overview && (
+              <Badge variant={active ? "success" : "warning"}>
+                {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
+              </Badge>
+            )}
           </>
         }
         actions={
           <>
-            {!active && (
+            {overview && activationChoice && (
+              <SpaceChoiceDropdown choice={activationChoice}>
+                <HeaderActionButton primary data-testid="detail-activate-btn">
+                  {t("integrations.btn.activateIn")}
+                </HeaderActionButton>
+              </SpaceChoiceDropdown>
+            )}
+            {!overview && !active && (
               <DisabledReasonTooltip
                 reason={
                   activation.mayActivate ? null : t("library.cannotActivate", { ns: "common" })
@@ -505,6 +540,13 @@ export function IntegrationDetailPage() {
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">
+        {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists. */}
+        {overview && (
+          <p className="text-muted-foreground mb-4 flex min-w-0 items-center gap-1.5 text-sm">
+            {t("integration.connections.listedIn")}
+            <WorkingSpaceName size="sm" className="shrink-0" />
+          </p>
+        )}
         {!active ? (
           <ActivationHint packageId={packageId} />
         ) : detail.auths.length === 0 ? (

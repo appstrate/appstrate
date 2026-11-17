@@ -27,8 +27,9 @@ function useChoiceKey(): string | null {
 
 /**
  * « Tous les espaces »: a mode laid over the working space, on while the reader chose it AND it is
- * offered; `known` once the space listing answered. A list page passes `on` to its data hooks as
- * `spanning`; a data hook never reads it, since a detail page runs in one space while it is on.
+ * offered; `known` once the space listing answered. A surface passes `on` to its data hooks as
+ * `spanning`; a data hook never reads it itself. A row's detail page acts in the one space it was
+ * opened in, and reads it to name that space, list across spaces, or ask where to act.
  */
 export function useOverviewMode() {
   const userId = useStore(authStore, (s) => s.user?.id);

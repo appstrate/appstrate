@@ -18,7 +18,7 @@
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ExternalLink, LibraryBig } from "lucide-react";
@@ -26,7 +26,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
-import { useHereSpaceId } from "../hooks/use-overview-mode";
+import { useHereSpaceId, useOverviewMode } from "../hooks/use-overview-mode";
+import { useListScope } from "../hooks/use-org-scope";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
@@ -43,7 +44,7 @@ import {
 import { searchOf } from "../lib/url-search";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
-import { fetchPackageDetail, useAgents } from "../hooks/use-packages";
+import { fetchPackageDetail, fetchPackageIndex, useAgents } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
 import { mayConfigurePackage } from "../lib/package-permissions";
@@ -155,14 +156,29 @@ export function OrgCatalogueModal({
     { enabled: active === "integration" },
   );
   const { data: integrations } = integrationsQuery;
-  // The library carries no icon: agents and integrations get theirs from their own reads.
-  const { data: agentsHere, isLoading: agentsHerePending } = useAgents();
+  // The library carries no icon: agents and integrations get theirs from their own reads — in
+  // « Tous les espaces » those of every space reached, the index pages' own lists, so a package
+  // absent from the hidden working space still has its icon.
+  const { on: spanning } = useOverviewMode();
+  const { data: agentsHere, isLoading: agentsHerePending } = useAgents({
+    spanning,
+    enabled: active === "agent",
+  });
+  const acrossScope = useListScope(true, true);
+  const integrationsAcross = useQuery({
+    queryKey: packageKeys.list("integrations", acrossScope.orgId, acrossScope.keySpace),
+    queryFn: () => fetchPackageIndex("integration", acrossScope.acrossOrgId),
+    enabled: spanning && active === "integration" && acrossScope.enabled,
+  });
   const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
+  const integrationIconOf = new Map(
+    (integrationsAcross.data ?? []).map((row) => [row.id, row.icon] as const),
+  );
   // One tile per package, the card's and the sheet's alike; it waits for the read that carries it.
   const iconPending =
     (active === "agent" && agentsHerePending) ||
-    (active === "integration" && integrationsQuery.isLoading);
+    (active === "integration" && (integrationsQuery.isLoading || integrationsAcross.isLoading));
   const tileOf = (id: string, name: string) =>
     iconPending ? (
       <Skeleton className="size-10 rounded-[10px]" />
@@ -171,7 +187,11 @@ export function OrgCatalogueModal({
         type={active}
         id={id}
         name={name}
-        icon={active === "agent" ? agentLook.get(id)?.icon : integrationById.get(id)?.manifest.icon}
+        icon={
+          active === "agent"
+            ? agentLook.get(id)?.icon
+            : (integrationById.get(id)?.manifest.icon ?? integrationIconOf.get(id))
+        }
         color={agentLook.get(id)?.color}
       />
     );
@@ -304,7 +324,12 @@ export function OrgCatalogueModal({
     const row: CardItem = {
       ...toCardItem(item),
       ...(active === "agent" && { identity: { icon: look?.icon, color: look?.color } }),
-      ...(active === "integration" && { logo: integrationById.get(item.id)?.manifest.icon }),
+      ...(active === "integration" && {
+        logo:
+          integrationById.get(item.id)?.manifest.icon ??
+          integrationIconOf.get(item.id) ??
+          undefined,
+      }),
     };
     if (layout !== "cards") return row;
     const placement = placementById.get(item.id);

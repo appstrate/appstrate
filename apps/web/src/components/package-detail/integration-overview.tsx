@@ -6,6 +6,8 @@ import { Layers, Plug, Wrench } from "lucide-react";
 import { HealthCard, HealthCardItem, HealthAction, HealthIssueBadge } from "../health-card";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { useAgents } from "../../hooks/use-packages";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { useSpaceLink } from "../../hooks/use-current-space";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
@@ -29,8 +31,11 @@ export function IntegrationOverview({
 }) {
   const { t } = useTranslation("settings");
   const location = useLocation();
-  // Only the agents of this space open from here: the others' pages answer 404.
-  const { data: spaceAgents, isLoading: agentsLoading } = useAgents();
+  // The agents of the working space, or in « Tous les espaces » of every space reached, each
+  // opening in its own: those of another space would answer 404 here.
+  const { on } = useOverviewMode();
+  const linkInSpace = useSpaceLink();
+  const { data: spaceAgents, isLoading: agentsLoading } = useAgents({ spanning: on });
   const agents = dependentIds && spaceAgents?.filter((agent) => dependentIds.includes(agent.id));
   const previewAgent = agents?.[0];
   const connections = [
@@ -142,7 +147,14 @@ export function IntegrationOverview({
                 )
               }
               target={
-                previewAgent ? { to: packageDetailPath("agent", previewAgent.id) } : undefined
+                previewAgent
+                  ? {
+                      to: linkInSpace(
+                        packageDetailPath("agent", previewAgent.id),
+                        previewAgent.space_ids,
+                      ),
+                    }
+                  : undefined
               }
             />
           </dl>
