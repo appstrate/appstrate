@@ -3160,7 +3160,7 @@ export interface paths {
         head?: never;
         /**
          * Rename a chat session or change its limit
-         * @description `title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one field is required.
+         * @description `title` renames the conversation. `restricted: true` limits it to its origin space and needs an origin space the caller can act in (else a 400 naming the field); `false` lifts the limit and keeps the origin. A conversation without an origin space takes one only by being limited to it: `spaceId` with `restricted: true` sets its origin and limits it there in one write; `spaceId` must be a space the conversation can act in, is accepted only while the stored origin is null (the origin never changes once set) and only together with `restricted: true` (else a 400 naming `spaceId`). The conversation is then listed under that space and imposes its enforced skills from its next turn; the spaces it touched before stay recorded. Changing the limit is refused while a turn is running (409 `chat_turn_in_flight`): a running turn keeps the reach it started with. At least one of `title` and `restricted` is required.
          */
         patch: operations["updateChatSession"];
         trace?: never;
@@ -20715,6 +20715,8 @@ export interface operations {
                 "application/json": {
                     title?: string;
                     restricted?: boolean;
+                    /** @description The origin space of a conversation without one (with `restricted: true` only). */
+                    spaceId?: string;
                 };
             };
         };

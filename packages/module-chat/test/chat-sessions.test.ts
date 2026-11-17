@@ -333,6 +333,106 @@ describe("chat sessions", () => {
     it("requires at least one field", async () => {
       const created = await createSession(ctx);
       expect((await patch(ctx, created.id, {})).status).toBe(400);
+      // An unknown field is a 400, never dropped.
+      expect((await patch(ctx, created.id, { title: "T", other: 1 })).status).toBe(400);
+    });
+
+    describe("giving a conversation without an origin its space, by limiting it there", () => {
+      const rowOf = async (id: string) =>
+        (await db.select().from(chatSessions).where(eq(chatSessions.id, id)))[0]!;
+      const fieldOf = async (res: Response) => JSON.stringify(await res.json());
+
+      it("sets the origin and the limit together, and lists it under that space alone", async () => {
+        const overview = await createSession(ctx);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([overview.id]);
+        const res = await patch(ctx, overview.id, { spaceId: spaceB, restricted: true });
+        expect(res.status).toBe(204);
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: spaceB, restricted: true });
+        expect(await listSessionIds(ctx, `?spaceId=${spaceB}`)).toEqual([overview.id]);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([]);
+        const dto = (await (await orgCallAs(ctx, overview.id)).json()) as SessionDto;
+        expect(dto).toMatchObject({ spaceId: spaceB, restricted: true, space_ids: [spaceB] });
+        // Lifting the limit keeps the origin.
+        expect((await patch(ctx, overview.id, { restricted: false })).status).toBe(204);
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: spaceB, restricted: false });
+      });
+
+      it("keeps the spaces touched before, the new origin listed once and first", async () => {
+        const overview = await createSession(ctx);
+        await touch(overview.id, ctx.defaultSpaceId);
+        await touch(overview.id, spaceB);
+        expect((await patch(ctx, overview.id, { spaceId: spaceB, restricted: true })).status).toBe(
+          204,
+        );
+        expect(await touchedBy(overview.id)).toEqual([ctx.defaultSpaceId]);
+        const dto = (await (await orgCallAs(ctx, overview.id)).json()) as SessionDto;
+        expect(dto.space_ids).toEqual([spaceB, ctx.defaultSpaceId]);
+        expect(await listSessionIds(ctx, `?spaceId=${ctx.defaultSpaceId}`)).toEqual([overview.id]);
+      });
+
+      it("refuses spaceId once the origin is set, even the same one (400 naming spaceId)", async () => {
+        const created = await createSession(ctx, { spaceId: ctx.defaultSpaceId });
+        for (const spaceId of [spaceB, ctx.defaultSpaceId]) {
+          const refused = await patch(ctx, created.id, { spaceId, restricted: true });
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+        }
+        expect(await rowOf(created.id)).toMatchObject({
+          spaceId: ctx.defaultSpaceId,
+          restricted: false,
+        });
+      });
+
+      it("refuses spaceId without restricted: true (400 naming spaceId)", async () => {
+        const overview = await createSession(ctx);
+        for (const body of [
+          { spaceId: spaceB },
+          { spaceId: spaceB, restricted: false },
+          { spaceId: spaceB, title: "T" },
+        ]) {
+          const refused = await patch(ctx, overview.id, body);
+          expect(refused.status).toBe(400);
+          expect(await fieldOf(refused)).toContain("spaceId");
+        }
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
+      });
+
+      it("refuses a space the caller cannot act in (400 naming spaceId)", async () => {
+        const acting = (await seedSpace({ orgId: ctx.orgId, name: "Acting", visibility: "closed" }))
+          .id;
+        const readOnly = (
+          await seedSpace({ orgId: ctx.orgId, name: "Read only", visibility: "closed" })
+        ).id;
+        const member = await memberContext(ctx, "member", "viewer");
+        await seedSpaceMember({ spaceId: acting, userId: member.user.id, presetRole: "runner" });
+        await seedSpaceMember({ spaceId: readOnly, userId: member.user.id, presetRole: "viewer" });
+        await db
+          .insert(chatSessions)
+          .values({ id: "chs_no_origin", orgId: ctx.orgId, userId: member.user.id });
+        const refused = await patch(member, "chs_no_origin", {
+          spaceId: readOnly,
+          restricted: true,
+        });
+        expect(refused.status).toBe(400);
+        expect(await fieldOf(refused)).toContain("spaceId");
+        expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: null, restricted: false });
+        expect(
+          (await patch(member, "chs_no_origin", { spaceId: acting, restricted: true })).status,
+        ).toBe(204);
+        expect(await rowOf("chs_no_origin")).toMatchObject({ spaceId: acting, restricted: true });
+      });
+
+      it("refuses it while a turn is running (409): the turn claims on the scope it read", async () => {
+        const overview = await createSession(ctx);
+        await db
+          .update(chatSessions)
+          .set({ activeStreamId: "stream_live" })
+          .where(eq(chatSessions.id, overview.id));
+        const refused = await patch(ctx, overview.id, { spaceId: spaceB, restricted: true });
+        expect(refused.status).toBe(409);
+        expect(((await refused.json()) as { code: string }).code).toBe("chat_turn_in_flight");
+        expect(await rowOf(overview.id)).toMatchObject({ spaceId: null, restricted: false });
+      });
     });
 
     it("refuses changing the limit while a turn is running (409), and still renames", async () => {

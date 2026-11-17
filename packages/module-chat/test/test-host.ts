@@ -23,6 +23,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     renderSpaces: (spaceIds) => spaceIds.join(", "),
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
+    SpaceChoiceSubmenu: () => null,
     ...overrides,
   };
 }
@@ -34,7 +35,8 @@ export function conversationScope(overrides: Partial<ConversationScope> = {}): C
     restricted: false,
     generating: false,
     pending: false,
-    setRestricted: () => {},
+    limitTo: () => {},
+    lift: () => {},
     ...overrides,
   };
 }

@@ -93,6 +93,7 @@ function hostWith(granted: string[]): ChatHost {
     renderSpaces: () => null,
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
+    SpaceChoiceSubmenu: () => null,
   };
 }
 

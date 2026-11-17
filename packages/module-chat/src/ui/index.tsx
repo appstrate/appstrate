@@ -63,6 +63,7 @@ export type {
   OpenFile,
   RenderSpaces,
   SelectConversation,
+  SpaceChoiceSubmenu,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
@@ -206,6 +207,8 @@ export interface ChatPageProps {
   linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
+  /** The host's sub-menu of spaces (see `ChatHost`). Pass a stable component. */
+  SpaceChoiceSubmenu: ChatHost["SpaceChoiceSubmenu"];
 }
 
 export function ChatPage({
@@ -231,6 +234,7 @@ export function ChatPage({
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,
+  SpaceChoiceSubmenu,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -339,6 +343,7 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
+      SpaceChoiceSubmenu,
     }),
     [
       onOpenFile,
@@ -357,6 +362,7 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
+      SpaceChoiceSubmenu,
     ],
   );
 

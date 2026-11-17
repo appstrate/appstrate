@@ -34,6 +34,9 @@ import {
   useConversationScope,
   useOriginSpaceLabel,
   useOriginSpaceNode,
+  useSpaceLabel,
+  useSpaceNode,
+  type LimitUnavailableReason,
 } from "./conversation-scope.ts";
 import {
   setPackageAuthoringEnabled,
@@ -44,11 +47,11 @@ import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 
-const LIMIT_REASON_KEY = {
+const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
   generating: "composer.limit.generating",
-  "no-space": "composer.limit.noSpace",
+  "no-acting-space": "composer.limit.noActingSpace",
   outside: "composer.limit.outside",
-} as const;
+};
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
@@ -70,13 +73,12 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds } = useChatHost();
+  const { t } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
-  // The plain name, for the accessible names: the node below carries a tile the name does not.
+  // The origin's plain name, for the accessible names: the node below carries a tile the name
+  // does not. Without an origin, the sentence stays generic.
   const spaceLabel = useOriginSpaceLabel();
-  const limit = limitAvailability(scope, actingSpaceIds);
-  // The space as the host names it; without an origin, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -141,25 +143,7 @@ export function ComposerTools({
               {t("composer.skills")}
             </DropdownMenuItem>
           )}
-          {limit.available ? (
-            <DropdownMenuCheckboxItem
-              checked={scope.restricted}
-              disabled={scope.pending}
-              onCheckedChange={scope.setRestricted}
-              aria-label={t("composer.limit", { name: spaceLabel })}
-              data-testid="composer-limit-item"
-            >
-              {sentenceWithNode(t, "composer.limit", spaceNode)}
-            </DropdownMenuCheckboxItem>
-          ) : (
-            // A turn generating, no origin space (« Tous les espaces »), or one the chat cannot act in.
-            <UnavailableItem
-              icon={<MapPinIcon />}
-              label={t("composer.limit.generic")}
-              reason={t(LIMIT_REASON_KEY[limit.reason])}
-              testId="composer-limit-item"
-            />
-          )}
+          <LimitMenuEntry />
           {authorsPackages && (
             <DropdownMenuCheckboxItem
               checked={creationMode}
@@ -188,7 +172,7 @@ export function ComposerTools({
           icon={<MapPinIcon />}
           removeLabel={t("composer.limit.undo", { name: spaceLabel })}
           removeDisabled={scope.generating || scope.pending}
-          onRemove={() => scope.setRestricted(false)}
+          onRemove={scope.lift}
           testId="composer-limit-chip"
         >
           {sentenceWithNode(t, "composer.limitChip", spaceNode)}
@@ -215,6 +199,55 @@ export function ComposerTools({
     >
       {cluster}
     </SkillsPicker>
+  );
+}
+
+/**
+ * The « + » menu's limit entry, as {@link limitAvailability} decides: one click limiting to the
+ * space it names, the host's sub-menu of the acting spaces for a conversation without an origin,
+ * or an inert entry giving the reason.
+ */
+export function LimitMenuEntry() {
+  const { t, actingSpaceIds, SpaceChoiceSubmenu } = useChatHost();
+  const scope = useConversationScope();
+  const limit = limitAvailability(scope, actingSpaceIds);
+  // The space a click limits to (the origin, or the one acting space), else the origin.
+  const named = limit.kind === "toggle" ? limit.spaceId : scope.originSpaceId;
+  const spaceLabel = useSpaceLabel(named);
+  const spaceNode = useSpaceNode(named);
+  return limit.kind === "toggle" ? (
+    // The origin, or the one space the chat acts in: one click limits there.
+    <DropdownMenuCheckboxItem
+      checked={scope.restricted}
+      disabled={scope.pending}
+      onCheckedChange={(on) => (on ? scope.limitTo(limit.spaceId) : scope.lift())}
+      aria-label={t("composer.limit", { name: spaceLabel })}
+      data-testid="composer-limit-item"
+    >
+      {sentenceWithNode(t, "composer.limit", spaceNode)}
+    </DropdownMenuCheckboxItem>
+  ) : limit.kind === "choose" ? (
+    // No origin and several acting spaces: the space picked becomes the origin.
+    <SpaceChoiceSubmenu
+      label={t("composer.limit.choose")}
+      spaceIds={limit.spaceIds}
+      onPick={scope.limitTo}
+      trigger={
+        <>
+          <MapPinIcon />
+          {t("composer.limit.generic")}
+        </>
+      }
+      testId="composer-limit-item"
+    />
+  ) : (
+    // A turn generating, no space to act in, or an origin the chat no longer acts in.
+    <UnavailableItem
+      icon={<MapPinIcon />}
+      label={t("composer.limit.generic")}
+      reason={t(LIMIT_REASON_KEY[limit.reason])}
+      testId="composer-limit-item"
+    />
   );
 }
 

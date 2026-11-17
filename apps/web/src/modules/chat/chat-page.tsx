@@ -39,6 +39,7 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
+import { ChatSpaceChoiceSubmenu } from "./space-choice-submenu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -202,6 +203,7 @@ export function ChatModulePage() {
               renderSpaces={renderSpaces}
               linkInSpace={linkInSpace}
               useSpaceLabelOf={useSpaceLabelOf}
+              SpaceChoiceSubmenu={ChatSpaceChoiceSubmenu}
             />
           </div>
           <ConversationSidebar

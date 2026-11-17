@@ -680,7 +680,7 @@ describe("the persona and the spaces", () => {
 
   describe("the origin space", () => {
     const sentence = (space: string, id: string) =>
-      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
+      `This conversation's space is ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
 
     it("is a default for a request naming no space, never a pin", () => {
       const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
@@ -695,7 +695,7 @@ describe("the persona and the spaces", () => {
 
     it("is absent from the overview, where the model asks when the request does not say", () => {
       const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
-      expect(out).not.toContain("This conversation was started in");
+      expect(out).not.toContain("This conversation's space is");
       expect(out).toContain(
         "Ask the user which space when the request does not say; never guess it.",
       );
