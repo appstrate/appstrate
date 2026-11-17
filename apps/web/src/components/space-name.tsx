@@ -179,11 +179,8 @@ export function SpaceTilesOf({
  * a dialog an action opened) acts there, which the mode's switcher does not say. Nothing out of
  * the mode, where the switcher names it.
  */
-export function WorkingSpaceName({
-  spaceId,
-  ...props
-}: Omit<Parameters<typeof SpaceNameOf>[0], "spaceId"> & { spaceId?: string }) {
+export function WorkingSpaceName(props: Omit<Parameters<typeof SpaceNameOf>[0], "spaceId">) {
   const { on } = useOverviewMode();
-  const workingSpaceId = useCurrentSpaceId();
-  return on ? <SpaceNameOf spaceId={spaceId ?? workingSpaceId} {...props} /> : null;
+  const spaceId = useCurrentSpaceId();
+  return on ? <SpaceNameOf spaceId={spaceId} {...props} /> : null;
 }

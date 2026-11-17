@@ -43,7 +43,6 @@ import { menuSections, type PackageMenuEntry } from "./package-menu";
 import {
   deedEntry,
   deedOfAction,
-  deedInSpaces,
   spaceDeedLabels,
   usePlacementDeeds,
   type SpaceDeed,
@@ -117,7 +116,7 @@ export function usePackageActions({
   const { on: overview } = useOverviewMode();
   const deletePkg = useDeletePackage(type);
   const [movingHome, setMovingHome] = useState(false);
-  const [forkSpaceId, setForkSpaceId] = useState<string | null>(null);
+  const [forking, setForking] = useState(false);
   // The space each act targets, kept while its dialog fades out.
   const [removing, setRemoving] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
@@ -151,7 +150,7 @@ export function usePackageActions({
   const spaceIds = detail?.space_ids;
   const published = (detail?.version_count ?? 0) > 0;
   // Forking writes a NEW package in the space it is made in: one where the reader writes the type.
-  const forkAction = useSpacesFor({ permission: packagePermission(type, "write") });
+  const forkAction = useSpaceAction({ permission: packagePermission(type, "write") });
   const showFork = forkAction.offered && !isOwned;
   // The export needs `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks,
   // in a space the package is active in; the file is the same from any of them.
@@ -227,11 +226,8 @@ export function usePackageActions({
       icon: GitFork,
       label: t("fork.button"),
       ...deedEntry(
-        deedInSpaces(
-          overview,
-          forkAction.targets,
-          spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"),
-          setForkSpaceId,
+        deedOfAction(forkAction, spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"), () =>
+          setForking(true),
         ),
       ),
       hidden: !showFork,
@@ -354,10 +350,9 @@ export function usePackageActions({
           }}
         />
       )}
-      {forkSpaceId && showFork && (
+      {forking && showFork && (
         <ForkPackageModal
-          spaceId={forkSpaceId}
-          onClose={() => setForkSpaceId(null)}
+          onClose={() => setForking(false)}
           packageId={packageId}
           defaultName={splitPackageRef(packageId).name}
           type={type}

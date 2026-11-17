@@ -48,7 +48,7 @@ export function useCanReach(): (target: string) => boolean {
 /**
  * {@link useCanReach} judged in a row's space rather than the working one: what a link of a list
  * spanning spaces opens once it has entered the row's space (`?enterSpace=`). A row of no space,
- * is judged by {@link useCanReach}.
+ * or of the working space, is {@link useCanReach}'s.
  */
 export function useCanReachInSpace(): (target: string, spaceId: string | undefined) => boolean {
   const canReach = useCanReach();
@@ -60,7 +60,7 @@ export function useCanReachInSpace(): (target: string, spaceId: string | undefin
   return useCallback(
     (target: string, spaceId: string | undefined) => {
       const route = routeOf(target);
-      if (!route || !spaceId) return canReach(target);
+      if (!route || !spaceId || spaceId === workingSpaceId) return canReach(target);
       const space = spaces?.find((s) => s.id === spaceId);
       if (!space) return false;
       const gate = (permission: string) =>

@@ -8,7 +8,6 @@ import { FormModal } from "./form-modal";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useForkPackage } from "../hooks/use-packages";
-import { useSpaceLink } from "../hooks/use-current-space";
 import { useOrg } from "../hooks/use-org";
 import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
@@ -17,17 +16,15 @@ import { errorMessage } from "../lib/mutation-error";
 interface Props {
   onClose: () => void;
   packageId: string;
-  spaceId: string;
   defaultName: string;
   type: string;
 }
 
 /** Mounted by the caller while open: closing abandons the name. */
-export function ForkPackageModal({ onClose, packageId, spaceId, defaultName, type }: Props) {
+export function ForkPackageModal({ onClose, packageId, defaultName, type }: Props) {
   const { t } = useTranslation(["agents", "common"]);
   const { currentOrg } = useOrg();
   const navigate = useNavigate();
-  const linkInSpace = useSpaceLink();
   const forkMutation = useForkPackage();
 
   const [name, setName] = useState(defaultName.toLowerCase());
@@ -38,11 +35,11 @@ export function ForkPackageModal({ onClose, packageId, spaceId, defaultName, typ
     e.preventDefault();
     setError(null);
     forkMutation.mutate(
-      { packageId, name, spaceId },
+      { packageId, name },
       {
         onSuccess: (result) => {
           onClose();
-          navigate(linkInSpace(packageDetailPath(type, result.id), spaceId));
+          navigate(packageDetailPath(type, result.id));
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";
@@ -62,7 +59,7 @@ export function ForkPackageModal({ onClose, packageId, spaceId, defaultName, typ
 
   return (
     <FormModal
-      inSpace={spaceId}
+      inSpace
       onClose={onClose}
       title={t("fork.title")}
       onSubmit={onSubmit}

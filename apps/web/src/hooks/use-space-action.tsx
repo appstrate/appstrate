@@ -86,9 +86,7 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
       ? can(need.permission)
       : canReach(need.route);
   const anyOf = (eligible.find((space) => space.id === workingSpaceId) ?? eligible[0])?.id;
-  const working = spaces?.find((space) => space.id === workingSpaceId);
-  const targets = on ? eligible : offered && working ? [working] : [];
-  return { on, eligible, offered, anyOf, targets };
+  return { on, eligible, offered, anyOf };
 }
 
 /** How {@link useSpaceAction} picks and enters a space. */
