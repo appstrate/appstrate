@@ -98,7 +98,7 @@ const SKILLS_INJECTED_LEAD =
 const SKILLS_MANUAL_NOTE =
   "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
 const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts this restriction by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills the user chose (shown here, if any): that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts this restriction by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -291,10 +291,7 @@ interface RenderedContext {
   injected: InjectedSkillMap;
 }
 
-/**
- * `## Skills`, or "". Kept apart so {@link buildCallerContextBlock} appends it on
- * every path, whatever else answers.
- */
+/** `## Skills`, or "": the skills section `formatCallerContext` appends after the identity lines. */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   capabilities: TurnCapabilities;

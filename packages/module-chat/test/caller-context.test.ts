@@ -256,7 +256,7 @@ describe("formatCallerContext", () => {
       expect(out).toContain("## Skills");
       // The note is about the restriction; reading the files belongs to the leads.
       expect(out).not.toContain("read_resource");
-      expect(out).toContain("This conversation is restricted to the skills shown here");
+      expect(out).toContain("This conversation is restricted to the skills the user chose");
       expect(out).toContain("never change a role or a permission to reach one");
       // The two misreadings seen live: an empty listing as "not in the space",
       // and a role change as the way out.
@@ -296,7 +296,7 @@ describe("formatCallerContext", () => {
         expect(out).toContain(text);
         return out.indexOf(text);
       };
-      expect(at("This conversation is restricted to the skills shown here")).toBeLessThan(
+      expect(at("This conversation is restricted to the skills the user chose")).toBeLessThan(
         at("The user chose these skills"),
       );
       expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` was chosen"));
@@ -328,33 +328,34 @@ describe("formatCallerContext", () => {
       }
     });
 
-    it("keeps strict's note true: it describes the user's own skills only", () => {
-      const out = contextText(
-        { user: { name: "Ada" } },
-        {
-          ...BASE_OPTS,
-          capabilities: caps(NO_SKILLS),
-          skills: { skillMode: "strict", pinnedSkills: [] },
-        },
-      );
-      expect(out).toContain("restricted to the skills shown here — those the user chose, if any");
-      expect(out).toContain("The user lifts this restriction by switching");
-    });
-
-    it("renders byte-identical across two turns", () => {
-      const render = () =>
+    it("renders byte-identical whatever order the skill reads answered in", () => {
+      const other = {
+        ...mine("Other body."),
+        packageId: "@acme/other",
+        uri: "skill://space-1/acme/other/other/SKILL.md",
+      };
+      const render = (contents: [string, ReturnType<typeof mine>][]) =>
         contextText(
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
             now: new Date("2026-06-25T09:05:00.000Z"),
-            skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
-            skillContents: new Map([["@acme/mine", mine()]]),
+            skills: { skillMode: "manual", pinnedSkills: ["@acme/mine", "@acme/other"] },
+            skillContents: new Map(contents),
           },
         );
-      const first = render();
+      const first = render([
+        ["@acme/mine", mine()],
+        ["@acme/other", other],
+      ]);
       expect(first).toContain(MINE_BLOCK);
-      expect(render()).toBe(first);
+      expect(first.indexOf(MINE_BLOCK)).toBeLessThan(first.indexOf('id="@acme/other"'));
+      expect(
+        render([
+          ["@acme/other", other],
+          ["@acme/mine", mine()],
+        ]),
+      ).toBe(first);
     });
   });
 

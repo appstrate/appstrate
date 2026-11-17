@@ -34,7 +34,7 @@ import {
 } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
-import { packages, runs, schedules } from "@appstrate/db/schema";
+import { packages, packageVersions, runs, schedules } from "@appstrate/db/schema";
 import { addMemory, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
 import { type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
@@ -1091,7 +1091,7 @@ describe("Agents API", () => {
   });
 
   describe("GET /api/agents — published", () => {
-    it("is false for a draft-only agent whatever its manifest version, true once a version is cut", async () => {
+    it("is false for a draft-only agent whatever its manifest version, true once a version is cut, false again once that `latest` is yanked", async () => {
       await seedActiveAgent({
         id: "@myorg/publish-flag",
         orgId: ctx.orgId,
@@ -1111,12 +1111,17 @@ describe("Agents API", () => {
       expect(draftOnly.version).not.toBeNull();
       expect(draftOnly.published).toBe(false);
 
-      await createVersionFromDraft({
+      const cut = await createVersionFromDraft({
         packageId: "@myorg/publish-flag",
         orgId: ctx.orgId,
         userId: ctx.user.id,
       });
+      if (!cut.ok) throw new Error(`version not cut: ${cut.error}`);
       expect((await listed()).published).toBe(true);
+
+      // A yanked `latest` resolves to nothing, exactly as the run path reads it.
+      await db.update(packageVersions).set({ yanked: true }).where(eq(packageVersions.id, cut.id));
+      expect((await listed()).published).toBe(false);
     });
   });
 

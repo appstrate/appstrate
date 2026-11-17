@@ -151,8 +151,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Drizzle `0108` drops `space_packages.chat_enforced`** (space-enforced chat
   skills are removed, see Removed). Whatever a space imposed is discarded with
-  the column. The migration is one-way: roll back by restoring the backup. No
-  script to run.
+  the column. The previous release selects the column on every placement read:
+  do not serve both releases at once (deploy with the app stopped), and roll back
+  by restoring the backup. No script to run.
 
 ### Changed
 
@@ -683,17 +684,17 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   `@appstrate/core/runtime-event-drain`, and the `runtime_tools` helpers of
   `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
 
-- **BREAKING: space-enforced chat skills are removed** (#1586). A space can no longer
+- **BREAKING: space-enforced chat skills are removed** (#2265). A space can no longer
   impose skills on its chat: a conversation spans several spaces, so a per-space
   imposition has no single space to read from. Removed: the `chat_enforced` field of
   `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (now a `400` unknown field, the
   body is strict), `SpacePackage.chat_enforced`, the library placement's
   `chat_enforced` and the library package's `published` (it only told whether a skill could
   be enforced), `GET /api/chat/enforced-skills`, the error codes
-  `chat_enforced_not_skill`, `enforced_skills_limit`, `enforced_skills_budget`,
-  `skill_not_servable` (the enforcement refusal) and `enforced_skills_unavailable`
-  (`503`), the audit actions `package.chat_enforced` and `package.chat_released`, the
-  library checkbox « Imposé dans le chat », the picker badge « Imposée par l'espace » and
+  `chat_enforced_not_skill`, `enforced_skills_limit`, `enforced_skills_budget` and
+  `enforced_skills_unavailable` (`503`), the audit actions `package.chat_enforced` and
+  `package.chat_released`, the catalogue sheet's « Imposé dans le chat » switch and its
+  confirmation, the picker badge « Imposée par l'espace » and
   the composer's read-only indicator. The column `space_packages.chat_enforced` is dropped
   by drizzle migration `0108_drop_space_packages_chat_enforced`: whatever a space imposed
   is discarded; the migration is one-way, roll back by restoring the backup. The core

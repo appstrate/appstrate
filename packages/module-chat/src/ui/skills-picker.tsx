@@ -18,7 +18,7 @@ import {
   MAX_PINNED_SKILLS,
   type ChatSkillSelection,
 } from "../skills.ts";
-import { pinCapReached, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
@@ -85,7 +85,7 @@ export function SkillsPickerPanel({
 
   const pinned = selection.pinnedSkills;
   const pinnedSet = new Set(pinned);
-  const atPinCap = pinCapReached(pinned);
+  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
   const rows = skillPickerRows(skills, pinned);
   // `auto` keeps the chosen skills but uses none: no list is offered then.
   const choosing = injectsSkills(selection.skillMode);

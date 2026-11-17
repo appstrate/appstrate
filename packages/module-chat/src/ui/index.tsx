@@ -447,7 +447,7 @@ interface ConversationProps {
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
-  /** `chat:write`. */
+  /** `chat:write`: the composer placeholder and the not-found screen's new-conversation action. */
   canWrite: boolean;
   /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
   serverGenerating: boolean | undefined;

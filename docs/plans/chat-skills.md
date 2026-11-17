@@ -51,8 +51,8 @@ definition; else `skills:read`; else refused. On that connection:
   bytes every MCP client and `appstrate code sync` get at that URI.
 
 The injected `SKILL.md`s share one budget, `CHAT_SKILLS_CONTENT_BUDGET_CHARS`
-(64 000, `packages/module-chat/src/skills.ts`), spent in stored order: what weighs on the context is the sum, so one
-long skill passes while the whole fits. A chosen skill that is not active, whose
+(64 000, `packages/module-chat/src/skills.ts`), spent in stored order: what
+weighs on the context is the sum, so one long skill passes while the whole fits. A chosen skill that is not active, whose
 read fails, or that does not fit what is left renders one notice line instead.
 At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 

@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { parseScopedName } from "@appstrate/core/naming";
-import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
+import { parseSkillList, type SkillHint } from "../skills.ts";
 import type { ChatTransport } from "./runtime-context.ts";
 
 /** A row of the organization index lists the spaces it is active in; the rest is `parseSkillList`'s. */
@@ -29,11 +29,6 @@ export async function fetchSkills(
       : [];
   });
   return parseSkillList({ data: kept });
-}
-
-/** The cap counts the chosen skills. */
-export function pinCapReached(stored: readonly string[]): boolean {
-  return stored.length >= MAX_PINNED_SKILLS;
 }
 
 /** Pin/unpin. The picker disables a new pin at the cap; the route refuses one past it. */

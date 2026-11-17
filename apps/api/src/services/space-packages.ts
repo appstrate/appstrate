@@ -808,7 +808,8 @@ export async function getResolvedRunConfig(
 
 /**
  * Update the per-space settings row: model, proxy, generation settings and input
- * values. Never `enabled` (activation doors own it). The org check shares the write's transaction.
+ * values. Never `enabled` (activation doors own it). The org check shares the
+ * write's transaction.
  *
  *   - `requirePlacement: true`: the row must already exist, else 404.
  *   - default: update the row; with none, create it only where the package is

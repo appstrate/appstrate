@@ -2,8 +2,8 @@
 
 /**
  * What the MCP Skills extension (SEP-2640) serves for one skill: its files as
- * an Agent Skills directory, and its entry. The MCP module serves it. Pure: the reads and the access rule live in
- * `./served-skills.ts` and `./skill-read.ts`; the `skill://` grammar in
+ * an Agent Skills directory, and its entry. Pure: the reads and the access rule
+ * live in `./served-skills.ts` and `./skill-read.ts`; the `skill://` grammar in
  * `@appstrate/core/skill-uri`.
  */
 

@@ -138,7 +138,6 @@
   "skills.pinnedPillLabel": "Ajoutées : {{skills}}. Choisir les compétences",
   "skills.count": "{{n}} compétences",
   "skills.pinnedCount": "{{n}} ajoutées",
-  "skills.chipsLabel": "Compétences chargées dans la conversation",
   "run.output.showJson": "Voir le JSON",
   "run.output.showFields": "Voir les champs",
   "context.backToFiles": "Revenir aux fichiers",

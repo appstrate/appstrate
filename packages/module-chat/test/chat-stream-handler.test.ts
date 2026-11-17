@@ -48,7 +48,7 @@ import {
   type ChatAttachmentRequest,
   type ChatUsageRecord,
 } from "@appstrate/core/chat-contract";
-import type { ModuleInitContext, PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
+import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -830,7 +830,7 @@ describe("handleChatStream", () => {
     expect(input.system).toContain("read a file it references with `read_resource`");
     expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
-    expect(input.system).toContain("This conversation is restricted to the skills shown here");
+    expect(input.system).toContain("This conversation is restricted to the skills the user chose");
     expect(await tokenPermissions(input)).toEqual([
       "chat:read",
       "chat:write",

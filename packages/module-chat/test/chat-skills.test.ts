@@ -3,13 +3,7 @@
 /** The skill picker's data and pure rules. */
 
 import { describe, expect, it } from "bun:test";
-import {
-  fetchSkills,
-  pinCapReached,
-  skillPickerRows,
-  togglePinned,
-} from "../src/ui/chat-skills.ts";
-import { MAX_PINNED_SKILLS } from "../src/skills.ts";
+import { fetchSkills, skillPickerRows, togglePinned } from "../src/ui/chat-skills.ts";
 import { requestAnswering, transportOver } from "./fake-request.ts";
 
 describe("fetchSkills", () => {
@@ -80,15 +74,6 @@ describe("fetchSkills", () => {
   it("throws on a refusal, as the host raised it", async () => {
     const request = requestAnswering(() => new Response(null, { status: 403 }));
     await expect(fetchSkills(transportOver(request), [])).rejects.toMatchObject({ status: 403 });
-  });
-});
-
-describe("pinCapReached", () => {
-  const pins = (n: number) => Array.from({ length: n }, (_, i) => `@a/own-${i}`);
-
-  it("is reached at the cap, not below it", () => {
-    expect(pinCapReached(pins(MAX_PINNED_SKILLS - 1))).toBe(false);
-    expect(pinCapReached(pins(MAX_PINNED_SKILLS))).toBe(true);
   });
 });
 

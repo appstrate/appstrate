@@ -30,11 +30,10 @@ function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSk
   const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
   // Named by the package's bare name until the catalogue answers.
-  const pinned: LoadedSkill[] = pinnedIds.map((id) => ({
+  return pinnedIds.map((id): LoadedSkill => ({
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
   }));
-  return pinned;
 }
 
 const PILL_CLASS = cn(
@@ -99,18 +98,7 @@ interface SkillChipsProps {
  * stands in (drawn only off the default selection).
  */
 export function SkillChips({ transport, selection, onOpenPicker }: SkillChipsProps) {
-  const { t } = useChatHost();
   const pinned = useLoadedSkills(transport, selection);
   if (pinned.length === 0) return <SkillsChip selection={selection} onClick={onOpenPicker} />;
-
-  return (
-    <div
-      role="group"
-      aria-label={t("skills.chipsLabel")}
-      data-testid="skill-chips"
-      className="flex min-w-0 flex-nowrap items-center gap-1.5"
-    >
-      <PinnedPill skills={pinned} onOpen={onOpenPicker} />
-    </div>
-  );
+  return <PinnedPill skills={pinned} onOpen={onOpenPicker} />;
 }

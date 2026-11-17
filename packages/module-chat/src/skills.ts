@@ -48,7 +48,7 @@ export interface SkillContent {
   served: InjectedSkill;
 }
 
-/** Characters the SKILL.md bodies injected into one chat turn share, out of the skills the user chose. */
+/** The characters the chosen skills' SKILL.md bodies may take in one turn, all skills together. */
 export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 
 /** Every chosen skill is injected in full on every turn: a context-budget bound. */
@@ -92,10 +92,10 @@ export function resolveChatSkills(
   contents: ReadonlyMap<string, SkillContent | null>,
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { chosen: [], notices: [] };
+  if (!injectsSkills(selection.skillMode)) return resolved;
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  if (!injectsSkills(selection.skillMode)) return resolved;
   // A chosen skill is the user's own act, so the model is told when it is left out.
   for (const id of selection.pinnedSkills) {
     const skill = contents.get(id);

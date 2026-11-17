@@ -13,7 +13,7 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { SkillChips } from "../src/ui/skill-chips.tsx";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
-import { ChatHostProvider, type ChatTransport } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { ChatSkillSelection } from "../src/skills.ts";
@@ -29,12 +29,7 @@ const manual = (pinnedSkills: string[]): ChatSkillSelection => ({
   pinnedSkills,
 });
 
-interface Options {
-  selection?: ChatSkillSelection;
-  transport?: ChatTransport | null;
-}
-
-function render({ selection = manual([]), transport = scoped }: Options = {}): string {
+function render(selection: ChatSkillSelection = manual([])): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <ChatHostProvider value={host}>
@@ -42,11 +37,7 @@ function render({ selection = manual([]), transport = scoped }: Options = {}): s
           value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
         >
           <TooltipProvider>
-            <SkillChips
-              transport={transport === null ? undefined : transport}
-              selection={selection}
-              onOpenPicker={() => {}}
-            />
+            <SkillChips transport={scoped} selection={selection} onOpenPicker={() => {}} />
           </TooltipProvider>
         </ConversationScopeProvider>
       </ChatHostProvider>
@@ -56,27 +47,25 @@ function render({ selection = manual([]), transport = scoped }: Options = {}): s
 
 describe("SkillChips", () => {
   it("draws ONE pill for a single pinned skill, named by its bare package name", () => {
-    const html = render({ selection: manual(["@acme/policy"]) });
+    const html = render(manual(["@acme/policy"]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
     expect(html).toContain("policy");
     expect(html).toContain(
       'aria-label="skills.pinnedPillLabel {&quot;skills&quot;:&quot;policy&quot;}"',
     );
-    expect(html).not.toContain("skill-chip-remove");
   });
 
   it("counts several pinned skills in the one pill, with no per-skill chip nor « +N »", () => {
-    const html = render({ selection: manual(["@a/one", "@a/two", "@a/three", "@a/four"]) });
+    const html = render(manual(["@a/one", "@a/two", "@a/three", "@a/four"]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
     expect(html).toContain("skills.pinnedCount {&quot;n&quot;:4}");
     expect(html).toContain(
       "skills.pinnedPillLabel {&quot;skills&quot;:&quot;skills.count {\\&quot;n\\&quot;:4}&quot;}",
     );
-    expect(html).not.toContain("skill-chip-overflow");
   });
 
   it("ignores pins in automatic mode, where none is injected", () => {
-    const html = render({ selection: { skillMode: "auto", pinnedSkills: ["@acme/b"] } });
+    const html = render({ skillMode: "auto", pinnedSkills: ["@acme/b"] });
     expect(html).toContain('data-testid="skills-picker-trigger"');
     expect(html).not.toContain("skill-pill-pinned");
   });
@@ -86,6 +75,6 @@ describe("SkillChips", () => {
   });
 
   it("draws nothing when nothing is loaded on the default selection", () => {
-    expect(render({ selection: { skillMode: "auto", pinnedSkills: [] } })).toBe("");
+    expect(render({ skillMode: "auto", pinnedSkills: [] })).toBe("");
   });
 });

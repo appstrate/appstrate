@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EnforcedChatSkill`, `EnforcedChatSkillRef`, `MAX_ENFORCED_CHAT_SKILLS`,
   `CHAT_SKILLS_CONTENT_BUDGET_CHARS`** — BREAKING (`@appstrate/core/chat-contract`), and
   **`PlatformServices.loadEnforcedChatSkills`, `PlatformServices.listEnforcedChatSkills`**
-  (`@appstrate/core/module`). Space-enforced chat skills are removed (#1586): a conversation
+  (`@appstrate/core/module`). Space-enforced chat skills are removed (#2265): a conversation
   spans several spaces, so a per-space imposition has no single space to read from.
   `CHAT_SKILLS_CONTENT_BUDGET_CHARS` moves into the chat module, its only consumer.
 - **`bundleMcpServer`, `BundleMcpServerInput`, `BundleMcpServerResult`, `BundlerError`,
