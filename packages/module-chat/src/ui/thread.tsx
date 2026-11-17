@@ -35,6 +35,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
@@ -719,39 +720,45 @@ export function MessageError() {
   );
   if (!errorState) return null;
   return (
-    <div
-      role="alert"
-      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm break-words"
+    <Alert
+      variant="destructive"
+      className="mt-2 break-words"
+      action={
+        errorState.action || errorState.retryable ? (
+          <div className="flex gap-2">
+            {errorState.action ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={errorState.action.href}>{errorState.action.label}</a>
+              </Button>
+            ) : null}
+            {errorState.retryable ? (
+              <ThreadPrimitive.If running={false}>
+                <ThreadPrimitive.Suggestion
+                  prompt={t("turn.retryPrompt")}
+                  method="replace"
+                  autoSend
+                  asChild
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    <RotateCcwIcon />
+                    {t("common:btn.retry")}
+                  </Button>
+                </ThreadPrimitive.Suggestion>
+              </ThreadPrimitive.If>
+            ) : null}
+          </div>
+        ) : null
+      }
     >
-      <span>
+      <AlertDescription>
         {errorState.text}
         {errorState.requestId ? (
-          <span className="mt-1 block text-xs opacity-80">
+          <span className="text-muted-foreground mt-1 block text-xs">
             {t("turn.error.requestId", { id: errorState.requestId })}
           </span>
         ) : null}
-      </span>
-      {errorState.action ? (
-        <Button asChild variant="outline" size="sm" className="shrink-0">
-          <a href={errorState.action.href}>{errorState.action.label}</a>
-        </Button>
-      ) : null}
-      {errorState.retryable ? (
-        <ThreadPrimitive.If running={false}>
-          <ThreadPrimitive.Suggestion
-            prompt={t("turn.retryPrompt")}
-            method="replace"
-            autoSend
-            asChild
-          >
-            <Button type="button" variant="outline" size="sm" className="shrink-0">
-              <RotateCcwIcon />
-              {t("common:btn.retry")}
-            </Button>
-          </ThreadPrimitive.Suggestion>
-        </ThreadPrimitive.If>
-      ) : null}
-    </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 

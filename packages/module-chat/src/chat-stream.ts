@@ -778,6 +778,8 @@ export async function handleChatStream(
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
   // permissions (the union over the turn's spaces, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
+  // It is server-minted, so the integration tools reach the credential proxy
+  // with it, exactly as any MCP client's bearer does.
   const mcpToken = mintMcpLoopbackToken(
     {
       userId: user.id,

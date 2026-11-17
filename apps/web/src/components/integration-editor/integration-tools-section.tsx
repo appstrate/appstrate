@@ -92,11 +92,11 @@ export function IntegrationToolsSection({
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
         allowUndeclared && (
-          <Alert variant="warning" className="p-3 text-xs">
-            <AlertTitle className="font-medium">
+          <Alert variant="warning" size="sm">
+            <AlertTitle>
               {t("integration.tools.wildcardNotice.title", { ns: "settings" })}
             </AlertTitle>
-            <AlertDescription className="text-muted-foreground text-xs">
+            <AlertDescription>
               {t("integration.tools.wildcardNotice.body", { ns: "settings" })}
             </AlertDescription>
           </Alert>

@@ -16,13 +16,16 @@ export function RetryAlert({
 }) {
   const { t } = useTranslation("common");
   return (
-    <Alert variant="destructive" className={className}>
-      <AlertDescription>
-        <p>{message}</p>
+    <Alert
+      variant="destructive"
+      className={className}
+      action={
         <Button type="button" variant="outline" size="sm" onClick={onRetry}>
           {t("btn.retry")}
         </Button>
-      </AlertDescription>
+      }
+    >
+      <AlertDescription>{message}</AlertDescription>
     </Alert>
   );
 }

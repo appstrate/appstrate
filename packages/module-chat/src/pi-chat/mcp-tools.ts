@@ -2,10 +2,12 @@
 
 /**
  * Build the Pi extension factories that expose the platform's own MCP tools
- * (`search_operations` / `describe_operation` / `invoke_operation` +
- * `run_and_wait`) to the in-process Pi chat session — the same meta-tools the
- * platform MCP server exposes, so the assistant pilots the platform with the
- * caller's own permissions.
+ * to the in-process Pi chat session — exactly the tools the platform MCP server
+ * declares to the caller (`search_operations` / `describe_operation` /
+ * `invoke_operation`, `run_and_wait`, `search_integration_tools` /
+ * `call_integration_tool`, and whatever it adds later), so the assistant pilots
+ * the platform with the caller's own permissions, through the one door every
+ * MCP client uses.
  *
  * Unlike the runtime container (which forwards a FIXED descriptor set), the chat
  * discovers the server's tools dynamically via `listTools()` and registers one
@@ -26,6 +28,7 @@ import {
   RESOURCE_BLOB_MAX_BYTES,
   RESOURCE_OVERSIZED_NOTE,
   RESOURCE_TEXT_MAX_BYTES,
+  isRelayedResult,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
@@ -33,10 +36,10 @@ import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
   mergeConnectOffers,
-  redactConnectPayload,
-  splitConnectPayload,
+  offerScopeOf,
   splitJsonText,
   type ConnectOffer,
+  type OfferScope,
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
@@ -63,6 +66,12 @@ interface PiToolResult {
    * because `details` is redacted and nothing would fall back.
    */
   connectOffers?: ConnectOffer[];
+  /**
+   * The platform marked the result relayed (`_meta["dev.appstrate/relayed"]`): a third party
+   * wrote it whole, so it was passed on verbatim. Persisted beside `connectOffers` (same
+   * contract), so a replay walks the stored text under the scope the live call had.
+   */
+  relayed?: true;
 }
 
 /**
@@ -74,8 +83,8 @@ interface PiToolResult {
  * `ui-stream-mapper.ts`) carries the redacted payload — the live URLs live in
  * exactly one place.
  */
-export function toPiToolResult(payload: unknown): PiToolResult {
-  const { redacted, offers } = splitConnectPayload(payload);
+export function toPiToolResult(payload: unknown, scope: OfferScope): PiToolResult {
+  const { redacted, offers } = scope(payload);
   return {
     content: [{ type: "text", text: JSON.stringify(redacted) }],
     details: redacted,
@@ -83,11 +92,19 @@ export function toPiToolResult(payload: unknown): PiToolResult {
   };
 }
 
-/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). */
-export function mcpResultToPi(result: {
-  content: Array<Record<string, unknown>>;
-  structuredContent?: unknown;
-}): PiToolResult {
+/**
+ * Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). `scope` says
+ * which part of the payload may carry a connect offer ({@link offerScopeOf}); a result the
+ * platform marked relayed keeps the mark ({@link PiToolResult.relayed}).
+ */
+export function mcpResultToPi(
+  result: {
+    content: Array<Record<string, unknown>>;
+    structuredContent?: unknown;
+    _meta?: unknown;
+  },
+  scope: OfferScope,
+): PiToolResult {
   // One list per text block, merged below — a result may split a readiness
   // error across blocks, and each block's connect links must all reach the UI.
   const blockOffers: ConnectOffer[][] = [];
@@ -97,7 +114,7 @@ export function mcpResultToPi(result: {
     // passes through byte-identical). The scrubbed URLs are captured as the
     // typed offers instead.
     if (c.type === "text") {
-      const split = splitJsonText(String(c.text ?? ""));
+      const split = splitJsonText(String(c.text ?? ""), scope);
       blockOffers.push(split.offers);
       return { type: "text" as const, text: split.text };
     }
@@ -106,7 +123,7 @@ export function mcpResultToPi(result: {
     if (c.type === "image") {
       return { type: "text" as const, text: `[image ${String(c.mimeType ?? "")}]` };
     }
-    return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
+    return { type: "text" as const, text: JSON.stringify(scope(c).redacted) };
   });
   let offers = mergeConnectOffers(blockOffers);
   // `details` is Pi's in-memory UI channel (never serialized to the model,
@@ -114,7 +131,7 @@ export function mcpResultToPi(result: {
   // exist only in the typed `connectOffers` field the connect cards read.
   let details: unknown;
   if (result.structuredContent !== undefined) {
-    const sc = splitConnectPayload(result.structuredContent);
+    const sc = scope(result.structuredContent);
     // structuredContent is the canonical payload — its offers replace the
     // text-derived ones wholesale, rather than merging with a text block that
     // may be a partial rendering of the same thing.
@@ -123,7 +140,12 @@ export function mcpResultToPi(result: {
   } else {
     details = { ...result, content };
   }
-  return { content, details, ...(offers.length > 0 ? { connectOffers: offers } : {}) };
+  return {
+    content,
+    details,
+    ...(offers.length > 0 ? { connectOffers: offers } : {}),
+    ...(isRelayedResult(result) ? { relayed: true as const } : {}),
+  };
 }
 
 interface PlatformMcpTools {
@@ -409,7 +431,12 @@ function makeForwardExtension(
         // spaces, else recorded before it is made.
         if (typeof args.space_id === "string") {
           const refusal = spaceIdRefusal(organization.spaces, args.space_id);
-          if (refusal) return withTurnBudgetNote(toPiToolResult({ ...refusal }), turnBudget);
+          if (refusal) {
+            return withTurnBudgetNote(
+              toPiToolResult({ ...refusal }, offerScopeOf(toolName, { arguments: args })),
+              turnBudget,
+            );
+          }
           await organization.touch(args.space_id);
         }
         const client = await untilAborted(getClient(), callSignal);
@@ -417,7 +444,11 @@ function makeForwardExtension(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
-        return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
+        const scope = offerScopeOf(toolName, {
+          arguments: params,
+          relayed: isRelayedResult(result),
+        });
+        return withTurnBudgetNote(mcpResultToPi(result as never, scope), turnBudget);
       },
     });
   };
@@ -620,6 +651,7 @@ function makeRunAndWaitExtension(
     turnBudget: PiTurnBudget;
   },
 ): ExtensionFactory {
+  const runAndWaitScope = offerScopeOf(RUN_AND_WAIT_TOOL, {});
   return (pi: ExtensionAPI) => {
     pi.registerTool({
       name: RUN_AND_WAIT_TOOL,
@@ -631,7 +663,10 @@ function makeRunAndWaitExtension(
         // argument it does not declare) and recorded before anything is launched.
         const target = await namedSpace(params, ctx.organization);
         if ("refusal" in target) {
-          return withTurnBudgetNote(toPiToolResult(target.refusal), ctx.turnBudget);
+          return withTurnBudgetNote(
+            toPiToolResult(target.refusal, runAndWaitScope),
+            ctx.turnBudget,
+          );
         }
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
@@ -662,7 +697,7 @@ function makeRunAndWaitExtension(
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(step.payload),
+            output: toPiToolResult(step.payload, runAndWaitScope),
             preliminary: true,
           });
         }
@@ -670,7 +705,7 @@ function makeRunAndWaitExtension(
         // re-emits it under the same id — an idempotent update to the same card).
         // That last write is the one the card keeps, and it carries the budget
         // note appended to `content` — the very channel the card parses.
-        return withTurnBudgetNote(toPiToolResult(finalPayload), ctx.turnBudget);
+        return withTurnBudgetNote(toPiToolResult(finalPayload, runAndWaitScope), ctx.turnBudget);
       },
     });
   };

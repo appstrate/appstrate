@@ -33,6 +33,10 @@ import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { turnPermissions } from "../src/turn-permissions.ts";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { spaces } from "@appstrate/db/schema";
+import { seedSpace } from "../../../apps/api/test/helpers/seed.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -61,7 +65,8 @@ const reachOf = (
     name: "Default",
     role,
     permissions: [...permissions],
-    credentialProxyOpen: false,
+    // The default space opens the credential proxy, as seeded.
+    credentialProxyOpen: true,
   },
 ];
 
@@ -183,5 +188,32 @@ describe("platform MCP surface key purity", () => {
     expect(theirs.key).not.toBe(mine.key);
     // Every space-acting tool lists the spaces in its `space_id`.
     expect(theirs.tools).not.toBe(mine.tools);
+  });
+
+  it("offers the integration tools, and withholds them under a different key where the space closes the proxy", async () => {
+    const open: Caller = { ctx: ownerA, orgRole: "owner", spaces: reachOf(ownerA, "owner", grant) };
+    const closedSpace = await seedSpace({ orgId: ownerA.orgId, name: "Closed" });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, closedSpace.id));
+    const closed: Caller = {
+      ctx: ownerA,
+      orgRole: "owner",
+      spaces: [
+        {
+          id: closedSpace.id,
+          name: "Closed",
+          role: "owner",
+          permissions: [...grant],
+          credentialProxyOpen: false,
+        },
+      ],
+    };
+    const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);
+    expect(opened.tools).toContain("search_integration_tools");
+    expect(opened.tools).toContain("call_integration_tool");
+    expect(shut.tools).not.toContain("call_integration_tool");
+    expect(shut.key).not.toBe(opened.key);
   });
 });

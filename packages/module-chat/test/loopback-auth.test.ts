@@ -46,6 +46,7 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
       headers: authHeaders(mintLoopbackToken(claims)),
     } as never);
     expect(res!.firstPartyLoopback).toBe(true);
+    expect(res!.serverMinted).toBe(true);
   });
 });
 
@@ -67,6 +68,12 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
     // Falsy (unset or false) so `if (resolution.firstPartyLoopback)` in the
     // auth pipeline never stamps the capability for this token.
     expect(res!.firstPartyLoopback).not.toBe(true);
+  });
+
+  it("is server-minted — the credential proxy (integration tools) accepts it", async () => {
+    const token = mintMcpLoopbackToken({ ...claims, permissions: callerPermissions });
+    const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
+    expect(res!.serverMinted).toBe(true);
   });
 
   it("carries a role preview across the hop, verbatim and only when there is one", async () => {

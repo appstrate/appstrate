@@ -124,10 +124,16 @@ export type AppEnv = {
      */
     authExtra?: Record<string, unknown>;
     /**
+     * Set by an auth strategy that declared `AuthResolution.serverMinted` — a
+     * server-minted, process-local bearer, carrying no CSRF risk. The credential
+     * proxy's bearer-only gate reads it. See `apps/api/src/lib/bearer-only.ts`.
+     */
+    serverMinted?: boolean;
+    /**
      * Set by an auth strategy that declared `AuthResolution.firstPartyLoopback`
-     * — a server-minted, process-local loopback bearer. The bearer-only proxy
-     * gate (`assertBearerOnly`) and the models route read this declared
-     * capability instead of special-casing a module's auth-method id. See
+     * — the chat's inference bearer. The LLM proxy's bearer-only gate, its chat
+     * usage context and the models route read this declared capability instead
+     * of special-casing a module's auth-method id. See
      * `apps/api/src/lib/bearer-only.ts`.
      */
     firstPartyLoopback?: boolean;

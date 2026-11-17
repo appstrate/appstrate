@@ -323,7 +323,7 @@ export function runPiChat(input: PiChatInput): Response {
         // so the silence bought nothing.
         write(mapper.startChunk(crypto.randomUUID()));
 
-        // Platform meta-tools (search/describe/invoke_operation + run_and_wait),
+        // Platform MCP tools (every tool the server declares to the caller),
         // and the Pi SDK's value graph. They are independent — the SDK import
         // reads no MCP result — so they run together rather than back to back.
         // The SDK module evaluation is the expensive half on a cold process

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AuthResolution.serverMinted`** (`@appstrate/core/module`): declares the bearer a strategy
+  verified a server-minted one (process-local secret, never reachable from a browser). The
+  credential proxy accepts it like an allowlisted bearer; `firstPartyLoopback` stays the one
+  capability the LLM proxy admits. The chat's platform-MCP bearer declares it, so the chat is
+  offered the MCP integration tools.
+
 - **`ToolIntegration`** (`@appstrate/core/integration`, #2233): `{ id, tool, title? }`, the
   integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
   `data.integration`.

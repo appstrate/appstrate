@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { toastError } from "../lib/mutation-error";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -126,19 +127,23 @@ function PairingBody({
           <span>{t("credentials.oauth.generatingCommand")}</span>
         </div>
       ) : isSpent ? (
-        <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          <p>
+        <Alert
+          variant="warning"
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
+              <RefreshCw className="mr-1.5" />
+              {t("credentials.oauth.regenerateCommand")}
+            </Button>
+          }
+        >
+          <AlertDescription>
             {t(
               state === "failed"
                 ? "credentials.oauth.pairingFailed"
                 : "credentials.oauth.pairingExpired",
             )}
-          </p>
-          <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
-            <RefreshCw className="mr-1.5" />
-            {t("credentials.oauth.regenerateCommand")}
-          </Button>
-        </div>
+          </AlertDescription>
+        </Alert>
       ) : (
         <>
           <div className="bg-muted relative flex items-center gap-2 rounded-md p-3 font-mono text-xs">
