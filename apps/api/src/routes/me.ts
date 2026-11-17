@@ -498,9 +498,8 @@ router.get(
 /**
  * GET /api/me/context — the caller's working context for an AI agent.
  *
- * One payload, three consumers: the chat module injects it into the system
- * prompt, the platform MCP server exposes it as the `get_me` tool, and
- * external REST/MCP clients call it directly. Returns the caller's identity,
+ * One payload, two consumers: the platform MCP server exposes it as the
+ * `get_me` tool, and external REST/MCP clients call it directly. Returns the caller's identity,
  * their role in the pinned org, and the integrations they could attach when
  * building an agent in the current space (own or shared into it) — so the
  * agent can prefer already-connected integrations and respect the caller's

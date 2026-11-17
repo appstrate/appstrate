@@ -13,7 +13,7 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
-import { testHost } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 import { OAuthConnectCard } from "../src/ui/oauth-connect-card.tsx";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];

@@ -9,7 +9,7 @@ import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { FileAttachment } from "../src/ui/file-attachment.tsx";
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
-import { testHost } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 
 const imageSpaces: Array<string | undefined> = [];
 

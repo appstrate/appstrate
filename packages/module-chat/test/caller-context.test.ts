@@ -22,27 +22,18 @@ import {
   SKILL_LOCK_VERSION_META_KEY,
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
+import { callerIdentity } from "./caller-identity.ts";
 
 /** The rendered texts; the injected-skills claim has its own cases. */
 const contextText = (...args: Parameters<typeof identityContext>) => identityContext(...args).text;
 
 /** `formatCallerContext` over an identity given loosely: what is not named is not known. */
 function identityContext(
-  raw: { user?: { name?: string; email?: string }; org?: Record<string, string> },
+  raw: Parameters<typeof callerIdentity>[0],
   opts: Omit<Parameters<typeof formatCallerContext>[1], "spaces"> &
     Partial<Pick<Parameters<typeof formatCallerContext>[1], "spaces">>,
 ) {
-  return formatCallerContext(
-    {
-      user: { name: raw.user?.name ?? null, email: raw.user?.email ?? null },
-      org: {
-        role: raw.org?.role ?? null,
-        name: raw.org?.name ?? null,
-        slug: raw.org?.slug ?? null,
-      },
-    },
-    { spaces: [], ...opts },
-  );
+  return formatCallerContext(callerIdentity(raw), { spaces: [], ...opts });
 }
 const blockText = async (...args: Parameters<typeof buildCallerContextBlock>) =>
   (await buildCallerContextBlock(...args)).text;

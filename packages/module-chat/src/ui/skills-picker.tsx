@@ -14,8 +14,8 @@ import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import {
-  DEFAULT_SKILL_SELECTION,
   injectsSkills,
+  isDefaultSkillSelection,
   MAX_PINNED_SKILLS,
   type ChatSkillSelection,
 } from "../skills.ts";
@@ -44,8 +44,8 @@ interface SkillsPickerProps {
 }
 
 /**
- * The entry to the picker in the composer's tool row while no skill is loaded (`SkillChips`'
- * fallback): drawn for a non-default selection, it reopens the picker.
+ * The entry to the picker in the composer's tool row while no skill is loaded (drawn by
+ * `SkillChips`): drawn for a non-default selection, it reopens the picker.
  */
 export function SkillsChip({
   selection,
@@ -55,10 +55,7 @@ export function SkillsChip({
   onClick: () => void;
 }) {
   const { t } = useChatHost();
-  const isDefault =
-    selection.skillMode === DEFAULT_SKILL_SELECTION.skillMode &&
-    selection.pinnedSkills.length === 0;
-  if (isDefault) return null;
+  if (isDefaultSkillSelection(selection)) return null;
   return (
     <button
       type="button"
@@ -82,16 +79,14 @@ export function SkillsPickerPanel({
   onChange,
 }: Pick<SkillsPickerProps, "transport" | "selection" | "onChange">) {
   const { t } = useChatHost();
-  const { catalogue, readable } = useSkillCatalogue(transport);
+  const { catalogue } = useSkillCatalogue(transport, true);
   const skills = catalogue.data ?? [];
   const enforcedQuery = useEnforcedSkills(transport);
   const enforced = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
-  // A disabled query stays `isPending` forever; unreadable reads as "nothing".
-  // Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
-  const loading =
-    (readable && catalogue.isPending) ||
-    (enforcedQuery.fetchStatus !== "idle" && enforcedQuery.isPending);
+  // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
+  // as "nothing". Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
+  const loading = catalogue.isLoading || enforcedQuery.isLoading;
 
   const pinned = ownPins(selection.pinnedSkills, enforcedIds);
   const pinnedSet = new Set(pinned);

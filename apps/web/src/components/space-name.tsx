@@ -12,10 +12,11 @@ import { spaceLabel } from "../lib/space-label";
 /** What naming a space reads of it. */
 export type SpaceListed = Parameters<typeof spaceTile>[0];
 
-/** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row. */
+/** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row, `lg` heading a table row. */
 const SIZES = {
   sm: { box: "gap-1.5 text-xs", tile: "size-4 rounded-[4px]" },
   md: { box: "gap-2.5 text-sm", tile: "size-6" },
+  lg: { box: "gap-3 text-sm", tile: "size-7 rounded-md" },
 } as const;
 
 /** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
@@ -79,17 +80,21 @@ export function SpaceTileStack({
 
 /**
  * A space as the app names it everywhere: its tile, then its name in the reader's words
- * (`spaceLabel`: « Mon espace » for the reader's own), truncated with the full name in `title`.
- * `children` follow the name (a marker such as the default space's star).
+ * (`spaceLabel`: « Mon espace » for the reader's own), truncated with the full name in `title`
+ * unless the caller says something else there (why a closed space cannot be entered). The name is
+ * raised over a table row's link (`relative z-10`, see `data-table.tsx`), or the row would swallow
+ * its hover. `children` follow the name (a marker such as the default space's star).
  */
 export function SpaceName({
   space,
   size = "sm",
+  title,
   className,
   children,
 }: {
   space: SpaceListed;
   size?: keyof typeof SIZES;
+  title?: string;
   className?: string;
   children?: ReactNode;
 }) {
@@ -98,7 +103,7 @@ export function SpaceName({
   return (
     <span className={cn("flex min-w-0 items-center", SIZES[size].box, className)}>
       <SpaceTile space={space} size={size} />
-      <span className="truncate" title={label}>
+      <span className="relative z-10 truncate" title={title ?? label}>
         {label}
       </span>
       {children}

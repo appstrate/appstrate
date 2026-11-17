@@ -27,6 +27,11 @@ export interface TurnCapabilities {
    */
   readonly readsSkills: boolean;
   /**
+   * `transport` ∧ `integrations:read`: `get_me` (declared on every platform MCP connection) lists
+   * the caller's connected integrations in a space — `GET /api/me/context` reads the same grant for them.
+   */
+  readonly readsConnections: boolean;
+  /**
    * `search_integration_tools` / `call_integration_tool` are offered: in at least one of the
    * turn's spaces, `mcp:invoke` and a credential-proxy permission hold and the space leaves the
    * proxy open (`credentialProxyOpen`) — the MCP server's per-space `proxies`, unioned org-wide.
@@ -53,6 +58,7 @@ export function turnCapabilities(
     ...agentCapabilities(has, invokes),
     authorsPackages: invokes && PACKAGE_WRITE_PERMISSIONS.some(has),
     readsSkills: transport && has("skills:read"),
+    readsConnections: transport && has("integrations:read"),
     callsIntegrationTools:
       invokes &&
       spaces.some((space) => {

@@ -184,13 +184,13 @@ failure answers the same 503.
   - A version deleted between the read and the click still gets the server's
     409 `no_published_version`. Each 409 has a French message.
 - **Picker** (`packages/module-chat/src/ui/skills-picker.tsx`): it reads
-  `["chat","enforced-skills",spaceId]`.
+  `["chat","enforced-skills",originSpaceId]`.
   - Enforced rows come first, checked and disabled, with the badge "Imposée par
     l'espace".
   - They are excluded from the choosable rows and from the pin cap.
 - **Read-only indicator:** a member with `chat:write` but no picker (no
   `skills:read`) sees the enforced names in the composer
-  (`EnforcedSkillsIndicator`).
+  (`SkillChips`, its locked pill).
 
 ## The origin space, and the spaces a conversation acts in
 

@@ -209,3 +209,27 @@ export function useLandAfterOrgSwitch(): () => void {
     else navigate(orgSwitchLanding(pathname), { replace: true });
   };
 }
+
+/** The history state of an overlay opened right after an organization switch: it floats over the landing of the page it was opened from, which has no entry of its own. */
+export function overlayStateAfterOrgSwitch(pagePath: string): unknown {
+  return withBackground(null, {
+    location: { ...DASHBOARD, pathname: orgSwitchLanding(pagePath) },
+    index: null,
+  });
+}
+
+/**
+ * Opens an overlay of the organization just switched to (its settings). Left to itself the
+ * overlay would keep the previous organization's page beneath it; it floats over that page's
+ * landing instead, in place of the page's entry, as `useLandAfterOrgSwitch` moves it.
+ */
+export function useOpenOverlayAfterOrgSwitch(): (to: string) => void {
+  const background = useBackgroundLocation();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  return (to) =>
+    navigate(to, {
+      replace: true,
+      state: overlayStateAfterOrgSwitch(background?.pathname ?? pathname),
+    });
+}

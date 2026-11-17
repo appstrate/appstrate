@@ -41,8 +41,8 @@ import {
 } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
-import { SkillChips } from "./enforced-skills.tsx";
-import { SkillsChip, SkillsPicker } from "./skills-picker.tsx";
+import { SkillChips } from "./skill-chips.tsx";
+import { SkillsPicker } from "./skills-picker.tsx";
 
 const LIMIT_REASON_KEY = {
   generating: "composer.limit.generating",
@@ -227,11 +227,6 @@ export function ComposerTools({
           transport={transport}
           selection={selection}
           onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
-          fallback={
-            showPicker ? (
-              <SkillsChip selection={selection} onClick={() => setSkillsOpen(true)} />
-            ) : null
-          }
         />
       )}
     </div>

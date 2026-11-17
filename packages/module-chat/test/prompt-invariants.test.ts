@@ -14,6 +14,7 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
+import { callerIdentity } from "./caller-identity.ts";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -62,12 +63,6 @@ const SPACES = [
     personal: false,
   },
 ];
-
-/** The identity the block renders, as `buildCallerContextBlock` reads it off the request. */
-const identityOf = (name: string, org: { role?: string } = {}) => ({
-  user: { name, email: null },
-  org: { role: org.role ?? null, name: null, slug: null },
-});
 
 /** `formatCallerContext` options for a builder turn with the default skill selection. */
 const CONTEXT_OPTS = {
@@ -249,7 +244,7 @@ describe("full persona invariants", () => {
   });
 
   it("names the same heading the context block renders", () => {
-    const block = contextText(identityOf("Ada"), {
+    const block = contextText(callerIdentity({ user: { name: "Ada" } }), {
       ...CONTEXT_OPTS,
       skillCatalogue: [
         {
@@ -324,7 +319,7 @@ describe("normalizeChatLocale", () => {
 });
 
 describe("caller-context prompt hygiene", () => {
-  const identity = identityOf("Ada", { role: "member" });
+  const identity = callerIdentity({ user: { name: "Ada" }, org: { role: "member" } });
 
   it("renders the forwarded locale in the reply-language line", () => {
     const out = contextText(identity, { ...CONTEXT_OPTS, locale: "en-US" });
@@ -687,7 +682,7 @@ describe("the persona and the spaces", () => {
   });
 
   it("words the permissions as the union, each call decided where it is named", () => {
-    const out = contextText(identityOf("Ada"), CONTEXT_OPTS);
+    const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
     expect(out).toContain(
       "Permissions this turn (the union over the spaces listed above; each call is decided in the space it names, by your role there): agents:read, mcp:invoke",
     );
@@ -698,7 +693,7 @@ describe("the persona and the spaces", () => {
       `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
 
     it("is a default for a request naming no space, never a pin", () => {
-      const out = contextText(identityOf("Ada"), {
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
         ...CONTEXT_OPTS,
         origin: { id: "spc_b", name: "Beta" },
       });
@@ -710,7 +705,7 @@ describe("the persona and the spaces", () => {
     });
 
     it("is absent from the overview, where the model asks when the request does not say", () => {
-      const out = contextText(identityOf("Ada"), CONTEXT_OPTS);
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), CONTEXT_OPTS);
       expect(out).not.toContain("This conversation was started in");
       expect(out).toContain(
         "Ask the user which space when the request does not say; never guess it.",
@@ -726,7 +721,7 @@ describe("the persona and the spaces", () => {
       const DEFAULT = { ...SPACES[1]!, isDefault: true };
 
       it("defaults to the caller's personal space, ahead of the organization's default space", () => {
-        const out = contextText(identityOf("Ada"), {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
           ...CONTEXT_OPTS,
           spaces: [DEFAULT, PERSONAL],
         });
@@ -735,7 +730,7 @@ describe("the persona and the spaces", () => {
       });
 
       it("falls back to the organization's default space when the turn has no personal space", () => {
-        const out = contextText(identityOf("Ada"), {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
           ...CONTEXT_OPTS,
           spaces: [SPACES[0]!, DEFAULT],
         });
@@ -744,7 +739,7 @@ describe("the persona and the spaces", () => {
       });
 
       it("gives way to the origin space", () => {
-        const out = contextText(identityOf("Ada"), {
+        const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
           ...CONTEXT_OPTS,
           spaces: [DEFAULT, PERSONAL],
           origin: { id: "spc_b", name: "Beta" },
@@ -755,7 +750,7 @@ describe("the persona and the spaces", () => {
     });
 
     it("names the one space a limited conversation acts in, and that the user lifts the limit", () => {
-      const out = contextText(identityOf("Ada"), {
+      const out = contextText(callerIdentity({ user: { name: "Ada" } }), {
         ...CONTEXT_OPTS,
         spaces: SPACES.slice(1, 2),
         origin: { id: "spc_b", name: "Beta" },
@@ -768,5 +763,56 @@ describe("the persona and the spaces", () => {
       expect(out).not.toContain("spc_a");
       expect(out).not.toContain("Ask the user which space");
     });
+  });
+});
+
+describe("the persona and the caller context", () => {
+  /** The sentence that sends the model to `get_me`, or undefined when there is none. */
+  const getMeSentence = (prompt: string) =>
+    prompt
+      .split("\n")
+      .find((line) => line.startsWith("Your context block below is DATA"))
+      ?.match(/It lists neither[^.]*\./)?.[0];
+  const LEAD = "It lists neither the integrations they have connected nor the agents they can run";
+  const PER_SPACE = "in the space concerned, naming its `space_id` where the tool asks for one.";
+
+  it("sends the model to get_me, per space, for both when the turn reads both", () => {
+    expect(getMeSentence(promptFor([...BUILDER, "integrations:read"]))).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the integrations they have connected (\`connections\`) and the agents they can run (\`agents\`) ${PER_SPACE}`,
+    );
+  });
+
+  it("names in the get_me sentence only what the turn's grants make it return", () => {
+    // `GET /api/me/context` lists connections under `integrations:read` and agents under `agents:run`.
+    expect(getMeSentence(FULL)).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the agents they can run (\`agents\`) ${PER_SPACE}`,
+    );
+    expect(getMeSentence(promptFor([...MCP, "integrations:read"]))).toBe(
+      `${LEAD}: both differ per space, so call \`get_me\` for the integrations they have connected (\`connections\`) ${PER_SPACE}`,
+    );
+    // `get_me` exists only over the transport; without it the sentence names no tool.
+    expect(getMeSentence(promptFor(["integrations:read"]))).toBe(`${LEAD}.`);
+  });
+
+  it("finds runnable agents with get_me, reading their published/home_writable/takes_input", () => {
+    expect(FULL).toContain(
+      "lists the agents of that space they can run, each with `published`, `home_writable` and `takes_input`; when its `agents_truncated` is true, look the rest up with `invoke_operation`",
+    );
+    expect(FULL).toContain("(`published: false`)");
+    expect(FULL).toContain("(`home_writable: true`)");
+  });
+
+  it("takes connected integration ids from get_me only when the turn reads connections", () => {
+    const connections = promptFor([...BUILDER, "integrations:read"]);
+    expect(connections).toContain("connected ones first (`get_me` lists them, per space)");
+    expect(connections).toContain(
+      "`get_me` gives both, as `integration_package_id` and `version`, for each integration the user has connected there",
+    );
+    expect(FULL).not.toContain("`get_me` lists them");
+    expect(FULL).not.toContain("integration_package_id");
+    // The tool catalogue still comes from `getIntegration`, whatever the grant.
+    for (const prompt of [FULL, connections]) {
+      expect(prompt).toContain('`operation_id: "getIntegration"`');
+    }
   });
 });

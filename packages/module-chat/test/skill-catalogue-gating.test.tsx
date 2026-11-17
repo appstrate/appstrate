@@ -8,7 +8,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { useSkillCatalogue } from "../src/ui/use-skill-catalogue.ts";
-import { testHost, transportOf } from "./fake-request.ts";
+import { transportOf } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 
 // The chat acts in spc_a and spc_b; only spc_b grants `skills:read`.
 const host = testHost({
@@ -18,7 +19,10 @@ const host = testHost({
 });
 
 function Readable() {
-  const { readable } = useSkillCatalogue(transportOf(() => ({})));
+  const { readable } = useSkillCatalogue(
+    transportOf(() => ({})),
+    true,
+  );
   return <b data-readable={String(readable)} />;
 }
 

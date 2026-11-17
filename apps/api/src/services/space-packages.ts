@@ -414,10 +414,8 @@ export function activeSpaceIds() {
  * differently.
  *
  * The tie-break is load-bearing — Postgres does not order rows within an equal
- * sort key. The chat renders the hint list into its system prompt, which pi-ai
- * emits as ONE cache block with ONE breakpoint, so a reshuffle invalidates the
- * cached prefix and the history behind it; and it makes the cap stable, since
- * which 15 of N survive is otherwise undefined.
+ * sort key. It makes the cap stable, since which 15 of N survive is otherwise
+ * undefined, and two identical get_me calls answer the same list.
  */
 function packageListingOrder() {
   return [sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id];
@@ -457,7 +455,7 @@ export async function listActivePackages(
 }
 
 // ---------------------------------------------------------------------------
-// Active-package hints — caller-context for the chat / get_me payload
+// Active-package hints — caller-context for the get_me payload
 // ---------------------------------------------------------------------------
 
 /**
@@ -532,14 +530,14 @@ interface HintOptions {
 
 /**
  * List the packages of one `type` an actor in this space could use, as a
- * bounded hint for the get_me / chat-prompt caller context. "Could use" is
+ * bounded hint for the get_me caller context. "Could use" is
  * {@link activePackagesFilter}, the run gate's own predicate: a system package,
  * or a placement row that says `enabled`. The list is capped (`limit`) so a
- * large catalog doesn't bloat the system prompt — the long tail stays reachable
+ * large catalog doesn't bloat the payload — the long tail stays reachable
  * via `search_operations`.
  *
- * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the
- * TTFT path: the activation filter and the LIMIT sit in the query, so only the
+ * Bounded IN SQL. One get_me call runs it twice (agents, then skills): the
+ * activation filter and the LIMIT sit in the query, so only the
  * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
  * `total` rides along as a window count over the filtered set (evaluated
  * before the LIMIT, so it is the size of the whole catalog, not of the page).
@@ -599,7 +597,7 @@ async function listActivePackageHints<T extends PackageHint>(
   return { items, truncated: total > items.length, total };
 }
 
-/** One entry in the runnable-agent hint exposed via get_me / the chat prompt. */
+/** One entry in the runnable-agent hint exposed via get_me. */
 interface RunnableAgent extends PackageHint {
   /** Whether the agent declares an input schema with at least one property. */
   takes_input: boolean;
@@ -634,7 +632,7 @@ export async function listRunnableAgents(
   return { agents: items, truncated, total };
 }
 
-/** One entry in the active-skill hint exposed via get_me / the chat prompt. */
+/** One entry in the active-skill hint exposed via get_me. */
 interface ActiveSkill extends PackageHint {
   /** The skill package's own manifest version, when known — pin a satisfiable
    * `dependencies.skills` range from it. */

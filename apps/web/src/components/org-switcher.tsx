@@ -9,15 +9,15 @@
  * keeps the tinted fill and the check; the explored one is the highlighted row. Every row leads
  * to its own settings, entering its organization or space first.
  */
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useLandAfterOrgSwitch } from "../lib/modal-route";
+import { useLandAfterOrgSwitch, useOpenOverlayAfterOrgSwitch } from "../lib/modal-route";
+import { mayCreateSpaceIn, settingsEntry, switcherShape } from "../lib/switcher-context";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Globe, Plus, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
 import { spaceRoleLabel } from "../hooks/use-roles";
-import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
 import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
@@ -87,9 +87,9 @@ function AddRow({
 
 /**
  * A pickable row: the pick on the left, the gear to its settings on the right. The gear shows on
- * the row pointed at or focused, and stays on the current one and wherever nothing hovers
- * (`pinned`). `onPick` replaces the link's own navigation, for settings of another context that
- * is entered first.
+ * the row pointed at or focused, and stays on the current one (`pinned`) and on a screen
+ * nothing hovers (a touch screen, `hover: none`). `onPick` replaces the link's own navigation,
+ * for settings of another context that is entered first.
  */
 function PickerRow({
   rowClassName,
@@ -124,7 +124,8 @@ function PickerRow({
           title={settings.label}
           className={cn(
             "text-muted-foreground hover:text-foreground shrink-0 px-2 py-1.5",
-            !settings.pinned && "hidden group-focus-within:block group-hover:block",
+            !settings.pinned &&
+              "hidden group-focus-within:block group-hover:block [@media(hover:none)]:block",
           )}
         >
           <Settings size={15} />
@@ -177,12 +178,12 @@ const TRIGGER_BOX = {
 export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
+  const openOverlayAfterOrgSwitch = useOpenOverlayAfterOrgSwitch();
   const { currentOrg, orgs, loading, switchOrg } = useOrg();
   const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
-  const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
   const viewer = useViewer();
   const overview = useOverviewMode();
@@ -192,13 +193,16 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const [query, setQuery] = useState("");
   // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
+  const spacesColumnId = useId();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
-  const mobilePresentation = variant === "mobile" || isMobile;
-  // One organization has nothing to explore: its row heads the workspaces, as on a phone.
-  const stacked = mobilePresentation || orgs.length === 1;
+  const { mobilePresentation, stacked } = switcherShape({
+    variant,
+    isMobile,
+    orgCount: orgs.length,
+  });
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
     setOpenMobile(false);
@@ -252,30 +256,24 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       } else if (!holdsOverview(routeOf(pathname))) navigate("/");
       closeSwitcherAndSidebar();
     });
-  const maySpaceWrite = isExploringElsewhere
-    ? !!orgs.find((org) => org.id === exploredId)?.permissions.includes("spaces:write")
-    : can("spaces:write");
-  /** The settings of another organization: switch there, then open them. */
-  const openOrgSettings = (orgId: string) =>
-    requestScopeChange(() => {
-      switchOrg(orgId);
-      navigate("/org-settings");
-      closeSwitcherAndSidebar();
-    });
-  /** The settings of another space: enter it (and its organization), then open them. */
-  const openSpaceSettings = (orgId: string, spaceId: string) =>
-    requestScopeChange(() => {
-      enterSpace(orgId, spaceId);
-      navigate("/workspace-settings");
-      closeSwitcherAndSidebar();
-    });
-  /** « Nouvel espace » of another organization: switch there, then open its creation. */
-  const createSpaceElsewhere = () =>
-    requestScopeChange(() => {
-      if (exploredId) switchOrg(exploredId);
-      navigate(NEW_SPACE_ADDRESS);
-      closeSwitcherAndSidebar();
-    });
+  const maySpaceWrite = mayCreateSpaceIn(orgs, exploredId);
+  /**
+   * The pick of settings (or of a creation) in another context: enter it, then open them. Over
+   * another organization's settings the page beneath moves to its landing, as a pick does.
+   * `undefined` for the current context's, which its link opens as is.
+   */
+  const settingsPick = (to: string, target: { orgId: string; spaceId?: string }) => {
+    const entry = settingsEntry({ orgId: currentOrg.id, spaceId: currentSpaceId }, target);
+    if (entry === "link") return undefined;
+    return () =>
+      requestScopeChange(() => {
+        if (target.spaceId === undefined) switchOrg(target.orgId);
+        else enterSpace(target.orgId, target.spaceId);
+        if (entry === "organization") openOverlayAfterOrgSwitch(to);
+        else navigate(to);
+        closeSwitcherAndSidebar();
+      });
+  };
   const overviewLabel = t("overview.title");
   const overviewCurrent = overview.on && !isExploringElsewhere;
   const offersOverview =
@@ -388,7 +386,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     <PickerRow
                       key={org.id}
                       data-testid={`org-item-${org.id}`}
-                      aria-expanded={isExplored}
+                      aria-current={isCurrent || undefined}
+                      // With one organization there is nothing to open: its spaces are always shown.
+                      aria-expanded={orgs.length > 1 ? isExplored : undefined}
+                      aria-controls={orgs.length > 1 ? spacesColumnId : undefined}
                       onClick={() => setExploredOrgId(org.id)}
                       rowClassName={cn(
                         isExplored && "bg-accent",
@@ -398,7 +399,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         to: "/org-settings",
                         label: t("switcher.settingsOf", { name: org.name }),
                         pinned: isCurrent || mobilePresentation,
-                        onPick: isCurrent ? undefined : () => openOrgSettings(org.id),
+                        onPick: settingsPick("/org-settings", { orgId: org.id }),
                       }}
                       onNavigate={closeSwitcherAndSidebar}
                     >
@@ -427,7 +428,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               )}
             </div>
 
-            <div className={cn("flex min-h-0 flex-col p-2", stacked ? "border-t" : "border-l")}>
+            <div
+              id={spacesColumnId}
+              className={cn("flex min-h-0 flex-col p-2", stacked ? "border-t" : "border-l")}
+            >
               <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
                 <div className="flex flex-col gap-1 p-2">
@@ -484,9 +488,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                                 to: "/workspace-settings",
                                 label: t("switcher.settingsOf", { name: spaceLabel(space, t) }),
                                 pinned: isCurrent || mobilePresentation,
-                                onPick: isCurrent
-                                  ? undefined
-                                  : () => openSpaceSettings(exploredId ?? currentOrg.id, space.id),
+                                onPick: settingsPick("/workspace-settings", {
+                                  orgId: exploredId ?? currentOrg.id,
+                                  spaceId: space.id,
+                                }),
                               }
                             : undefined
                         }
@@ -527,7 +532,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   to={NEW_SPACE_ADDRESS}
                   label={t("spaces.create", { ns: "settings" })}
                   onNavigate={closeSwitcherAndSidebar}
-                  onPick={isExploringElsewhere ? createSpaceElsewhere : undefined}
+                  onPick={settingsPick(NEW_SPACE_ADDRESS, { orgId: exploredId ?? currentOrg.id })}
                 />
               )}
             </div>

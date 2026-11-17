@@ -77,6 +77,33 @@ test.describe("Org switching in UI", () => {
     await agents.expectAgentNotVisible(agentA);
   });
 
+  test("The gear of another org opens its settings over its landing, not the page left", async ({
+    authedPage: page,
+    clientA,
+    orgA,
+    orgB,
+  }) => {
+    const scopeA = `@${orgA.orgSlug}`;
+    const agentA = `gear-agent-a-${Date.now()}`;
+    await createAgent(clientA, scopeA, agentA);
+    await page.goto(`/agents/${scopeA}/${agentA}`);
+    await expect(page.getByText(agentA).first()).toBeVisible({ timeout: 10_000 });
+
+    const sidebar = new Sidebar(page);
+    await sidebar.openOrgSettings(orgB.orgName);
+
+    // The current organization is the one whose settings are open…
+    await expect
+      .poll(() => sidebar.switcherButton.getAttribute("aria-label"))
+      .toContain(`actuel : ${orgB.orgName}`);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    // …and the page beneath is its landing, not organization A's agent (a 404 there).
+    await expect(page.getByText(agentA)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page).toHaveURL("/");
+  });
+
   test("Webhook page reflects current org context", async ({ authedPage: page, clientA }) => {
     const webhookUrl = `https://org-sw-wh-${Date.now()}.example.com/hook`;
     await createWebhook(clientA, { url: webhookUrl });

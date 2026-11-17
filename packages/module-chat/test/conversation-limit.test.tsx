@@ -30,7 +30,8 @@ import {
   type SessionsCache,
   type SessionSummary,
 } from "../src/ui/sessions.ts";
-import { requestAnswering, testHost, transportOf, transportOver } from "./fake-request.ts";
+import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 
 describe("what the first message carries", () => {
   it("is the origin space, and the limit only when it is on", () => {

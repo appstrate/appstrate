@@ -23,7 +23,7 @@ import { APICallError } from "ai";
 import { conflict } from "@appstrate/core/api-errors";
 
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
-import { testHost } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 import { MessageError } from "../src/ui/thread.tsx";
 import { chatCapacityError } from "../src/pi-chat/concurrency.ts";
 

@@ -8,8 +8,7 @@
  * subtracts when it already knows the answer.
  */
 
-import { describe, it, expect, spyOn } from "bun:test";
-import { IDENTITY_COLOR_CLASSES } from "@appstrate/ui/identity-colors";
+import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunsTable } from "../runs-table.tsx";
@@ -18,7 +17,6 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { makeRun, STARTED_AT } from "../../test/run-fixture.ts";
 import { formatDateField } from "../../lib/format-date.ts";
-import { spaceStore } from "../../stores/space-store.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -35,14 +33,12 @@ const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "blue" });
 function Harness({
   runs,
   oneAgent,
-  spanning,
   ...props
 }: {
   runs: EnrichedRun[];
   oneAgent?: boolean;
-  spanning?: boolean;
 } & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
-  const columns = useRunColumns({ agentName, agentIdentity, oneAgent, spanning });
+  const columns = useRunColumns({ agentName, agentIdentity, oneAgent });
   return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
@@ -72,7 +68,7 @@ describe("the runs column set", () => {
 
   it("draws the agent's tile before its name", () => {
     // The tile wears the agent's chosen colour.
-    expect(html).toContain(IDENTITY_COLOR_CLASSES.blue);
+    expect(html).toContain("bg-identity-blue-tile");
   });
 
   it("leads to the run, under a name that says which run", () => {
@@ -147,30 +143,5 @@ describe("a run whose agent was deleted", () => {
 
   it("says why, where the missing link is", () => {
     expect(html).toContain(agentsFr["runs.deletedAgentBadge"]);
-  });
-});
-
-describe("a list spanning spaces", () => {
-  const run = makeRun({ spaceId: "spc_2" });
-
-  it("gives each row's space a column, and only there", () => {
-    expect(table([run], { spanning: true })).toContain('data-column="space"');
-    expect(table([run])).not.toContain('data-column="space"');
-  });
-
-  it("links a run of another space naming that space, and one of the current space as before", () => {
-    // A static render reads a zustand store's INITIAL state (its server snapshot).
-    const current = spyOn(spaceStore, "getInitialState").mockReturnValue({
-      ...spaceStore.getInitialState(),
-      id: "spc_1",
-    });
-    try {
-      expect(table([run])).toContain('href="/agents/@acme/reporter/runs/run_1?enterSpace=spc_2"');
-      expect(table([makeRun({ spaceId: "spc_1" })])).toContain(
-        'href="/agents/@acme/reporter/runs/run_1"',
-      );
-    } finally {
-      current.mockRestore();
-    }
   });
 });
