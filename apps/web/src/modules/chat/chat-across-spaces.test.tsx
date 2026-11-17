@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat in « Vue d'ensemble »: what a page holds while the mode is not known, how the
+ * The chat in « Tous les espaces »: what a page holds while the mode is not known, how the
  * conversation panel keeps its lists live across spaces, and the grants the module reads.
  */
 
@@ -176,7 +176,7 @@ describe("the chat's transport", () => {
   }
   const filter = (chosen: boolean, list = spaces) => renderOverview(<Filter />, list, chosen).html;
 
-  it("filters the list to the selected space, and to none in « Vue d'ensemble »", () => {
+  it("filters the list to the selected space, and to none in « Tous les espaces »", () => {
     expect(filter(false)).toContain("<p>org_1|spc_a</p>");
     expect(filter(true)).toContain("<p>org_1|null</p>");
   });

@@ -42,7 +42,7 @@ export function ProductTabs() {
   const { ready } = usePermissions();
   const previewing = useViewAsHeader() !== null;
   // The chat has no entry in the Studio's navigation: its unread count rides on this tab, the
-  // working space's, or in « Vue d'ensemble » the organization's.
+  // working space's, or in « Tous les espaces » the organization's.
   const chatTransport = useShellChatTransport();
   const chatUnread = useChatUnreadCount(chatTransport, chatReachable);
   const hasChatSessions = useHasChatSessions(chatTransport, chatReachable);

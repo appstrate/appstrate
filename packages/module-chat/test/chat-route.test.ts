@@ -57,7 +57,7 @@ describe("the chat's routes", () => {
 });
 
 describe("the conversation list as a filter", () => {
-  it("reads every conversation in « Vue d'ensemble » and those that touched the selected space otherwise", async () => {
+  it("reads every conversation in « Tous les espaces » and those that touched the selected space otherwise", async () => {
     const request = requestAnswering(() => Response.json({ data: [], hasMore: false }));
 
     await fetchSessionsPage(transportOver(request, null), undefined);
@@ -100,7 +100,7 @@ describe("the origin space of a new conversation", () => {
     expect(selectedOriginSpaceId({ spaceId: "spc_b" }, acting)).toBe("spc_b");
   });
 
-  it("is none in « Vue d'ensemble », in a space the chat cannot act in, and without a transport", () => {
+  it("is none in « Tous les espaces », in a space the chat cannot act in, and without a transport", () => {
     expect(selectedOriginSpaceId({ spaceId: null }, acting)).toBeUndefined();
     expect(selectedOriginSpaceId({ spaceId: "spc_viewer" }, acting)).toBeUndefined();
     expect(selectedOriginSpaceId(undefined, acting)).toBeUndefined();

@@ -2,7 +2,7 @@
 
 /**
  * The lists that span spaces and which spaces admit each: held with a role, where the permission
- * of the list's route holds (the org route lists nothing elsewhere). The « Vue d'ensemble » mode,
+ * of the list's route holds (the org route lists nothing elsewhere). The « Tous les espaces » mode,
  * chosen in the switcher, opens them, and the dashboard drawn from them, on every space; outside
  * it each list is the current space's.
  */
@@ -92,8 +92,9 @@ export function grantsInRowSpace(
 }
 
 /**
- * How an action naming no space finds one in « Vue d'ensemble »: not offered without an eligible
- * space, the only one taken without asking, the reader asked between several.
+ * How an action naming no space finds one in « Tous les espaces »: not offered without an eligible
+ * space, the only one taken without asking, chosen by the reader between several (its trigger is
+ * then a menu of them, `SpaceChoiceDropdown`).
  */
 type SpaceChoice = { kind: "none" } | { kind: "one"; spaceId: string } | { kind: "ask" };
 
@@ -110,7 +111,7 @@ export function spaceChoice(
   return { kind: "ask" };
 }
 
-/** The « Vue d'ensemble » is offered from two spaces admitting at least one of the lists. */
+/** The « Tous les espaces » is offered from two spaces admitting at least one of the lists. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
   const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, undefined, admits).length >= 2;
@@ -124,28 +125,28 @@ export function overviewLapsed(spaces: readonly ListedSpace[] | undefined): bool
 const listOf = (path: RoutePath) => SPACE_LISTS.find((list) => LIST_ROUTE[list] === path);
 
 /**
- * A list's route, or one row of it: the list's route followed by a parameter (`/schedules/:id`,
+ * One row of a list: the list's route followed by a parameter (`/schedules/:id`,
  * `/agents/:scope/:name`, its versions and its runs). A row opened from a spanning list runs in
- * the row's space (`?enterSpace=`), the mode staying on. `/integrations/new/mcp` creates: no row.
+ * the row's space (`?enterSpace=`), the mode staying on, and its page names that space
+ * (`DetailBar`). `/integrations/new/mcp` creates: no row.
  */
-const ofList = (path: RoutePath) =>
-  SPACE_LISTS.some((list) => path === LIST_ROUTE[list] || path.startsWith(`${LIST_ROUTE[list]}/:`));
+export function isListRow(path: RoutePath | undefined): boolean {
+  return path !== undefined && SPACE_LISTS.some((list) => path.startsWith(`${LIST_ROUTE[list]}/:`));
+}
 
-/** Org-level routes that still ACT in the working space ("here"), which the mode does not name. */
-const ACTS_IN_WORKING_SPACE: readonly RoutePath[] = ["/catalogue"];
+const ofList = (path: RoutePath) => listOf(path) !== undefined || isListRow(path);
 
 const isOrgLevel = (permission: string) =>
   (CORE_RESOURCE_LEVELS as Record<string, string>)[permission.split(":")[0]!] === "org";
 
 /**
- * A route judged by one space's permissions: the workspace settings, the routes acting "here",
- * and any route a permission of space level (or a module's, which the SPA cannot grade) opens.
- * The organization and account settings, and the `open` routes (`/` among them), belong to no
- * space.
+ * A route judged by one space's permissions: the workspace settings, and any route a permission
+ * of space level (or a module's, which the SPA cannot grade) opens. The organization and account
+ * settings, the catalogue (its add menu names the space of each deed), and the `open` routes
+ * (`/` among them), belong to no space.
  */
 function belongsToSpace(path: RoutePath): boolean {
-  const here = [SETTINGS_INDEX.workspace, ...ACTS_IN_WORKING_SPACE];
-  if (here.some((prefix) => isUnder(path, prefix))) return true;
+  if (isUnder(path, SETTINGS_INDEX.workspace)) return true;
   if (isUnder(path, SETTINGS_INDEX.organization) || isUnder(path, SETTINGS_INDEX.account)) {
     return false;
   }
@@ -160,8 +161,8 @@ const spansSpaces = (path: RoutePath) =>
 /**
  * Whether rendering `path` keeps the mode: the lists and their rows, the routes serving the
  * organization (`spansSpaces`), any route of no space (the dashboard, `/`, is one), and an
- * address no route declares. Any other route leaves it, into the working space (the one an action
- * asking « Dans quel espace ? » entered).
+ * address no route declares. Any other route leaves it, into the working space (the one the last
+ * action naming no space entered).
  */
 export function holdsOverview(path: RoutePath | undefined): boolean {
   return path === undefined || ofList(path) || spansSpaces(path) || !belongsToSpace(path);
@@ -170,7 +171,7 @@ export function holdsOverview(path: RoutePath | undefined): boolean {
 /**
  * A route that spans spaces opens where some space admits it, whatever the working space grants:
  * a route serving the organization (`spansSpaces`: the chat) in every mode, a list's route (its
- * rows are every space's) in « Vue d'ensemble » only. `undefined` for any other route, which the
+ * rows are every space's) in « Tous les espaces » only. `undefined` for any other route, which the
  * working space decides, as does every route before the space listing has answered.
  */
 export function spanningRouteVerdict(

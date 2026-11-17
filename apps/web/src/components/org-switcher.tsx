@@ -147,7 +147,7 @@ function RowRole({ children }: { children: string | null | undefined }) {
   );
 }
 
-/** « Vue d'ensemble »'s tile, in the slot a space's sits: it reads even when the name is truncated. */
+/** « Tous les espaces »'s tile, in the slot a space's sits: it reads even when the name is truncated. */
 function OverviewTile({ className }: { className?: string }) {
   return (
     <span
@@ -231,7 +231,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
-  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. A real space ends « Vue d'ensemble » there. */
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. A real space ends « Tous les espaces » there. */
   const applyContext = (orgId: string, spaceId: string) =>
     requestScopeChange(() => {
       overview.choose(false, orgId);
@@ -240,7 +240,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     });
 
   /**
-   * « Vue d'ensemble » of the explored organization, in one pick. In the current one it keeps
+   * « Tous les espaces » of the explored organization, in one pick. In the current one it keeps
    * the working space, and a page that does not hold the mode gives way to its home, the
    * dashboard. In another it switches there (the space resolver enters the space remembered
    * there, else the default) and lands on that home.
@@ -283,7 +283,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       ? spaceLabel(currentSpace, t)
       : undefined;
   // The space's tile is a badge on the organization's, ringed in the trigger's background.
-  // « Vue d'ensemble » is no space: no badge, its name on the second line says it.
+  // « Tous les espaces » is no space: no badge, its name on the second line says it.
   const spaceBadge: ReactNode =
     currentSpace && !overview.on ? (
       <IdentityTile

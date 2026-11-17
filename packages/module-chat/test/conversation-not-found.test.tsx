@@ -136,7 +136,7 @@ describe("a new conversation", () => {
     expect(html).toContain("composer.placeholder");
   });
 
-  it("says nothing in a space the chat acts in, or in « Vue d'ensemble »", () => {
+  it("says nothing in a space the chat acts in, or in « Tous les espaces »", () => {
     expect(welcome("spc_a")).not.toContain("welcome.spaceNotActing");
     expect(welcome(null)).not.toContain("welcome.spaceNotActing");
   });

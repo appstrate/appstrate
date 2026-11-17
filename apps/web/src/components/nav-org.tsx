@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from "react-router-dom";
+import { useStore } from "zustand";
 import { useOverlayPath } from "../lib/modal-route";
+import { navEntryActive, navLocation } from "../lib/nav-active";
+import { breadcrumbStore } from "../stores/breadcrumb-store";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -59,11 +62,14 @@ type NavItem = {
 
 export function NavOrg() {
   const { t } = useTranslation();
-  // Behind an open overlay no entry is active: the dashboard drawn under a
-  // cold settings link is not where the user is.
+  // The entry the header trail roots the page under (`navLocation`), so the two never disagree;
+  // behind an open overlay none: the dashboard drawn under a cold settings link is not where the
+  // user is.
   const { pathname } = useLocation();
-  const visiblePathname = useOverlayPath() ?? pathname;
-  // The badge and the running spinner are the working space's: « Vue d'ensemble » neither
+  const overlayPath = useOverlayPath();
+  const trailRootHref = useStore(breadcrumbStore, (s) => s.page.entries[0]?.href);
+  const location = navLocation({ overlayPath, trailRootHref, pathname });
+  // The badge and the running spinner are the working space's: « Tous les espaces » neither
   // shows nor asks what feeds them (no list it already holds counts every space's unread and
   // running runs, inline ones included).
   const { on: overview } = useOverviewMode();
@@ -79,7 +85,7 @@ export function NavOrg() {
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
-  // may hold none of them, so no entry is assumed reachable. In « Vue d'ensemble » the
+  // may hold none of them, so no entry is assumed reachable. In « Tous les espaces » the
   // same entries, each opened where some space admits it (`spanningRouteVerdict`).
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
@@ -100,11 +106,7 @@ export function NavOrg() {
   const renderItems = (items: NavItem[]) =>
     items.map(({ path, label, icon: Icon }) => (
       <SidebarMenuItem key={path}>
-        <SidebarMenuButton
-          asChild
-          isActive={path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(path)}
-          tooltip={label}
-        >
+        <SidebarMenuButton asChild isActive={navEntryActive(path, location)} tooltip={label}>
           <Link to={path}>
             <Icon />
             <span>{label}</span>
@@ -152,7 +154,7 @@ export function NavOrg() {
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
                   asChild
-                  isActive={visiblePathname.startsWith("/runs")}
+                  isActive={navEntryActive("/runs", location)}
                   tooltip={t("nav.runs")}
                 >
                   <Link to="/runs">

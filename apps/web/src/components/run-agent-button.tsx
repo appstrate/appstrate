@@ -9,6 +9,7 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
+import { SpaceChoiceDropdown } from "./space-choice-menu";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
@@ -29,7 +30,7 @@ interface RunAgentButtonProps {
    * The spaces of the index row that offers the run: the run is offered where one grants it, and
    * a click enters that space as the working space before running, so the launch, its input
    * form and the run page all are that space's. Several granting it (a list spanning spaces),
-   * the click asks « Dans quel espace ? ». The working space when absent or empty.
+   * the button opens « Lancer dans… », the menu of them. The working space when absent or empty.
    */
   spaceIds?: readonly string[];
   /** When provided, skips the lazy fetch (detail page case). */
@@ -64,7 +65,7 @@ export function RunAgentButton({
   showLabel = false,
   connectionWarning = false,
 }: RunAgentButtonProps) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "common"]);
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const workingSpaceId = useCurrentSpaceId();
@@ -136,6 +137,9 @@ export function RunAgentButton({
     );
   };
 
+  // Between several of the row's spaces, the button is the menu of them.
+  const runIn = runAction.choose(t("common:spaceChoice.run"), start);
+
   const neverPublished = isNeverPublishedForReader(detail);
   const inputShown = runInputOpens({
     requested: inputOpen,
@@ -169,22 +173,24 @@ export function RunAgentButton({
   return (
     <>
       <DisabledReasonTooltip reason={blockedTitle}>
-        <PendingButton
-          variant={variant}
-          size={size}
-          className={cn("relative", className)}
-          onClick={handleClick}
-          pending={isPending}
-          disabled={isDisabled}
-          title={blockedTitle ? undefined : t("detail.run")}
-          aria-label={showLabel ? undefined : t("detail.run")}
-        >
-          {!isPending && (
-            <Play className={cn(showLabel && variant === "outline" && "text-primary")} />
-          )}
-          {showLabel && t("detail.run")}
-          {warningDot}
-        </PendingButton>
+        <SpaceChoiceDropdown choice={isDisabled ? undefined : runIn}>
+          <PendingButton
+            variant={variant}
+            size={size}
+            className={cn("relative", className)}
+            onClick={handleClick}
+            pending={isPending}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            aria-label={showLabel ? undefined : t("detail.run")}
+          >
+            {!isPending && (
+              <Play className={cn(showLabel && variant === "outline" && "text-primary")} />
+            )}
+            {showLabel && t("detail.run")}
+            {warningDot}
+          </PendingButton>
+        </SpaceChoiceDropdown>
       </DisabledReasonTooltip>
 
       {detail && (
@@ -196,8 +202,6 @@ export function RunAgentButton({
           isPending={launcher.isPending}
         />
       )}
-
-      {runAction.picker}
 
       <RunLaunchRecovery
         launcher={launcher}

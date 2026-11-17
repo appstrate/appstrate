@@ -4,10 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Share2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { useSharedFromText } from "../hooks/use-shared-from-text";
-import { useSpaceLabelOf } from "../hooks/use-spaces";
-import { SpaceNameOf } from "./space-name";
+import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
+import { SpaceName } from "./space-name";
 
-/** The count of the spaces a package reaches beyond its home, the names in a tooltip. */
+/**
+ * The count of the spaces a package reaches beyond its home, as « +2 », the names in a tooltip.
+ * Text, not the share icon: outside the mode that icon says "shared from" (`PackageSharedFrom`).
+ */
 function SpacesBadge({ names, text }: { names: readonly string[]; text: string }) {
   if (names.length === 0) return null;
   return (
@@ -17,10 +20,9 @@ function SpacesBadge({ names, text }: { names: readonly string[]; text: string }
           tabIndex={0}
           role="img"
           aria-label={text}
-          className="text-muted-foreground relative z-10 flex shrink-0 items-center gap-0.5 tabular-nums"
+          className="text-muted-foreground relative z-10 shrink-0 tabular-nums"
         >
-          <Share2 className="size-3" aria-hidden />
-          {names.length}
+          {`+${names.length}`}
         </span>
       </TooltipTrigger>
       <TooltipContent>{text}</TooltipContent>
@@ -28,9 +30,12 @@ function SpacesBadge({ names, text }: { names: readonly string[]; text: string }
   );
 }
 
+/** Tiles drawn for a package's spaces: its home's and at most this many others behind it. */
+const STACKED_TILES = 2;
+
 /**
- * The spaces of a package in a list spanning spaces: its home, then the others it is shared
- * into as a count. With no visible home (a system package, or a home withheld from the reader)
+ * The spaces of a package in a list spanning spaces: its home's tile with the others' stacked
+ * behind, its home's name, then the others as a count. With no visible home (a system package, or a home withheld from the reader)
  * a muted label stands for it and the count covers every space.
  */
 export function PackageSpaces({
@@ -44,16 +49,22 @@ export function PackageSpaces({
 }) {
   const { t } = useTranslation("common");
   const labelOf = useSpaceLabelOf();
+  const { data: spaces } = useSpaces();
   const home = system ? null : (homeSpaceId ?? null);
-  const names = spaceIds.filter((id) => id !== home).flatMap((id) => labelOf(id) ?? []);
+  const others = spaceIds.filter((id) => id !== home);
+  const names = others.flatMap((id) => labelOf(id) ?? []);
+  const homeSpace = spaces?.find((space) => space.id === home);
+  const stacked = others
+    .flatMap((id) => spaces?.find((space) => space.id === id) ?? [])
+    .slice(0, STACKED_TILES);
   const text = t(home ? "packageSpaces.sharedWith" : "packageSpaces.availableIn", {
     names: names.join(", "),
   });
   return (
     <span className="text-muted-foreground flex min-w-0 items-center gap-2">
-      {home ? (
-        <SpaceNameOf spaceId={home} />
-      ) : (
+      {homeSpace ? (
+        <SpaceName space={homeSpace} stacked={stacked} />
+      ) : home ? null : (
         <span className="truncate">
           {t(system ? "packageSpaces.platform" : "packageSpaces.hiddenHome")}
         </span>

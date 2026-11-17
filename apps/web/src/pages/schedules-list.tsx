@@ -28,14 +28,16 @@ export function SchedulesListPage() {
   const { on: spanning } = useOverviewMode();
   const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
-  // A schedule is created in one space: in « Vue d'ensemble », the one the reader picks.
+  // A schedule is created in one space: in « Tous les espaces », the one the reader picks in the entry's menu.
   const create = useSpaceAction({ permission: "schedules:write" });
 
+  const openNew = () => setNewScheduleOpen(true);
   const createAction: MenuAction = {
     id: "create",
     label: t("schedules.create"),
     icon: Plus,
-    onSelect: () => create.run(() => setNewScheduleOpen(true)),
+    onSelect: () => create.run(openNew),
+    inSpaces: create.choose(t("common:spaceChoice.create"), openNew),
     hidden: !create.offered,
   };
 
@@ -116,7 +118,6 @@ export function SchedulesListPage() {
         count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />
       {newScheduleOpen && <NewScheduleModal onClose={() => setNewScheduleOpen(false)} />}
-      {create.picker}
     </div>
   );
 }

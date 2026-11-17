@@ -104,7 +104,7 @@ describe("the products toggle", () => {
         },
       );
       if (seedUnread) {
-        // The selected space's list holds one unread reply, « Vue d'ensemble »'s three.
+        // The selected space's list holds one unread reply, « Tous les espaces »'s three.
         const list = (unread: number) => ({
           pages: [
             {

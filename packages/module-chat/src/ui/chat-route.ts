@@ -18,7 +18,7 @@ export function chatPath(transport: Pick<ChatTransport, "orgId">, suffix = ""): 
 
 /**
  * The space a new conversation takes as its origin: the one the host is looking at, when the chat
- * acts there (the server refuses a space outside the acting set). `undefined` in « Vue d'ensemble »
+ * acts there (the server refuses a space outside the acting set). `undefined` in « Tous les espaces »
  * and in a space the chat cannot act in: the conversation then has no origin space.
  */
 export function selectedOriginSpaceId(

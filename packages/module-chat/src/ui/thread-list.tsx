@@ -318,7 +318,7 @@ export function ChatConversationList({
   );
 }
 
-/** The spaces a conversation touched, named by the host; « Vue d'ensemble » when it touched none. */
+/** The spaces a conversation touched, named by the host; « Tous les espaces » when it touched none. */
 function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
   return session.space_ids.length > 0
     ? renderSpaces(session.space_ids)

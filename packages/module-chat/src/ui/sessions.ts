@@ -42,7 +42,7 @@ export interface SessionSummary {
 export const SESSIONS_QUERY_KEY = ["chat", "sessions"] as const;
 
 /**
- * The conversation list under ONE space filter (`null`: « Vue d'ensemble », every conversation).
+ * The conversation list under ONE space filter (`null`: « Tous les espaces », every conversation).
  * The filter belongs in the key: a key without it would serve another filter's list from cache.
  */
 export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {

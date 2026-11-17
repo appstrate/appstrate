@@ -311,17 +311,20 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   );
 }
 
-/** A run's page, under its agent. */
+/** A run's page, under its agent; an inline run (no agent page) under the runs list, as the page. */
 export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
+  const { t } = useTranslation("agents");
   const { scope, name } = useParams();
   const listCrumb = usePackageListCrumb("agent");
   const tab = useOpenTab();
   return (
     <DetailPageSkeleton
       trail={
-        agentName
-          ? [listCrumb, { label: agentName, href: `/agents/${scope}/${name}#runs` }]
-          : [listCrumb]
+        scope === "@inline"
+          ? [{ label: t("runs.title"), href: "/runs" }]
+          : agentName
+            ? [listCrumb, { label: agentName, href: `/agents/${scope}/${name}#runs` }]
+            : [listCrumb]
       }
       tabCount={3}
       meta={false}
@@ -411,7 +414,7 @@ export function ListPageSkeleton({
 
 function ViewedCollectionBlocks({ list, views }: { list: string; views: boolean }) {
   const [view] = useListView(list);
-  // « Vue d'ensemble » names each card's space.
+  // « Tous les espaces » names each card's space.
   const { on } = useOverviewMode();
   return (
     <CollectionBlocks
@@ -685,7 +688,7 @@ function ScheduleRowSkeleton() {
  * each block built like the component it stands for, in the same layout
  * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
  * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
- * In « Vue d'ensemble » the agent cards name their space.
+ * In « Tous les espaces » the agent cards name their space.
  */
 export function DashboardBodySkeleton() {
   const { on } = useOverviewMode();

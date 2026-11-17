@@ -27,9 +27,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { SpaceMenuLabel } from "./space-choice-menu";
 
 export interface AddableSpace {
   id: string;
@@ -80,9 +80,7 @@ export function CatalogueAddButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuLabel className="text-muted-foreground text-xs font-medium">
-          {t("catalogue.addToMenu")}
-        </DropdownMenuLabel>
+        <SpaceMenuLabel>{t("catalogue.addToMenu")}</SpaceMenuLabel>
         {spaces.map((space) => (
           // Where it already runs stays in the menu, ticked and inert: the
           // picture is whole, and a space does not vanish after a click.

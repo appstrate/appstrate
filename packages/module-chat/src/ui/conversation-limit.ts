@@ -29,7 +29,7 @@ interface Created {
   restricted: boolean;
 }
 
-/** The creation fields of a first turn: only what is set, so « Vue d'ensemble » sends neither. */
+/** The creation fields of a first turn: only what is set, so « Tous les espaces » sends neither. */
 export function creationFields(created: Created): ConversationCreation {
   return {
     ...(created.spaceId && { spaceId: created.spaceId }),

@@ -29,7 +29,7 @@ function useChatGetHeaders() {
 }
 
 /**
- * The space the chat is filtered to: the selected space, none in « Vue d'ensemble » (the chat holds
+ * The space the chat is filtered to: the selected space, none in « Tous les espaces » (the chat holds
  * the mode). `known` once the space listing has answered: before, the mode cannot be told, and a
  * chat page would read the wrong list. `ready` once the filter itself is settled: known, and a
  * space resolved when one is selected.

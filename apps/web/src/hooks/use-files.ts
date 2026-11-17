@@ -42,7 +42,7 @@ export interface FileListFilters {
 
 /**
  * List files (gallery + run tab); scope headers ride in the query key. `spanning`: every space's
- * the reader reaches, each row granted by its own space (a conversation of « Vue d'ensemble »).
+ * the reader reaches, each row granted by its own space (a conversation of « Tous les espaces »).
  */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();

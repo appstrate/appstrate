@@ -43,7 +43,7 @@ function navFor(
     ...orgStore.getInitialState(),
     id: org.id,
   });
-  // « Vue d'ensemble » chosen by this reader in this org, or not.
+  // « Tous les espaces » chosen by this reader in this org, or not.
   const chosen = [
     spyOn(authStore, "getInitialState").mockReturnValue({
       ...authStore.getInitialState(),
@@ -114,7 +114,7 @@ describe("the main navigation", () => {
   });
 });
 
-describe("the navigation in « Vue d'ensemble »", () => {
+describe("the navigation in « Tous les espaces »", () => {
   const space = (id: string, permissions: string[]) => ({
     id,
     access: "member",

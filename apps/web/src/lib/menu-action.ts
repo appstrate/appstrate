@@ -2,6 +2,17 @@
 
 import type { To } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
+import type { spaceTile } from "./identity-tile-props";
+
+/**
+ * The spaces an action naming no space may act in, when the reader chooses (`useSpaceAction`'s
+ * `choose`): its trigger opens a menu of them under `label` (« Créer dans… »).
+ */
+export interface SpaceChoiceMenu {
+  label: string;
+  spaces: readonly Parameters<typeof spaceTile>[0][];
+  onPick: (spaceId: string) => void;
+}
 
 /**
  * One deed of a menu, declared once whichever menu draws it. `onSelect` acts in
@@ -20,6 +31,8 @@ export interface MenuAction {
   destructive?: boolean;
   hidden?: boolean;
   testId?: string;
+  /** The reader chooses the space first: the entry opens a menu of them instead of acting. */
+  inSpaces?: SpaceChoiceMenu;
 }
 
 /** A link's `onClick` when `onSelect` replaces its navigation; none without `onSelect`. */

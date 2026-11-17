@@ -22,7 +22,7 @@ const sessions: SessionSummary[] = [
   { ...base, id: "chs_3", title: "Fresh", space_ids: [] },
 ];
 
-/** The list under `filter` (`null`: « Vue d'ensemble »), seeded with `rows`. */
+/** The list under `filter` (`null`: « Tous les espaces »), seeded with `rows`. */
 function render(filter: string | null, withSeam = true, rows = sessions): string {
   const transport = transportOf(() => ({ "X-Org-Id": "org_1" }), filter);
   const qc = new QueryClient();
@@ -52,7 +52,7 @@ function render(filter: string | null, withSeam = true, rows = sessions): string
 
 describe("the conversation list's space line", () => {
   for (const [mode, filter] of [
-    ["in « Vue d'ensemble »", null],
+    ["in « Tous les espaces »", null],
     ["under a selected space", "spc_a"],
   ] as const) {
     it(`names the spaces every conversation touched ${mode}`, () => {
@@ -61,7 +61,7 @@ describe("the conversation list's space line", () => {
       expect(html).toContain('data-spaces="spc_a,spc_b"');
     });
 
-    it(`says « Vue d'ensemble » for a conversation that touched no space ${mode}`, () => {
+    it(`says « Tous les espaces » for a conversation that touched no space ${mode}`, () => {
       expect(render(filter)).toContain("common:overview.title");
     });
   }

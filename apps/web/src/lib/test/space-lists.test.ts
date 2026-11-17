@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Which spaces admit each list spanning spaces, and the « Vue d'ensemble » mode's rules. */
+/** Which spaces admit each list spanning spaces, and the « Tous les espaces » mode's rules. */
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -12,6 +12,7 @@ const {
   grantedInSomeActingSpace,
   grantsInRowSpace,
   holdsOverview,
+  isListRow,
   isSpaceEnterable,
   listAdmits,
   overviewLapsed,
@@ -110,16 +111,17 @@ describe("holdsOverview", () => {
       "/org-settings/members",
       "/org-settings/billing",
       "/preferences/general",
+      // It names no space: its add menu and « Par espace » name each deed's.
+      "/catalogue",
+      "/catalogue/:type",
     ] as const) {
       expect({ path, holds: holdsOverview(path) }).toEqual({ path, holds: true });
     }
     expect(holdsOverview(undefined)).toBe(true);
   });
 
-  it("is left by any route of one space: the catalogue (it acts « here »), a creation, the workspace settings", () => {
+  it("is left by any route of one space: a creation, the workspace settings", () => {
     for (const path of [
-      "/catalogue",
-      "/catalogue/:type",
       "/integrations/new/mcp",
       "/workspace-settings",
       "/workspace-settings/general",
@@ -127,6 +129,32 @@ describe("holdsOverview", () => {
     ] as const) {
       expect({ path, holds: holdsOverview(path) }).toEqual({ path, holds: false });
     }
+  });
+});
+
+describe("isListRow", () => {
+  it("is a row of a list spanning spaces, never the list, a creation or a page of no space", () => {
+    for (const path of [
+      "/runs",
+      "/agents",
+      "/integrations/new/mcp",
+      "/notifications/:id",
+      "/",
+      "/catalogue/:type",
+    ] as const) {
+      expect({ path, row: isListRow(path) }).toEqual({ path, row: false });
+    }
+    for (const path of [
+      "/agents/:scope/:name",
+      "/agents/:scope/:name/runs/:runId",
+      "/schedules/:id",
+      "/files/:fileId",
+      "/skills/:scope/:name/:version",
+      "/integrations/:scope/:name",
+    ] as const) {
+      expect({ path, row: isListRow(path) }).toEqual({ path, row: true });
+    }
+    expect(isListRow(undefined)).toBe(false);
   });
 });
 
@@ -237,13 +265,13 @@ describe("spacesWhere", () => {
 });
 
 describe("spaceChoice", () => {
-  it("offers nothing without a space, takes the only one, asks between several", () => {
+  it("offers nothing without a space, takes the only one, lets the reader choose between several", () => {
     expect(spaceChoice([])).toEqual({ kind: "none" });
     expect(spaceChoice([space("spc_a", [])])).toEqual({ kind: "one", spaceId: "spc_a" });
     expect(spaceChoice(TWO)).toEqual({ kind: "ask" });
   });
 
-  it("takes the preferred space without asking when it is eligible, and only then", () => {
+  it("takes the preferred space without a choice when it is eligible, and only then", () => {
     expect(spaceChoice(TWO, "spc_b")).toEqual({ kind: "one", spaceId: "spc_b" });
     expect(spaceChoice(TWO, "spc_other")).toEqual({ kind: "ask" });
     expect(spaceChoice([], "spc_a")).toEqual({ kind: "none" });

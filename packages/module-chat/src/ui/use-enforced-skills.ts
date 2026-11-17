@@ -9,7 +9,7 @@ import { actsIn, useChatHost, type ChatTransport } from "./runtime-context.ts";
  * Shared by the picker and the composer's skill chips: what the conversation's origin space imposes
  * on its turns (the selected space for a conversation not yet started). The turn loads them only
  * for an origin the author can still act in, so that is the only origin whose skills are shown:
- * none without an origin (« Vue d'ensemble ») or outside the acting set, and nothing is requested
+ * none without an origin (« Tous les espaces ») or outside the acting set, and nothing is requested
  * then. Default staleness (30 s): a library toggle shows on the next mount past it, without a
  * cross-module invalidation.
  */

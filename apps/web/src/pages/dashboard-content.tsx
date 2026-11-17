@@ -42,7 +42,7 @@ const CODING_AGENT_SETUP_PROMPT = `Fetch and follow the Appstrate coding-agent s
 
 export interface DashboardData {
   firstName: string;
-  /** « Vue d'ensemble »: the rows are every space's, each naming its space. */
+  /** « Tous les espaces »: the rows are every space's, each naming its space. */
   spanning: boolean;
   agents: AgentListItem[];
   runs: EnrichedRun[];
@@ -69,7 +69,7 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 
 /**
  * The greeting: drawn at once, its running count a placeholder until the runs answer. The
- * assistant names no space: its chat door opens as it is (in « Vue d'ensemble » a conversation
+ * assistant names no space: its chat door opens as it is (in « Tous les espaces » a conversation
  * acting across spaces), offered where some space opens the chat.
  */
 export function DashboardHeader({
@@ -245,7 +245,7 @@ function DashboardScheduleRow({
   const linkInSpace = useSpaceLink();
   const nextRunAt = scheduleNextRunAt(schedule);
   return (
-    // A schedule of another space (« Vue d'ensemble ») names it: the detail enters it.
+    // A schedule of another space (« Tous les espaces ») names it: the detail enters it.
     <Link
       to={linkInSpace(scheduleDetailPath(schedule.id), schedule.spaceId)}
       className="hover:bg-muted/50 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors"
@@ -362,8 +362,8 @@ export function DashboardContent(data: DashboardData) {
   const { data: spaces } = useSpaces();
   const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
-  // section answers to the guard of the query that feeds it — in « Vue
-  // d'ensemble », granted in some space (the org route lists those).
+  // section answers to the guard of the query that feeds it — in « Tous les
+  // espaces », granted in some space (the org route lists those).
   const sections = dashboardSections(
     data.spanning
       ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0

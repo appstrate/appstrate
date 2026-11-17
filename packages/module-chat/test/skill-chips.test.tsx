@@ -165,7 +165,7 @@ describe("SkillChips", () => {
     expect(render({ selection: { skillMode: "auto", pinnedSkills: [] } })).toBe("");
   });
 
-  it("shows no imposed skill in « Vue d'ensemble »: no read, no pill, no placeholder", () => {
+  it("shows no imposed skill in « Tous les espaces »: no read, no pill, no placeholder", () => {
     const html = render({ enforced: null, originSpaceId: null });
     expect(html).toContain('data-testid="skills-picker-trigger"');
     expect(html).not.toContain("animate-pulse");

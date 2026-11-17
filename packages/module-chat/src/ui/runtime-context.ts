@@ -45,7 +45,7 @@ export type ChatRequest = (path: string, init?: RequestInit) => Promise<Response
 /**
  * What the chat page reads. A conversation belongs to the organization and its author, so every
  * chat call goes to `/api/orgs/{orgId}/chat/*`; `spaceId` is the conversation list's filter
- * (`?spaceId=`): the space the host is looking at, `null` in « Vue d'ensemble », where the list
+ * (`?spaceId=`): the space the host is looking at, `null` in « Tous les espaces », where the list
  * holds every conversation. It is also the origin of a new conversation, when the chat acts there.
  */
 export interface ChatTransport {
@@ -183,7 +183,7 @@ export interface ChatHost {
   actingSpaceIds: readonly string[];
   /**
    * The host's working space, where an upload lands, `null` when it has none. Distinct from
-   * `ChatTransport.spaceId`, the list filter, which is `null` in « Vue d'ensemble » while the
+   * `ChatTransport.spaceId`, the list filter, which is `null` in « Tous les espaces » while the
    * working space stays the one entered. A limited conversation takes a file only while this is
    * its origin space.
    */

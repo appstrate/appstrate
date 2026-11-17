@@ -155,7 +155,7 @@ export function ComposerTools({
               {sentenceWithNode(t, "composer.limit", spaceNode)}
             </DropdownMenuCheckboxItem>
           ) : (
-            // A turn generating, no origin space (« Vue d'ensemble »), or one the chat cannot act in.
+            // A turn generating, no origin space (« Tous les espaces »), or one the chat cannot act in.
             <DropdownMenuItem disabled data-testid="composer-limit-item">
               <MapPinIcon />
               <span className="flex flex-col">

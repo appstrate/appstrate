@@ -11,7 +11,7 @@ import { spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
- * permissions, except a route spanning spaces: the chat in every mode, a list in « Vue d'ensemble »,
+ * permissions, except a route spanning spaces: the chat in every mode, a list in « Tous les espaces »,
  * which open where some space admits them. A route the module does not load stays absent.
  */
 export function useRouteVerdict() {

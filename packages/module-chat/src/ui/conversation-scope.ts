@@ -13,7 +13,7 @@ import { actsIn, useChatHost } from "./runtime-context.ts";
 export interface ConversationScope {
   /**
    * The conversation's origin space: the stored one for an existing conversation, the selected
-   * space (when the chat acts there) for one not yet started. `null`: none (« Vue d'ensemble »).
+   * space (when the chat acts there) for one not yet started. `null`: none (« Tous les espaces »).
    */
   originSpaceId: string | null;
   /** Limited to the origin space: its tools take no `space_id` and act there alone. */
@@ -56,7 +56,7 @@ export function limitAvailability(
   if (scope.generating) return { available: false, reason: "generating" };
   if (scope.restricted) return { available: true };
   if (!scope.originSpaceId) {
-    // No origin: « Vue d'ensemble », or a working space the chat does not act in (the origin is
+    // No origin: « Tous les espaces », or a working space the chat does not act in (the origin is
     // only ever a space it acts in).
     const outside = !!workingSpaceId && !actsIn(actingSpaceIds, workingSpaceId);
     return { available: false, reason: outside ? "outside" : "no-space" };

@@ -22,7 +22,7 @@ type RouteAccess = {
   /** Absent in a personal space: the server refuses its writes there (409 `personal_space_*`). */
   readonly teamSpaceOnly?: true;
   /**
-   * In « Vue d'ensemble » the route serves the organization, not one space (the chat: sessions
+   * In « Tous les espaces » the route serves the organization, not one space (the chat: sessions
    * acting across spaces): rendering it keeps the mode, as a list spanning spaces does.
    */
   readonly spansSpaces?: true;

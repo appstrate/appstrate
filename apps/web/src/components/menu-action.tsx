@@ -4,8 +4,9 @@ import { cn } from "@appstrate/ui/cn";
 import { Link } from "react-router-dom";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { replacingNavigation, type MenuAction } from "../lib/menu-action";
+import { SpaceChoiceSubmenu } from "./space-choice-menu";
 
-/** A deed as a menu entry. A page's deed is marked `data-page-action` with its id. */
+/** A deed as a menu entry (a sub-menu of spaces when it asks for one, `inSpaces`). A page's deed is marked `data-page-action` with its id. */
 export function MenuActionItem({
   action,
   pageAction = false,
@@ -24,6 +25,10 @@ export function MenuActionItem({
     ...(pageAction ? { "data-page-action": action.id } : {}),
     ...(action.testId ? { "data-testid": action.testId } : {}),
   };
+  // The reader chooses the space first: the entry opens the menu of them.
+  if (action.inSpaces && !action.disabled) {
+    return <SpaceChoiceSubmenu choice={action.inSpaces} trigger={body} marks={marks} />;
+  }
   const linked = action.to !== undefined || action.href !== undefined;
   return (
     <DropdownMenuItem

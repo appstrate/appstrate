@@ -42,7 +42,7 @@ describe("what the first message carries", () => {
     });
   });
 
-  it("is nothing from « Vue d'ensemble », whatever was toggled", () => {
+  it("is nothing from « Tous les espaces », whatever was toggled", () => {
     expect(creationFields({ spaceId: null, restricted: false })).toEqual({});
     expect(creationFields({ spaceId: null, restricted: true })).toEqual({});
   });
@@ -59,7 +59,7 @@ describe("when the limit is on offer", () => {
     });
   });
 
-  it("is not in « Vue d'ensemble » or for a conversation without an origin", () => {
+  it("is not in « Tous les espaces » or for a conversation without an origin", () => {
     expect(
       limitAvailability({ originSpaceId: null, restricted: false, generating: false }, acting),
     ).toEqual({

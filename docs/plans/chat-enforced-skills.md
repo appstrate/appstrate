@@ -195,7 +195,7 @@ failure answers the same 503.
 ## The origin space, and the spaces a conversation acts in
 
 A conversation (`/api/orgs/{orgId}/chat`, #1886) has a nullable **origin space** (`chat_sessions.space_id`): the
-space selected when it was created, NULL from « Vue d'ensemble ». It is not an owner, but it owns the
+space selected when it was created, NULL from « Tous les espaces ». It is not an owner, but it owns the
 enforced skills:
 
 - **Enforced skills** are the origin space's (`deps.loadEnforcedSkills(orgId,

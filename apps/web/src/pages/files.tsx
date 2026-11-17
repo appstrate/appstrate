@@ -3,7 +3,7 @@
 /**
  * Files gallery. Paginated (keyset "load more") list of every file
  * visible to the caller in the current space, or in every space it reaches
- * in « Vue d'ensemble », with a purpose filter. Visibility is the API's
+ * in « Tous les espaces », with a purpose filter. Visibility is the API's
  * (container-inherited ACL): members see the space's files, end-users see only
  * their own.
  */

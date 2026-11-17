@@ -147,6 +147,7 @@ export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
 
   return (
     <FormModal
+      inSpace
       onClose={onClose}
       onSubmit={(e) => {
         e.preventDefault();
