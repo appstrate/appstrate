@@ -95,12 +95,16 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
 
 const QUEUE_NAME = "schedules";
 
-let scheduleQueue: JobQueue<ScheduleJobData> | null = null;
+// The promise is memoised, not the resolved queue: the API serves schedule writes while
+// `initScheduleWorker` is still starting, and two first callers must share one queue (a second
+// in-memory queue would hold its own schedulers; a second BullMQ one would never be shut down).
+let scheduleQueue: Promise<JobQueue<ScheduleJobData>> | null = null;
 
-async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
-  if (!scheduleQueue) {
-    scheduleQueue = await createQueue<ScheduleJobData>(QUEUE_NAME);
-  }
+function getQueue(): Promise<JobQueue<ScheduleJobData>> {
+  scheduleQueue ??= createQueue<ScheduleJobData>(QUEUE_NAME).catch((err) => {
+    scheduleQueue = null;
+    throw err;
+  });
   return scheduleQueue;
 }
 
@@ -379,8 +383,9 @@ export async function initScheduleWorker(): Promise<void> {
 
 /** Shutdown schedule worker and queue. */
 export async function shutdownScheduleWorker(): Promise<void> {
-  await scheduleQueue?.shutdown();
+  const queue = await scheduleQueue?.catch(() => null);
   scheduleQueue = null;
+  await queue?.shutdown();
   logger.info("Schedule worker stopped");
 }
 
