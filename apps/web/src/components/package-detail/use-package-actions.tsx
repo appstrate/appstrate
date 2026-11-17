@@ -43,6 +43,7 @@ import { menuSections, type PackageMenuEntry } from "./package-menu";
 import {
   deedEntry,
   deedOfAction,
+  deedInSpaces,
   spaceDeedLabels,
   usePlacementDeeds,
   type SpaceDeed,
@@ -57,6 +58,7 @@ type PackageActionsDetail = Pick<
   | "home_writable"
   | "home_deletable"
   | "home_shareable"
+  | "read_space_ids"
   | "space_ids"
 > &
   Partial<Pick<AgentDetail, "running_runs" | "version_count">> &
@@ -116,7 +118,7 @@ export function usePackageActions({
   const { on: overview } = useOverviewMode();
   const deletePkg = useDeletePackage(type);
   const [movingHome, setMovingHome] = useState(false);
-  const [forking, setForking] = useState(false);
+  const [forkSpaceId, setForkSpaceId] = useState<string | null>(null);
   // The space each act targets, kept while its dialog fades out.
   const [removing, setRemoving] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
@@ -150,11 +152,14 @@ export function usePackageActions({
   const spaceIds = detail?.space_ids;
   const published = (detail?.version_count ?? 0) > 0;
   // Forking writes a NEW package in the space it is made in: one where the reader writes the type.
-  const forkAction = useSpaceAction({ permission: packagePermission(type, "write") });
+  const forkAction = useSpacesFor({ permission: packagePermission(type, "write") });
   const showFork = forkAction.offered && !isOwned;
   // The export needs `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks,
   // in a space the package is active in; the file is the same from any of them.
-  const readers = useSpacesFor({ permission: packagePermission(type, "read") }, spaceIds);
+  const readers = useSpacesFor(
+    { permission: packagePermission(type, "read") },
+    detail?.read_space_ids,
+  );
   const exportFrom = readers.anyOf;
   const canExport = readers.offered && !!downloadVersion && !!onDownload;
   // A run resolves an integration's published version in a space where it is active: the agent
@@ -226,8 +231,11 @@ export function usePackageActions({
       icon: GitFork,
       label: t("fork.button"),
       ...deedEntry(
-        deedOfAction(forkAction, spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"), () =>
-          setForking(true),
+        deedInSpaces(
+          overview,
+          forkAction.targets,
+          spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"),
+          setForkSpaceId,
         ),
       ),
       hidden: !showFork,
@@ -350,9 +358,10 @@ export function usePackageActions({
           }}
         />
       )}
-      {forking && showFork && (
+      {forkSpaceId && showFork && (
         <ForkPackageModal
-          onClose={() => setForking(false)}
+          spaceId={forkSpaceId}
+          onClose={() => setForkSpaceId(null)}
           packageId={packageId}
           defaultName={splitPackageRef(packageId).name}
           type={type}

@@ -10,7 +10,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { detailElsewhere, isUnreadableHere, nextSpaceToTry, placedSpaceIds } =
+const { detailElsewhere, isUnreadableHere, nextSpaceToTry } =
   await import("../detail-elsewhere.ts");
 const { ApiError } = await import("../../api/client.ts");
 
@@ -79,18 +79,6 @@ describe("nextSpaceToTry", () => {
     expect(nextSpaceToTry(listed, "spc_1", all)).toBe("spc_2");
     expect(nextSpaceToTry(listed, "spc_2", all)).toBe("spc_3");
     expect(nextSpaceToTry(listed, "spc_3", all)).toBeUndefined();
-  });
-});
-
-describe("placedSpaceIds", () => {
-  it("lists the active placements first, then the inactive ones, never `none`", () => {
-    expect(
-      placedSpaceIds([
-        { space_id: "spc_off", state: "inactive" },
-        { space_id: "spc_none", state: "none" },
-        { space_id: "spc_on", state: "active" },
-      ]),
-    ).toEqual(["spc_on", "spc_off"]);
   });
 });
 

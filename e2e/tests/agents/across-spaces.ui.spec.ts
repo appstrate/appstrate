@@ -60,6 +60,9 @@ test("in « Tous les espaces », « Lancer » asks the space and launches there,
     const detailReads = recordRequests(page, "GET", detailPath);
     const launches = recordRequests(page, "POST", launchPath);
 
+    const loaded = page.waitForResponse(
+      (response) => response.ok() && pathOf(response.request()) === detailPath,
+    );
     await page.goto(`/agents/${scope}/${name}`);
     // It reopens in a space that holds it (`?enterSpace=`), then drops the parameter.
     await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}$`));
@@ -81,9 +84,8 @@ test("in « Tous les espaces », « Lancer » asks the space and launches there,
 
     // The redirect entered one of the two; choose the OTHER, so the page must read it there
     // before entering it.
-    const entered = await page.evaluate(
-      () => Object.values(JSON.parse(localStorage.getItem("appstrate_last_space") ?? "{}"))[0],
-    );
+    const entered = spaceOf((await loaded).request());
+    expect([alpha.id, beta.id]).toContain(entered);
     const target = entered === beta.id ? alpha : beta;
     const readsBefore = detailReads.length;
     const launched = page.waitForRequest(
@@ -136,5 +138,36 @@ test("with a space selected, « Lancer » launches there at once, asking nothing
     await expect(page.getByRole("menu")).toHaveCount(0);
   } finally {
     await context.close();
+  }
+});
+
+test("a disabled agent opens from its direct URL with its administrator's overview", async ({
+  browser,
+  browserCtx,
+  apiClient,
+  orgOnlyClient,
+}) => {
+  const home = await createSpace(orgOnlyClient, "Agent home");
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = "disabled-agent";
+  await createAgent(apiClient.withSpace(home.id), scope, name);
+  expect((await orgOnlyClient.delete(`/spaces/${home.id}/packages/${scope}/${name}`)).ok()).toBe(
+    true,
+  );
+  const ctx = await createOverviewContext(
+    browser,
+    browserCtx.auth,
+    browserCtx.org.orgId,
+    browserCtx.org.defaultSpaceId,
+  );
+  try {
+    const page = await ctx.newPage();
+    await page.goto(`/agents/${scope}/${name}#overview`);
+    await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+    await page.getByRole("tab", { name: "Vue d’ensemble" }).click();
+    await expect(page.getByText("Dernier run", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/Votre rôle permet de lancer cet agent/)).toHaveCount(0);
+  } finally {
+    await ctx.close();
   }
 });

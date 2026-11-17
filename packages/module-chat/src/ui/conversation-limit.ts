@@ -195,8 +195,7 @@ export function useConversationLimit({
   const [override, setOverride] = useState<Limit>();
 
   const exists = persistedAtMount || created !== null;
-  const current: Limit = override ??
-    (persistedAtMount ? stored : created) ?? { spaceId: null, restricted: false };
+  const current: Limit = override ?? stored ?? created ?? { spaceId: null, restricted: false };
   const newOrigin = draftOrigin(draft, selectedSpaceId);
   const originSpaceId = exists ? current.spaceId : newOrigin;
   const draftLimited = draft.restricted && newOrigin !== null;
@@ -226,8 +225,12 @@ export function useConversationLimit({
       }),
     // The server's answer is now the stored value: drop the local override so a later change of
     // the stored limit (another tab, a refetch) is not masked by it.
-    onSuccess: (_data, next) => {
+    onSettled: () => {
       setOverride(undefined);
+      void queryClient.invalidateQueries({ queryKey: sessionQueryKey(transport!.orgId, id) });
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+    },
+    onSuccess: (_data, next) => {
       setCreated((prev) => (prev ? next : prev));
     },
   });

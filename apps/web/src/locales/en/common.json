@@ -38,6 +38,7 @@
   "spaceChoice.schedule": "Schedule in…",
   "spaceChoice.scheduleIn": "Schedule in {{space}}",
   "spaceChoice.create": "Create in…",
+  "spaceChoice.importIn": "Import into {{space}}",
   "spaceChoice.import": "Import into…",
   "spaceChoice.run": "Run in…",
   "spaceChoice.runOptions": "Run with options in…",

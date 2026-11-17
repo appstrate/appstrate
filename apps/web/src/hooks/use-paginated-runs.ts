@@ -142,8 +142,7 @@ const IN_FLIGHT: RunStatus[] = ["pending", "running"];
 /**
  * An agent's runs in flight (`pending`, `running`) in every space the reader reaches: the count
  * the overview shows and the verdicts of « Supprimer » and « Supprimer les runs » in « Tous les
- * espaces », from one query. `busyIn(spaceId)`: a run is in flight there, or might be (the page
- * not loaded, or not holding them all).
+ * espaces », from one query. `busyIn(spaceId)`: a run is in flight there, or the first page is still loading. The delete route checks the space atomically.
  */
 export function useAgentRunsInFlightAcross(packageId: string, { enabled }: { enabled: boolean }) {
   const query = useFirstRunsPage({
@@ -157,8 +156,7 @@ export function useAgentRunsInFlightAcross(packageId: string, { enabled }: { ena
   return {
     ...query,
     total: page?.total,
-    busyIn: (spaceId: string) =>
-      !page || page.hasMore || page.data.some((run) => run.spaceId === spaceId),
+    busyIn: (spaceId: string) => !page || page.data.some((run) => run.spaceId === spaceId),
   };
 }
 

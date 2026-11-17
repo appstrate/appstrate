@@ -43,7 +43,7 @@ export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
 export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
-import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
+import { useOrgOnlyScope, useOrgScope, useSpaceReadScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
@@ -184,8 +184,8 @@ export function useIntegrationsById(
   };
 }
 
-export function useIntegrationDetail(packageId: string | undefined) {
-  const scope = useIntegrationsReadScope();
+export function useIntegrationDetail(packageId: string | undefined, spaceId?: string) {
+  const scope = useSpaceReadScope("integrations:read", spaceId);
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}",

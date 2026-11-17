@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback } from "react";
-import { usePermissions } from "./use-permissions";
+import { usePermissions, useRowSpaceGrants } from "./use-permissions";
 import { useAppConfig } from "./use-app-config";
 import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
-import { useOrg } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { grantsInRowSpace, spanningRouteVerdict } from "../lib/space-lists";
+import { spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -47,27 +45,24 @@ export function useCanReach(): (target: string) => boolean {
 
 /**
  * {@link useCanReach} judged in a row's space rather than the working one: what a link of a list
- * spanning spaces opens once it has entered the row's space (`?enterSpace=`). A row of no space,
- * or of the working space, is {@link useCanReach}'s.
+ * spanning spaces opens once it has entered the row's space (`?enterSpace=`). A row of no space
+ * is judged by {@link useCanReach}.
  */
 export function useCanReachInSpace(): (target: string, spaceId: string | undefined) => boolean {
   const canReach = useCanReach();
-  const { can } = usePermissions();
+  const grants = useRowSpaceGrants();
   const { features } = useAppConfig();
-  const workingSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   return useCallback(
     (target: string, spaceId: string | undefined) => {
       const route = routeOf(target);
-      if (!route || !spaceId || spaceId === workingSpaceId) return canReach(target);
+      if (!route || !spaceId) return canReach(target);
       const space = spaces?.find((s) => s.id === spaceId);
       if (!space) return false;
-      const gate = (permission: string) =>
-        grantsInRowSpace(spaceId, workingSpaceId, can, spaces, orgPermissions, permission);
+      const gate = (permission: string) => grants(spaceId, permission);
       return routeVerdict(route, gate, features, space.personal) === "granted";
     },
-    [canReach, can, features, workingSpaceId, spaces, orgPermissions],
+    [canReach, grants, features, spaces],
   );
 }
 

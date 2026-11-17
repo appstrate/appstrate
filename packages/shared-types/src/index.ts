@@ -750,6 +750,8 @@ export interface AgentDetail {
    * the order of the space listing. Empty when it is active in none.
    */
   space_ids: string[];
+  /** Readable placements, including those switched off. */
+  read_space_ids: string[];
 }
 
 // --- Organization Package Types ---
@@ -852,6 +854,7 @@ export interface OrgPackageItemDetail extends Omit<
    * released definition.
    */
   definition: "draft" | "published";
+  read_space_ids: string[];
   /**
    * Present but nullable — the `draft_content` column is nullable, and a
    * published projection reads the archive entry this type is authored around.

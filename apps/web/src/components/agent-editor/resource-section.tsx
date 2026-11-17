@@ -43,6 +43,9 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
+import { rowSpace } from "../../lib/across-spaces";
+import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { deedEntry, deedInSpaces, spaceDeedLabels } from "../space-deed";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useSpacesFor } from "../../hooks/use-space-action";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -84,7 +87,18 @@ export function ResourceSection({
   const catalogUnreadable = t(
     spanning ? "editor.catalogUnreadableAcross" : "editor.catalogUnreadable",
   );
-  const [importing, setImporting] = useState(false);
+  const workingSpaceId = useCurrentSpaceId();
+  const linkInSpace = useSpaceLink();
+  const readSpace = (item: CatalogItem | undefined) =>
+    spanning ? rowSpace(item?.space_ids, workingSpaceId) : undefined;
+  const writers = useSpacesFor({ permission: packagePermission(type, "write") });
+  const [importSpaceId, setImportSpaceId] = useState<string | null>(null);
+  const importDeed = deedInSpaces(
+    spanning,
+    writers.targets,
+    spaceDeedLabels(t, "spaceChoice.import", "spaceChoice.importIn"),
+    setImportSpaceId,
+  );
   const [picking, setPicking] = useState(false);
   const [toolsId, setToolsId] = useState<string | null>(null);
   const toolsEntry = selectedEntries.find((entry) => entry.id === toolsId);
@@ -161,7 +175,7 @@ export function ResourceSection({
               id: "import",
               label: t("common:nav.import"),
               icon: Upload,
-              onSelect: () => setImporting(true),
+              ...deedEntry(importDeed),
             },
           ]}
         />
@@ -253,6 +267,7 @@ export function ResourceSection({
                         <PackageVersionSelect
                           type={type}
                           packageId={entry.id}
+                          spaceId={readSpace(item)}
                           value={entry.version ?? "*"}
                           onChange={(v) => updateVersion(entry.id, v)}
                           toOption={(version) => ({
@@ -292,7 +307,7 @@ export function ResourceSection({
                       >
                         <DropdownMenuItem asChild>
                           <Link
-                            to={packageDetailPath(type, entry.id)}
+                            to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -310,8 +325,13 @@ export function ResourceSection({
         </div>
       )}
 
-      {importing && (
-        <ImportModal type={type} onClose={() => setImporting(false)} onImported={addImported} />
+      {importSpaceId && (
+        <ImportModal
+          spaceId={importSpaceId}
+          type={type}
+          onClose={() => setImportSpaceId(null)}
+          onImported={addImported}
+        />
       )}
       {picking && (
         <ResourcePicker
@@ -329,6 +349,7 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
+          spaceId={readSpace(byId.get(toolsEntry.id))}
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);
@@ -343,11 +364,13 @@ export function ResourceSection({
 /** An integration's allowed tools, edited on a copy and applied to the draft. */
 function ToolsModal({
   name,
+  spaceId,
   entry,
   onClose,
   onApply,
 }: {
   name: string;
+  spaceId?: string;
   entry: ResourceEntry;
   onClose: () => void;
   onApply: (entry: ResourceEntry) => void;
@@ -366,7 +389,12 @@ function ToolsModal({
       className="sm:max-w-2xl"
     >
       <div className="max-h-[60dvh] overflow-y-auto">
-        <IntegrationToolPicker packageId={entry.id} entry={draft} onChange={setDraft} />
+        <IntegrationToolPicker
+          spaceId={spaceId}
+          packageId={entry.id}
+          entry={draft}
+          onChange={setDraft}
+        />
       </div>
     </FormModal>
   );

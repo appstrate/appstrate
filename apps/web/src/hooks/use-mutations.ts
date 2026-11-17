@@ -186,9 +186,11 @@ export function useImportPackage(meta?: MutationMeta) {
       file,
       force,
       type,
+      spaceId,
     }: {
       file: File;
       force?: boolean;
+      spaceId?: string;
       /** The type imported for: an archive of another type is refused before anything is written. */
       type?: PackageType;
     }): Promise<ImportedPackage> => {
@@ -199,7 +201,7 @@ export function useImportPackage(meta?: MutationMeta) {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
-          params: { query: { type } },
+          params: { header: { "X-Space-Id": spaceId }, query: { type } },
           // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
@@ -212,7 +214,7 @@ export function useImportPackage(meta?: MutationMeta) {
         };
       }
       const { data } = await client.POST("/api/packages/import", {
-        params: { query: { force: force || undefined, type } },
+        params: { header: { "X-Space-Id": spaceId }, query: { force: force || undefined, type } },
         // Multipart gap — see above.
         body: { file },
         bodySerializer: () => fd,
@@ -227,9 +229,17 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async ({ url, type }: { url: string; type?: PackageType }) => {
+    mutationFn: async ({
+      url,
+      type,
+      spaceId,
+    }: {
+      url: string;
+      type?: PackageType;
+      spaceId?: string;
+    }) => {
       const { data } = await client.POST("/api/packages/import-github", {
-        params: { query: { type } },
+        params: { header: { "X-Space-Id": spaceId }, query: { type } },
         body: { url },
       });
       return data!;

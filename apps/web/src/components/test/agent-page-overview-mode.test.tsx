@@ -95,6 +95,7 @@ function detail(over: Partial<AgentDetail> = {}): AgentDetail {
     // Switched off in the hidden working space, running in Studio and Coffre.
     active: false,
     space_ids: ["spc_b", "spc_c"],
+    read_space_ids: ["spc_b", "spc_c"],
     ...over,
   };
 }
@@ -305,14 +306,21 @@ const detailKey = (spaceId: string) =>
   packageDetailQueryOptions("agent", { orgId: "org_1", spaceId }, PACKAGE_ID).queryKey;
 
 /** The agent's runs across spaces: its latest one and those in flight, as the overview reads them. */
-function seedRuns(qc: QueryClient, { latest, inFlight }: { latest: string[]; inFlight: string[] }) {
+function seedRuns(
+  qc: QueryClient,
+  {
+    latest,
+    inFlight,
+    hasMore = false,
+  }: { latest: string[]; inFlight: string[]; hasMore?: boolean },
+) {
   const page = (spaceIds: string[]) => ({
     pages: [
       {
         object: "list",
         data: spaceIds.map((spaceId, i) => ({ id: `run_${i}`, status: "running", spaceId })),
         total: spaceIds.length,
-        hasMore: false,
+        hasMore,
       },
     ],
     pageParams: [undefined],
@@ -375,6 +383,14 @@ describe("the agent's deeds in the mode", () => {
     const html = probe(true, "clearRuns", (qc) =>
       seedRuns(qc, { latest: ["spc_c"], inFlight: ["spc_c"] }),
     );
+    expect(html).toContain("<p>true|Supprimer les runs dans Studio||</p>");
+  });
+
+  it("can clear a switched-off placement when another space fills the first page of running runs", () => {
+    const html = probe(true, "clearRuns", (qc) => {
+      qc.setQueryData(detailKey("spc_a"), detail({ space_ids: ["spc_c"] }));
+      seedRuns(qc, { latest: ["spc_b"], inFlight: Array(25).fill("spc_c"), hasMore: true });
+    });
     expect(html).toContain("<p>true|Supprimer les runs dans Studio||</p>");
   });
 

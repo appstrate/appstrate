@@ -71,6 +71,7 @@ const DETAIL: Versioned<AgentDetail> = {
   effective_timeout_seconds: 300,
   active: true,
   space_ids: ["spc_home"],
+  read_space_ids: ["spc_home"],
   etag: null,
 };
 

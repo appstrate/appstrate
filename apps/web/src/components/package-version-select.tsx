@@ -36,6 +36,7 @@ const exactVersion = (version: string): SelectOption => ({ value: version, label
 export function PackageVersionSelect({
   type,
   packageId,
+  spaceId,
   value,
   onChange,
   leadingOptions = NO_LEADING_OPTIONS,
@@ -46,6 +47,7 @@ export function PackageVersionSelect({
 }: {
   type: PackageType;
   packageId: string;
+  spaceId?: string;
   value: string;
   onChange: (next: string) => void;
   leadingOptions?: VersionLeadingOption[];
@@ -56,7 +58,7 @@ export function PackageVersionSelect({
   className?: string;
   "aria-label"?: string;
 }) {
-  const { data: versions, isLoading } = usePackageVersions(type, packageId);
+  const { data: versions, isLoading } = usePackageVersions(type, packageId, spaceId);
   if (isLoading) return <Skeleton className={cn("h-9 w-full", className)} />;
   const options = [
     ...leadingOptions,

@@ -26,6 +26,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import type { PackageWriteGuard } from "../package-locks.ts";
 import { activeInSpaces, activeSpaceIds } from "../space-packages.ts";
 
 export class PackageAlreadyExistsError extends Error {
@@ -411,6 +412,7 @@ export async function deleteOrgItem(
   orgId: string,
   itemId: string,
   cfg: PackageTypeConfig,
+  beforeWrite?: PackageWriteGuard,
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -422,6 +424,7 @@ export async function deleteOrgItem(
   }
 
   await db.transaction(async (tx) => {
+    await beforeWrite?.(tx);
     // Enumerate BEFORE the delete: `ON DELETE CASCADE` on `package_versions`
     // makes every published artifact's key unrecoverable the moment the
     // `packages` row goes. A bare delete followed by a best-effort

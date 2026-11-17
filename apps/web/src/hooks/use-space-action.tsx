@@ -10,7 +10,7 @@ import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import type { SpaceChoiceMenu } from "../lib/menu-action";
-import { grantsInRowSpace, spaceChoice, spacesWhere, type SpaceGate } from "../lib/space-lists";
+import { spaceChoice, spacesWhere, type SpaceGate } from "../lib/space-lists";
 import { useAppConfig } from "./use-app-config";
 import { useCanReach } from "./use-can-reach";
 import { useCurrentSpaceId, useSpaceSwitcher } from "./use-current-space";
@@ -23,19 +23,6 @@ import { useSpaces } from "./use-spaces";
 
 /** What an action needs of a space: a permission, or a route that opens there. */
 type SpaceNeed = { permission: string } | { route: RoutePath };
-
-/** Whether `permission` holds in a row's space (`spaceId`; the working space's when absent). */
-export function useRowSpaceGrants(): (spaceId: string | undefined, permission: string) => boolean {
-  const { can } = usePermissions();
-  const workingSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
-  return useCallback(
-    (spaceId, permission) =>
-      grantsInRowSpace(spaceId, workingSpaceId, can, spaces, orgPermissions, permission),
-    [can, workingSpaceId, spaces, orgPermissions],
-  );
-}
 
 /**
  * Performs `act` in `spaceId`: at once in the working space, else after entering it as the
@@ -86,7 +73,9 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
       ? can(need.permission)
       : canReach(need.route);
   const anyOf = (eligible.find((space) => space.id === workingSpaceId) ?? eligible[0])?.id;
-  return { on, eligible, offered, anyOf };
+  const working = spaces?.find((space) => space.id === workingSpaceId);
+  const targets = on ? eligible : offered && working ? [working] : [];
+  return { on, eligible, offered, anyOf, targets };
 }
 
 /** How {@link useSpaceAction} picks and enters a space. */

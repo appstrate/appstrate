@@ -4168,7 +4168,7 @@ export interface paths {
         };
         /**
          * Locate a package: its type, its home and the spaces you read it from
-         * @description Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.
+         * @description Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's sight permission (agents:read or agents:run for an agent) and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.
          */
         get: operations["getPackageHome"];
         /**
@@ -5900,6 +5900,8 @@ export interface components {
             effective_timeout_seconds: number;
             /** @description Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted. */
             active: boolean;
+            /** @description The reached spaces where the caller can open this package detail, including inactive placements. */
+            read_space_ids: string[];
             /** @description The spaces the caller reaches where the agent is ACTIVE (spc_ prefix), as the agent's row of `GET /api/orgs/{orgId}/agents` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted. */
             space_ids: string[];
         };
@@ -6845,6 +6847,8 @@ export interface components {
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
+            /** @description The reached spaces where the caller can open this package detail, including inactive placements. */
+            read_space_ids: string[];
             /** @description The spaces the caller reaches where the package is ACTIVE (spc_ prefix), as its row of `GET /api/orgs/{orgId}/packages/{skills|integrations}` names them: its home first when it is one of them, then in the order of `GET /api/spaces`. Empty when it is active in none of them, the space read from included. Always emitted. */
             space_ids: string[];
             agents: {

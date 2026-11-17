@@ -22,6 +22,7 @@
  */
 
 import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
   chatMessages,
@@ -127,23 +128,6 @@ export async function touchSessionSpace(
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
 
-/** Levels of `cause` walked: Drizzle wraps the driver error, whose own `code` is the SQLSTATE. */
-const MAX_CAUSE_DEPTH = 8;
-
-/**
- * A write refused by a foreign key: PostgreSQL `23503`, or `23001` (PGlite surfaces an
- * `ON DELETE RESTRICT` with it), on the error or down its `cause` chain.
- */
-export function isForeignKeyViolation(err: unknown): boolean {
-  let current: unknown = err;
-  for (let depth = 0; depth < MAX_CAUSE_DEPTH && typeof current === "object" && current; depth++) {
-    const code = (current as { code?: unknown }).code;
-    if (code === "23503" || code === "23001") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
 /**
  * Runs a write that sets a conversation's origin space, checked in the acting set before it:
  * the space deleted in between refuses the write on its foreign key, answered as the same 400
@@ -153,7 +137,7 @@ export async function writingOriginSpace<T>(write: () => Promise<T>): Promise<T>
   try {
     return await write();
   } catch (error) {
-    if (!isForeignKeyViolation(error)) throw error;
+    if (!isForeignKeyViolation(error, "chat_sessions_space_id_org_id_fk")) throw error;
     throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
   }
 }

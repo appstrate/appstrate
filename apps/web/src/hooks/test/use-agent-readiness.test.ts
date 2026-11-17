@@ -84,6 +84,7 @@ function agent(over: Partial<AgentDetail> = {}): AgentDetail {
     effective_timeout_seconds: 300,
     active: true,
     space_ids: ["spc_1"],
+    read_space_ids: ["spc_1"],
     ...over,
   };
 }

@@ -13,19 +13,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { $api } from "../api/client";
-import { useCatalogueLibrary } from "../hooks/use-library";
+import { splitPackageRef } from "../lib/package-paths";
+import { useOrgScope } from "../hooks/use-org-scope";
 import { fetchSchedules } from "../hooks/use-schedules";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaces } from "../hooks/use-spaces";
 import { ACROSS_SPACES, scheduleKeys } from "../lib/query-keys";
-import {
-  detailElsewhere,
-  isUnreadableHere,
-  placedSpaceIds,
-  type ElsewhereRow,
-} from "../lib/detail-elsewhere";
+import { detailElsewhere, isUnreadableHere, type ElsewhereRow } from "../lib/detail-elsewhere";
 import { isSpaceEnterable } from "../lib/space-lists";
 import { ResourceErrorState } from "./page-states";
 
@@ -35,6 +31,8 @@ interface UnreadableDetailProps {
   kind: DetailKind;
   id: string;
   error: unknown;
+  /** A version needs full content access; agents:run grants only the live summary. */
+  version?: boolean;
   /** Drawn while the read across spaces answers: the page's own skeleton. */
   pending: ReactNode;
   /** The hint out of the mode (the page's own wording); in it, the hint naming no space. */
@@ -63,18 +61,34 @@ export function UnreadableDetail(props: UnreadableDetailProps) {
   return <PackageElsewhere {...props} type={props.kind} />;
 }
 
-/**
- * A package, from the library: every placement the reader reads, the inactive ones included (the
- * agent and package indexes list the active set only).
- */
+/** The home lookup shares the detail's sight and placement rules, including inactive homes. */
 function PackageElsewhere(
   props: UnreadableDetailProps & { type: "agent" | "skill" | "integration" },
 ) {
-  const { data, isError } = useCatalogueLibrary();
-  const rows = data?.packages[props.type].map((pkg) => ({
-    id: pkg.id,
-    spaceIds: placedSpaceIds(pkg.placements),
-  }));
+  const scope = useOrgScope();
+  const { data: spaces } = useSpaces();
+  const { data, isError } = $api.useQuery(
+    "get",
+    "/api/packages/{scope}/{name}/home",
+    {
+      params: { path: splitPackageRef(props.id), header: scope.header },
+    },
+    { enabled: scope.enabled },
+  );
+  const rows =
+    data &&
+    (data.type === props.type
+      ? [
+          {
+            id: props.id,
+            spaceIds: data.read_space_ids.filter(
+              (id) =>
+                !props.version ||
+                spaces?.some((s) => s.id === id && s.permissions.includes(`${props.type}s:read`)),
+            ),
+          },
+        ]
+      : []);
   return <Elsewhere {...props} found={{ rows, failed: isError }} />;
 }
 

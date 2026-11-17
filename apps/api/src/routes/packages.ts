@@ -24,7 +24,7 @@ import {
   activatePackage,
   activatePackageWithin,
   assertHasPublishedVersion,
-  listActiveSpaceIdsOf,
+  packageDetailSpaces,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
@@ -107,7 +107,8 @@ import {
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../lib/view-as.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
-import { getRunningRunsForPackage } from "../services/state/runs.ts";
+import type { PackageWriteGuard } from "../services/package-locks.ts";
+import { lockIdleAgent } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
@@ -511,8 +512,6 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
   path: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T];
   /** Storage entry for the content field: primary text or the portable manifest. */
   storageFileName: string;
-  /** If true, version create/restore require no running runs (agents). */
-  requireMutableForVersionOps?: boolean;
   /**
    * If true, this type's content file is mandatory: create refuses a body
    * without a non-blank `content` (through
@@ -545,7 +544,6 @@ const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
     path: "agents",
     storageFileName: "prompt.md",
     requireContent: true,
-    requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
@@ -795,14 +793,14 @@ async function buildPackageDetailDto(
   if (!item) return null;
 
   const read = packagePermission(rcfg.cfg.type, "read");
-  const [spec, spaceIds] = await Promise.all([
+  const [spec, packageSpaces] = await Promise.all([
     resolveFileExplorerVersion(
       c,
       { id: item.id, source: item.source },
       opts.version?.trim() || undefined,
     ),
     // The spaces the org index of this type would list it in for this caller.
-    listActiveSpaceIdsOf(
+    packageDetailSpaces(
       orgId,
       item.id,
       rcfg.cfg.type,
@@ -833,7 +831,7 @@ async function buildPackageDetailDto(
     definition,
     ...homeWireForCaller({ type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
     // Every space the caller reaches where the package is active, as its index row's `space_ids`.
-    space_ids: spaceIds,
+    ...packageSpaces,
     version_count: versionCount,
     // Authoring metadata, never projected: it compares the DRAFT against the
     // latest version, and that answer does not change with the definition the
@@ -1064,34 +1062,16 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
   };
 }
 
-/**
- * Reject (409) when an agent package has runs in progress. Removing the package or one of its
- * versions takes it from every space it is placed in, so `"org"` counts the runs of every space;
- * creating or restoring a version leaves the version a run froze untouched, so `"space"` counts
- * the request's space only (a guest's run elsewhere does not block its author from publishing).
- * No-op for package types that don't gate version/delete ops on running runs (skills, where
- * `requireMutableForVersionOps` is unset).
- */
-async function assertNoRunningRuns(
+/** Package and version deletion affect every space. Publish and restore check the working space. */
+function idleAgentGuard(
   c: Context<AppEnv>,
   rcfg: PackageRouteConfig,
   itemId: string,
   reach: "org" | "space",
-): Promise<void> {
-  if (!rcfg.requireMutableForVersionOps) return;
-  const orgId = c.get("orgId");
-  const running = await getRunningRunsForPackage(
-    reach === "org" ? { orgId } : { orgId, spaceId: c.get("spaceId") },
-    itemId,
-  );
-  if (running > 0) {
-    throw conflict(
-      "agent_in_use",
-      reach === "org"
-        ? `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}, in this space or another space of the organization`
-        : `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}`,
-    );
-  }
+): PackageWriteGuard | undefined {
+  if (rcfg.cfg.type !== "agent") return undefined;
+  const scope = reach === "org" ? { orgId: c.get("orgId") } : getSpaceScope(c);
+  return (tx) => lockIdleAgent(tx, scope, itemId);
 }
 
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
@@ -1105,9 +1085,12 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId, "org");
-
-    const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
+    const result = await deleteOrgItem(
+      orgId,
+      itemId,
+      rcfg.cfg,
+      idleAgentGuard(c, rcfg, itemId, "org"),
+    );
     if (!result.ok) {
       throw conflict(
         "in_use",
@@ -1208,8 +1191,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId, "space");
-
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Parse optional version override from request body. The body itself is
@@ -1223,6 +1204,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const result = await createVersionFromDraft({
+      beforeWrite: idleAgentGuard(c, rcfg, itemId, "space"),
       packageId: itemId,
       orgId,
       userId: user.id,
@@ -1296,8 +1278,6 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId, "space");
-
     const versionSpec = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionSpec);
     if (!detail) {
@@ -1335,6 +1315,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
         precondition: { assertVersion: (current) => assertIfMatch(c, current) },
+        beforeWrite: idleAgentGuard(c, rcfg, itemId, "space"),
         manifest: asRecord(detail.manifest),
         draftContent: content,
         replace: files,
@@ -1387,10 +1368,12 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     // Verify org ownership before deletion
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
-    await assertNoRunningRuns(c, rcfg, itemId, "org");
-
     const versionSpec = c.req.param("version")!;
-    const deleted = await deletePackageVersion(itemId, versionSpec);
+    const deleted = await deletePackageVersion(
+      itemId,
+      versionSpec,
+      idleAgentGuard(c, rcfg, itemId, "org"),
+    );
     if (!deleted) {
       throw notFound(`Version '${versionSpec}' not found`);
     }

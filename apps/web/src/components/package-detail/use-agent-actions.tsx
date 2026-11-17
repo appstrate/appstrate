@@ -13,11 +13,9 @@ import {
 } from "../../hooks/use-paginated-runs";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAgentSpaceAction } from "../../hooks/use-agent-run-space";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useSpacesFor } from "../../hooks/use-space-action";
-import { useSpaceLabelOf, useSpaces } from "../../hooks/use-spaces";
-import type { SpaceChoiceMenu } from "../../lib/menu-action";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { launchFromOptions } from "../../lib/run-launch";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
@@ -27,7 +25,6 @@ import type { PackageActionsDropdownProps } from "./use-package-actions";
 import { deedInSpaces, deedOfAction, spaceDeedLabels, type SpaceDeed } from "../space-deed";
 
 type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
-type ChoiceSpace = SpaceChoiceMenu["spaces"][number];
 
 /** The title of each confirmation names its act; the button repeats the verb. */
 const CONFIRM_TEXT: Record<Confirmation, { title: string; description: string }> = {
@@ -75,8 +72,6 @@ export function useAgentActions({
   const { t } = useTranslation(["agents", "common"]);
   const { on: overview } = useOverviewMode();
   const { can } = usePermissions();
-  const workingSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
   const spaceLabelOf = useSpaceLabelOf();
   const { data: detail } = usePackageDetail("agent", packageId);
   const spaceIds = detail?.space_ids ?? NO_SPACES;
@@ -92,14 +87,6 @@ export function useAgentActions({
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
-  // The spaces a deed acts in: in the mode those that grant it; else the working space, when it does.
-  const working = spaces?.find((space) => space.id === workingSpaceId);
-  const grantingSpaces = (verdict: {
-    eligible: readonly ChoiceSpace[];
-    offered: boolean;
-  }): readonly ChoiceSpace[] =>
-    overview ? verdict.eligible : verdict.offered && working ? [working] : [];
-
   const runSpace = useAgentSpaceAction(packageId, "agents:run", spaceIds, {
     preferWorkingSpace: false,
   });
@@ -108,17 +95,20 @@ export function useAgentActions({
   });
 
   // « Supprimer les runs » deletes every run of the agent in one space, which the route asks of
-  // `runs:delete` and `runs:read-all` there. In the mode: among the spaces it is active in, once
+  // `runs:delete` and `runs:read-all` there. In the mode: among its readable placements, once
   // it ran somewhere (a space with none answers `deleted_count: 0`); a space with a run in flight
   // is not offered.
-  const deleters = useSpacesFor({ permission: "runs:delete" }, spaceIds);
-  const allReaders = useSpacesFor({ permission: "runs:read-all" }, spaceIds);
+  const deleters = useSpacesFor({ permission: "runs:delete" }, detail?.read_space_ids ?? NO_SPACES);
+  const allReaders = useSpacesFor(
+    { permission: "runs:read-all" },
+    detail?.read_space_ids ?? NO_SPACES,
+  );
   const latestAcross = useAgentLatestRunAcross(packageId, { enabled: overview });
   const inFlightAcross = useAgentRunsInFlightAcross(packageId, { enabled: overview });
   const ran = overview ? (latestAcross.data?.data.length ?? 0) > 0 : !!detail?.last_run;
   const runSpaces = ran
-    ? grantingSpaces(deleters).filter((space) =>
-        grantingSpaces(allReaders).some((reader) => reader.id === space.id),
+    ? deleters.targets.filter((space) =>
+        allReaders.targets.some((reader) => reader.id === space.id),
       )
     : [];
   const busy = (spaceId: string) =>
@@ -135,7 +125,7 @@ export function useAgentActions({
   // it and hold some, each row naming its space in the mode.
   const { data: memories } = useAgentMemories(packageId, { spanning: overview });
   const memoryDeleters = useSpacesFor({ permission: "persistence:delete" });
-  const memorySpaces = grantingSpaces(memoryDeleters).filter((space) =>
+  const memorySpaces = memoryDeleters.targets.filter((space) =>
     (memories ?? []).some((memory) => !overview || memory.spaceId === space.id),
   );
   const clearMemories = deedInSpaces(

@@ -25,12 +25,7 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
-import {
-  ensureSession,
-  isForeignKeyViolation,
-  touchSessionSpace,
-  writingOriginSpace,
-} from "../src/persistence.ts";
+import { ensureSession, touchSessionSpace, writingOriginSpace } from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
 import { installPermissionAuditLogger } from "../../../apps/api/src/lib/permission-audit.ts";
@@ -836,7 +831,7 @@ describe("an origin space deleted between its check and the write", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    expect(isForeignKeyViolation(raw)).toBe(true);
+    expect(raw).toBeDefined();
     await expect(writingOriginSpace(write)).rejects.toMatchObject({
       status: 400,
       param: "spaceId",
@@ -847,7 +842,13 @@ describe("an origin space deleted between its check and the write", () => {
   it("lets every other failure through", async () => {
     const other = new Error("boom");
     await expect(writingOriginSpace(() => Promise.reject(other))).rejects.toBe(other);
-    expect(isForeignKeyViolation(new Error("x", { cause: { code: "23505" } }))).toBe(false);
+    const missingUser = new Error("insert failed", {
+      cause: {
+        code: "23503",
+        constraint_name: "chat_sessions_user_id_user_id_fk",
+      },
+    });
+    await expect(writingOriginSpace(() => Promise.reject(missingUser))).rejects.toBe(missingUser);
   });
 });
 

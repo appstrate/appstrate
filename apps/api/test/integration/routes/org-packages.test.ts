@@ -174,7 +174,11 @@ describe("package indexes across the organization's spaces", () => {
         headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": spaceId },
       });
       expect(res.status, await res.clone().text()).toBe(200);
-      return (await res.json()) as { active: boolean; space_ids: string[] };
+      return (await res.json()) as {
+        active: boolean;
+        space_ids: string[];
+        read_space_ids: string[];
+      };
     };
     expect((await detail(s.deux)).space_ids).toEqual(
       (await rows("agents", session(member))).a!.space_ids,
@@ -184,6 +188,7 @@ describe("package indexes across the organization's spaces", () => {
     const off = await detail(s.deux);
     expect(off.active).toBe(false);
     expect(off.space_ids).toEqual([s.un]);
+    expect(off.read_space_ids).toEqual([s.un, s.deux]);
   });
 
   it("leaves out of the agent detail a space where the caller has no agent sight", async () => {

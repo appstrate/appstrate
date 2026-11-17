@@ -33,7 +33,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
-import { placementRowJoin } from "./package-placement.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   getLatestVersionId,
   getVersionDetail,
@@ -379,42 +379,54 @@ export function activePackagesFilter(scope: OrgScope, type: PackageType) {
  * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
  * `type` active in any of `spaceIds`, one row per package ({@link activeSpaceIds}
  * names the spaces). A column `query` selects beyond `packages`' own goes in
- * `groupBy`; `packageId` narrows it to that one package.
+ * `groupBy`.
  */
 export function activeInSpaces<Q extends PgSelect>(
   query: Q,
   orgId: string,
   spaceIds: readonly string[],
   type: PackageType,
-  { groupBy = [], packageId }: { groupBy?: AnyPgColumn[]; packageId?: string } = {},
+  { groupBy = [] }: { groupBy?: AnyPgColumn[] } = {},
 ) {
   return query
     .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
-    .where(
-      and(
-        activePackagesFilter({ orgId }, type),
-        packageId === undefined ? undefined : eq(packages.id, packageId),
-      ),
-    )
+    .where(activePackagesFilter({ orgId }, type))
     .groupBy(packages.id, ...groupBy);
 }
 
-/**
- * The spaces of `spaceIds` where one package is active, in the order of
- * {@link activeSpaceIds} — the `space_ids` an index row of it carries. Empty
- * when it is active in none of them.
- */
-export async function listActiveSpaceIdsOf(
+/** Detail reads include switched-off placements; execution and the header use only active ones. */
+export async function packageDetailSpaces(
   orgId: string,
   packageId: string,
   type: PackageType,
   spaceIds: readonly string[],
-): Promise<string[]> {
-  if (spaceIds.length === 0) return [];
-  const query = db.select({ spaceIds: activeSpaceIds() }).from(packages).$dynamic();
-  const [row] = await activeInSpaces(query, orgId, spaceIds, type, { packageId });
-  return row?.spaceIds ?? [];
+) {
+  const rows =
+    spaceIds.length === 0
+      ? []
+      : await db
+          .select({ id: spaces.id, active: sql<boolean>`${activeHereSql()}` })
+          .from(packages)
+          .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
+          .leftJoin(spacePackages, placementRowJoin(packages.id, spaces.id))
+          .where(
+            and(
+              eq(packages.id, packageId),
+              eq(packages.type, type),
+              orgOrSystemFilter(orgId),
+              notEphemeralFilter(),
+              placementReadFilter(spaces.id),
+            ),
+          )
+          .orderBy(
+            sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`,
+            ...spaceListingOrder(),
+          );
+  return {
+    read_space_ids: rows.map((row) => row.id),
+    space_ids: rows.filter((row) => row.active).map((row) => row.id),
+  };
 }
 
 /**

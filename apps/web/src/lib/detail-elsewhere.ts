@@ -20,20 +20,6 @@ export interface ElsewhereRow {
 }
 
 /**
- * The spaces a package is placed in, from its library placements: the active ones first, then
- * the inactive ones (its page reads there and says it is switched off).
- */
-export function placedSpaceIds(
-  placements: readonly { space_id: string; state: "active" | "inactive" | "none" }[],
-): string[] {
-  const placed = placements.filter((placement) => placement.state !== "none");
-  return [
-    ...placed.filter((placement) => placement.state === "active"),
-    ...placed.filter((placement) => placement.state === "inactive"),
-  ].map((placement) => placement.space_id);
-}
-
-/**
  * The space to try next among a row's: the first enterable one listed AFTER the working space,
  * or the first enterable one when the working space is not listed. Never one before it: each
  * refusal moves forward, so a chain of refusals ends instead of bouncing between two spaces.

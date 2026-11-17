@@ -9,7 +9,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { rowValueErrorCode, isForeignKeyViolation } from "../../../src/lib/db-helpers.ts";
+import { isForeignKeyViolation } from "@appstrate/db/errors";
+import { rowValueErrorCode } from "../../../src/lib/db-helpers.ts";
 
 /** How Drizzle surfaces a driver failure: a wrapper with no code of its own. */
 function drizzleWrapped(code: string): Error {

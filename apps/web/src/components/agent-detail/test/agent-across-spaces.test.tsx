@@ -101,6 +101,7 @@ const DETAIL: AgentDetail = {
   effective_timeout_seconds: 300,
   active: true,
   space_ids: ["spc_b", "spc_c"],
+  read_space_ids: ["spc_b", "spc_c"],
 };
 
 function schedule(id: string, spaceId: string, nextRunAt: string): EnrichedSchedule {
@@ -339,7 +340,7 @@ function configurationSpace(html: string): string | null {
 describe("the configuration view", () => {
   const label = () => i18n.t("detail.configuration.spaceLabel", { ns: "agents" });
   // Active in Atelier, the working space, and in Studio.
-  const placedHere: AgentDetail = { ...DETAIL, space_ids: ["spc_a", "spc_b"] };
+  const placedHere: AgentDetail = { ...DETAIL, read_space_ids: ["spc_a", "spc_b"] };
 
   it("names the space whose configuration it shows in the mode, and offers the others", () => {
     const html = renderIn(
@@ -402,7 +403,7 @@ describe("the configuration view", () => {
 
 describe("the settings rail when the hidden space refuses configuring", () => {
   // Atelier (working, hidden) reads but does not configure; Studio configures.
-  const placedHere = { ...DETAIL, space_ids: ["spc_a", "spc_b"], etag: null };
+  const placedHere = { ...DETAIL, read_space_ids: ["spc_a", "spc_b"], etag: null };
   const settings = (overview: boolean) =>
     renderIn(
       overview,

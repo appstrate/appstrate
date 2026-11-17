@@ -24,7 +24,8 @@ import {
   useRunPinned,
   type PersistenceRowRef,
 } from "../../hooks/use-persistence";
-import { useRowSpaceGrants, useSpacesFor } from "../../hooks/use-space-action";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
+import { useSpacesFor } from "../../hooks/use-space-action";
 import { SpaceNameOf } from "../space-name";
 import { authStore } from "../../stores/auth-store";
 

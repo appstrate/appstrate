@@ -26,6 +26,7 @@ import {
   runs,
   runLogs,
   packages,
+  packageVersions,
   profiles,
   endUsers,
   apiKeys,
@@ -708,6 +709,29 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
     // visible consequence, deliberate: a request that is both over-cap and
     // references a deleted file now answers 429 instead of 409.
     await enforceOrgConcurrencyCap(tx, scope);
+
+    // Take the run FK's lock before file locks. If deletion won during preflight, refuse
+    // this launch. A version deletion takes FOR UPDATE on this same package, so a pinned
+    // version checked after the lock cannot disappear before the pending run commits.
+    const [agent] = await tx
+      .select({ source: packages.source })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId)))
+      .for("key share");
+    if (!agent) throw notFound(`Agent '${packageId}' no longer exists`);
+    if (params.versionRef && params.versionRef !== "draft" && agent.source !== "system") {
+      const [version] = await tx
+        .select({ id: packageVersions.id })
+        .from(packageVersions)
+        .where(
+          and(
+            eq(packageVersions.packageId, packageId),
+            eq(packageVersions.version, params.versionRef),
+          ),
+        );
+      if (!version)
+        throw notFound(`Version '${params.versionRef}' of '${packageId}' no longer exists`);
+    }
 
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
@@ -1410,18 +1434,8 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
 }
 
 /**
- * Count a package's active (pending/running) runs through `handle`.
- *
- * `handle` is what separates the two callers: {@link getRunningRunsForPackage}
- * reads with the base client (its own snapshot, no locks), while
- * {@link deletePackageRuns} passes its open transaction so the count is taken
- * under the run-admission advisory lock and sees what that lock is holding back.
- *
- * `visibility` narrows the count to what a caller may read; the mutation
- * guards pass none, because "is this agent busy" is about the agent, not about
- * who is watching. Omit `spaceId` for every space of the organization: the
- * package-level mutations (delete, new version, restore) act on the package in
- * all of them.
+ * Active runs of this package in the requested space, or in the whole org.
+ * Reads may apply the viewer's visibility. Mutation guards count every actor under their lock.
  */
 async function countActiveRunsForPackage(
   handle: Db | DbTx,
@@ -1445,8 +1459,32 @@ async function countActiveRunsForPackage(
   return row?.count ?? 0;
 }
 
-export async function getRunningRunsForPackage(
+/**
+ * Serialize a package mutation against run admission. A run INSERT takes FOR KEY SHARE on
+ * this package through runs.package_id. FOR UPDATE waits for earlier admissions and holds later
+ * ones until the mutation commits. The count must be a separate statement after that wait.
+ */
+export async function lockIdleAgent(
+  tx: Db,
   scope: OrgScope & { spaceId?: string },
+  packageId: string,
+): Promise<void> {
+  await tx
+    .select({ id: packages.id })
+    .from(packages)
+    .where(and(eq(packages.orgId, scope.orgId), eq(packages.id, packageId)))
+    .for("update");
+  const active = await countActiveRunsForPackage(tx, scope, packageId);
+  if (active > 0) {
+    throw conflict(
+      "agent_in_use",
+      `${active} run(s) still running for this agent${scope.spaceId === undefined ? ", in this space or another space of the organization" : ""}`,
+    );
+  }
+}
+
+export async function getRunningRunsForPackage(
+  scope: SpaceScope,
   packageId: string,
   visibility?: SQL,
 ): Promise<number> {

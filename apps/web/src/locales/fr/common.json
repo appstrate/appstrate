@@ -38,6 +38,7 @@
   "spaceChoice.schedule": "Planifier dans…",
   "spaceChoice.scheduleIn": "Planifier dans {{space}}",
   "spaceChoice.create": "Créer dans…",
+  "spaceChoice.importIn": "Importer dans {{space}}",
   "spaceChoice.import": "Importer dans…",
   "spaceChoice.run": "Lancer dans…",
   "spaceChoice.runOptions": "Lancer avec options dans…",

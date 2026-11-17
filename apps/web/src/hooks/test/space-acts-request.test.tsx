@@ -23,8 +23,12 @@ const { packageDetailQueryOptions } = await import("../use-packages.ts");
 const { useDeleteAgentRuns } = await import("../use-mutations.ts");
 const { useDeleteAgentMemories, useDeletePersistenceRow, fetchAgentPersistence } =
   await import("../use-persistence.ts");
+const { useCanReachInSpace } = await import("../use-can-reach.ts");
+const { usePackageVersions } = await import("../use-packages.ts");
+const { useIntegrationDetail } = await import("../use-integrations.ts");
+const { useImportPackage, useImportFromGithub } = await import("../use-mutations.ts");
 const { fetchAgentSchedules } = await import("../use-schedules.ts");
-const { useRowSpaceGrants } = await import("../use-space-action.tsx");
+const { useRowSpaceGrants } = await import("../use-permissions.ts");
 
 const PACKAGE_ID = "@acme/reporter";
 
@@ -45,7 +49,13 @@ const space = (id: string, permissions: string[]) => ({
 /** Atelier is the working space, hidden in the mode; Studio and Coffre run the agent. */
 const SPACES = [
   space("spc_a", ["agents:read"]),
-  space("spc_b", ["agents:read", "agents:run", "persistence:delete"]),
+  space("spc_b", [
+    "agents:read",
+    "agents:run",
+    "persistence:delete",
+    "integrations:read",
+    "runs:read",
+  ]),
   space("spc_c", ["agents:read", "agents:run"]),
 ];
 
@@ -273,5 +283,68 @@ describe("the spanning reads of an agent", () => {
         { params: { path: { scope: "@acme", name: "reporter" } } },
       ],
     ]);
+  });
+});
+
+describe("resources opened from a spanning list", () => {
+  it("judges a notification's run link in its own space even when it is the hidden working space", () => {
+    const link = capture(() => useCanReachInSpace());
+    renderInMode(<link.Probe />);
+    const target = "/agents/@acme/reporter/runs/run_1";
+    expect(link.current!(target, "spc_a")).toBe(false);
+    expect(link.current!(target, "spc_b")).toBe(true);
+  });
+
+  it("reads the dependency's tools and versions where it is listed, without switching the editor", () => {
+    const probe = capture(() => ({
+      tools: useIntegrationDetail(PACKAGE_ID, "spc_b"),
+      versions: usePackageVersions("integration", PACKAGE_ID, "spc_b"),
+    }));
+    const qc = renderInMode(<probe.Probe />);
+    for (const path of [
+      "/api/integrations/{packageId}",
+      "/api/packages/integrations/{scope}/{name}/versions",
+    ]) {
+      const query = qc.getQueryCache().find({ queryKey: ["get", path], exact: false });
+      expect(query?.queryKey[2]).toMatchObject({ params: { header: { "X-Space-Id": "spc_b" } } });
+      expect(query?.options).toMatchObject({ enabled: true });
+    }
+    expect(spaceStore.getState().id).toBe("spc_a");
+  });
+
+  it("imports archives and GitHub dependencies in the selected space while the editor stays put", async () => {
+    const post = spyOn(client, "POST").mockResolvedValue({
+      data: {
+        packageId: PACKAGE_ID,
+        root_package_id: PACKAGE_ID,
+        type: "integration",
+        version: "1.0.0",
+      },
+    });
+    stubs.push(post);
+    const imports = capture(() => ({ archive: useImportPackage(), github: useImportFromGithub() }));
+    renderInMode(<imports.Probe />);
+    for (const name of ["a.afps", "a.afps-bundle"]) {
+      await imports.current!.archive.mutateAsync({
+        file: new File(["example"], name),
+        spaceId: "spc_b",
+        type: "integration",
+      });
+    }
+    await imports.current!.github.mutateAsync({
+      url: "https://github.com/acme/a",
+      type: "integration",
+      spaceId: "spc_b",
+    });
+    const calls: readonly (readonly unknown[])[] = post.mock.calls;
+    expect(calls.map(([path]) => path)).toEqual([
+      "/api/packages/import",
+      "/api/packages/import-bundle",
+      "/api/packages/import-github",
+    ]);
+    for (const [, init] of calls) {
+      expect(init).toMatchObject({ params: { header: { "X-Space-Id": "spc_b" } } });
+    }
+    expect(spaceStore.getState().id).toBe("spc_a");
   });
 });

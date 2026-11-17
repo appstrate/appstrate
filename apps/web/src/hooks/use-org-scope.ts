@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCurrentOrgId } from "./use-org";
+import { useRowSpaceGrants } from "./use-permissions";
 import { useCurrentSpaceId } from "./use-current-space";
 import { ACROSS_SPACES_POLL_MS } from "../lib/across-spaces";
 import { ACROSS_SPACES } from "../lib/query-keys";
 
 /** Org/space context for queries. Headers are passed explicitly so they are part of the React Query key (a scope switch refetches). */
-export function useOrgScope() {
+export function useOrgScope(targetSpaceId?: string) {
   const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const workingSpaceId = useCurrentSpaceId();
+  const spaceId = targetSpaceId ?? workingSpaceId;
   return {
     enabled: !!orgId && !!spaceId,
     header: {
@@ -16,6 +18,13 @@ export function useOrgScope() {
       "X-Space-Id": spaceId ?? undefined,
     },
   };
+}
+
+/** A read in the named space (the working one when omitted), under its own permission. */
+export function useSpaceReadScope(permission: string, spaceId?: string) {
+  const scope = useOrgScope(spaceId);
+  const grants = useRowSpaceGrants();
+  return { header: scope.header, enabled: scope.enabled && grants(spaceId, permission) };
 }
 
 /**

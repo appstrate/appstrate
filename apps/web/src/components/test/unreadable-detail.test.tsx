@@ -49,6 +49,7 @@ const refused = new ApiError("not_found", "not here", 404);
 
 function detail(options: {
   overview: boolean;
+  agent?: { version?: boolean };
   error?: unknown;
   seed?: (qc: QueryClient) => void;
 }): string {
@@ -84,8 +85,9 @@ function detail(options: {
   try {
     return render(
       <UnreadableDetail
-        kind="run"
-        id="run_1"
+        kind={options.agent ? "agent" : "run"}
+        id={options.agent ? "@acme/a" : "run_1"}
+        version={options.agent?.version}
         error={options.error === undefined ? refused : options.error}
         pending={<span>{PENDING}</span>}
       />,
@@ -115,6 +117,28 @@ describe("UnreadableDetail", () => {
 
   it("waits for the look-up across spaces with the page's own skeleton", () => {
     expect(detail({ overview: true })).toContain(PENDING);
+  });
+
+  it("locates the live agent with launch-only sight and a version only with full read", () => {
+    const seed = (qc: QueryClient) => {
+      qc.setQueryData(
+        $api.queryOptions("get", "/api/packages/{scope}/{name}/home", {
+          params: {
+            path: { scope: "@acme", name: "a" },
+            header: { "X-Org-Id": ORG_ID, "X-Space-Id": "spc_hidden" },
+          },
+        }).queryKey,
+        { id: "@acme/a", type: "agent", read_space_ids: ["spc_other"] },
+      );
+      qc.setQueryData(
+        $api.queryOptions("get", "/api/spaces", {
+          params: { header: { "X-Org-Id": ORG_ID } },
+        }).queryKey,
+        { data: [SPACES[0], { ...SPACES[1], permissions: ["agents:run"] }] },
+      );
+    };
+    expect(detail({ overview: true, agent: {}, seed })).toBe("");
+    expect(detail({ overview: true, agent: { version: true }, seed })).toContain(HINT_ACROSS());
   });
 
   it("says unavailable in none of the reader's spaces when the look-up failed", () => {

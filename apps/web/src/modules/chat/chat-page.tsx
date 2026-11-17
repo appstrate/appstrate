@@ -26,7 +26,7 @@ import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
-import { useRowSpaceGrants } from "../../hooks/use-space-action";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";

@@ -17,7 +17,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
-import { findCause } from "../../lib/error-cause.ts";
+import { findCause } from "@appstrate/core/error-cause";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {

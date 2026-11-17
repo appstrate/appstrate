@@ -16,7 +16,7 @@ import { disableSchedules } from "./schedules-naming-connection.ts";
  * Drizzle filter: is the package placed in `spaceId`? Needs a LEFT JOIN of
  * `spacePackages` on {@link placementRowJoin}; org and shadow filters are the caller's.
  */
-export function placementReadFilter(spaceId: string) {
+export function placementReadFilter(spaceId: string | AnyPgColumn) {
   return or(
     eq(packages.source, "system"),
     isNotNull(spacePackages.packageId),

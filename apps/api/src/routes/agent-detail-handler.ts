@@ -23,7 +23,7 @@ import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts"
 import {
   getSpacePackageSettings,
   isPackageActiveHere,
-  listActiveSpaceIdsOf,
+  packageDetailSpaces,
 } from "../services/space-packages.ts";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import { resolveRunTimeout } from "../services/run-limits.ts";
@@ -215,7 +215,7 @@ export async function buildAgentDetailDto(
   // runs, not a colleague's.
   const visibility = runVisibilityFilter(c);
   const sight = packageSightPermissions("agent");
-  const [lastRun, runningCount, active, spaceIds] = await Promise.all([
+  const [lastRun, runningCount, active, packageSpaces] = await Promise.all([
     getLastRun(scope, agent.id, visibility),
     getRunningRunsForPackage(scope, agent.id, visibility),
     // The space's switch, answered by the page that carries it. Reading an
@@ -224,7 +224,7 @@ export async function buildAgentDetailDto(
     // in the payload instead of turning the read into a 404.
     isPackageActiveHere(scope, agent.id),
     // The spaces the org agent index would list it in for this caller.
-    listActiveSpaceIdsOf(
+    packageDetailSpaces(
       orgId,
       agent.id,
       "agent",
@@ -305,7 +305,7 @@ export async function buildAgentDetailDto(
     active,
     // Every space the caller reaches where the agent is active, as the org
     // agent index's `space_ids`: the page names them and runs in one of them.
-    space_ids: spaceIds,
+    ...packageSpaces,
     // Which space's `agents:write` governs this agent, and whether THIS caller
     // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
     // UNCONDITIONALLY, for the same reason as the timeout above: a summary read

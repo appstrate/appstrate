@@ -37,7 +37,7 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSpaces } from "@appstrate/db/schema";
 import {
@@ -185,16 +185,6 @@ async function getOwnedSession(id: string, scope: SessionScope): Promise<Session
   const session = await findOwnedSession(id, scope);
   if (!session) throw notFound("Chat session not found");
   return session;
-}
-
-/** The stored origin space of a session, read again after a guarded write matched nothing. */
-async function originOf(sessionId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ spaceId: chatSessions.spaceId })
-    .from(chatSessions)
-    .where(eq(chatSessions.id, sessionId))
-    .limit(1);
-  return row?.spaceId ?? null;
 }
 
 async function loadMessages(sessionId: string): Promise<MessageRow[]> {
@@ -462,7 +452,6 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         );
       }
       // The turn in flight keeps the reach it was minted with, so the limit changes between turns.
-      const limitChanges = restricted !== undefined && restricted !== session.restricted;
       const write = () =>
         db.transaction(async (tx) => {
           const rows = await tx
@@ -477,7 +466,12 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
             .where(
               and(
                 eq(chatSessions.id, session.id),
-                limitChanges ? isNull(chatSessions.activeStreamId) : undefined,
+                restricted === undefined
+                  ? undefined
+                  : or(
+                      eq(chatSessions.restricted, restricted),
+                      isNull(chatSessions.activeStreamId),
+                    ),
                 spaceId === undefined ? undefined : isNull(chatSessions.spaceId),
               ),
             )
@@ -497,9 +491,9 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         });
       const updated = await (spaceId === undefined ? write() : writingOriginSpace(write));
       if (updated.length === 0) {
-        if (!limitChanges) throw notFound("Chat session not found");
+        const latest = await getOwnedSession(session.id, sessionScope(c));
         // Another request gave the conversation its origin first.
-        if (spaceId !== undefined && (await originOf(session.id)) !== null) {
+        if (spaceId !== undefined && latest.spaceId !== null) {
           throw invalidRequest(
             "spaceId is set only on a conversation without an origin space",
             "spaceId",

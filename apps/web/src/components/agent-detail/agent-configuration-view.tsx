@@ -123,7 +123,7 @@ export function AgentConfigurationView({
       {namesSpace && permission && (
         <AgentConfigurationSpace
           packageId={packageId}
-          spaceIds={detail.space_ids}
+          spaceIds={detail.read_space_ids}
           permission={permission}
         />
       )}

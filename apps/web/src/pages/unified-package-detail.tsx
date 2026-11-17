@@ -114,7 +114,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   const runSpaces = useAdmittingSpaces("runs");
   const agentSpaces = useAdmittingSpaces("agents");
   const memoryReach = useSpacesFor({ permission: "persistence:read" });
-  const agentReach = useSpacesFor({ permission: "agents:read" }, detail?.space_ids);
+  const agentReach = useSpacesFor({ permission: "agents:read" }, detail?.read_space_ids);
   const tabReads = {
     runs: overview ? runSpaces.length > 0 : canReadRuns(can),
     memory: memoryReach.offered,
@@ -193,10 +193,11 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading))
     return <PackageDetailSkeleton type={type} />;
-  if (error || !detail)
+  if (error || !detail || (overview && isVersionView && !can(`${type}s:read`)))
     return (
       <UnreadableDetail
         kind={type}
+        version={isVersionView}
         id={packageId}
         error={error}
         pending={<PackageDetailSkeleton type={type} />}

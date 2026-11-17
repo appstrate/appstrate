@@ -677,6 +677,7 @@ describe("an agent's page", () => {
     effective_timeout_seconds: 300,
     active: true,
     space_ids,
+    read_space_ids: space_ids,
   });
 
   /** The page's « Lancer »: its opening tag, or `null` when it is absent. */
