@@ -5,7 +5,7 @@
  * satellite (routes/chat.ts) with two changes:
  *
  *   1. Identity: the satellite carried two audience-bound OAuth tokens; the
- *      module forwards the caller's own headers on loopback calls (self.ts).
+ *      module's loopback calls carry a short-lived bearer it mints (loopback-auth.ts).
  *   2. Persistence: server-authoritative. This route writes the user turn
  *      before inference and the assistant turn when the stream finalizes
  *      (see persistence.ts). Generation runs through a resumable producer
