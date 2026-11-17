@@ -5,16 +5,16 @@ import { requestScopeChange } from "../hooks/use-unsaved-changes";
 /**
  * Organization and workspace switcher, at the head of the header trail: two columns, the
  * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
- * opens its workspaces, it does not switch to it); one column, the organization above its
- * workspaces, on a phone or with a single organization. You are always in a workspace, never
- * in an organization alone, so org + workspace are applied together. The current context
+ * opens its workspaces, it does not switch to it), even with a single organization; one
+ * column, the organization above its workspaces, on a phone only. You are always in a
+ * workspace, never in an organization alone, so org + workspace are applied together. The current context
  * keeps the tinted fill and the check; the explored one is the highlighted row. Every row leads
  * to its own settings, entering its organization or space first.
  */
 import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLandAfterOrgSwitch, useOpenOverlayAfterOrgSwitch } from "../lib/modal-route";
-import { mayCreateSpaceIn, settingsEntry, switcherShape } from "../lib/switcher-context";
+import { mayCreateSpaceIn, settingsEntry } from "../lib/switcher-context";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Plus, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -178,11 +178,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
-  const { mobilePresentation, stacked } = switcherShape({
-    variant,
-    isMobile,
-    orgCount: orgs.length,
-  });
+  // A phone presents the panel under the trigger, in one column; everywhere else the
+  // organizations sit beside their spaces, even when there is only one.
+  const mobilePresentation = variant === "mobile" || isMobile;
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
     setOpenMobile(false);
@@ -309,7 +307,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         className={cn(
           // Beside the sidebar the panel takes what the viewport leaves it, never more.
           "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
-          stacked ? "w-[340px]" : "w-[660px]",
+          mobilePresentation ? "w-[340px]" : "w-[660px]",
           mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
           variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
           isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
@@ -325,7 +323,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             aria-label={t("switcher.searchAriaLabel")}
           />
 
-          <div className={cn("grid", stacked ? "grid-cols-1" : "grid-cols-2")}>
+          <div className={cn("grid", mobilePresentation ? "grid-cols-1" : "grid-cols-2")}>
             <div className="flex min-h-0 flex-col p-2">
               <ColumnHeader label={t("switcher.orgsColumn")} />
               <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
@@ -383,7 +381,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
 
             <div
               id={spacesColumnId}
-              className={cn("flex min-h-0 flex-col p-2", stacked ? "border-t" : "border-l")}
+              className={cn(
+                "flex min-h-0 flex-col p-2",
+                mobilePresentation ? "border-t" : "border-l",
+              )}
             >
               <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
