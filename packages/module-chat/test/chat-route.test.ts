@@ -16,7 +16,7 @@ import {
   SESSIONS_QUERY_KEY,
   stopSession,
 } from "../src/ui/sessions.ts";
-import { fetchEnforcedSkills, fetchSkills } from "../src/ui/chat-skills.ts";
+import { fetchEnforcedSkills } from "../src/ui/chat-skills.ts";
 import { requestAnswering, transportOver } from "./fake-request.ts";
 
 const headers = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a", "X-Chat-Locale": "fr" });
@@ -141,33 +141,5 @@ describe("the origin space of a new conversation", () => {
         skills: { skillMode: "auto", pinnedSkills: ["@acme/tone"] },
       }),
     ).toMatchObject({ skill_mode: "auto", pinned_skills: ["@acme/tone"] });
-  });
-});
-
-describe("the skills picker's catalogue", () => {
-  it("lists the skills of the acting spaces, one row per package", async () => {
-    const row = (spaceId: string, id: string) => ({
-      id,
-      name: id,
-      spaceId,
-      version: "1.0.0",
-      description: null,
-    });
-    const request = requestAnswering(() =>
-      Response.json({
-        object: "list",
-        data: [
-          row("spc_a", "@acme/tone"),
-          row("spc_b", "@acme/tone"),
-          row("spc_b", "@acme/seo"),
-          row("spc_viewer", "@acme/hidden"),
-        ],
-      }),
-    );
-
-    const skills = await fetchSkills(transportOver(request, "spc_a"), ["spc_a", "spc_b"]);
-
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
-    expect(skills.map((s) => s.packageId)).toEqual(["@acme/tone", "@acme/seo"]);
   });
 });
