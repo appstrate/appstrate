@@ -17,12 +17,12 @@ const { client } = await import("../../api/client.ts");
 const { renderInSpace, testSpace } = await import("../../test/space-context.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { useAgentSpaceAction } = await import("../use-agent-run-space.ts");
-const { packageDetailQueryOptions } = await import("../use-packages.ts");
+const { packageDetailQueryOptions, useDeletePackage, useForkPackage, usePackageVersions } =
+  await import("../use-packages.ts");
 const { useDeleteAgentRuns } = await import("../use-mutations.ts");
 const { useDeleteAgentMemories, useDeletePersistenceRow, fetchAgentPersistence } =
   await import("../use-persistence.ts");
 const { useCanReachInSpace } = await import("../use-can-reach.ts");
-const { usePackageVersions } = await import("../use-packages.ts");
 const { useIntegrationDetail } = await import("../use-integrations.ts");
 const { useImportPackage, useImportFromGithub } = await import("../use-mutations.ts");
 const { fetchAgentSchedules } = await import("../use-schedules.ts");
@@ -260,6 +260,24 @@ describe("resources opened from a spanning list", () => {
       expect(query?.options).toMatchObject({ enabled: true });
     }
     expect(spaceStore.getState().id).toBe("spc_a");
+  });
+
+  it("refreshes a previously opened catalogue after making and deleting a copy", async () => {
+    const copy = "@acme/copy";
+    stubs.push(
+      spyOn(client, "POST").mockResolvedValue({ data: { id: copy, forked_from: PACKAGE_ID } }),
+      spyOn(client, "DELETE").mockResolvedValue({}),
+    );
+    const hook = capture(() => ({ fork: useForkPackage(), remove: useDeletePackage("agent") }));
+    const qc = renderInMode(<hook.Probe />);
+    const catalogue = ["get", "/api/library", { params: { header: { "X-Org-Id": "org_1" } } }];
+    qc.setQueryData(catalogue, [PACKAGE_ID]);
+    await hook.current!.fork.mutateAsync({ packageId: PACKAGE_ID, spaceId: "spc_b" });
+    expect(qc.getQueryState(catalogue)?.isInvalidated).toBe(true);
+
+    qc.setQueryData(catalogue, [PACKAGE_ID, copy]);
+    await hook.current!.remove.mutateAsync(copy);
+    expect(qc.getQueryState(catalogue)?.isInvalidated).toBe(true);
   });
 
   it("imports archives and GitHub dependencies in the selected space while the editor stays put", async () => {

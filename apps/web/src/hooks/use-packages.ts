@@ -250,6 +250,7 @@ function useDeletePackage(type: PackageType) {
     onSuccess: () => {
       // Stale, not refetched: the deleted package's own detail is still mounted until the navigation below.
       qc.invalidateQueries({ queryKey: packageKeys.family(segment), refetchType: "none" });
+      void invalidateLibraries(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
       toast.success(t("packages.deleted"));
@@ -571,6 +572,7 @@ export function useForkPackage() {
     },
     onSuccess: () => {
       invalidatePackageCaches(qc);
+      void invalidateLibraries(qc);
       // The copy may be an integration, whose list is keyed apart from the package family.
       void invalidateIntegrationQueries(qc);
     },
