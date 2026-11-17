@@ -8,7 +8,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { canAuthorPackages, canPinSkills, turnCapabilities } from "../src/capabilities.ts";
+import {
+  canAuthorPackages,
+  canComposeInlineRuns,
+  canPinSkills,
+  turnCapabilities,
+} from "../src/capabilities.ts";
 
 describe("turnCapabilities", () => {
   it("puts `invokes` in every level: no MCP pair, no run level and no authoring", () => {
@@ -69,6 +74,21 @@ describe("canAuthorPackages", () => {
     }
     const none = new Set(["chat:write", "mcp:read", "mcp:invoke", "skills:read"]);
     expect(canAuthorPackages((p) => none.has(p))).toBe(false);
+  });
+});
+
+describe("canComposeInlineRuns", () => {
+  const composing = ["mcp:read", "mcp:invoke", "agents:write", "agents:run", "runs:read"];
+  const held = (set: string[]) => (p: string) => set.includes(p);
+
+  it("needs the turn (`chat:write`) and the compose run level", () => {
+    expect(canComposeInlineRuns(held(["chat:write", ...composing]))).toBe(true);
+    expect(canComposeInlineRuns(held(composing))).toBe(false);
+  });
+
+  it("is refused to a caller who may only launch saved agents", () => {
+    const launcher = composing.filter((p) => p !== "agents:write");
+    expect(canComposeInlineRuns(held(["chat:write", ...launcher]))).toBe(false);
   });
 });
 

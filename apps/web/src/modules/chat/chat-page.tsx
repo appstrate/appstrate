@@ -20,7 +20,7 @@ import {
   SelectConversationProvider,
   type OpenFile,
 } from "@appstrate/module-chat/ui";
-import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authoring";
+import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
@@ -57,11 +57,11 @@ import { pickerCredentials } from "../../lib/model-picker";
 import { refreshPackageLists } from "../../hooks/use-mutations";
 
 export function ChatModulePage() {
-  // The package-authoring preference is per user: bind it before the composer paints.
+  // The composer's preferences are per user: bind them before the composer paints.
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const firstName = useFirstName();
-  useLayoutEffect(() => bindPackageAuthoringUser(userId), [userId]);
+  useLayoutEffect(() => bindChatPreferencesUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.

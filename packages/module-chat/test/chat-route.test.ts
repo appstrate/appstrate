@@ -112,8 +112,18 @@ describe("the origin space of a new conversation", () => {
     messages: [],
     generation: {},
     packageAuthoring: false,
+    inlineRunsUseChatModel: false,
     skills: undefined,
   };
+
+  it("carries the inline-run model switch as the user set it", () => {
+    expect(turnBody({ ...base, creation: undefined })).toMatchObject({
+      inline_runs_use_chat_model: false,
+    });
+    expect(turnBody({ ...base, inlineRunsUseChatModel: true, creation: undefined })).toMatchObject({
+      inline_runs_use_chat_model: true,
+    });
+  });
 
   it("rides in the body of the turn that creates the conversation, with its limit", () => {
     expect(turnBody({ ...base, creation: { spaceId: "spc_a" } })).toMatchObject({

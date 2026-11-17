@@ -11,6 +11,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   BookOpenIcon,
+  CpuIcon,
   MapPinIcon,
   PackageIcon,
   PaperclipIcon,
@@ -39,6 +40,7 @@ import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
+import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
@@ -58,6 +60,8 @@ export interface ComposerToolsProps {
   showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
+  /** The caller may compose inline runs: the inline-run model switch is offered. */
+  composesInline: boolean;
   /** Without the picker, a writer still sees the space's imposed skills. */
   showEnforced: boolean;
 }
@@ -68,6 +72,7 @@ export function ComposerTools({
   onSelectionChange,
   showPicker,
   authorsPackages,
+  composesInline,
   showEnforced,
 }: ComposerToolsProps) {
   const { t, actingSpaceIds } = useChatHost();
@@ -79,6 +84,9 @@ export function ComposerTools({
   // The space as the host names it; without an origin, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
+  // Composing an inline run needs creation mode too: off, no turn launches one.
+  const offersInlineRunModel = composesInline && creationMode;
+  const inlineRunModel = useInlineRunModelEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
   // A popover opened while the menu is closing loses to the menu's focus
   // restore (Radix reads it as a focus-outside): open it once the menu is gone.
@@ -169,6 +177,20 @@ export function ComposerTools({
               {t("composer.creationMode")}
             </DropdownMenuCheckboxItem>
           )}
+          {offersInlineRunModel && (
+            <DropdownMenuCheckboxItem
+              checked={inlineRunModel}
+              onCheckedChange={setInlineRunModelEnabled}
+              data-testid="composer-inline-run-model-item"
+            >
+              <span className="flex flex-col">
+                {t("composer.inlineRunModel")}
+                <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
+                  {t("composer.inlineRunModel.hint")}
+                </span>
+              </span>
+            </DropdownMenuCheckboxItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -181,6 +203,17 @@ export function ComposerTools({
           onRemove={() => setPackageAuthoringEnabled(true)}
         >
           {t("composer.creationOff")}
+        </RemovableChip>
+      )}
+      {/* Off is the default, so the chip marks the departure from it. */}
+      {offersInlineRunModel && inlineRunModel && (
+        <RemovableChip
+          icon={<CpuIcon />}
+          removeLabel={t("composer.inlineRunModelChip.undo")}
+          onRemove={() => setInlineRunModelEnabled(false)}
+          testId="composer-inline-run-model-chip"
+        >
+          {t("composer.inlineRunModelChip")}
         </RemovableChip>
       )}
       {scope.restricted && (
