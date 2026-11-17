@@ -34,7 +34,7 @@ import {
   loadEnforcedChatSkills,
 } from "../../services/chat-enforced-skills.ts";
 import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
-import { callerPersonalOwnerId } from "../view-as.ts";
+import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -110,7 +110,9 @@ function buildPlatformServices(): PlatformServices {
           isDefault: space.isDefault,
           personal: personalOwner !== null && space.ownerUserId === personalOwner,
         })),
-        pinned: (c as Context<AppEnv>).get("credentialSpaceId") !== undefined,
+        confined: credentialConfinedToSpaces(c as Context<AppEnv>),
+        // The half every space's set above was computed from (`effectiveInSpace`).
+        orgPermissions: [...((c as Context<AppEnv>).get("orgPermissions") ?? [])],
       };
     },
     // Module routes run behind the platform middleware chain, so the context

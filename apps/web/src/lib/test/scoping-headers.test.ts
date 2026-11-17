@@ -28,18 +28,4 @@ describe("missingScopingHeaders", () => {
     const present = new Headers({ "X-Org-Id": "org_b", "X-Space-Id": "spc_9" });
     expect(missingScopingHeaders(present, { scoping: CURRENT })).toEqual({});
   });
-
-  it("names no space on an org route, which names the organization in its path", () => {
-    const url = "http://localhost/api/orgs/org_a/chat/sessions";
-    expect(missingScopingHeaders(new Headers(), { scoping: CURRENT, url })).toEqual({
-      "X-Org-Id": "org_a",
-      "X-View-As": "org_role=member",
-    });
-    expect(
-      missingScopingHeaders(new Headers(), {
-        scoping: CURRENT,
-        url: "http://localhost/api/runs",
-      }),
-    ).toEqual(CURRENT);
-  });
 });

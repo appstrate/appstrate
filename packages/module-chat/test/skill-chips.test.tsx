@@ -54,7 +54,13 @@ function render({
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={{ ...host, can: () => canReadSkills }}>
         <ConversationScopeProvider
-          value={{ originSpaceId, restricted: false, generating: false, setRestricted: () => {} }}
+          value={{
+            originSpaceId,
+            restricted: false,
+            generating: false,
+            pending: false,
+            setRestricted: () => {},
+          }}
         >
           <TooltipProvider>
             <SkillChips

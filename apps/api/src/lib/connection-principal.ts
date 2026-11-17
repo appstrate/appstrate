@@ -6,23 +6,44 @@ import { getActor, type Actor } from "./actor.ts";
 import { unauthorized } from "./errors.ts";
 
 /**
+ * Where a credential confines the caller on connections: one org, and within it the spaces it
+ * names (`null`: every space of the org).
+ */
+interface ConnectionBinding {
+  orgId: string;
+  spaceIds: readonly string[] | null;
+}
+
+/**
  * Who acts on connections, decided once at the door. A user principal acts as the person, whatever
- * the transport; any other credential is delegated: bound to its org, and to the space it pins
- * when it pins one. `X-Space-Id` addresses the request space and grants no binding.
+ * the transport, bound only when its credential carries a space allowlist (the chat's bearer:
+ * `credentialSpaceIds`), to the allowlist's org and spaces. Any other credential is delegated:
+ * bound to its org, and to the space it pins when it pins one. `X-Space-Id` addresses the request
+ * space and grants no binding.
  */
 export type ConnectionPrincipal =
-  | { kind: "person"; actor: Actor }
-  | { kind: "delegated"; actor: Actor; orgId: string; spaceId: string | null };
+  | { kind: "person"; actor: Actor; binding: ConnectionBinding | null }
+  | { kind: "delegated"; actor: Actor; binding: ConnectionBinding };
 
 export function connectionPrincipal(c: Context<AppEnv>): ConnectionPrincipal {
   const actor = getActor(c);
-  if (c.get("principalKind") === "user") return { kind: "person", actor };
+  const allowlist = c.get("credentialSpaceIds");
+  if (c.get("principalKind") === "user" && allowlist === undefined) {
+    return { kind: "person", actor, binding: null };
+  }
   const orgId = c.get("orgId");
   if (!orgId) throw unauthorized("Credential is missing its organization binding");
-  return { kind: "delegated", actor, orgId, spaceId: c.get("credentialSpaceId") ?? null };
+  const pinned = c.get("credentialSpaceId");
+  // A pin and an allowlist both confine: the spaces both admit.
+  const spaceIds =
+    pinned && allowlist ? allowlist.filter((id) => id === pinned) : pinned ? [pinned] : allowlist;
+  const binding = { orgId, spaceIds: spaceIds ?? null };
+  return c.get("principalKind") === "user"
+    ? { kind: "person", actor, binding }
+    : { kind: "delegated", actor, binding };
 }
 
-/** The space a delegated credential is confined to; `null`: a person or an unpinned credential. */
-export function boundSpaceOf(principal: ConnectionPrincipal): string | null {
-  return principal.kind === "delegated" ? principal.spaceId : null;
+/** The spaces the principal is confined to; `null`: confined to none (a person, an unpinned credential). */
+export function boundSpacesOf(principal: ConnectionPrincipal): readonly string[] | null {
+  return principal.binding?.spaceIds ?? null;
 }

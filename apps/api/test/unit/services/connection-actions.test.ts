@@ -28,7 +28,7 @@ const spaceRow = (userId = OWNER, spaceId = HERE) => ({
 
 function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
   return testCaller(
-    { kind: "person", actor: { type: "user", id: OWNER } },
+    { kind: "person", binding: null, actor: { type: "user", id: OWNER } },
     {
       spaceId: HERE,
       ...overrides,
@@ -123,7 +123,11 @@ describe("connectionActions", () => {
     const endUser = { type: "end_user" as const, id: "eu_1" };
     const row = { orgId: "org_1", userId: null, endUserId: "eu_1", spaceId: HERE };
     const bound = reader({
-      principal: { kind: "delegated", actor: endUser, orgId: "org_1", spaceId: HERE },
+      principal: {
+        kind: "delegated",
+        actor: endUser,
+        binding: { orgId: "org_1", spaceIds: [HERE] },
+      },
     });
     expect(connectionActions(row, bound, false)).toEqual(["rename"]);
   });
@@ -133,8 +137,7 @@ describe("connectionActions", () => {
       principal: {
         kind: "delegated",
         actor: { type: "user", id: OWNER },
-        orgId: "org_1",
-        spaceId: HERE,
+        binding: { orgId: "org_1", spaceIds: [HERE] },
       },
     });
     expect(connectionActions(spaceRow(), bound, false)).toEqual(["rename", "share"]);
@@ -147,8 +150,7 @@ describe("connectionActions", () => {
       principal: {
         kind: "delegated",
         actor: { type: "user", id: OWNER },
-        orgId: "org_1",
-        spaceId: null,
+        binding: { orgId: "org_1", spaceIds: null },
       },
     });
     expect(connectionActions(orgRow(), unpinned, false)).toEqual(["rename", "share"]);

@@ -109,29 +109,21 @@ function sign(payload: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-/** Serialize + sign a claims payload into a `chatloop_` bearer. */
-function mint(
-  identity: LoopbackIdentity,
-  permissions: readonly string[],
-  firstPartyLoopback: boolean,
-  ttlMs: number,
-  chatSessionId?: string | null,
-  viewAs?: unknown,
-  injectedSkills?: InjectedSkills,
-  spaceIds?: readonly string[],
-): string {
+/** Serialize + sign a claims payload into a `chatloop_` bearer; `ttlMs` sets its `exp`. */
+function mint({ ttlMs, ...claims }: Omit<LoopbackClaims, "exp"> & { ttlMs: number }): string {
+  const { chatSessionId, viewAs, injectedSkills, spaceIds } = claims;
   const payload = Buffer.from(
     JSON.stringify({
-      ...identity,
+      ...claims,
       exp: Date.now() + ttlMs,
-      permissions: [...permissions],
-      firstPartyLoopback,
-      ...(chatSessionId ? { chatSessionId } : {}),
-      ...(viewAs !== undefined ? { viewAs } : {}),
-      ...(injectedSkills && Object.keys(injectedSkills.skills).length > 0
-        ? { injectedSkills }
-        : {}),
-      ...(spaceIds ? { spaceIds: [...spaceIds] } : {}),
+      // Absent rather than empty: a claim the verifier reads only when present.
+      chatSessionId: chatSessionId || undefined,
+      viewAs,
+      injectedSkills:
+        injectedSkills && Object.keys(injectedSkills.skills).length > 0
+          ? injectedSkills
+          : undefined,
+      spaceIds,
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -155,13 +147,13 @@ export function mintLoopbackToken(
   identity: LoopbackIdentity,
   opts?: { ttlMs?: number; chatSessionId?: string | null },
 ): string {
-  return mint(
-    identity,
-    INFERENCE_PERMISSIONS,
-    true,
-    opts?.ttlMs ?? TOKEN_TTL_MS,
-    opts?.chatSessionId,
-  );
+  return mint({
+    ...identity,
+    permissions: [...INFERENCE_PERMISSIONS],
+    firstPartyLoopback: true,
+    ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
+    chatSessionId: opts?.chatSessionId,
+  });
 }
 
 /**
@@ -196,17 +188,14 @@ export function mintMcpLoopbackToken(
   },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, viewAs, injectedSkills, spaceIds, ...rest } = identity;
-  return mint(
-    rest,
-    permissions,
-    false,
-    opts?.ttlMs ?? TOKEN_TTL_MS,
-    null,
-    viewAs,
-    injectedSkills,
-    spaceIds,
-  );
+  const { permissions, spaceIds, ...rest } = identity;
+  return mint({
+    ...rest,
+    permissions: [...permissions],
+    firstPartyLoopback: false,
+    ttlMs: opts?.ttlMs ?? TOKEN_TTL_MS,
+    ...(spaceIds ? { spaceIds: [...spaceIds] } : {}),
+  });
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {

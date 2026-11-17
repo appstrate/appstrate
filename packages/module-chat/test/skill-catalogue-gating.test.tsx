@@ -27,7 +27,13 @@ function readable(originSpaceId: string, restricted: boolean): string {
     <QueryClientProvider client={new QueryClient()}>
       <ChatHostProvider value={host}>
         <ConversationScopeProvider
-          value={{ originSpaceId, restricted, generating: false, setRestricted: () => {} }}
+          value={{
+            originSpaceId,
+            restricted,
+            generating: false,
+            pending: false,
+            setRestricted: () => {},
+          }}
         >
           <Readable />
         </ConversationScopeProvider>

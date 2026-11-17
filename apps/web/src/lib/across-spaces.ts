@@ -10,7 +10,9 @@
  * file reader's `?org=…&space=…` names where to read WITHOUT switching.
  */
 
-export const ENTER_SPACE_PARAM = "enterSpace";
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
+
+export { ENTER_SPACE_PARAM };
 
 /** `path` as it was within the current space (or for a row of no space); naming the row's space otherwise. */
 export function linkedSpacePath(

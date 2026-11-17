@@ -70,12 +70,12 @@ export function ComposerTools({
   authorsPackages,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds } = useChatHost();
+  const { t, actingSpaceIds, workingSpaceId } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
   // The plain name, for the accessible names: the node below carries a tile the name does not.
   const spaceLabel = useOriginSpaceLabel();
-  const limit = limitAvailability(scope, actingSpaceIds);
+  const limit = limitAvailability(scope, actingSpaceIds, workingSpaceId);
   // The space as the host names it; without the host's rendering, the sentence stays generic.
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
@@ -147,6 +147,7 @@ export function ComposerTools({
           {limit.available ? (
             <DropdownMenuCheckboxItem
               checked={scope.restricted}
+              disabled={scope.pending}
               onCheckedChange={scope.setRestricted}
               aria-label={t("composer.limit", { name: spaceLabel })}
               data-testid="composer-limit-item"
@@ -213,7 +214,7 @@ export function ComposerTools({
           <button
             type="button"
             aria-label={t("composer.limit.undo", { name: spaceLabel })}
-            disabled={scope.generating}
+            disabled={scope.generating || scope.pending}
             onClick={() => scope.setRestricted(false)}
             className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
           >

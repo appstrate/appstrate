@@ -32,7 +32,7 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
-import { ACROSS_SPACES_POLL_MS } from "../../lib/across-spaces";
+import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
@@ -159,8 +159,9 @@ export function ConversationRuns({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const orgId = useCurrentOrgId();
   const canRead = useAdmittingSpaces("runs").length > 0;
+  // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
+  const scope = useListScope(true, canRead);
   const agentName = useRunAgentName();
   const { data: agents } = useAgents();
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
@@ -169,11 +170,10 @@ export function ConversationRuns({
   const query = $api.useQuery(
     "get",
     "/api/orgs/{orgId}/runs",
-    { params: { path: { orgId: orgId ?? "" }, query: filters } },
+    { params: { path: { orgId: scope.orgId ?? "" }, query: filters } },
     {
-      enabled: !!orgId && canRead && active && !!conversationId,
-      // The SSE stream carries the working space only: runs of the others are polled.
-      refetchInterval: ACROSS_SPACES_POLL_MS,
+      enabled: scope.enabled && canRead && active && !!conversationId,
+      refetchInterval: scope.refetchInterval,
     },
   );
 

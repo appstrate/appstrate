@@ -24,7 +24,7 @@ export const MCP_SURFACE_CACHE_MAX_ENTRIES = 64;
 /**
  * `permissions` and `spaces` MUST be the lists minted into the bearer (its permissions and its
  * space allowlist). The org id of the path reaches no descriptor; `spaces` (ids, names, roles,
- * sets and direct-access switches) are written into every one.
+ * sets and direct-access switches, in reach order) are written into every one.
  */
 export function platformMcpSurfaceKey(
   url: string,
@@ -36,15 +36,15 @@ export function platformMcpSurfaceKey(
     parsed.origin,
     parsed.searchParams.get("renders_cards"),
     [...new Set(permissions)].sort(),
-    spaces
-      .map((space) => [
-        space.id,
-        space.name,
-        space.role,
-        [...space.permissions].sort(),
-        space.credentialProxyOpen,
-      ])
-      .sort(([a], [b]) => String(a).localeCompare(String(b))),
+    // In reach order, unsorted: the descriptors list the spaces in that order, so two orders are
+    // two surfaces.
+    spaces.map((space) => [
+      space.id,
+      space.name,
+      space.role,
+      [...space.permissions].sort(),
+      space.credentialProxyOpen,
+    ]),
   ]);
 }
 

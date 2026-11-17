@@ -84,7 +84,12 @@ async function lockVisible(tx: Tx, input: EditInput): Promise<ConnectionRow> {
   return row;
 }
 
-/** A share's target, shared into or withdrawn from, is a space the credential may name. */
+/**
+ * A share's target, shared into or withdrawn from, is a space the credential may name. Always a
+ * 403 here: the caller only knows whether the credential admits the space, not which confinement
+ * refused it, and a space-pinned key's 403 on this door is asserted (`me.test.ts`). The answer
+ * depends on the credential alone, so it confirms nothing about the id.
+ */
 function assertAdmittedTarget(caller: ConnectionCaller, spaceId: string): void {
   if (!caller.admitsSpace(spaceId)) {
     throw forbidden(`Credential scope does not include space '${spaceId}'`);

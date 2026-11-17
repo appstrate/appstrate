@@ -225,7 +225,7 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
         );
         expect([door.path, refused.status]).toEqual([door.path, 403]);
         expect(((await refused.json()) as { detail: string }).detail).toContain(
-          "A delegated credential cannot reconnect a connection serving the whole organization",
+          "A credential bound to spaces cannot reconnect a connection serving the whole organization",
         );
         expect(await ciphertextOf(orgRow.id)).toBe(orgRow.credentialsEncrypted);
 

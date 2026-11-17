@@ -294,6 +294,7 @@ describe("handleChatStream", () => {
     engine?: ChatEngine,
     reachable: ReachableSpaceGrant[],
     principalKind: PrincipalKind = "user",
+    orgHalf: ReadonlySet<string> = new Set(),
   ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
@@ -310,6 +311,7 @@ describe("handleChatStream", () => {
       // What the router's middleware writes on every chat route in production: the spaces the
       // caller reaches.
       c.set("reachable", reachable);
+      c.set("reachableOrgHalf", orgHalf);
       c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
       c.set("orgName", CONTEXT_ORG_MARKER);
@@ -346,6 +348,8 @@ describe("handleChatStream", () => {
       packageAuthoring?: boolean;
       /** The spaces the caller reaches; omitted = the test context's default space, with `permissions`. */
       reachable?: ReachableSpaceGrant[];
+      /** The org-level half of the caller's grants (`ReachedSpaces.orgPermissions`); omitted = none. */
+      orgHalf?: ReadonlySet<string>;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
       /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
@@ -382,6 +386,7 @@ describe("handleChatStream", () => {
       engine,
       overrides?.reachable ?? [defaultReach(overrides?.permissions)],
       overrides?.principalKind,
+      overrides?.orgHalf,
     );
     const res = await app.request(`/api/orgs/${ctx.orgId}/chat`, {
       method: "POST",
@@ -1090,7 +1095,9 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(buildSystemPrompt(turnCapabilities(() => false)).slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt(turnCapabilities(() => false, [])).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -1122,7 +1129,7 @@ describe("handleChatStream", () => {
     expect(roles).toContain("assistant");
 
     const assistant = rows.find((r) => (r.content as { role?: string }).role === "assistant");
-    expect(assistant).toBeDefined();
+    expect(assistant).toMatchObject({ sessionId, content: { role: "assistant" } });
     const content = assistant!.content as {
       parts?: Array<{ type: string; text?: string }>;
       metadata?: { appstrate?: { turn?: { finishReason?: string; stepCount?: number } } };
@@ -1485,7 +1492,14 @@ describe("handleChatStream", () => {
         ),
       );
       const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-      expect(row).toBeDefined();
+      // Started from the overview: no origin space, no limit.
+      expect(row).toMatchObject({
+        id: sessionId,
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        spaceId: null,
+        restricted: false,
+      });
     });
 
     it("narrows the union by the authoring switch", async () => {
@@ -1513,7 +1527,8 @@ describe("handleChatStream", () => {
       expect(system).not.toContain("Gamma");
       expect(system).toContain("takes the `space_id` of one of them");
       expect(system).toContain("Ask the user which space when the request does not say");
-      expect(system).toContain("never moved to another space");
+      // The server's instructions say a refusal is final (`NO_FALLBACK_HINT`): the block does not.
+      expect(system).not.toContain("refused action");
       expect(system).toContain(CONTEXT_ORG_MARKER);
     });
 
@@ -1542,7 +1557,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
 
         expect(calls[0]!.system).toContain(
-          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`; never move a refused action into another space.`,
+          `This conversation was started in Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
         );
         // The default pins nothing: every acting space stays listed, on the organization endpoint.
         expect(calls[0]!.system).toContain(`- \`${ctx.defaultSpaceId}\` — Alpha (role operator)`);
@@ -1701,6 +1716,43 @@ describe("handleChatStream", () => {
         );
         const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
         expect(row).toMatchObject({ spaceId: spaceB, restricted: true });
+      });
+
+      it("keeps of the org-level half only the reads it needs; an unlimited turn keeps it all", async () => {
+        const orgHalf = new Set(["org:read", "models:read", "proxies:write", "members:invite"]);
+        const withOrg = reach.map((space) => ({
+          ...space,
+          permissions: [...space.permissions, ...orgHalf],
+        }));
+        const limited = await limitedTurn(mintSessionId(), { orgHalf }, withOrg);
+        expect(limited.res.status).toBe(200);
+        await collectUiChunks(limited.res);
+        const limitedSet = await tokenPermissions(limited.calls[0]!);
+        expect(limitedSet).toEqual(
+          [
+            "agents:write",
+            "chat:read",
+            "chat:write",
+            "mcp:invoke",
+            "mcp:read",
+            "models:read",
+            "org:read",
+            "skills:write",
+          ].sort(),
+        );
+        // The prompt lists the turn's set: no org-level write is offered to the model either.
+        expect(limited.calls[0]!.system).not.toContain("proxies:write");
+
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(mintSessionId(), undefined, engine, {
+          reachable: withOrg,
+          orgHalf,
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(await tokenPermissions(calls[0]!)).toEqual(
+          expect.arrayContaining(["proxies:write", "members:invite", "org:read"]),
+        );
       });
 
       it("tells the model it is limited to that space and lists no other", async () => {

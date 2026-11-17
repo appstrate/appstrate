@@ -116,20 +116,20 @@ describe("connection shares", () => {
   /** The owner on the account surface (no request space), holding `permissions` in every target. */
   const owner = (permissions = CONNECT): ConnectionCaller =>
     testCaller(
-      { kind: "person", actor: person(memberId) },
+      { kind: "person", binding: null, actor: person(memberId) },
       { permissionsIn: async () => permissions },
     );
 
   /** The org owner governing `here`, never the row's owner. */
   const governor = (): ConnectionCaller =>
     testCaller(
-      { kind: "person", actor: person(ctx.user.id) },
+      { kind: "person", binding: null, actor: person(ctx.user.id) },
       { spaceId: here, governs: true, permissionsIn: async () => GOVERN },
     );
 
   const orgOwner = () =>
     testCaller(
-      { kind: "person", actor: person(ctx.user.id) },
+      { kind: "person", binding: null, actor: person(ctx.user.id) },
       {
         canShareAllSpaces: () => true,
         permissionsIn: async () => GOVERN,
@@ -367,8 +367,7 @@ describe("connection shares", () => {
           {
             kind: "delegated",
             actor: person(memberId),
-            orgId: ctx.orgId,
-            spaceId: null,
+            binding: { orgId: ctx.orgId, spaceIds: null },
           },
           { canShareAllSpaces: () => true },
         ),
@@ -525,7 +524,7 @@ describe("connection shares", () => {
         spaceId: here,
         integrationId: INTEGRATION,
         caller: testCaller(
-          { kind: "delegated", actor, orgId: ctx.orgId, spaceId: here },
+          { kind: "delegated", actor, binding: { orgId: ctx.orgId, spaceIds: [here] } },
           { spaceId: here, permissionsIn: async () => CONNECT },
         ),
       }),

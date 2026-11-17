@@ -169,7 +169,7 @@ describe("unsharing on access loss", () => {
   /** The owner's own view of their connection, from the account surface. */
   const ownerViewer = (userId: string): ConnectionCaller =>
     testCaller(
-      { kind: "person", actor: { type: "user", id: userId } },
+      { kind: "person", binding: null, actor: { type: "user", id: userId } },
       { permissionsIn: async () => presetPermissions("operator") },
     );
 

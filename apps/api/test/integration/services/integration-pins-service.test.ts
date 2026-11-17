@@ -121,6 +121,7 @@ async function sharesOf(id: string): Promise<string[]> {
 
 const person = (id: string): ConnectionPrincipal => ({
   kind: "person",
+  binding: null,
   actor: { type: "user", id },
 });
 
@@ -814,8 +815,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           {
             kind: "delegated",
             actor: { type: "end_user", id: endUser.id },
-            orgId: ctx.orgId,
-            spaceId: null,
+            binding: { orgId: ctx.orgId, spaceIds: null },
           },
           id,
         );
@@ -1626,8 +1626,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           principal: {
             kind: "delegated",
             actor: { type: "end_user", id: endUser.id },
-            orgId: ctx.orgId,
-            spaceId: null,
+            binding: { orgId: ctx.orgId, spaceIds: null },
           },
         }),
       ).rejects.toMatchObject({ status: 409, code: "end_user_connection_not_shareable" });
@@ -1716,8 +1715,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const boundPrincipal: ConnectionPrincipal = {
         kind: "delegated",
         actor: { type: "user", id: memberId },
-        orgId: ctx.orgId,
-        spaceId: scope.spaceId,
+        binding: { orgId: ctx.orgId, spaceIds: [scope.spaceId] },
       };
       // As the door builds it: the credential admits the space it is bound to, alone.
       const bound = testCaller(boundPrincipal, { permissionsIn: async () => CONNECT });

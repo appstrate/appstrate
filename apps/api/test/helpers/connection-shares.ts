@@ -3,7 +3,7 @@
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationConnectionShares } from "@appstrate/db/schema";
 import type { ConnectionCaller } from "../../src/services/connection-reach.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../../src/lib/connection-principal.ts";
+import { boundSpacesOf, type ConnectionPrincipal } from "../../src/lib/connection-principal.ts";
 import { db } from "./db.ts";
 
 /**
@@ -15,13 +15,13 @@ export function testCaller(
   principal: ConnectionPrincipal,
   overrides: Partial<ConnectionCaller> = {},
 ): ConnectionCaller {
-  const bound = boundSpaceOf(principal);
+  const bound = boundSpacesOf(principal);
   return {
     principal,
     spaceId: null,
     canConnect: true,
     governs: false,
-    admitsSpace: (spaceId) => bound === null || spaceId === bound,
+    admitsSpace: (spaceId) => bound === null || bound.includes(spaceId),
     permissionsIn: async () => new Set(),
     spacesSeen: async () => [],
     ...overrides,

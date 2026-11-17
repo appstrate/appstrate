@@ -128,7 +128,7 @@ function organizationOf(events: string[]): TurnSpaces {
     touch: async (spaceId) => {
       events.push(`touch ${spaceId}`);
     },
-    spaceOfUri: async (uri) => (uri.startsWith("skill://spc_beta/") ? "spc_beta" : undefined),
+    spaceOfUri: async (uri) => uri.match(/^skill:\/\/(spc_[a-z]+)\//)?.[1],
   };
 }
 
@@ -256,6 +256,27 @@ describe("the conversation's forwarded tools and resources", () => {
       transport.events.length = 0;
       await tool("read_resource").execute("c2", { uri: "appfile://file_unplaced00" });
       expect(transport.events).toEqual(["resources/read"]);
+    } finally {
+      await built.close();
+    }
+  });
+
+  it("refuses a resource of a space outside the turn's like a call naming it: unread, unrecorded", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const refused = JSON.parse(
+        text(
+          await tool("read_resource").execute("c1", {
+            uri: "skill://spc_nope/acme/tone/tone/SKILL.md",
+          }),
+        ),
+      );
+      expect(refused).toMatchObject({
+        code: "unknown_space",
+        accepted: SPACES.map((space) => space.id),
+      });
+      expect(transport.events).toEqual([]);
     } finally {
       await built.close();
     }

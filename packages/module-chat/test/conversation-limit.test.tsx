@@ -84,6 +84,19 @@ describe("when the limit is on offer", () => {
     }
   });
 
+  it("is « outside », not « no-space », when the host works in a space the chat does not act in", () => {
+    const none = { originSpaceId: null, restricted: false, generating: false };
+    expect(limitAvailability(none, acting, "spc_x")).toEqual({
+      available: false,
+      reason: "outside",
+    });
+    // The overview keeps the entered space as working space: that one is acted in.
+    expect(limitAvailability(none, acting, "spc_a")).toEqual({
+      available: false,
+      reason: "no-space",
+    });
+  });
+
   it("always lets a limited conversation be released", () => {
     expect(
       limitAvailability({ originSpaceId: "spc_x", restricted: true, generating: false }, acting),
@@ -259,6 +272,7 @@ describe("the composer's limit chip", () => {
       originSpaceId: "spc_a",
       restricted: true,
       generating: false,
+      pending: false,
       setRestricted: () => {},
     });
     expect(out).toContain('data-testid="composer-limit-chip"');
@@ -272,6 +286,18 @@ describe("the composer's limit chip", () => {
       originSpaceId: "spc_a",
       restricted: true,
       generating: true,
+      pending: false,
+      setRestricted: () => {},
+    });
+    expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
+  });
+
+  it("disables the chip's X and the menu item while a change is in flight", () => {
+    const out = html({
+      originSpaceId: "spc_a",
+      restricted: true,
+      generating: false,
+      pending: true,
       setRestricted: () => {},
     });
     expect(out).toMatch(/aria-label="composer\.limit\.undo\|Studio" disabled=""/);
@@ -283,6 +309,7 @@ describe("the composer's limit chip", () => {
         originSpaceId: "spc_a",
         restricted: false,
         generating: false,
+        pending: false,
         setRestricted: () => {},
       }),
     ).not.toContain("composer-limit-chip");
@@ -336,6 +363,7 @@ describe("attaching a file in a limited conversation", () => {
               originSpaceId: "spc_a",
               restricted: true,
               generating: false,
+              pending: false,
               setRestricted: () => {},
             }}
           >

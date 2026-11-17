@@ -19,7 +19,7 @@ import { actorFilter } from "../lib/actor.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import type { SpaceScope } from "../lib/scope.ts";
-import { meConnectionAuthorityFilter } from "./connection-reach.ts";
+import { meConnectionAuthorityFilter, withinSpaces } from "./connection-reach.ts";
 
 /** One journal row on the wire. */
 export interface ConnectionCallView {
@@ -123,7 +123,7 @@ export function listSpaceConnectionCalls(
 /**
  * The calls made with a connection `principal` owns, whoever made them and from whichever space.
  * `null` for an unknown connection, one the caller does not own, or one outside a bound
- * credential's org (and space); a bound credential reads the calls of its org (and space) only.
+ * credential's org (and spaces); a bound credential reads the calls of its org (and spaces) only.
  */
 export async function listOwnConnectionCalls(
   principal: ConnectionPrincipal,
@@ -143,12 +143,12 @@ export async function listOwnConnectionCalls(
     )
     .limit(1);
   if (!owned) return null;
-  const binding =
-    principal.kind === "delegated"
-      ? and(
-          eq(connectionCalls.orgId, principal.orgId),
-          principal.spaceId ? eq(connectionCalls.spaceId, principal.spaceId) : undefined,
-        )
-      : undefined;
+  const bound = principal.binding;
+  const binding = bound
+    ? and(
+        eq(connectionCalls.orgId, bound.orgId),
+        withinSpaces(bound.spaceIds, (spaceId) => eq(connectionCalls.spaceId, spaceId)),
+      )
+    : undefined;
   return listCalls(and(eq(connectionCalls.connectionId, owned.id), binding), filters, page);
 }

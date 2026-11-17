@@ -10088,12 +10088,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "chat_sessions_space_id_spaces_id_fk": {
-          "name": "chat_sessions_space_id_spaces_id_fk",
+        "chat_sessions_space_id_org_id_fk": {
+          "name": "chat_sessions_space_id_org_id_fk",
           "tableFrom": "chat_sessions",
           "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": ["space_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }

@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `data.integration`.
 - **`ReachableSpaceGrant`, `ReachedSpaces`** (`@appstrate/core/module`, #1886): a space the caller reaches, with
   their role, effective permissions and direct-access switch (`credentialProxyOpen`) there, whether it is the organization's
-  default space (`isDefault`) or the caller's own personal space (`personal`), and whether the credential pins the reach, as
+  default space (`isDefault`) or the caller's own personal space (`personal`), whether the credential is confined to spaces (`confined`: pinned to one, or carrying a space allowlist), and
+  the org-level half of the caller's grants that every space's set shares (`orgPermissions`), as
   `PlatformServices.reachableSpaces` answers.
 - **`chatActsIn`** (`@appstrate/core/chat-contract`, #1886): whether a space's effective permissions
   (an array) let a chat conversation act in it (`chat:write`, `chat:read` and `mcp:read`): the one
@@ -31,8 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`describeSpace`, `spaceIdRefusal`, `NamedSpace`** (`@appstrate/core/mcp-spaces`, #1886): the
   refusal of a missing or unknown `space_id` on an organization-wide MCP connection, shared by the
   MCP server and the chat's local tools.
-- **`ChatAttachmentRequest.beforeResolve`** (`@appstrate/core/chat-contract`, #1886) is required: the
-  platform calls it with the space a file belongs to before anything is materialized there.
+- **`ResolvedChatAttachment.spaceId`** (`@appstrate/core/chat-contract`, #1886): the space the
+  attachment's file belongs to, where it resolved.
+- **`ENTER_SPACE_PARAM`** (`@appstrate/core/chat-contract`, #1886): the web shell's query parameter
+  that enters a space when an in-app link opens (`?enterSpace=`), shared by the shell's lists and
+  the run links the chat persists into a conversation.
 
 ### Fixed
 
@@ -79,6 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ChatAttachmentRequest`** (`@appstrate/core/chat-contract`, #1886) — BREAKING: `spaceId` is gone
+  and `permissions` becomes `spaces`, a list of `{ id, permissions }`, one per space the caller may
+  chat in. The attachment resolves in the space its file (or upload) belongs to, which must be one
+  of them. It gains a required `beforeResolve(spaceId)`: the platform calls it with that space
+  before anything is created or read there, and a rejection refuses the attachment.
 - **`injectedSkillsSchema`** (`@appstrate/core/chat-contract`, #1886) — BREAKING. The claim no
   longer carries a claim-wide `spaceId`: each skill's entry carries its own `spaceId`, the space its
   `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space only. A claim

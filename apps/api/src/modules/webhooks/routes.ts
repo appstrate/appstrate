@@ -159,7 +159,11 @@ export function createWebhooksRouter() {
   // a space too. Safe here because nothing on `/api/webhooks*` writes `spaceId`
   // for a session — the route family is not in `SPACE_SCOPED_PREFIXES` and the
   // space-context applier deliberately never writes that key, so it only ever
-  // holds the CREDENTIAL's own space. Building the scope here (rather than
+  // holds the CREDENTIAL's own space. A credential bound to a SET of spaces
+  // (`credentialSpaceIds`) pins none, so it keeps `OrgScope`: the handlers test
+  // the set themselves (`credentialAdmitsSpace`), and the by-id loader answers a
+  // row outside it as a missing one.
+  // Building the scope here (rather than
   // passing two strings) is what makes it impossible at the type level to
   // forget the space-scoping downstream.
   function webhookScope(c: Context<AppEnv>): OrgScope | SpaceScope {
@@ -298,8 +302,14 @@ export function createWebhooksRouter() {
     let webhook: WebhookInfo;
     try {
       webhook = await getWebhook(webhookScope(c), c.req.param("id")!);
-      // An org-level row spans every space: a credential confined to spaces does not see it.
-      if (webhook.level === "org" && credentialConfinedToSpaces(c)) {
+      // A row outside what the credential reaches is a row that does not exist, in the same
+      // words: an org-level row spans every space, so a confined credential never sees it, and a
+      // space row outside the credential's pin or allowlist would otherwise confirm its id, and
+      // name its space, through the space refusal below.
+      if (
+        (webhook.level === "org" && credentialConfinedToSpaces(c)) ||
+        (webhook.level === "space" && !credentialAdmitsSpace(c, webhook.spaceId))
+      ) {
         throw notFound(`Webhook '${webhook.id}' not found`);
       }
     } catch (err) {

@@ -460,7 +460,8 @@ function makeForwardExtension(
  * its files by its `skill://` URI (SEP-2640). Each content is returned whole
  * within the platform's inline bounds ({@link inlineResourceContent}): its
  * text, or a binary file's base64 in `blob`. A refusal reaches the model as the
- * server's error.
+ * server's error, or, for a resource of a space outside the turn's, as the forward tool's
+ * structured refusal.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
@@ -492,11 +493,21 @@ function makeReadResourceExtension(
         if (typeof uri !== "string" || uri === "") {
           throw new Error("`uri` must be a non-empty string");
         }
-        // A resource of a space the conversation reads from touches it.
+        // A resource of a space the conversation reads from touches it; one of a space outside the
+        // turn's is refused like a call naming it (the forward tool's structured refusal), unread
+        // and unrecorded.
         const resourceSpace = await organization.spaceOfUri(uri);
         if (resourceSpace) {
           const refusal = spaceIdRefusal(organization.spaces, resourceSpace);
-          if (refusal) throw new Error(refusal.error);
+          if (refusal) {
+            return withTurnBudgetNote(
+              toPiToolResult(
+                { ...refusal },
+                offerScopeOf(READ_RESOURCE_TOOL, { arguments: params }),
+              ),
+              turnBudget,
+            );
+          }
           await organization.touch(resourceSpace);
         }
         const client = await untilAborted(getClient(), callSignal);

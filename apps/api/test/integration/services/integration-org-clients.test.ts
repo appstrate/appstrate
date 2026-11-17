@@ -194,7 +194,7 @@ describe("org-level integration OAuth clients", () => {
   /** The list reader of a member of the org acting from `spaceA` (a session, no governance). */
   function memberReader(): ConnectionCaller {
     return testCaller(
-      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       { spaceId: spaceA.spaceId },
     );
   }

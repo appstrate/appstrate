@@ -1226,7 +1226,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1290,7 +1290,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1341,7 +1341,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-          delegated: principal.kind === "delegated",
+          delegated: principal.binding !== null,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),

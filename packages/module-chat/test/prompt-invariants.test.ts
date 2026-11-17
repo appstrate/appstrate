@@ -21,7 +21,7 @@ const contextText = (...args: Parameters<typeof formatCallerContext>) =>
 
 /** The turn's capabilities, from a permission set a role can actually hold. */
 function caps(permissions: readonly string[]) {
-  return turnCapabilities((permission) => permissions.includes(permission));
+  return turnCapabilities((permission) => permissions.includes(permission), []);
 }
 
 /** Build a persona from a permission set, so every one below is reachable. */
@@ -91,9 +91,10 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("duration, cost, token usage");
   });
 
-  it("keeps the available-integrations-by-default rule for context research", () => {
-    expect(FULL).toContain("default to the integrations already available");
-    expect(FULL).toContain("connected ones first");
+  it("keeps the integrations-over-memory rule for context research, the order being the server's", () => {
+    expect(FULL).toContain("use an available integration rather than answering from memory");
+    // The preference order (connected, then activated) is the MCP server's instructions'.
+    expect(FULL).not.toContain("connected ones first");
   });
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
@@ -168,7 +169,8 @@ describe("full persona invariants", () => {
     // its path names, so its 403 carries the route's own error, never the
     // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
-    expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(FULL).toMatch(/so do NOT restart the connect flow/);
+    expect(FULL).toContain("after a failed call, then re-run once");
     expect(FULL).toContain("`activatePackage`");
     expect(FULL).toContain("`POST /api/spaces/{id}/packages`");
     expect(FULL).toContain('{ "packageId": "<that integration id>" }');
@@ -220,8 +222,8 @@ describe("full persona invariants", () => {
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {
-      expect(persona).toMatch(
-        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in the space the failed call acted in/,
+      expect(persona).toContain(
+        "For `integration_not_active`, connecting is not the remedy: offer the activation described below for that code",
       );
       expect(persona).toContain(
         "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",
@@ -396,7 +398,7 @@ describe("the persona without inline composition", () => {
   it("keeps every rule that is not about composing one", () => {
     expect(REDUCED).toContain("You are Appstrate's assistant");
     expect(REDUCED).toContain("Never quote run metrics");
-    expect(REDUCED).toContain("default to the integrations already available");
+    expect(REDUCED).toContain("use an available integration rather than answering from memory");
     expect(REDUCED).toContain("call `read_file` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
     expect(REDUCED).toContain("The context lists the permissions this turn holds");
@@ -664,8 +666,12 @@ describe("the persona and package authoring", () => {
 
 describe("the persona and the spaces", () => {
   it("tells the model to activate in the space the failed call acted in", () => {
-    expect(FULL).toContain("with `spaceId` that space's id");
-    expect(FULL).toContain("the conversation's space when it is limited to one");
+    expect(FULL).toContain("with the path parameter `id` and the `space_id` both that space's id");
+    // Every call names its space, a limited conversation's included: no call carries none.
+    expect(FULL).toContain("the space its `space_id` named, as every call names one");
+    expect(FULL).not.toContain("the conversation's space when it is limited to one");
+    // Stated once: the warnings paragraph refers to it.
+    expect(FULL.split("`activatePackage`").length - 1).toBe(1);
     expect(FULL).not.toContain("the current space from your context block");
     expect(FULL).toMatch(/the space the failed call acted in/);
   });
@@ -689,7 +695,7 @@ describe("the persona and the spaces", () => {
 
   describe("the origin space", () => {
     const sentence = (space: string, id: string) =>
-      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`; never move a refused action into another space.`;
+      `This conversation was started in ${space} (\`${id}\`): when the user names no space, pass \`${id}\` as the \`space_id\`.`;
 
     it("is a default for a request naming no space, never a pin", () => {
       const out = contextText(identityOf("Ada"), {
@@ -707,13 +713,15 @@ describe("the persona and the spaces", () => {
       const out = contextText(identityOf("Ada"), CONTEXT_OPTS);
       expect(out).not.toContain("This conversation was started in");
       expect(out).toContain(
-        "Ask the user which space when the request does not say; never guess it. A refused action is never moved to another space: report the refusal.",
+        "Ask the user which space when the request does not say; never guess it.",
       );
+      // Never moving a refused action is the server instructions' (`NO_FALLBACK_HINT`): one copy.
+      expect(out).not.toContain("refused action");
     });
 
     describe("without an origin space (the overview)", () => {
       const fallback = (id: string, label: string) =>
-        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`; never move a refused action into another space.`;
+        `When the user names no space, pass \`${id}\` (${label}) as the \`space_id\`.`;
       const PERSONAL = { ...SPACES[0]!, id: "spc_p", name: "Mine", personal: true };
       const DEFAULT = { ...SPACES[1]!, isDefault: true };
 

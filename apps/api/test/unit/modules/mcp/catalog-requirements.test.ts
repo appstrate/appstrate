@@ -570,12 +570,12 @@ describe("hand-written predicates agree with the guards they stand for", () => {
     },
     {
       name: "turnCapabilities.authors ↔ invokes ∧ createAgent",
-      predicate: (set) => turnCapabilities((p) => set.has(p)).authors,
+      predicate: (set) => turnCapabilities((p) => set.has(p), []).authors,
       guards: (set) => invokes(set) && granted("createAgent", set),
     },
     {
       name: "turnCapabilities.transport ↔ the MCP endpoint's guard",
-      predicate: (set) => turnCapabilities((p) => set.has(p)).transport,
+      predicate: (set) => turnCapabilities((p) => set.has(p), []).transport,
       guards: transport,
     },
     {
@@ -583,22 +583,22 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       // only MCP half; a skill the space does not enforce is served on
       // `getSkill`'s guard, and `listSkills` names the rest.
       name: "turnCapabilities.readsSkills ↔ mcp:read ∧ getSkill ∧ listSkills",
-      predicate: (set) => turnCapabilities((p) => set.has(p)).readsSkills,
+      predicate: (set) => turnCapabilities((p) => set.has(p), []).readsSkills,
       guards: (set) => transport(set) && granted("getSkill", set) && granted("listSkills", set),
     },
     {
       name: "turnCapabilities reaches read ↔ invokes ∧ getRun",
-      predicate: (set) => reaches(turnCapabilities((p) => set.has(p)).runLevel, "read"),
+      predicate: (set) => reaches(turnCapabilities((p) => set.has(p), []).runLevel, "read"),
       guards: (set) => invokes(set) && granted("getRun", set),
     },
     {
       name: "turnCapabilities reaches run ↔ invokes ∧ runAgent ∧ getRun",
-      predicate: (set) => reaches(turnCapabilities((p) => set.has(p)).runLevel, "run"),
+      predicate: (set) => reaches(turnCapabilities((p) => set.has(p), []).runLevel, "run"),
       guards: (set) => invokes(set) && granted("runAgent", set) && granted("getRun", set),
     },
     {
       name: "turnCapabilities reaches compose ↔ invokes ∧ runAgent ∧ getRun ∧ runInline",
-      predicate: (set) => reaches(turnCapabilities((p) => set.has(p)).runLevel, "compose"),
+      predicate: (set) => reaches(turnCapabilities((p) => set.has(p), []).runLevel, "compose"),
       guards: (set) =>
         invokes(set) &&
         granted("runAgent", set) &&

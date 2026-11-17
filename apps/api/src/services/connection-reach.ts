@@ -20,7 +20,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { Permission } from "../lib/permissions.ts";
 
 function orgOf(spaceId: string): SQL {
@@ -100,13 +100,27 @@ export function ownUsableInSpace(spaceId: string, actor: Actor): SQL {
 /** The order candidates of equal standing keep, wherever the usable rows are listed. */
 export const OLDEST_FIRST = [asc(c.createdAt), asc(c.id)] as const;
 
-/** In the SQL, so a delegated credential only ever SELECTs rows inside its org (and space). */
+/**
+ * In the SQL, so a bound credential only ever SELECTs rows inside its org and, when it names spaces,
+ * rows serving one of them (an org-level row serves them all).
+ */
 export function meConnectionAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
-  if (principal.kind !== "delegated") return undefined;
-  return and(
-    eq(c.orgId, principal.orgId),
-    principal.spaceId ? connectionInSpace(principal.spaceId) : undefined,
-  );
+  const { binding } = principal;
+  if (!binding) return undefined;
+  return and(eq(c.orgId, binding.orgId), withinSpaces(binding.spaceIds, connectionInSpace));
+}
+
+/**
+ * `predicate` holds for one of `spaceIds`; `undefined` (no bound) when `spaceIds` is `null`, and
+ * FALSE for an empty list, which names no space at all.
+ */
+export function withinSpaces(
+  spaceIds: readonly string[] | null,
+  predicate: (spaceId: string) => SQL,
+): SQL | undefined {
+  if (spaceIds === null) return undefined;
+  if (spaceIds.length === 0) return sql`FALSE`;
+  return or(...spaceIds.map(predicate));
 }
 
 /** A space of an org the caller sees, with the caller's permissions there. */
@@ -157,7 +171,8 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
 
 /**
  * The write actions `caller` holds on `row`: what the lists offer and the edit services enforce. The
- * owner renames (a credential bound to a space: rows scoped to it only) and shares a member's row;
+ * owner renames (a credential bound to spaces: rows scoped to one of them only, never a row serving
+ * the whole org) and shares a member's row;
  * a governor of the request space renames a colleague's row scoped to it and withdraws one shared
  * into it. Sharing is the owner's consent: a governor never shares.
  */
@@ -170,14 +185,15 @@ export function connectionActions(
   if (!caller.canConnect) return [];
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
-    const bound = boundSpaceOf(caller.principal);
-    if (bound === null || row.spaceId === bound) actions.push("rename");
+    const bound = boundSpacesOf(caller.principal);
+    if (bound === null || (row.spaceId !== null && bound.includes(row.spaceId)))
+      actions.push("rename");
     if (row.userId !== null) {
       actions.push("share");
       if (
         row.spaceId === null &&
         caller.canShareAllSpaces?.(row.orgId) &&
-        caller.principal.kind === "person" &&
+        caller.principal.binding === null &&
         (orgRole === "owner" || orgRole === "admin")
       )
         actions.push("share_all_spaces");

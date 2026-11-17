@@ -38,9 +38,9 @@ export function ConversationSpacesControl({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="sm"
               // The stacked tiles ring themselves in the button's background, at rest or hovered.
-              className="size-auto h-8 shrink-0 px-2 [--space-tile-ring:var(--canvas)] hover:[--space-tile-ring:var(--accent)]"
+              className="shrink-0 px-2 [--space-tile-ring:var(--canvas)] hover:[--space-tile-ring:var(--accent)]"
               aria-label={label}
               data-testid="conversation-spaces"
             >

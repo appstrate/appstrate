@@ -87,11 +87,12 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(session.id, "strm_1", {
-      id: "u1",
-      role: "user",
-      parts: [{ type: "text", text: "hello" }],
-    });
+    await claimTurn(
+      session.id,
+      "strm_1",
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      { spaceId: null, restricted: false },
+    );
 
     // The helper rejects when fewer frames than asked arrive: asking for two
     // and getting one is the assertion.

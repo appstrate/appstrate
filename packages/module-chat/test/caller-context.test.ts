@@ -55,7 +55,7 @@ function fakeContext(vars: Record<string, unknown>): any {
 
 /** The turn's capabilities, from the permission set a role actually grants. */
 function caps(permissions: readonly string[]) {
-  return turnCapabilities((permission) => permissions.includes(permission));
+  return turnCapabilities((permission) => permissions.includes(permission), []);
 }
 
 /** A builder: the MCP pair, the launch, run-read and authoring. */
@@ -95,7 +95,6 @@ const BASE_OPTS = {
   rolePreview: false,
   spaces: REACH,
   restricted: false,
-  originLapsed: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
   enforced: [],
@@ -479,7 +478,7 @@ describe("formatCallerContext", () => {
         "those this conversation's origin space requires and those the user chose",
       );
       expect(out).toContain("The user lifts only their own restriction");
-      expect(out).toContain("their requirement stays");
+      expect(out).toContain("the origin space's requirement stays");
     });
 
     it("notices an enforced skill with no readable version", () => {
@@ -520,14 +519,14 @@ describe("formatCallerContext", () => {
   });
 
   it("omits the role clause when the role is absent", () => {
-    const out = contextText({ user: { name: "Ada" }, connections: [] }, BASE_OPTS);
+    const out = contextText({ user: { name: "Ada" } }, BASE_OPTS);
     expect(out).toContain("assisting Ada.");
     expect(out).not.toContain("role in this organization");
   });
 
   it("renders each skill line with id, version, URI and description, dropping what says nothing", () => {
     const out = contextText(
-      { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" }, connections: [] },
+      { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" } },
       {
         ...BASE_OPTS,
         skillCatalogue: [
@@ -554,7 +553,7 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("(list truncated)");
   });
 
-  it("renders a context block from skills alone (no identity/connections/agents)", () => {
+  it("renders a context block from skills alone (no identity)", () => {
     const out = contextText(
       {},
       {
@@ -571,7 +570,6 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        connections: [],
       },
       { ...BASE_OPTS, skillCatalogue: [] },
     );
@@ -583,7 +581,6 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada", email: "ada@acme.com" },
         org: { role: "member", name: "Acme", slug: "acme" },
-        connections: [],
       },
       BASE_OPTS,
     );
@@ -598,8 +595,6 @@ describe("formatCallerContext", () => {
     const ctx = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
@@ -701,15 +696,10 @@ describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
   describe("the origin space", () => {
-    const build = (extra: {
-      origin?: typeof ORIGIN;
-      restricted?: boolean;
-      originLapsed?: boolean;
-    }) =>
+    const build = (extra: { origin?: typeof ORIGIN; restricted?: boolean }) =>
       blockText(fakeContext({ orgRole: "member" }), {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         ...extra,
         user,
         capabilities: caps(BUILDER),
@@ -723,19 +713,8 @@ describe("buildCallerContextBlock", () => {
       const out = await build({ origin: ORIGIN });
       expect(out).toContain("- `spc_1` — One (role builder)");
       expect(out).toContain(
-        "This conversation was started in One (`spc_1`): when the user names no space, pass `spc_1` as the `space_id`; never move a refused action into another space.",
+        "This conversation was started in One (`spc_1`): when the user names no space, pass `spc_1` as the `space_id`.",
       );
-    });
-
-    it("tells the model an origin space's required skills lapse once its author cannot act there", async () => {
-      const out = await build({ originLapsed: true });
-      expect(out).toContain("## Skills");
-      expect(out).toContain(
-        "requires skills in every conversation, but you can no longer act in it: those skills do not apply to this turn.",
-      );
-      // An origin the author still acts in, or none at all, says nothing of the sort.
-      expect(await build({ origin: ORIGIN })).not.toContain("no longer act in it");
-      expect(await build({})).not.toContain("no longer act in it");
     });
 
     it("names no default without an origin space (the overview)", async () => {
@@ -775,7 +754,6 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         user,
         // Strict: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
@@ -847,7 +825,6 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -876,7 +853,6 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -907,7 +883,6 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
@@ -937,7 +912,6 @@ describe("buildCallerContextBlock", () => {
       {
         spaces: REACH,
         restricted: false,
-        originLapsed: false,
         user,
         capabilities: caps(BUILDER),
         // The turn keeps `skills:write`: it reads the drafts the caller reads.

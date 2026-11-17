@@ -32,6 +32,7 @@ import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 
 /** Operation ids whose result launches a run we can follow. */
 const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
@@ -689,10 +690,12 @@ export function extractRunPackageId(result: unknown): string | undefined {
 }
 
 /**
- * Build the in-app run-detail URL (`/agents/{packageId}/runs/{runId}`, the same
+ * Build the in-app run-detail path (`/agents/{packageId}/runs/{runId}`, the same
  * route the run table links to). `undefined` when the run has no package id
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
- * slashes literal to match the route; only the run id is encoded.
+ * slashes literal to match the route; only the run id is encoded. The UI opens it in the run's
+ * space through the host's `linkInSpace`; `spaceId` names it directly for the server-side
+ * reconcile, which has no host to ask.
  */
 export function buildRunPageHref(
   packageId: string | undefined,
@@ -703,13 +706,6 @@ export function buildRunPageHref(
   const href = `/agents/${packageId}/runs/${encodeURIComponent(runId)}`;
   return spaceId ? `${href}?${ENTER_SPACE_PARAM}=${encodeURIComponent(spaceId)}` : href;
 }
-
-/**
- * The host's query parameter that enters a space when a link opens (`lib/across-spaces.ts` in
- * the web app, which resolves it): a run a conversation launched lives in the space its
- * call named, so its link enters that space.
- */
-const ENTER_SPACE_PARAM = "enterSpace";
 
 /**
  * `request` asking in `spaceId`: the run a conversation launched is read in the space

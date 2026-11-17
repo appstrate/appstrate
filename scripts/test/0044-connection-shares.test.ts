@@ -138,7 +138,11 @@ describe("0044 — connection shares copied into integration_connection_shares",
       connectionId: id,
       spaceId: s2,
       integrationId: null,
-      caller: testCaller({ kind: "person", actor: { type: "user", id: ctx.user.id } }),
+      caller: testCaller({
+        kind: "person",
+        actor: { type: "user", id: ctx.user.id },
+        binding: null,
+      }),
     });
     expect(removed).toBe(true);
 

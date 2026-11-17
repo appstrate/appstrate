@@ -23,7 +23,7 @@
  * store resolves to "no active stream".
  */
 
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
@@ -297,12 +297,30 @@ export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
  * route tell a freshly claimed turn from a marker whose producer died (see
  * {@link STALE_MARKER_MIN_AGE_MS}). Emits no signal: the caller's user-message
  * write does; on its failure `clearActiveStream` does.
+ *
+ * A compare-and-set on the scope the turn read (its origin space and limit): the
+ * turn's spaces and bearer were computed from that read, and the limit PATCH is
+ * refused only once a marker is set, so a change landing between the read and this
+ * claim must refuse the turn rather than let it act with the reach it no longer has.
+ * `false`: the scope moved, nothing was written.
  */
-export async function setActiveStream(sessionId: string, streamId: string): Promise<void> {
-  await db
+export async function setActiveStream(
+  sessionId: string,
+  streamId: string,
+  scope: { spaceId: string | null; restricted: boolean },
+): Promise<boolean> {
+  const claimed = await db
     .update(chatSessions)
     .set({ activeStreamId: streamId, updatedAt: new Date() })
-    .where(eq(chatSessions.id, sessionId));
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        eq(chatSessions.restricted, scope.restricted),
+        sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
+      ),
+    )
+    .returning({ id: chatSessions.id });
+  return claimed.length > 0;
 }
 
 /**

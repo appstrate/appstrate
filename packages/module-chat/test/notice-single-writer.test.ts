@@ -42,6 +42,9 @@ import { claimTurn } from "../src/chat-stream.ts";
 import { reconcileChatRun, runNoticeMessageId } from "../src/run-reconcile.ts";
 import { setActiveStream } from "../src/resumable.ts";
 
+/** The scope of a session created with no origin space and no limit. */
+const UNLIMITED = { spaceId: null, restricted: false };
+
 let ctx: TestContext;
 let packageId: string;
 
@@ -202,7 +205,7 @@ describe("persistNotice single-writer guard", () => {
 
   it("refuses while a turn owns the session", async () => {
     const sessionId = await createSession();
-    await setActiveStream(sessionId, "strm_live");
+    await setActiveStream(sessionId, "strm_live", UNLIMITED);
 
     const posted = await persistNotice({
       sessionId,
@@ -223,7 +226,7 @@ describe("persistNotice single-writer guard", () => {
     const sessionId = await createSession();
     await installClaimProbe();
     try {
-      await claimTurn(sessionId, "strm_claim", userMessage("u1", "bonjour"));
+      await claimTurn(sessionId, "strm_claim", userMessage("u1", "bonjour"), UNLIMITED);
       // Exactly one message landed, and the session was already claimed when it
       // did. With the write ordered first this reads `[null]`: a notice
       // committing in that gap takes the seq between the user message and the
@@ -242,7 +245,7 @@ describe("persistNotice single-writer guard", () => {
     await failEveryMessageInsert();
     try {
       await expect(
-        claimTurn(sessionId, "strm_failed", userMessage("u1", "bonjour")),
+        claimTurn(sessionId, "strm_failed", userMessage("u1", "bonjour"), UNLIMITED),
       ).rejects.toThrow();
     } finally {
       await removeClaimProbe();
@@ -255,6 +258,39 @@ describe("persistNotice single-writer guard", () => {
       .limit(1);
     expect(row?.activeStreamId).toBeNull();
     expect(await messageIds(sessionId)).toEqual([]);
+  });
+
+  it("refuses the claim when the conversation's scope moved since the turn read it", async () => {
+    // The turn's spaces and bearer are computed from the scope it read; the limit PATCH is
+    // refused only once a marker is set. A limit set in between must refuse the turn, not let
+    // it act across spaces the conversation no longer allows.
+    const sessionId = await createSession();
+    await db
+      .update(chatSessions)
+      .set({ spaceId: ctx.defaultSpaceId, restricted: true })
+      .where(eq(chatSessions.id, sessionId));
+    const claim = (scope: { spaceId: string | null; restricted: boolean }) =>
+      claimTurn(sessionId, "strm_scope", userMessage("u1", "bonjour"), scope);
+
+    for (const read of [
+      { spaceId: ctx.defaultSpaceId, restricted: false },
+      { spaceId: null, restricted: false },
+    ]) {
+      await expect(claim(read)).rejects.toMatchObject({
+        status: 409,
+        code: "chat_turn_scope_changed",
+      });
+    }
+    const [row] = await db
+      .select({ activeStreamId: chatSessions.activeStreamId })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId));
+    expect(row?.activeStreamId).toBeNull();
+    expect(await messageIds(sessionId)).toEqual([]);
+
+    // The scope as stored: claimed.
+    await claim({ spaceId: ctx.defaultSpaceId, restricted: true });
+    expect(await messageIds(sessionId)).toEqual(["u1"]);
   });
 
   it("still signals the owner after a write commits", async () => {

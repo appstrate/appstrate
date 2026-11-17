@@ -62,7 +62,7 @@ describe("the conversation list's space line", () => {
     });
 
     it(`says « Vue d'ensemble » for a conversation that touched no space ${mode}`, () => {
-      expect(render(filter)).toContain("threads.overview");
+      expect(render(filter)).toContain("common:overview.title");
     });
   }
 
@@ -72,7 +72,7 @@ describe("the conversation list's space line", () => {
   });
 
   it("draws none without the host's rendering", () => {
-    expect(render(null, false)).not.toContain("threads.overview");
+    expect(render(null, false)).not.toContain("common:overview.title");
   });
 
   it("leaves a row's actions to the chat's own grant", () => {

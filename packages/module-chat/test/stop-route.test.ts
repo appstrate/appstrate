@@ -26,6 +26,9 @@ import {
 import { setActiveStream } from "../src/resumable.ts";
 import { registerStopController, unregisterStopController } from "../src/stop-registry.ts";
 
+/** The scope of a session created with no origin space and no limit. */
+const UNLIMITED = { spaceId: null, restricted: false };
+
 const app = getTestApp();
 
 describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
@@ -62,7 +65,7 @@ describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId);
+    await setActiveStream(sessionId, streamId, UNLIMITED);
     return { sessionId, controller };
   }
 

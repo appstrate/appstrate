@@ -24,6 +24,7 @@ import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { admittingSpaces } from "../lib/space-lists";
 import { useSpaceLink } from "../hooks/use-current-space";
+import { useChatCan } from "../modules/chat/use-chat-runtime";
 import { useSpacesFor } from "../hooks/use-space-action";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
@@ -79,6 +80,8 @@ export function DashboardHeader({
 }) {
   const { t, i18n } = useTranslation("agents");
   const chat = useSpacesFor({ route: "/chat" });
+  // The chat acts across the caller's spaces: writing is judged over them, as the product tabs do.
+  const canChat = useChatCan()("chat:write");
   const { copy } = useCopyToClipboard();
   const navigate = useNavigate();
   const [assistOpen, setAssistOpen] = useState(false);
@@ -139,8 +142,8 @@ export function DashboardHeader({
         >
           <p className="text-muted-foreground text-sm">{t("dashboard.askAi.description")}</p>
           <div className="flex flex-col gap-2">
-            {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
-            {chat.offered && (
+            {/* Offered where `/chat` opens (the module loaded AND the caller's grants) and the caller may write in it. */}
+            {chat.offered && canChat && (
               <ChoiceCard
                 icon={MessageSquareText}
                 title={t("dashboard.askAi.chat")}

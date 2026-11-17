@@ -50,7 +50,7 @@ import { orgPermissions, presetPermissions } from "../../../apps/api/src/lib/per
 import { ensurePersonalSpaceFor } from "../../../apps/api/src/services/spaces.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
-import { turnPermissions } from "../src/turn-permissions.ts";
+import { limitedConversationPermissions, turnPermissions } from "../src/turn-permissions.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -329,6 +329,57 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
     "X-Org-Id": owner.orgId,
   });
 
+  it("keeps a limited conversation of an org owner off every org-level write, not off its origin space", async () => {
+    const union = [...orgPermissions("owner"), ...presetPermissions("admin"), "mcp:read"];
+    // What `handleChatStream` mints for each case over the same reach.
+    const limited = limitedConversationPermissions(union, orgPermissions("owner"));
+    const bearerWith = (permissions: readonly string[]) => ({
+      Authorization: `Bearer ${mintMcpLoopbackToken({
+        userId: owner.user.id,
+        email: owner.user.email,
+        name: owner.user.name,
+        orgId: owner.orgId,
+        orgRole: "owner",
+        permissions,
+        spaceIds: [owner.defaultSpaceId],
+      })}`,
+      "X-Org-Id": owner.orgId,
+    });
+    const proxy = { label: "Egress", url: "http://proxy.example.com:8080" };
+    const statusOf = async (
+      permissions: readonly string[],
+      operationId: string,
+      body: unknown,
+      pathParams?: Record<string, string>,
+    ) =>
+      (await invoke(bearerWith(permissions), owner.defaultSpaceId, operationId, body, pathParams))
+        .data.status;
+
+    // Limited: an org-level write is refused, whatever the org role; a space write in the origin
+    // is not, and the reads the turn needs stay.
+    expect(await statusOf(limited, "createProxy", proxy)).toBe(403);
+    expect(
+      await statusOf(
+        limited,
+        "inviteMember",
+        { email: "new@example.com", role: "member" },
+        { orgId: owner.orgId },
+      ),
+    ).toBe(403);
+    expect(await statusOf(limited, "createEndUser", { name: "Alice" })).toBe(201);
+    expect(await statusOf(limited, "listSpaces", undefined)).toBe(200);
+    // Unlimited (same allowlist kind, the caller's org grants kept): the same write goes through.
+    expect(await statusOf(union, "createProxy", proxy)).toBe(201);
+    expect(
+      await statusOf(
+        union,
+        "inviteMember",
+        { email: "new@example.com", role: "member" },
+        { orgId: owner.orgId },
+      ),
+    ).toBe(201);
+  });
+
   it("names no space outside its allowlist in a path, though its org permissions would serve it", async () => {
     const headers = ownerBearer();
     const onSpace = (operationId: string, id: string) =>
@@ -343,12 +394,13 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
       "listSpacePackages",
     ]) {
       const refused = await onSpace(operationId, gestion.id);
-      expect({ operationId, status: refused.data.status }).toEqual({ operationId, status: 403 });
+      expect({ operationId, status: refused.data.status }).toEqual({ operationId, status: 404 });
     }
     expect((await onSpace("getSpace", owner.defaultSpaceId)).data.status).toBe(200);
-    // The same bearer on the REST door, where no dispatch pins it: the allowlist alone refuses.
+    // The same bearer on the REST door, where no dispatch pins it: the allowlist alone refuses,
+    // with the 404 of a space that does not exist.
     const direct = (id: string) => app.request(`/api/spaces/${id}`, { headers });
-    expect((await direct(gestion.id)).status).toBe(403);
+    expect((await direct(gestion.id)).status).toBe(404);
     expect((await direct(owner.defaultSpaceId)).status).toBe(200);
 
     const listed = await invoke(headers, owner.defaultSpaceId, "listSpaces");
@@ -502,6 +554,76 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
     expect(shared.map((s) => s.spaceId)).toEqual([gestion.id]);
   });
 
+  it("reaches no connection of its owner outside its allowlist, nor one serving the whole org for a write", async () => {
+    await seedPackage({ id: "@chatorg/gmail", orgId: owner.orgId, type: "integration" });
+    const seedRow = async (spaceId: string | null, label: string) => {
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: "@chatorg/gmail",
+          authKey: "google",
+          accountId: `acct-${label}`,
+          orgId: owner.orgId,
+          spaceId,
+          originSpaceId: spaceId === null ? owner.defaultSpaceId : null,
+          userId: owner.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          label,
+        })
+        .returning({ id: integrationConnections.id });
+      return row!.id;
+    };
+    const outside = await seedRow(gestion.id, "Gestion");
+    const inside = await seedRow(owner.defaultSpaceId, "Default");
+    const orgWide = await seedRow(null, "Org");
+    const headers = { ...ownerBearer(), "Content-Type": "application/json" };
+    const call = (path: string, method = "GET", body?: unknown) =>
+      app.request(path, {
+        method,
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+
+    const listed = (await (await call("/api/me/connections")).json()) as {
+      data: Array<{ connections: Array<{ connection_id: string; allowed_actions: string[] }> }>;
+    };
+    const actions = Object.fromEntries(
+      listed.data.flatMap((group) =>
+        group.connections.map((row) => [row.connection_id, row.allowed_actions] as const),
+      ),
+    );
+    expect(actions).toEqual({ [inside]: ["rename", "share"], [orgWide]: ["share"] });
+
+    // Outside the allowlist: not there, whatever the action.
+    expect((await call(`/api/me/connections/${outside}`, "PATCH", { label: "x" })).status).toBe(
+      404,
+    );
+    expect((await call(`/api/me/connections/${outside}/calls`)).status).toBe(404);
+    expect(
+      ((await (await call(`/api/me/connections/${outside}/handoff`)).json()) as { data: [] }).data,
+    ).toEqual([]);
+    expect((await call(`/api/me/connections/${outside}`, "DELETE")).status).toBe(204);
+    // A row serving the whole org serves spaces outside the allowlist too: listed, not written.
+    expect((await call(`/api/me/connections/${orgWide}`, "PATCH", { label: "y" })).status).toBe(
+      403,
+    );
+    expect((await call(`/api/me/connections/${orgWide}`, "DELETE")).status).toBe(403);
+    // Inside it, the owner's own row is renamed.
+    expect(
+      (await call(`/api/me/connections/${inside}`, "PATCH", { label: "Renamed" })).status,
+    ).toBe(200);
+
+    const rows = await db
+      .select({ id: integrationConnections.id, label: integrationConnections.label })
+      .from(integrationConnections);
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.label]))).toEqual({
+      [outside]: "Gestion",
+      [inside]: "Renamed",
+      [orgWide]: "Org",
+    });
+  });
+
   /** An agent homed in the default space with a published version, so it can be placed elsewhere. */
   const seedPublishedAgent = async (id: string) => {
     await seedPackage({ id, orgId: owner.orgId, homeSpaceId: owner.defaultSpaceId });
@@ -530,7 +652,8 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
         headers: { ...ownerBearer(), "X-Space-Id": owner.defaultSpaceId },
       });
 
-    expect((await withdraw(gestion.id)).status).toBe(403);
+    // Not a space it may name: the same 404 as a space that does not exist.
+    expect((await withdraw(gestion.id)).status).toBe(404);
     expect(await placements("@chatorg/shared")).toEqual([owner.defaultSpaceId, gestion.id].sort());
   });
 

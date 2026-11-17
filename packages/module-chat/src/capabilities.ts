@@ -38,11 +38,12 @@ const PROXY_PERMISSIONS = ["credential-proxy:call", "credential-proxy:call-own"]
 
 /**
  * `has` is the turn's set; `spaces` are the turn's spaces, each acting with its own permissions
- * within that set. Without them (the web shell's judgement) no integration tool is counted.
+ * within that set. A judgement that names none (the web shell's, which judges no turn) counts no
+ * integration tool, so it says so with `[]`.
  */
 export function turnCapabilities(
   has: (permission: string) => boolean,
-  spaces: readonly Pick<ReachableSpaceGrant, "permissions" | "credentialProxyOpen">[] = [],
+  spaces: readonly Pick<ReachableSpaceGrant, "permissions" | "credentialProxyOpen">[],
 ): TurnCapabilities {
   const transport = has("mcp:read");
   const invokes = transport && has("mcp:invoke");
@@ -64,7 +65,7 @@ export function turnCapabilities(
 
 /** Creating packages from the chat: the composer's authoring switch and the shell's access row. */
 export function canAuthorPackages(has: (permission: string) => boolean): boolean {
-  return has("chat:write") && turnCapabilities(has).authorsPackages;
+  return has("chat:write") && turnCapabilities(has, []).authorsPackages;
 }
 
 /**

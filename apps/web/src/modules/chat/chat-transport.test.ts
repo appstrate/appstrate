@@ -41,14 +41,10 @@ describe("chatTransport", () => {
     expect(transport.spaceId).toBeNull();
   });
 
-  it("sends the organization's chat routes without X-Space-Id", async () => {
+  it("sends the headers as built, the chat's routes ignoring X-Space-Id", async () => {
     const headers = await sent("/api/orgs/org_1/chat/sessions");
-    expect(headers.get("X-Space-Id")).toBeNull();
     expect(headers.get("X-Org-Id")).toBe("org_1");
     expect(headers.get("X-Chat-Locale")).toBe("fr");
-  });
-
-  it("keeps the working space on the calls that are not the organization's", async () => {
-    expect((await sent("/api/uploads")).get("X-Space-Id")).toBe("spc_a");
+    expect(headers.get("X-Space-Id")).toBe("spc_a");
   });
 });

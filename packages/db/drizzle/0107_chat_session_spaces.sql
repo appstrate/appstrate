@@ -13,7 +13,9 @@ CREATE TABLE "chat_session_spaces" (
 ALTER TABLE "chat_sessions" ALTER COLUMN "space_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "chat_sessions" ADD COLUMN "restricted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "chat_sessions" DROP CONSTRAINT "chat_sessions_space_id_spaces_id_fk";--> statement-breakpoint
-ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_space_id_spaces_id_fk" FOREIGN KEY ("space_id") REFERENCES "public"."spaces"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+-- Composite tenant-integrity FK; `SET NULL (space_id)` nulls only the space, never `org_id`
+-- (Drizzle cannot express the column list, same as migration 0028).
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_space_id_org_id_fk" FOREIGN KEY ("space_id","org_id") REFERENCES "public"."spaces"("id","org_id") ON DELETE SET NULL ("space_id") ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chat_session_spaces" ADD CONSTRAINT "chat_session_spaces_session_org_fk" FOREIGN KEY ("session_id","org_id") REFERENCES "public"."chat_sessions"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chat_session_spaces" ADD CONSTRAINT "chat_session_spaces_space_org_fk" FOREIGN KEY ("space_id","org_id") REFERENCES "public"."spaces"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_chat_session_spaces_space" ON "chat_session_spaces" USING btree ("space_id");--> statement-breakpoint

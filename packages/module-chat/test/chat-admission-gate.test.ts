@@ -83,6 +83,7 @@ function fakeContext(opts: {
         personal: false,
       },
     ],
+    reachableOrgHalf: new Set<string>(),
     principalKind: "user",
     orgRole: "member",
   };

@@ -714,7 +714,7 @@ constraint chat_session_spaces chat_session_spaces_space_org_fk FOREIGN KEY (spa
 constraint chat_sessions chat_sessions_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_pkey PRIMARY KEY (id)
 constraint chat_sessions chat_sessions_restricted_needs_space CHECK (((restricted = false) OR (space_id IS NOT NULL)))
-constraint chat_sessions chat_sessions_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
+constraint chat_sessions chat_sessions_space_id_org_id_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE SET NULL (space_id)
 constraint chat_sessions chat_sessions_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint cli_refresh_tokens cli_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint cli_refresh_tokens cli_refresh_tokens_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES cli_refresh_tokens(id) ON DELETE SET NULL

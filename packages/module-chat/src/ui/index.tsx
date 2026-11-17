@@ -198,6 +198,8 @@ export interface ChatPageProps {
   firstName?: ChatHost["firstName"];
   /** Names spaces (see `ChatHost`). Pass a stable function. */
   renderSpaces?: ChatHost["renderSpaces"];
+  /** Links a path in a row's space (see `ChatHost`). Pass a stable function. */
+  linkInSpace?: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf?: ChatHost["useSpaceLabelOf"];
 }
@@ -223,6 +225,7 @@ export function ChatPage({
   onPackagesChanged,
   firstName,
   renderSpaces,
+  linkInSpace,
   useSpaceLabelOf,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
@@ -330,6 +333,7 @@ export function ChatPage({
       onPackagesChanged,
       firstName,
       renderSpaces,
+      linkInSpace,
       useSpaceLabelOf,
     }),
     [
@@ -347,6 +351,7 @@ export function ChatPage({
       onPackagesChanged,
       firstName,
       renderSpaces,
+      linkInSpace,
       useSpaceLabelOf,
     ],
   );

@@ -152,6 +152,10 @@ describe("platform MCP surface key purity", () => {
       },
     ];
 
+    // Another member of the org holding the same reach: same role, same space, same set.
+    const peer = await memberContext(ownerA, "owner");
+    callers.push({ ctx: peer, orgRole: "owner", spaces: reachOf(ownerA, "owner", grant) });
+
     const [first, ...rest] = await Promise.all(callers.map((c) => handshake(c, grant)));
     // Not a vacuous comparison: the surface carries real content.
     expect(first!.instructions).toContain("## Operation index");
@@ -161,6 +165,37 @@ describe("platform MCP surface key purity", () => {
       expect(other.instructions).toBe(first!.instructions);
       expect(other.tools).toBe(first!.tools);
     }
+  });
+
+  it("answers a role preview like the member it previews, under the same key", async () => {
+    // The owner previewing a builder of the default space reaches what a real builder reaches.
+    const builder = await memberContext(ownerA, "member", "builder");
+    const callers: Caller[] = [
+      { ctx: builder, orgRole: "member", spaces: reachOf(ownerA, "builder", grant) },
+      {
+        ctx: ownerA,
+        orgRole: "owner",
+        spaces: reachOf(ownerA, "builder", grant),
+        viewAs: {
+          orgId: ownerA.orgId,
+          orgRole: "member",
+          space: { spaceId: ownerA.defaultSpaceId, role: { kind: "preset", preset: "builder" } },
+        },
+      },
+    ];
+    const [real, previewed] = await Promise.all(callers.map((c) => handshake(c, grant)));
+    expect(previewed!.key).toBe(real!.key);
+    expect(previewed!.instructions).toBe(real!.instructions);
+    expect(previewed!.tools).toBe(real!.tools);
+  });
+
+  it("keys the spaces in reach order, the order every descriptor lists them in", () => {
+    const second = { ...reachOf(ownerA, "owner", grant)[0]!, id: "spc_second", name: "Second" };
+    const [first] = reachOf(ownerA, "owner", grant);
+    const url = platformMcpUrl(ORIGIN, ownerA.orgId);
+    expect(platformMcpSurfaceKey(url, grant, [first!, second])).not.toBe(
+      platformMcpSurfaceKey(url, grant, [second, first!]),
+    );
   });
 
   it("answers a different permission list differently, under a different key", async () => {

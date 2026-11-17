@@ -20,6 +20,8 @@ export interface ConversationScope {
   restricted: boolean;
   /** A turn is generating: the limit cannot change until it ends. */
   generating: boolean;
+  /** A change of the limit is in flight: a second one would roll back to the first's value. */
+  pending: boolean;
   /** Limit (`true`) or lift (`false`): local until the first message, a PATCH afterwards. */
   setRestricted: (next: boolean) => void;
 }
@@ -28,6 +30,7 @@ const NO_SCOPE: ConversationScope = {
   originSpaceId: null,
   restricted: false,
   generating: false,
+  pending: false,
   setRestricted: () => {},
 };
 
@@ -41,16 +44,23 @@ export function useConversationScope(): ConversationScope {
 
 /**
  * Whether « Limiter à cet espace » can change: not while a turn generates (the server refuses),
- * else there is an origin space and the chat acts in it. A conversation already limited can always
+ * else there is an origin space and the chat acts in it (`outside` also when the host's working
+ * space is one the chat does not act in, so no origin was taken). A conversation already limited can always
  * be released, whatever the acting set became.
  */
 export function limitAvailability(
   scope: Pick<ConversationScope, "originSpaceId" | "restricted" | "generating">,
   actingSpaceIds: readonly string[],
+  workingSpaceId?: string | null,
 ): { available: true } | { available: false; reason: "generating" | "no-space" | "outside" } {
   if (scope.generating) return { available: false, reason: "generating" };
   if (scope.restricted) return { available: true };
-  if (!scope.originSpaceId) return { available: false, reason: "no-space" };
+  if (!scope.originSpaceId) {
+    // No origin: « Vue d'ensemble », or a working space the chat does not act in (the origin is
+    // only ever a space it acts in).
+    const outside = !!workingSpaceId && !actsIn(actingSpaceIds, workingSpaceId);
+    return { available: false, reason: outside ? "outside" : "no-space" };
+  }
   if (!actsIn(actingSpaceIds, scope.originSpaceId)) return { available: false, reason: "outside" };
   return { available: true };
 }

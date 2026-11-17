@@ -97,7 +97,7 @@ export interface ResolvedChatCapability extends ChatCapability {
 /** `chat:write` gates the turn itself: a `chat:read`-only caller holds no row. */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
   const converses = ctx.can("chat:write");
-  const turn = turnCapabilities(ctx.can);
+  const turn = turnCapabilities(ctx.can, []);
   return CHAT_CAPABILITIES.map((capability) => ({
     ...capability,
     verdict: !(converses && capability.held(ctx, turn))

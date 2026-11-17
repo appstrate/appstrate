@@ -48,7 +48,7 @@ function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSk
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
   }));
-  // `isLoading`: the read is off without a space, and would wait forever.
+  // `isLoading`: the read is off without an origin space the chat acts in, and would wait forever.
   return { enforced, pinned, loading: enforcedQuery.isLoading };
 }
 

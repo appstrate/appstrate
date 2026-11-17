@@ -52,7 +52,7 @@ export const chatSessions = pgTable(
      * and the space a limited conversation is confined to. Deleting the space detaches the
      * conversation (NULL, and `restricted` false: `deleteSpace` writes both in its transaction).
      */
-    spaceId: text("space_id").references(() => spaces.id, { onDelete: "set null" }),
+    spaceId: text("space_id"),
     /** Confined to its origin space (its turns' allowlist is that space alone); needs an origin space. */
     restricted: boolean("restricted").notNull().default(false),
     title: text("title"),
@@ -90,6 +90,16 @@ export const chatSessions = pgTable(
     // covering exactly these columns for the FK to attach. Trivially valid —
     // `id` alone is the PK, so `(id, org_id)` can never collide.
     uniqueIndex("uq_chat_sessions_id_org_id").on(table.id, table.orgId),
+    // Tenant-integrity FK: the origin space is inseparable from the session's org. A NULL
+    // `space_id` passes (MATCH SIMPLE). The real action is `ON DELETE SET NULL (space_id)`
+    // (column list: only the space is nulled, never the NOT NULL `org_id`), hand-written in
+    // migration 0107 because Drizzle cannot express a column list; `.onDelete("set null")` is
+    // the closest approximation (same trade-off and `db:push` warning as `llm_usage_run_id_org_id_fk`).
+    foreignKey({
+      name: "chat_sessions_space_id_org_id_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("set null"),
   ],
 );
 

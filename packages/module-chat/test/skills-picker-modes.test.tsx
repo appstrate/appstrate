@@ -38,6 +38,7 @@ function render(skillMode: ChatSkillMode): string {
             originSpaceId: "spc_a",
             restricted: false,
             generating: false,
+            pending: false,
             setRestricted: () => {},
           }}
         >

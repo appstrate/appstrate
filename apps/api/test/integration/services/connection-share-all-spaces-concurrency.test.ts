@@ -106,7 +106,7 @@ describeRequiresPostgres("all-spaces connection sharing serializes with space cr
       integrationId: "@all-spaces-lock/svc",
       enabled: true,
       caller: testCaller(
-        { kind: "person", actor: { type: "user", id: ctx.user.id } },
+        { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
         { canShareAllSpaces: () => true },
       ),
     });
@@ -124,7 +124,7 @@ describeRequiresPostgres("all-spaces connection sharing serializes with space cr
   // A withdrawal takes no org lock: the connection row orders it with space creation.
   it("a withdrawal waiting behind a space creation keeps that share and stops later ones", async () => {
     const caller = testCaller(
-      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       { canShareAllSpaces: () => true },
     );
     const input = { connectionId, integrationId: "@all-spaces-lock/svc", caller };
@@ -161,7 +161,7 @@ describeRequiresPostgres("all-spaces connection sharing serializes with space cr
 
   it("a space creation waiting behind a withdrawal re-reads specific-space mode", async () => {
     const caller = testCaller(
-      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } },
       { canShareAllSpaces: () => true },
     );
     await setConnectionShareAllSpaces({

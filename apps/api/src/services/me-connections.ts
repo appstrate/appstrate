@@ -8,7 +8,9 @@
  *
  * Scope depends on the caller's principal, not just their identity:
  *   - A `person` principal crosses orgs and spaces — the connection list
- *     belongs to the person, not to any single org context.
+ *     belongs to the person, not to any single org context — unless its
+ *     credential carries a space allowlist (the chat's bearer), which binds it
+ *     like a delegated one to that org and those spaces.
  *   - A `delegated` principal authenticates as its issuer but is bound; its
  *     listing is hard-scoped to that binding at the SQL level so a leaked
  *     credential can never enumerate the issuer's connections elsewhere
@@ -29,7 +31,7 @@ import {
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
 import { displayAccountId } from "../lib/connection-identity.ts";
-import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -51,6 +53,7 @@ import { pinLayer, schedulesLeftUnnamedWithout } from "./schedules-named-by-laye
 import {
   connectionActions,
   meConnectionAuthorityFilter,
+  withinSpaces,
   ownUsableInSpace,
   type ConnectionCaller,
 } from "./connection-reach.ts";
@@ -61,18 +64,17 @@ import type { OrgRole } from "@appstrate/core/permissions";
 
 /** The same binding over `schedules`, which carry both columns. */
 function scheduleAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
-  if (principal.kind !== "delegated") return undefined;
+  const { binding } = principal;
+  if (!binding) return undefined;
   return and(
-    eq(schedules.orgId, principal.orgId),
-    principal.spaceId ? eq(schedules.spaceId, principal.spaceId) : undefined,
+    eq(schedules.orgId, binding.orgId),
+    withinSpaces(binding.spaceIds, (spaceId) => eq(schedules.spaceId, spaceId)),
   );
 }
 
-/** Its space over member pins — a pin of the connection is in the connection's org already. */
+/** Its spaces over member pins — a pin of the connection is in the connection's org already. */
 function pinAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
-  return principal.kind === "delegated" && principal.spaceId
-    ? eq(integrationPins.spaceId, principal.spaceId)
-    : undefined;
+  return withinSpaces(boundSpacesOf(principal), (spaceId) => eq(integrationPins.spaceId, spaceId));
 }
 
 /**
@@ -231,12 +233,14 @@ export async function listMeConnections(
     });
   }
 
-  // Where a row serves agents: for the owner, every space they run in that it is usable in; for a
-  // delegated credential, its home and shares within the binding. Share targets count either way.
+  // Where a row serves agents: for the owner, every space they run in that it is usable in (within
+  // the spaces a bound person's credential names); for a delegated credential, its home and shares
+  // within the binding. Share targets count either way.
   const served =
     principal.kind === "person"
       ? await spacesServedToOwner(actor, orgRoles)
       : { byConnection: new Map<string, string[]>(), orgOfSpace: new Map<string, string>() };
+  const bound = boundSpacesOf(principal);
   const servingSpaces = (r: (typeof rows)[number]) =>
     principal.kind === "person"
       ? [
@@ -244,7 +248,7 @@ export async function listMeConnections(
             ...(served.byConnection.get(r.connectionId) ?? []),
             ...sharesOf(r.connectionId),
           ]),
-        ]
+        ].filter((id) => bound === null || bound.includes(id))
       : reachedSpaces(r);
   const orgOfSpace = new Map([
     ...spaceRows.map((sp) => [sp.id, sp.orgId] as const),

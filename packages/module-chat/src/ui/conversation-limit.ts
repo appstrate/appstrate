@@ -144,6 +144,13 @@ export function useConversationLimit({
         previous: restricted,
         show: setOverride,
       }),
+    // The server's answer is now the stored value: drop the local override so a later change of
+    // the stored limit (another tab, a refetch) is not masked by it.
+    onSuccess: (_data, next) => {
+      setOverride(undefined);
+      if (frozen.current) frozen.current = { ...frozen.current, restricted: next };
+      setCreated((prev) => (prev ? { ...prev, restricted: next } : prev));
+    },
   });
 
   // One change at a time: a second one would roll back to the first's optimistic value.
@@ -156,8 +163,8 @@ export function useConversationLimit({
   );
 
   const scope = useMemo(
-    () => ({ originSpaceId, restricted, generating, setRestricted }),
-    [originSpaceId, restricted, generating, setRestricted],
+    () => ({ originSpaceId, restricted, generating, pending: isPending, setRestricted }),
+    [originSpaceId, restricted, generating, isPending, setRestricted],
   );
   return { scope, getCreation };
 }

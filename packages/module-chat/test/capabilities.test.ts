@@ -17,7 +17,7 @@ describe("turnCapabilities", () => {
     // drops one half of the pair.
     const acting = ["agents:run", "agents:write", "runs:read-all"];
     const levels = (held: Set<string>) => {
-      const { invokes, runLevel, authors } = turnCapabilities((p) => held.has(p));
+      const { invokes, runLevel, authors } = turnCapabilities((p) => held.has(p), []);
       return { invokes, runLevel, authors };
     };
     for (const transport of [[], ["mcp:read"], ["mcp:invoke"]]) {
@@ -36,13 +36,14 @@ describe("turnCapabilities", () => {
   });
 
   it("names the transport `mcp:read` alone: without it the turn holds no tool", () => {
-    const transport = (held: string[]) => turnCapabilities((p) => held.includes(p)).transport;
+    const transport = (held: string[]) => turnCapabilities((p) => held.includes(p), []).transport;
     expect(transport(["mcp:read"])).toBe(true);
     expect(transport(["mcp:invoke", "skills:read", "agents:run"])).toBe(false);
   });
 
   it("reads skills on the transport alone: `resources/read` needs no dispatch", () => {
-    const readsSkills = (held: string[]) => turnCapabilities((p) => held.includes(p)).readsSkills;
+    const readsSkills = (held: string[]) =>
+      turnCapabilities((p) => held.includes(p), []).readsSkills;
     expect(readsSkills(["mcp:read", "skills:read"])).toBe(true);
     expect(readsSkills(["skills:read", "mcp:invoke"])).toBe(false);
     expect(readsSkills(["mcp:read", "mcp:invoke"])).toBe(false);

@@ -38,7 +38,7 @@ import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
-import { turnPermissions } from "./turn-permissions.ts";
+import { limitedConversationPermissions, turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { chatSkillModeValues } from "@appstrate/db/schema";
 import { scopedNameRegex } from "@appstrate/core/validation";
@@ -231,8 +231,16 @@ export async function claimTurn(
   sessionId: string,
   streamId: string,
   message: UIMessage,
+  scope: { spaceId: string | null; restricted: boolean },
 ): Promise<string> {
-  await setActiveStream(sessionId, streamId);
+  // The scope the turn's spaces and bearer were computed from: a limit changed (or an origin
+  // space deleted) since that read refuses the turn, which a resend computes afresh.
+  if (!(await setActiveStream(sessionId, streamId, scope))) {
+    throw conflict(
+      "chat_turn_scope_changed",
+      "The conversation's limit changed while this turn was starting. Send the message again.",
+    );
+  }
   try {
     return await persistUserMessage(sessionId, message);
   } catch (err) {
@@ -398,9 +406,11 @@ export async function handleChatStream(
     const spaces = conv.restricted && originSpace ? [originSpace] : acting;
     // The caller's grants this turn starts from: the union over the turn's spaces. It is a
     // CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
-    // `lib/auth-pipeline.ts`), so no space's grants reach another.
+    // `lib/auth-pipeline.ts`), so no space's grants reach another. A limited conversation keeps
+    // of the org-level half only the reads it needs: it changes nothing serving every space.
+    const union = spaces.flatMap((space) => space.permissions);
     const callerPermissions: ReadonlySet<string> = new Set(
-      spaces.flatMap((space) => space.permissions),
+      conv.restricted ? limitedConversationPermissions(union, c.get("reachableOrgHalf")) : union,
     );
     const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
@@ -432,10 +442,10 @@ export async function handleChatStream(
     };
     return {
       skills: conv.selection,
+      // As read: the claim compares the row against it (`claimTurn`).
+      scope: { spaceId: conv.spaceId, restricted: conv.restricted },
       originSpace,
       restricted: conv.restricted,
-      // An origin space the author can no longer act in (a limited conversation was refused above).
-      originLapsed: conv.spaceId !== null && !originSpace,
       spaces,
       callerPermissions,
       organization,
@@ -459,8 +469,9 @@ export async function handleChatStream(
   // resolves, overlapping the model list, the attachment materialization, the
   // credential resolution and the gate rather than waiting behind them. A turn the gate
   // rejects has read its skills for nothing, which is acceptable — what a rejected turn
-  // must not do is persist a user message, open an MCP session for the engine or record
-  // usage, none of which happen before the gate.
+  // must not do is persist a user message, record a space on the conversation (an
+  // attachment's or a call's), open an MCP session for the engine or record usage, none of
+  // which happen before the gate.
   //
   // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
   // connection from `platformMcp.url`, and the MCP server's instructions reach
@@ -479,21 +490,11 @@ export async function handleChatStream(
     { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
   > = turn
     .then(
-      ({
-        skills,
-        permissions,
-        capabilities,
-        spaces,
-        originSpace,
-        restricted,
-        originLapsed,
-        callerPermissions,
-      }) =>
+      ({ skills, permissions, capabilities, spaces, originSpace, restricted, callerPermissions }) =>
         buildCallerContextBlock(c, {
           spaces,
           origin: originSpace,
           restricted,
-          originLapsed,
           user,
           // UI language forwarded by the client; validated/defaulted in the builder.
           locale: c.req.header("X-Chat-Locale"),
@@ -535,7 +536,7 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, listsSkills, spaces, organization }] =
+  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }] =
     await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, enforcedSkills]);
   let chosen;
   try {
@@ -565,39 +566,6 @@ export async function handleChatStream(
     providerId: chosen.providerId,
   });
 
-  // Materialize the new turn's composer attachments into durable, session-scoped
-  // files and rewrite each `upload://` (or already-`appfile://`) file part
-  // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
-  // stores only `appfile://`) and before it reaches the engine (the model is
-  // shown the attachment as a text line, never a raw file URL). Needs the session
-  // (the file container) and the resolved space id, both known here;
-  // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
-  // error with no MCP/stop-controller to leak. Only the last message can carry
-  // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
-  if (sessionId && lastMessage) {
-    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
-    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
-    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
-    // they attach it. Picker and attach answer the same set.
-    const attachmentSpaces = spaces.map((space) => ({
-      id: space.id,
-      permissions: new Set(space.permissions),
-    }));
-    lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
-      return deps.resolveChatAttachment({
-        orgId,
-        userId: user.id,
-        chatSessionId: sessionId,
-        uri,
-        spaces: attachmentSpaces,
-        // The space the file belongs to is touched by the session that comes to hold it,
-        // before anything is materialized there.
-        beforeResolve: organization.touch,
-      });
-    });
-    messages[messages.length - 1] = lastMessage;
-  }
-
   // Which credential the turn spends. The platform resolves the chosen model
   // row: an API-key/unknown provider yields `{ subscription: false }` and the
   // turn is bound to the llm-proxy; an oauth2 provider yields the real upstream
@@ -618,10 +586,11 @@ export async function handleChatStream(
   // inference, and a module gating on subscription status must be able to
   // refuse it.
   //
-  // Gated BEFORE the caller-context block is consumed, the model binding is
-  // resolved and capacity is reserved, so a rejected turn opens no MCP session
-  // and persists no user message. (The block's read may already be in flight —
-  // see phase B above — but nothing is written until the gate has answered.)
+  // Gated BEFORE the caller-context block is consumed, the attachments are
+  // materialized, the model binding is resolved and capacity is reserved, so a
+  // rejected turn opens no MCP session, touches no space and persists no user
+  // message. (The block's read may already be in flight — see phase B above — but
+  // nothing is written until the gate has answered.)
   const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
@@ -685,6 +654,46 @@ export async function handleChatStream(
   if (!slot) throw chatCapacityError();
   const modelBinding = resolution.binding;
 
+  // Materialize the new turn's composer attachments into durable, session-scoped
+  // files and rewrite each `upload://` (or already-`appfile://`) file part
+  // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
+  // stores only `appfile://`) and before it reaches the engine (the model is
+  // shown the attachment as a text line, never a raw file URL). Needs the session
+  // (the file container) and the turn's spaces, both known here. After every refusal
+  // (the admission gate, the model binding, capacity), because resolving an attachment
+  // touches its space on the conversation, which a refused turn must not widen; before
+  // the claim and the MCP session, so a quota/cap rejection surfaces as a clean error
+  // with only the slot to release. Only the last message can carry fresh uploads —
+  // earlier turns already hold rewritten `appfile://` URIs.
+  if (sessionId && lastMessage) {
+    // The spaces an attachment may resolve in (the turn's), each under the caller's set there.
+    // The container ACL reads as wide as the caller does: an `appfile://` the user picked from the gallery — which
+    // `runs:read-all` widens to the whole space's run outputs — must still resolve when
+    // they attach it. Picker and attach answer the same set.
+    const attachmentSpaces = spaces.map((space) => ({
+      id: space.id,
+      permissions: new Set(space.permissions),
+    }));
+    try {
+      lastMessage = await materializeUserAttachments(lastMessage, async (uri) => {
+        return deps.resolveChatAttachment({
+          orgId,
+          userId: user.id,
+          chatSessionId: sessionId,
+          uri,
+          spaces: attachmentSpaces,
+          // The space the file belongs to is touched by the session that comes to hold it,
+          // before anything is materialized there.
+          beforeResolve: organization.touch,
+        });
+      });
+    } catch (err) {
+      slot.release();
+      throw err;
+    }
+    messages[messages.length - 1] = lastMessage;
+  }
+
   // ── Server-authoritative persistence + resumable streaming ───────────────
   // Persist the user turn BEFORE inference; the assistant turn is persisted when
   // the stream finalizes (in `finalize` below). Generation runs through a
@@ -702,7 +711,7 @@ export async function handleChatStream(
   if (sessionId && lastMessage?.id) {
     const claimStart = Date.now();
     try {
-      userMessageId = await claimTurn(sessionId, streamId, lastMessage);
+      userMessageId = await claimTurn(sessionId, streamId, lastMessage, scope);
       claimTurnMs = Date.now() - claimStart;
     } catch (err) {
       // The concurrency slot is already reserved but generation has not started,

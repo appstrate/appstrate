@@ -142,7 +142,7 @@ function FileImageThumbnail({
 export function FileAttachment({
   file,
 }: {
-  /** `spaceId`: the file's space when it is not the working space (a run of another space). */
+  /** `spaceId`: the file's space when known (the space of the call that produced it). */
   file: { id: string; name: string; mime?: string | null; spaceId?: string };
 }) {
   const { openFile: opener, downloadFile, t } = useChatHost();

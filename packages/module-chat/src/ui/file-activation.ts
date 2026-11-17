@@ -29,7 +29,8 @@ export function fileActivation(
   // placeholder instead, so the sentence stays grammatical in every language.
   const fileName = name || UNNAMED_FILE;
   const labelName = name || t("file.unnamed");
-  // `spaceId` rides only when the file is elsewhere: a file of the working space names none.
+  // `spaceId` is the file's space when the caller knows it (the space of the call that produced it);
+  // the host decides whether it differs from the working space.
   const onActivate = opener
     ? () => opener({ id, name: fileName, ...(spaceId && { spaceId }) })
     : () => download(id, fileName, spaceId);

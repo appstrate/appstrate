@@ -209,6 +209,14 @@ export function chatActsIn(permissions: readonly string[]): boolean {
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 
 /**
+ * The web shell's query parameter that enters a space when an in-app link opens
+ * (`?enterSpace=<space id>`). One definition for the two writers of such links: the shell's own
+ * lists, and the chat, which persists run links into a conversation (the notice of a run that
+ * ended after its turn) where no host renders them.
+ */
+export const ENTER_SPACE_PARAM = "enterSpace";
+
+/**
  * The skills a chat turn injected, as served: a published version, or the draft
  * at the `lockVersion` it had. Each is bound to `spaceId`, the space its own
  * `skill://<spaceId>/…` URI names, and `resources/read` honours it in that space

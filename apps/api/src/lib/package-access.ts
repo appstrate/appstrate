@@ -34,7 +34,7 @@ import { isUserPrincipal } from "./principal.ts";
 import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces, type ReachableSpace } from "./reachable-spaces.ts";
+import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
 import { placementRowJoin } from "../services/package-placement.ts";
 
 /**
@@ -600,9 +600,7 @@ export async function callerPlacementAuthority(
  * package, not every space it could be placed in. `null`: a personal space the share would create.
  */
 export function assertShareTargetAdmitted(c: Context<AppEnv>, spaceId: string | null): void {
-  if (!credentialAdmitsSpace(c, spaceId)) {
-    throw forbidden("Credential scope does not include this space");
-  }
+  if (!credentialAdmitsSpace(c, spaceId)) throw unnameableSpace(c, spaceId);
 }
 
 /** Which side's authority withdrew a placement — recorded on `package.unshared`. */

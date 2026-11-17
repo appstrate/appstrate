@@ -25,7 +25,7 @@ import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-space-action";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
@@ -140,6 +140,8 @@ export function ChatModulePage() {
   // A file of another space (a call of a conversation) is read in its own.
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
+  // A run a conversation launched opens in its space, entering it when it is not this one.
+  const linkInSpace = useSpaceLink();
   const onDownloadFile = useCallback(
     (id: string, name: string, spaceId?: string) =>
       void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
@@ -199,6 +201,7 @@ export function ChatModulePage() {
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
               renderSpaces={renderSpaces}
+              linkInSpace={linkInSpace}
               useSpaceLabelOf={useSpaceLabelOf}
             />
           </div>

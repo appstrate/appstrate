@@ -103,7 +103,8 @@ export function useActiveSession(
   persisted: boolean,
 ): SessionSummary | undefined {
   const listed = useSessions(transport).data?.find((s) => s.id === id);
-  const detail = useQuery(sessionQuery(transport, persisted ? id : null));
+  // The detail is only fetched when the list does not hold the row (filtered out, not loaded).
+  const detail = useQuery(sessionQuery(transport, persisted && !listed ? id : null));
   return listed ?? detail.data ?? undefined;
 }
 

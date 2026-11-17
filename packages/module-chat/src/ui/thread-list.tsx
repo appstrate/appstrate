@@ -73,6 +73,7 @@ import {
   renameSession,
   deleteSession,
   dropSessionFromLists,
+  sessionQueryKey,
   SESSIONS_QUERY_KEY,
   type SessionSummary,
 } from "./sessions.ts";
@@ -319,7 +320,9 @@ export function ChatConversationList({
 
 /** The spaces a conversation touched, named by the host; « Vue d'ensemble » when it touched none. */
 function sessionSpaces(session: SessionSummary, renderSpaces: RenderSpaces, t: ChatTranslate) {
-  return session.space_ids.length > 0 ? renderSpaces(session.space_ids) : t("threads.overview");
+  return session.space_ids.length > 0
+    ? renderSpaces(session.space_ids)
+    : t("common:overview.title");
 }
 
 function ConversationRow({
@@ -565,7 +568,10 @@ function ConversationSettingsDialog({
     setFailed(false);
     try {
       await renameSession(transport, session.id, next);
-      await queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: sessionQueryKey(transport.orgId, session.id) }),
+      ]);
       onClose();
     } catch {
       setFailed(true);

@@ -109,9 +109,9 @@ export function useSelectConversation(): SelectConversation | null {
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
  *
- * `spaceId` names the file's space when it is not the working space (a file a call of the
- * conversation produced elsewhere): the host reads it there. The download and the image
- * hook below take it the same way.
+ * `spaceId` names the file's space when known (the space of the call of the conversation that
+ * produced it): the host reads it there, and reads in the working space when it is the same one.
+ * The download and the image hook below take it the same way.
  */
 export type OpenFile = (file: { id: string; name: string; spaceId?: string }) => void;
 
@@ -212,6 +212,12 @@ export interface ChatHost {
   firstName?: string | null;
   /** Names spaces; absent in a mount that has no space listing. */
   renderSpaces?: RenderSpaces;
+  /**
+   * Where an in-app `path` opens for a row of `spaceId`: the host names the space in the link when
+   * it is not the working one (its `?enterSpace=` convention), else returns `path` unchanged.
+   * Absent: links stay plain paths.
+   */
+  linkInSpace?: (path: string, spaceId: string | undefined) => string;
   /**
    * A hook returning a space's plain name by id (`undefined` for one the caller does not reach),
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.

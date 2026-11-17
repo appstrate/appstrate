@@ -1409,11 +1409,20 @@ export interface ReachableSpaceGrant {
   personal: boolean;
 }
 
-/** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential pins it. */
+/** What {@link PlatformServices.reachableSpaces} answers: the reach, and whether the credential confines it. */
 export interface ReachedSpaces {
   spaces: ReachableSpaceGrant[];
-  /** The credential itself is pinned to one space (a space API key, a space-bound token): `spaces` holds that one. */
-  pinned: boolean;
+  /**
+   * The credential itself is confined to spaces: pinned to one (a space API key, a space-bound
+   * token) or carrying a space allowlist (the chat's own bearer). `spaces` holds those alone.
+   */
+  confined: boolean;
+  /**
+   * The org-level half of the caller's grants (org role, principal grants, role preview): the part
+   * every space's `permissions` shares. A permission is org-level or space-level, never both, so a
+   * space's set minus this half is what the caller's role grants in that space.
+   */
+  orgPermissions: string[];
 }
 
 export interface PlatformServices {
@@ -1633,8 +1642,8 @@ export interface PlatformServices {
    * names it) and their effective permission set there, for a route that
    * serves the organization as a whole and so enters no space. The same reach
    * every cross-space list reads, persona and credential ceiling included; an
-   * end-user is refused with a 403. Memoized per request. `pinned` tells a route that
-   * must not serve a space-pinned credential to refuse it itself.
+   * end-user is refused with a 403. Memoized per request. `confined` tells a route that
+   * must not serve a credential confined to spaces to refuse it itself.
    */
   reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
   /**

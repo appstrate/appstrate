@@ -123,9 +123,9 @@ interface RunLogStream {
  *                      `run_and_wait` returns a terminal run) — seeds the badge
  *                      and skips the SSE tail when already terminal
  *                      (`shouldOpenLiveTail`).
- * @param spaceId      the space the run ran in when it is not the working space
- *                      (a run a conversation launched): its reads and its
- *                      stream name that space.
+ * @param spaceId      the space the run ran in (the space of the conversation's call
+ *                      that launched it): its reads and its stream name that
+ *                      space, whether or not it is the working one.
  */
 export function useRunLogStream(
   runId: string | undefined,

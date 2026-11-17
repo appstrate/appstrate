@@ -31,6 +31,8 @@ import {
 } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
 import { ensureSession, touchSessionSpace } from "../src/persistence.ts";
+import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
+import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
 
 const app = getTestApp();
 
@@ -609,7 +611,38 @@ describe("chat sessions", () => {
       headers: { Authorization: `Bearer ${key.rawKey}` },
     });
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { detail: string }).detail).toContain("pinned");
+    expect(((await res.json()) as { detail: string }).detail).toContain("confined to spaces");
+  });
+
+  it("refuses a turn's own bearer (a space allowlist): a turn opens no conversation nor turn", async () => {
+    const headers = {
+      Authorization: `Bearer ${mintMcpLoopbackToken({
+        userId: ctx.user.id,
+        email: ctx.user.email,
+        name: ctx.user.name,
+        orgId: ctx.orgId,
+        orgRole: "owner",
+        permissions: [...orgPermissions("owner"), "chat:read", "chat:write", "mcp:read"],
+        spaceIds: [ctx.defaultSpaceId],
+      })}`,
+      "Content-Type": "application/json",
+    };
+    const list = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, { headers });
+    const created = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ spaceId: ctx.defaultSpaceId }),
+    });
+    const turn = await app.request(`/api/orgs/${ctx.orgId}/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: crypto.randomUUID(), messages: [] }),
+    });
+    for (const res of [list, created, turn]) {
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { detail: string }).detail).toContain("confined to spaces");
+    }
+    expect(await db.select({ id: chatSessions.id }).from(chatSessions)).toEqual([]);
   });
 
   it("refuses an API key", async () => {

@@ -44,7 +44,6 @@ import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { CallSpace, ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
-  buildRunPageHref,
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
@@ -347,7 +346,6 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
-      runHref={runId ? buildRunPageHref(packageId, runId, spaceId) : undefined}
       initialPackageId={packageId}
       spaceId={spaceId}
       initialFiles={initialFiles}

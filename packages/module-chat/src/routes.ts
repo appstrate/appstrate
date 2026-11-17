@@ -205,13 +205,15 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     }
     // Like every `/api/orgs/:orgId/*` route, this reads no `X-Space-Id`: a request that
     // carries one (the MCP router adds it to every dispatched hop) is served all the same.
-    const { spaces, pinned } = await deps.reachableSpaces(c, orgId);
-    // A credential pinned to one space cannot hold a conversation: its spaces are the
-    // caller's, whichever the credential would let a call name.
-    if (pinned) {
-      throw forbidden("A credential pinned to a space cannot use the organization chat endpoint.");
+    const { spaces, confined, orgPermissions } = await deps.reachableSpaces(c, orgId);
+    // A credential confined to spaces (pinned to one, or the chat's own bearer with its space
+    // allowlist) cannot hold a conversation: a conversation's spaces are the caller's, whichever
+    // the credential would let a call name, and a turn never opens another turn.
+    if (confined) {
+      throw forbidden("A credential confined to spaces cannot use the organization chat endpoint.");
     }
     c.set("reachable", spaces);
+    c.set("reachableOrgHalf", new Set(orgPermissions));
     return next();
   });
 

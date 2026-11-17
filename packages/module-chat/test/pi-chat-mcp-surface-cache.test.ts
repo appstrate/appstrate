@@ -350,7 +350,8 @@ describe("platform MCP surface cache", () => {
     );
     // The spaces are written into every descriptor: another caller's reach is another surface.
     const both = surfaceKey(org, perms, [alpha, beta]);
-    expect(surfaceKey(org, perms, [beta, alpha])).toBe(both);
+    // In reach order: the descriptors list the spaces in that order.
+    expect(surfaceKey(org, perms, [beta, alpha])).not.toBe(both);
     expect(surfaceKey(org, perms, [alpha])).not.toBe(both);
     expect(surfaceKey(org, perms, [alpha, { ...beta, name: "Other" }])).not.toBe(both);
     expect(surfaceKey(org, perms, [alpha, { ...beta, role: "viewer" }])).not.toBe(both);

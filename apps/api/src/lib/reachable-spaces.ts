@@ -6,11 +6,12 @@ import type { AppEnv } from "../types/index.ts";
 import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
 import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
-import { forbidden } from "./errors.ts";
+import { forbidden, notFound, type ApiError } from "./errors.ts";
 import { dispatchSpacePin } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
+  credentialAdmitsSpace,
   effectiveInSpace,
   personaFor,
   personaMemberships,
@@ -77,10 +78,9 @@ async function resolveReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const pinned = c.get("credentialSpaceId") ?? dispatchSpacePin(c);
-  const allowed = c.get("credentialSpaceIds");
+  const dispatchPin = dispatchSpacePin(c);
   return entries.flatMap(({ space, role }) =>
-    role && (!pinned || space.id === pinned) && (!allowed || allowed.includes(space.id))
+    role && credentialAdmitsSpace(c, space.id) && (!dispatchPin || space.id === dispatchPin)
       ? [
           {
             id: space.id,
@@ -142,5 +142,22 @@ export async function readableSpacesAcross(
     permissions.some((permission) => space.permissions.has(permission))
       ? [{ spaceId: space.id, permissions: space.permissions }]
       : [],
+  );
+}
+
+/**
+ * The refusal for a space the request's credential may not name (`credentialAdmitsSpace`). It
+ * depends on the credential alone, never on the space, so it confirms nothing about an id. A
+ * credential pinned to one space is told what it already knows, a 403 (the contract API keys and
+ * space-bound tokens have always had); a credential bound to a SET of spaces gets the 404 a space
+ * outside its reach gets everywhere else (`enterSpaceById`), so the set is not probed by status.
+ * `spaceId` is `null` for a personal space the request would create.
+ */
+export function unnameableSpace(c: Context<AppEnv>, spaceId: string | null): ApiError {
+  if (c.get("credentialSpaceId") !== undefined) {
+    return forbidden("Credential scope does not include this space");
+  }
+  return notFound(
+    spaceId ? `Space '${spaceId}' not found in this organization` : "Space not found",
   );
 }

@@ -13,6 +13,7 @@ import {
 import { canReadRuns } from "@appstrate/core/permissions";
 import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
+import { unnameableSpace } from "../lib/reachable-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -220,9 +221,10 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: reject with 403 when the `:id` route param names a space the
- *  credential may not name (`credentialAdmitsSpace`): outside the space it pins,
- *  or outside its allowlist. A credential with neither (a session, an OIDC
+/** Middleware: reject when the `:id` route param names a space the
+ *  credential may not name (`credentialAdmitsSpace`): outside the space it pins
+ *  (403, the contract of a pinned key), or outside its allowlist (404, as
+ *  `enterSpaceById`; see `unnameableSpace`). A credential with neither (a session, an OIDC
  *  instance token) passes, subject to the per-space permission gates.
  *
  *  Why: `/api/spaces` is org-scoped, not space-scoped, so `requireSpaceContext`
@@ -234,7 +236,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   const paramSpaceId = c.req.param("id");
   if (paramSpaceId && !credentialAdmitsSpace(c, paramSpaceId)) {
-    throw forbidden("Credential scope does not include this space");
+    throw unnameableSpace(c, paramSpaceId);
   }
   return next();
 }

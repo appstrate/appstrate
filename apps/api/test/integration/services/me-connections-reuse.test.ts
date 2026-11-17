@@ -84,7 +84,7 @@ describe("listMeConnections — reused_by_agents", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "reuseorg" });
-    principal = { kind: "person", actor: { type: "user", id: ctx.user.id } };
+    principal = { kind: "person", binding: null, actor: { type: "user", id: ctx.user.id } };
     a = ctx.defaultSpaceId;
     b = (await seedSpace({ orgId: ctx.orgId, name: "B" })).id;
     await seedPackage({
@@ -158,8 +158,7 @@ describe("listMeConnections — reused_by_agents", () => {
     const bound: ConnectionPrincipal = {
       kind: "delegated",
       actor: { type: "user", id: ctx.user.id },
-      orgId: ctx.orgId,
-      spaceId: a,
+      binding: { orgId: ctx.orgId, spaceIds: [a] },
     };
     const groups = await listMeConnections(testCaller(bound));
     const boundCount = groups

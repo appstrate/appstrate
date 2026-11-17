@@ -157,9 +157,9 @@ describe("the grants the chat module reads", () => {
 
   it("is what some space where the chat acts grants, in the overview and out of it", () => {
     for (const chosen of [true, false]) {
-      expect(can("skills:read", chosen)).toContain("true");
-      expect(can("chat:write", chosen)).toContain("true");
-      expect(can("files:read", chosen)).toContain("false");
+      expect(can("skills:read", chosen)).toContain("<p>true</p>");
+      expect(can("chat:write", chosen)).toContain("<p>true</p>");
+      expect(can("files:read", chosen)).toContain("<p>false</p>");
     }
   });
 });
@@ -177,12 +177,12 @@ describe("the chat's transport", () => {
   const filter = (chosen: boolean, list = spaces) => renderOverview(<Filter />, list, chosen).html;
 
   it("filters the list to the selected space, and to none in « Vue d'ensemble »", () => {
-    expect(filter(false)).toContain("org_1|spc_a");
-    expect(filter(true)).toContain("org_1|null");
+    expect(filter(false)).toContain("<p>org_1|spc_a</p>");
+    expect(filter(true)).toContain("<p>org_1|null</p>");
   });
 
   it("is not there until the space listing has answered", () => {
-    expect(renderOverview(<Filter />, undefined, true).html).toContain("none");
+    expect(renderOverview(<Filter />, undefined, true).html).toContain("<p>none</p>");
   });
 });
 
@@ -239,16 +239,16 @@ describe("the stream's chat channel", () => {
   it("is wanted, in the overview or not, when another space than the working one reads the chat", () => {
     withChat(() => {
       const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["chat:read", "runs:read"])];
-      expect(renderOverview(<Reach />, spaces, true).html).toContain("true");
-      expect(renderOverview(<Reach />, spaces, false).html).toContain("true");
+      expect(renderOverview(<Reach />, spaces, true).html).toContain("<p>true</p>");
+      expect(renderOverview(<Reach />, spaces, false).html).toContain("<p>true</p>");
     });
   });
 
   it("is not wanted, in either mode, when no space reads the chat", () => {
     withChat(() => {
       const spaces = [space("spc_a", ["runs:read"]), space("spc_b", ["files:read"])];
-      expect(renderOverview(<Reach />, spaces, true).html).toContain("false");
-      expect(renderOverview(<Reach />, spaces, false).html).toContain("false");
+      expect(renderOverview(<Reach />, spaces, true).html).toContain("<p>false</p>");
+      expect(renderOverview(<Reach />, spaces, false).html).toContain("<p>false</p>");
     });
   });
 });

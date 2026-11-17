@@ -81,7 +81,7 @@ async function strictTurn(
         },
       ],
       user,
-      capabilities: turnCapabilities((p) => permissions.includes(p)),
+      capabilities: turnCapabilities((p) => permissions.includes(p), []),
       permissions,
       skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
       enforced: Promise.resolve([]),
