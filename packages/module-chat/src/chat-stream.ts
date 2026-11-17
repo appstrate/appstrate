@@ -466,7 +466,7 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Then the caller-context block. It depends on the reach and the session row
+  // The caller-context block. It depends on the reach and the session row
   // (the turn's grants and its skills) — never on the
   // chosen model or the admission gate — so it starts the moment the row
   // resolves, overlapping the model list, the attachment materialization, the

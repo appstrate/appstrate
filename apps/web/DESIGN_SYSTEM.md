@@ -230,8 +230,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     and default role, the icon and colour of an organization or a space, activating a
     package in a space, a space member's role, sharing a connection, an organization
     policy switch, and the deeds (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
-    `ConfirmModal`: imposing a skill on a space's chat, an organization member's
-    owner or access-revoking role, closing an open space.
+    `ConfirmModal`: an organization member's owner or access-revoking role, closing an
+    open space.
   - Operational state and navigation history (auth, selected org/space, sidebar,
     pairing recovery, sent messages, runs and logs) are not drafts.
 - Clean forms follow refreshed data. Dirty forms preserve their edits on refetch

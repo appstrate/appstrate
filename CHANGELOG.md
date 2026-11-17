@@ -687,8 +687,9 @@ vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
   impose skills on its chat: a conversation spans several spaces, so a per-space
   imposition has no single space to read from. Removed: the `chat_enforced` field of
   `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (now a `400` unknown field, the
-  body is strict), `SpacePackage.chat_enforced` and the library placement's
-  `chat_enforced`, `GET /api/chat/enforced-skills`, the error codes
+  body is strict), `SpacePackage.chat_enforced`, the library placement's
+  `chat_enforced` and the library package's `published` (it only told whether a skill could
+  be enforced), `GET /api/chat/enforced-skills`, the error codes
   `chat_enforced_not_skill`, `enforced_skills_limit`, `enforced_skills_budget`,
   `skill_not_servable` (the enforcement refusal) and `enforced_skills_unavailable`
   (`503`), the audit actions `package.chat_enforced` and `package.chat_released`, the

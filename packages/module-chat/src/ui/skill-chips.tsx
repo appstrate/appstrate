@@ -45,8 +45,8 @@ const PILL_CLASS = cn(
 type Translate = ReturnType<typeof useChatHost>["t"];
 
 /** The pill's text: the count of several skills, the name of a single one. */
-function pillText(skills: readonly LoadedSkill[], countKey: string, t: Translate): string {
-  return skills.length === 1 ? skills[0]!.name : t(countKey, { n: skills.length });
+function pillText(skills: readonly LoadedSkill[], t: Translate): string {
+  return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { n: skills.length });
 }
 
 /** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
@@ -78,7 +78,7 @@ function PinnedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen
           className={PILL_CLASS}
         >
           <BookOpenIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="max-w-32 truncate">{pillText(skills, "skills.pinnedCount", t)}</span>
+          <span className="max-w-32 truncate">{pillText(skills, t)}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">

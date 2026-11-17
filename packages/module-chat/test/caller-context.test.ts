@@ -352,7 +352,9 @@ describe("formatCallerContext", () => {
             skillContents: new Map([["@acme/mine", mine()]]),
           },
         );
-      expect(render()).toBe(render());
+      const first = render();
+      expect(first).toContain(MINE_BLOCK);
+      expect(render()).toBe(first);
     });
   });
 

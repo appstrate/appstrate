@@ -40,7 +40,7 @@ test("carries the chosen mode and skills with the first message, and writes noth
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
   await expect(auto).toHaveAttribute("data-state", "active");
-  // In auto the assistant chooses among the catalogue: the picker lists only imposed skills.
+  // In auto the assistant chooses among the catalogue: the picker lists no skill to choose.
   const pin = popover.getByTestId(`skill-pin-${packageId}`);
   await expect(pin).toHaveCount(0);
   await manual.click();

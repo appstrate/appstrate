@@ -308,7 +308,7 @@ async function coarseSpacePackageGate(
 }
 
 /**
- * Gate a space-package write and resolve the package's type, in the order that
+ * Gate a space-package write on the package's type, in the order that
  * keeps 403 and 404 independent of each other.
  *
  *   1. **Coarse gate, before any catalog read**
@@ -344,7 +344,7 @@ async function gateSpacePackageWrite(
      */
     ownSpace?: boolean;
   },
-): Promise<PackageType> {
+): Promise<void> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
   const { type } = await assertCatalogPackageAccess(c, packageId);
@@ -354,7 +354,6 @@ async function gateSpacePackageWrite(
   // other RBAC call site — the move `requirePackageReadPermission` makes in
   // `routes/packages.ts`. An unmapped type fails CLOSED.
   if (!ownSpace) await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
-  return type;
 }
 
 /** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
