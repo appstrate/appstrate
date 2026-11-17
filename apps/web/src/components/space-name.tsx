@@ -44,7 +44,7 @@ function SpaceTile({
 const RING = "ring-(--space-tile-ring,var(--background))";
 
 /**
- * Several spaces' tiles stacked, each overlapping the previous one, ringed in `--space-tile-ring`
+ * Several spaces' tiles stacked, the first in front and each next one behind it, ringed in `--space-tile-ring`
  * (the colour of the surface they sit on, which the container sets for each of its states: a
  * conversation row or the chat's top-bar trigger; `--background` when none does) so the edges
  * stay readable. Past `max`, the rest is counted.
@@ -60,15 +60,13 @@ export function SpaceTileStack({
 }) {
   const shown = max === undefined ? spaces : spaces.slice(0, max);
   const hidden = spaces.length - shown.length;
+  // Reversed in the DOM, read in order on screen: the first space is painted last, in front.
   return (
-    <span className="flex shrink-0 items-center -space-x-1" data-testid="space-tile-stack">
-      {shown.map((space) => (
-        <SpaceTile key={space.id} space={space} size={size} className={cn("ring-2", RING)} />
-      ))}
+    <span className="flex shrink-0 flex-row-reverse items-center" data-testid="space-tile-stack">
       {hidden > 0 && (
         <span
           className={cn(
-            "bg-muted text-muted-foreground flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
+            "bg-muted text-muted-foreground -ml-1 flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
             SIZES[size].tile,
             RING,
           )}
@@ -76,15 +74,22 @@ export function SpaceTileStack({
           +{hidden}
         </span>
       )}
+      {shown
+        .map((space, index) => (
+          <SpaceTile
+            key={space.id}
+            space={space}
+            size={size}
+            className={cn("ring-2", RING, index > 0 && "-ml-1")}
+          />
+        ))
+        .reverse()}
     </span>
   );
 }
 
 /** No tile stacked behind a space's own. */
 const NO_SPACES: readonly SpaceListed[] = [];
-
-/** Front to back, for the tiles a {@link SpaceName} stacks (static classes, for Tailwind). */
-const STACK_ORDER = ["z-[3]", "z-[2]", "z-[1]"] as const;
 
 /**
  * A space as the app names it everywhere: its tile, then its name in the reader's words
@@ -113,21 +118,11 @@ export function SpaceName({
   const label = spaceLabel(space, t);
   return (
     <span className={cn("flex min-w-0 items-center", SIZES[size].box, className)}>
-      <span className="flex shrink-0">
-        {[space, ...stacked].map((tile, index) => (
-          // The home tile in front: each one behind is drawn under the one before it.
-          <span
-            key={tile.id}
-            className={cn("relative flex", STACK_ORDER[index], index > 0 && "-ml-1.5")}
-          >
-            <SpaceTile
-              space={tile}
-              size={size}
-              className={cn(index > 0 && "ring-background ring-[1.5px]")}
-            />
-          </span>
-        ))}
-      </span>
+      {stacked.length > 0 ? (
+        <SpaceTileStack spaces={[space, ...stacked]} size={size} />
+      ) : (
+        <SpaceTile space={space} size={size} />
+      )}
       <span className="relative z-10 truncate" title={title ?? label}>
         {label}
       </span>
