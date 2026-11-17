@@ -181,6 +181,8 @@ export function ComposerTools({
             <DropdownMenuCheckboxItem
               checked={inlineRunModel}
               onCheckedChange={setInlineRunModelEnabled}
+              // The hint below would otherwise be read as part of the name.
+              aria-label={t("composer.inlineRunModel")}
               data-testid="composer-inline-run-model-item"
             >
               <span className="flex flex-col">
