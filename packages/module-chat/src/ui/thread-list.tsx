@@ -255,14 +255,13 @@ export function ChatConversationList({
           </SidebarGroupLabel>
         )}
         {/* Grows only with rows to scroll: an empty list must not push its
-            empty state to the bottom of the sidebar. `-mr-2 pr-2` pushes the
-            scrollbar out of the group's padding onto the sidebar's edge, rows
-            staying where they were; `w-auto` lifts the menu's `w-full`, which
-            would otherwise pin the width and void the negative margin. */}
+            empty state to the bottom of the sidebar. The negative margins
+            stretch the scroll box over the group's padding to the sidebar's
+            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it. */}
         <SidebarMenu
           className={
             list.length > 0 || isLoading
-              ? "-mr-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2"
+              ? "-mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
               : undefined
           }
         >
