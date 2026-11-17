@@ -125,7 +125,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(body.code).toBe("agent_in_use");
   });
 
-  it("refuses deleting an agent while a run of it runs in another space, but lets its author publish", async () => {
+  it("refuses deleting an agent while a run of it runs in another space, but lets its author publish and restore", async () => {
     await seedAgent({
       id: "@delorg/elsewhere",
       orgId: ctx.orgId,

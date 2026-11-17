@@ -3626,7 +3626,7 @@ export interface paths {
         put?: never;
         /**
          * Create an agent version from draft
-         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. A pending or running execution of this agent in the request space blocks publication. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
          */
         post: operations["createAgentVersion"];
         delete?: never;
@@ -3690,7 +3690,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an agent version into the draft
-         * @description Restore a published version into the draft. Requires no runs in progress in any space of the organization. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         * @description Restore a published version into the draft. A pending or running execution of this agent in the request space blocks restoration. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
          */
         post: operations["restoreAgentVersion"];
         delete?: never;
@@ -22422,7 +22422,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent in use (runs in progress in this space), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`. */
+            /** @description A run is in progress in the request space, the draft is unchanged, or the version already exists (`agent_in_use`, `no_changes`, `version_exists`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22588,7 +22588,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Agent in use: it has runs in progress in this space. RFC 9457 problem+json with `code` `agent_in_use`. */
+            /** @description The agent has a pending or running execution in the request space (`agent_in_use`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23177,7 +23177,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
+            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23795,7 +23795,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
+            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
