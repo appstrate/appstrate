@@ -4,7 +4,8 @@
  * The skills loaded in the conversation, as pills in the composer's tool row: ONE locked pill for
  * the ones the origin space imposes (also readable by a member without `skills:read`) and ONE for
  * the ones the user added. Each shows its count, or the name when there is a single skill; the
- * tooltip lists the names. Removal happens in the picker, which both pills open.
+ * tooltip lists the names. Removal happens in the picker, which both pills open; the user's pill
+ * also carries an X back to the automatic mode.
  */
 
 import { BookOpenIcon, LockIcon } from "lucide-react";
@@ -13,8 +14,9 @@ import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import { injectsSkills, isDefaultSkillSelection, type ChatSkillSelection } from "../skills.ts";
+import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
 import { ownPins } from "./chat-skills.ts";
+import { RemovableChip } from "./removable-chip.tsx";
 import { useOriginSpaceLabel, useOriginSpaceNode } from "./conversation-scope.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
@@ -132,22 +134,36 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
   );
 }
 
-/** The skills the user added, in one pill: it opens the picker, where they are removed. */
-function PinnedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen: () => void }) {
+/**
+ * The skills the user added, in one pill: its body opens the picker, where they are removed; its X
+ * returns to the automatic mode, which keeps them unused.
+ */
+function PinnedPill({
+  skills,
+  onOpen,
+  onReset,
+}: {
+  skills: readonly LoadedSkill[];
+  onOpen: () => void;
+  onReset: () => void;
+}) {
   const { t } = useChatHost();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          data-testid="skill-pill-pinned"
-          aria-label={t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) })}
-          onClick={onOpen}
-          className={PILL_CLASS}
+        <RemovableChip
+          icon={<BookOpenIcon aria-hidden="true" />}
+          open={{
+            onClick: onOpen,
+            label: t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) }),
+            testId: "skill-pill-pinned",
+          }}
+          removeLabel={t("skills.resetToAuto")}
+          onRemove={onReset}
+          removeTestId="skills-reset-auto"
         >
-          <BookOpenIcon className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{pillText(skills, "skills.pinnedCount", t)}</span>
-        </button>
+        </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
@@ -161,24 +177,28 @@ interface SkillChipsProps {
   selection: ChatSkillSelection;
   /** Absent for a member who cannot pick: the pill is then read-only and enforced-only. */
   onOpenPicker?: () => void;
+  /** Back to the automatic mode: the X of the pill of a non-automatic mode. */
+  onResetMode: () => void;
 }
 
 /**
  * The skill pills of the composer's tool row. While no skill is loaded, who can pick gets the
  * picker's summary chip instead (drawn only off the default selection).
  */
-export function SkillChips({ transport, selection, onOpenPicker }: SkillChipsProps) {
+export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: SkillChipsProps) {
   const { t } = useChatHost();
   const { enforced, pinned, loading } = useLoadedSkills(transport, selection, !!onOpenPicker);
   if (loading) {
     // A placeholder only where something is sure to be drawn once the read answers (the chip
-    // for a non-default selection) or is the only thing this row is for (no picker): elsewhere
-    // the common case draws nothing, and a placeholder would itself be the shift.
-    const reserve = !onOpenPicker || !isDefaultSkillSelection(selection);
+    // of a non-automatic mode) or is the only thing this row is for (no picker): elsewhere the
+    // common case draws nothing, and a placeholder would itself be the shift.
+    const reserve = !onOpenPicker || injectsSkills(selection.skillMode);
     return reserve ? <Skeleton className="h-7 w-28 shrink-0 rounded-full" aria-hidden /> : null;
   }
   if (enforced.length === 0 && pinned.length === 0) {
-    return onOpenPicker ? <SkillsChip selection={selection} onClick={onOpenPicker} /> : null;
+    return onOpenPicker ? (
+      <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onResetMode} />
+    ) : null;
   }
 
   return (
@@ -189,7 +209,9 @@ export function SkillChips({ transport, selection, onOpenPicker }: SkillChipsPro
       className="flex min-w-0 flex-nowrap items-center gap-1.5"
     >
       {enforced.length > 0 && <EnforcedPill skills={enforced} onOpen={onOpenPicker} />}
-      {onOpenPicker && pinned.length > 0 && <PinnedPill skills={pinned} onOpen={onOpenPicker} />}
+      {onOpenPicker && pinned.length > 0 && (
+        <PinnedPill skills={pinned} onOpen={onOpenPicker} onReset={onResetMode} />
+      )}
     </div>
   );
 }

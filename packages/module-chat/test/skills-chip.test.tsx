@@ -13,17 +13,22 @@ import { testHost } from "./test-host.ts";
 function html(selection: ChatSkillSelection): string {
   return renderToStaticMarkup(
     <ChatHostProvider value={testHost()}>
-      <SkillsChip selection={selection} onClick={() => {}} />
+      <SkillsChip selection={selection} onClick={() => {}} onReset={() => {}} />
     </ChatHostProvider>,
   );
 }
 
 describe("SkillsChip", () => {
-  it("draws nothing for the default selection", () => {
+  it("draws nothing in automatic mode, whatever pins are kept", () => {
     expect(html({ skillMode: "auto", pinnedSkills: [] })).toBe("");
+    expect(html({ skillMode: "auto", pinnedSkills: ["@acme/a"] })).toBe("");
   });
 
-  it("draws the button for a non-default selection", () => {
-    expect(html({ skillMode: "manual", pinnedSkills: [] })).toContain("skills-picker-trigger");
+  it("draws the button and its X back to automatic off the automatic mode", () => {
+    for (const skillMode of ["manual", "strict"] as const) {
+      const out = html({ skillMode, pinnedSkills: [] });
+      expect(out).toContain("skills-picker-trigger");
+      expect(out).toContain("skills-reset-auto");
+    }
   });
 });

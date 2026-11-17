@@ -12,9 +12,9 @@ import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
 import { openRow } from "../../helpers/table.ts";
 
-/** The picker sits behind the composer's « + » menu (its chip shows only off the defaults). */
+/** The picker sits behind the composer's settings menu (its chip shows only off the automatic mode). */
 async function openSkillsPicker(page: Page) {
-  await page.getByTestId("composer-tools-trigger").click();
+  await page.getByTestId("composer-settings-trigger").click();
   await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
 }
 
