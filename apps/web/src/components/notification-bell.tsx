@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { CountBadge } from "./count-badge";
 import { PendingButton } from "@/components/app-ui/pending-button";
@@ -14,92 +13,11 @@ import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/shee
 import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { EmptyState, ErrorState } from "./page-states";
-import {
-  useUnreadCount,
-  useMarkRead,
-  useMarkAllRead,
-  useNotifications,
-} from "../hooks/use-notifications";
+import { useUnreadCount, useMarkAllRead, useNotifications } from "../hooks/use-notifications";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { formatDateField } from "../lib/format-date";
-import { catalogueHref } from "../lib/catalogue-link";
-import type { paths } from "../api/client";
-
-/** One notification as returned by `GET /api/notifications`. */
-type NotificationItem =
-  paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
-
-/** What a row says and where it leads (`null` when that page is closed to the caller). */
-interface NotificationRow {
-  title: string;
-  status: string | null;
-  /** The text an agent sent (`agent_message`). */
-  message: string | null;
-  /** The line under the row: its date, and who sent it for an agent's message. */
-  meta: string;
-  target: string | null;
-}
-
-/**
- * One row per kind. Notifications follow the session's ceiling, not the
- * space's reads, so each target is asked of `canReach`.
- */
-function notificationRow(
-  notification: NotificationItem,
-  agentName: (packageId: string) => string | undefined,
-  canReach: (target: string) => boolean,
-  t: TFunction<["common", "agents"]>,
-): NotificationRow {
-  const date = formatDateField(notification.createdAt);
-  if (notification.type === "package_shared") {
-    // One share, one decision: open THAT package's sheet, not a list to search.
-    const share = notification.payload;
-    const href = share ? catalogueHref(share.package_type, { packageId: share.packageId }) : null;
-    return {
-      title: t("notifications.packageShared", {
-        name: share?.shared_by_name ?? "",
-        package: share?.packageId ?? "",
-      }),
-      status: null,
-      message: null,
-      meta: date,
-      target: href && canReach(href) ? href : null,
-    };
-  }
-  const packageId = notification.payload?.packageId ?? null;
-  const href =
-    packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
-  const target = href && canReach(href) ? href : null;
-  const liveName = packageId ? agentName(packageId) : undefined;
-  if (notification.type === "agent_message") {
-    // A message the agent sent from its run (`notify`): its own title and text, no status.
-    const sent = notification.payload;
-    const agent =
-      liveName ?? sent?.agent_name ?? packageId ?? t("runs.deletedAgent", { ns: "agents" });
-    return {
-      title: sent?.title ?? agent,
-      status: null,
-      message: sent?.message ?? null,
-      meta: t("notifications.agentMessageFrom", { agent, date }),
-      target,
-    };
-  }
-  // A run that needs attention: it failed or timed out.
-  return {
-    // Live name, else the one stamped on the run (agent switched off or deleted).
-    title:
-      liveName ??
-      notification.payload?.agent_name ??
-      packageId ??
-      t("runs.deletedAgent", { ns: "agents" }),
-    status: notification.payload?.status ?? null,
-    message: null,
-    meta: date,
-    target,
-  };
-}
+import { notificationRow, type NotificationItem } from "../lib/notification-row";
 
 /**
  * The bell's list, exported for the rendering tests: a Radix popover mounts
@@ -124,7 +42,8 @@ export function NotificationContent({
   /** A listed agent's display name, from its package id. */
   agentName: (packageId: string) => string | undefined;
   canReach: (target: string) => boolean;
-  onItemClick: (notificationId: string) => void;
+  /** A row was followed; the page it opens marks the notification read. */
+  onItemClick: () => void;
   markAllRead: () => void;
   /** The list is still being read: the badge may already say N. */
   loading?: boolean;
@@ -202,17 +121,20 @@ export function NotificationContent({
                 </div>
               </>
             );
-            const row = {
-              onClick: () => onItemClick(notification.id),
-              className:
-                "hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors",
-              children: body,
-            };
-            // Nowhere to go: clicking still marks it read.
-            return target ? (
-              <Link key={notification.id} to={target} {...row} />
-            ) : (
-              <button key={notification.id} type="button" {...row} />
+            // A failed run opens its run; every other kind its own page. That page reads it.
+            const to =
+              notification.type === "run_failed" && target
+                ? target
+                : `/notifications/${notification.id}`;
+            return (
+              <Link
+                key={notification.id}
+                to={to}
+                onClick={onItemClick}
+                className="hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors"
+              >
+                {body}
+              </Link>
             );
           })}
           {hasMore && (
@@ -242,18 +164,12 @@ export function NotificationBell() {
     isFetchingNextPage,
     fetchNextPage,
   } = useNotifications({ unread: true, limit: 50 });
-  const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
   const canReach = useCanReach();
   const unread = count ?? 0;
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
-
-  const handleClick = (notificationId: string) => {
-    markRead.mutate({ params: { path: { id: notificationId } } });
-    setOpen(false);
-  };
 
   const triggerButton = (
     <button
@@ -276,7 +192,7 @@ export function NotificationBell() {
     notifications: notifications ?? [],
     agentName: (packageId: string) => agentNames.get(packageId),
     canReach,
-    onItemClick: handleClick,
+    onItemClick: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,

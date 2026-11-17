@@ -6,6 +6,7 @@ import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { requireAnyCeiling } from "../middleware/require-permission.ts";
 import {
+  getNotification,
   getUnreadNotificationCount,
   markNotificationRead,
   markAllNotificationsRead,
@@ -18,8 +19,9 @@ import { parseListLimit } from "@appstrate/core/list-query";
 
 /**
  * The recipient's notification feed — the dashboard bell: what needs their
- * attention (a failed run, a share). A run's read state is served with the
- * runs (`GET /api/runs?unread=true`, `PUT /api/runs/{id}/read`, `read-all`).
+ * attention (a failed run, an agent's message, a share). A notification is read
+ * by the page it opens: a `run_failed` by its run (`PUT /api/runs/{id}/read`),
+ * every other kind by its own page (`PUT /api/notifications/{id}/read`).
  */
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -48,6 +50,14 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-count", feedCeiling, async (c) => {
     const count = await getUnreadNotificationCount(getSpaceScope(c), getActor(c));
     return c.json({ count });
+  });
+
+  // GET /api/notifications/:id — a pure read; the notification's page marks it
+  // read through the PUT below.
+  router.get("/notifications/:id", feedCeiling, async (c) => {
+    const notification = await getNotification(getSpaceScope(c), c.req.param("id")!, getActor(c));
+    if (!notification) throw notFound("Notification not found");
+    return c.json(notification);
   });
 
   // PUT /api/notifications/:id/read
