@@ -15,6 +15,8 @@ import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../lib/package-card-item";
+import { useSharedFromText } from "../hooks/use-shared-from-text";
+import { PackageSharedFrom } from "./package-shared-from";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { PackageSpaces } from "./package-spaces";
 
@@ -66,6 +68,7 @@ export function PackageCard({
   headingLevel?: 2 | 3;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const sharedFrom = useSharedFromText(homeSpaceId, source === "system");
   const linkInSpace = useSpaceLink();
   // The focus ring is drawn on the stretched overlay, i.e. around the whole
   // card: on the title itself `truncate` would clip it.
@@ -146,7 +149,7 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {(version || showSpace || meta) && (
+          {(version || showSpace || sharedFrom || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {version && (
                 <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
@@ -154,7 +157,8 @@ export function PackageCard({
                 </UIBadge>
               )}
               {showSpace && <PackageSpaces item={{ homeSpaceId, spaceIds, source }} />}
-              {showSpace && meta && <span aria-hidden>·</span>}
+              <PackageSharedFrom homeSpaceId={homeSpaceId} system={source === "system"} inline />
+              {(showSpace || sharedFrom) && meta && <span aria-hidden>·</span>}
               {meta}
             </div>
           )}

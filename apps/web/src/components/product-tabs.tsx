@@ -80,35 +80,41 @@ export function ProductTabs() {
     },
   ].filter((p) => p.enabled);
 
+  // A toggle with one choice is noise; a slot still being decided keeps the row.
+  const chatDeciding = chatPending && !chatShown;
+  if (products.length < 2 && !chatDeciding) return null;
+
   return (
-    <nav
-      aria-label={t("products.ariaLabel")}
-      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
-    >
-      {products.map((p) => (
-        <Link
-          key={p.id}
-          to={p.to}
-          aria-current={p.active ? "page" : undefined}
-          className={cn(
-            "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-            p.active
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
-          <span className="truncate">{p.label}</span>
-          {!p.active && (
-            <CountBadge
-              count={p.unread ?? 0}
-              label={t("products.unread", { count: p.unread })}
-              tone="primary"
-            />
-          )}
-        </Link>
-      ))}
-      {chatPending && !chatShown && <Skeleton className="h-7 flex-1 rounded-md" />}
-    </nav>
+    <div className="px-2 pt-4 pb-1">
+      <nav
+        aria-label={t("products.ariaLabel")}
+        className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
+      >
+        {products.map((p) => (
+          <Link
+            key={p.id}
+            to={p.to}
+            aria-current={p.active ? "page" : undefined}
+            className={cn(
+              "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
+              p.active
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
+            <span className="truncate">{p.label}</span>
+            {!p.active && (
+              <CountBadge
+                count={p.unread ?? 0}
+                label={t("products.unread", { count: p.unread })}
+                tone="primary"
+              />
+            )}
+          </Link>
+        ))}
+        {chatDeciding && <Skeleton className="h-7 flex-1 rounded-md" />}
+      </nav>
+    </div>
   );
 }
