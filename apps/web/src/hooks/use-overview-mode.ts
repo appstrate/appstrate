@@ -67,28 +67,17 @@ export function withdrawOnPage(key: string, pathname: string): void {
   if (!holdsOverview(routeOf(pathname))) withdraw(key);
 }
 
-/** The listing rule of {@link useOverviewRules}: a listing proving the mode no longer offered withdraws it. Exported for its test. */
-export function withdrawIfLapsed(key: string, spaces: Parameters<typeof overviewOffered>[0]): void {
-  if (spaces !== undefined && !overviewOffered(spaces)) withdraw(key);
-}
-
 /**
- * Withdraws the choice when the mode cannot stand: on reaching a page of one space
- * (`holdsOverview`), and once the listing proves it no longer offered, so a
- * space granted later does not bring it back. The page rule runs when the PAGE changes, never
- * when the choice does: choosing it on a page about to be left does not undo it. Render inside
- * MainLayout.
+ * Withdraws the choice on reaching a page of one space (`holdsOverview`). It runs when the PAGE
+ * changes, never when the choice does: choosing it on a page about to be left does not undo it.
+ * A mode no longer offered is simply off (`useOverviewMode`'s `on`). Render inside MainLayout.
  */
 export function useOverviewRules(): void {
   const { pathname } = useLocation();
   const key = useChoiceKey();
-  const { data: spaces } = useSpaces();
   useEffect(() => {
     if (key) withdrawOnPage(key, pathname);
   }, [key, pathname]);
-  useEffect(() => {
-    if (key) withdrawIfLapsed(key, spaces);
-  }, [key, spaces]);
 }
 
 /**
