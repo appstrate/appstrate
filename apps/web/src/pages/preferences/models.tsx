@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertDescription } from "@appstrate/ui/components/alert";
-import { AlertTriangle, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -137,7 +137,6 @@ export function PreferencesModelsPage() {
     <>
       {personalModelCredentialsDisabled && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle size={16} />
           <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
         </Alert>
       )}

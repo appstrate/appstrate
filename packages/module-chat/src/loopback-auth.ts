@@ -28,14 +28,16 @@
  *   - `mintMcpLoopbackToken` — the platform-MCP bearer handed to the
  *     in-process Pi engine. Scope is the caller's own already-
  *     resolved permission set (RBAC fidelity, no amplification) and
- *     `firstPartyLoopback: false` — it authorizes the MCP meta-tools but
- *     can NEVER be replayed against the inference proxy.
+ *     `firstPartyLoopback: false` — it authorizes the MCP tools, the
+ *     integration tools among them, but can NEVER be replayed against the
+ *     inference proxy.
  *
  * Contributed through the standard `authStrategies()` module extension
- * point. The strategy declares the `firstPartyLoopback` capability on its
- * `AuthResolution` only when the token itself grants it; the bearer-only
- * proxy gates accept on THAT declared capability (not on this module's
- * auth-method id) — see `bearer-only.ts`.
+ * point. The strategy declares `serverMinted` on every token it verifies (each
+ * is built from the process-local secret, so none carries CSRF risk — the
+ * credential proxy accepts it), and `firstPartyLoopback` only when the token
+ * itself grants it. The bearer-only proxy gates accept on THOSE declared
+ * capabilities (not on this module's auth-method id) — see `bearer-only.ts`.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -166,7 +168,9 @@ export function mintLoopbackToken(
  * turn may not author agents) never amplifies beyond what the caller could
  * already do over REST. The token does
  * NOT grant `firstPartyLoopback`, so — unlike the inference bearer — it can
- * never be replayed against the inference proxy.
+ * never be replayed against the inference proxy. Like every token of this
+ * strategy it is `serverMinted`, which is what lets the integration tools re-enter
+ * the credential proxy with it.
  *
  * The engine bakes these headers once and may reconnect across the turn, so
  * callers pass a `ttlMs` that spans the whole turn.
@@ -222,6 +226,9 @@ export const chatLoopbackStrategy: AuthStrategy = {
       orgRole: claims.orgRole as AuthResolution["orgRole"],
       authMethod: CHAT_LOOPBACK_AUTH_METHOD,
       principalKind: "user",
+      // Every token here is signed with the process-local secret: none ever reached
+      // a browser, so the credential proxy may accept it (no CSRF risk).
+      serverMinted: true,
       // Only granted when the token itself carries the capability (the inference
       // bearer). The MCP bearer sets it false, so core never lets it reach the
       // subscription LLM gateway. Safe to set true for the inference bearer: it

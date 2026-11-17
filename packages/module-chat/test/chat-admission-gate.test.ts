@@ -87,7 +87,7 @@ function fakeContext(opts: {
     orgId: opts.orgId,
     user: opts.user,
     // What `enterSpaceContext` writes on every `/api/chat/*` route.
-    space: { id: opts.spaceId },
+    space: { id: opts.spaceId, credentialProxyOpen: true },
     principalKind: "user",
     orgRole: "member",
     // A Set, as `enterSpaceContext` writes and `ChatEnv` declares.

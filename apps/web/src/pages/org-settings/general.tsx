@@ -5,7 +5,7 @@ import { Alert } from "@appstrate/ui/components/alert";
 import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Building, HardDrive } from "lucide-react";
+import { Building, HardDrive } from "lucide-react";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -204,7 +204,6 @@ export function OrgSettingsGeneralPage() {
                 </div>
                 {storageNearLimit && (
                   <Alert variant="warning" className="mt-3">
-                    <AlertTriangle size={16} />
                     <AlertDescription>{t("orgStorage.nearLimitWarning")}</AlertDescription>
                   </Alert>
                 )}

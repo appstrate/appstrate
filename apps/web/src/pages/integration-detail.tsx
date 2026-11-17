@@ -31,7 +31,6 @@ import {
   LayoutGrid,
   Server,
   Settings2,
-  Info,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
@@ -485,16 +484,21 @@ export function IntegrationDetailPage() {
         homeWritable: !!homeWritable,
         canOpenWizard: canReach("/integrations/new/mcp"),
       }) && (
-        <Alert variant="info" className="mb-4" data-testid="integration-wizard-finish">
-          <Info />
-          <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>
-          <AlertDescription>
-            <p>{t("integrationWizard.finish.description", { ns: "agents" })}</p>
-            <Button variant="outline" size="sm" className="mt-2" asChild>
+        <Alert
+          variant="info"
+          className="mb-4"
+          data-testid="integration-wizard-finish"
+          action={
+            <Button variant="outline" size="sm" asChild>
               <Link to={wizardResumePath(packageId)}>
                 {t("integrationWizard.finish.action", { ns: "agents" })}
               </Link>
             </Button>
+          }
+        >
+          <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>
+          <AlertDescription>
+            {t("integrationWizard.finish.description", { ns: "agents" })}
           </AlertDescription>
         </Alert>
       )}

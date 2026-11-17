@@ -267,8 +267,7 @@ export function RunResultsContent({
         <SettingsHeading title={activeSection.label} description={activeSection.description} />
         <div className="flex flex-col gap-4">
           {isPartial && (
-            <Alert>
-              <FileOutput />
+            <Alert icon={FileOutput}>
               <AlertTitle>{t("run.resultsPartial")}</AlertTitle>
               <AlertDescription>{t("run.resultsPartialHint")}</AlertDescription>
             </Alert>
