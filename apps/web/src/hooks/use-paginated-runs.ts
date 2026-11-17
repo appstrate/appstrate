@@ -3,7 +3,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
-import { splitPackageRef } from "../lib/package-paths";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
@@ -24,7 +23,7 @@ interface UseRunsOptions {
   search?: string;
   /** Only the runs the caller has not read yet — the global `/api/runs` view only. */
   unread?: boolean;
-  /** Every space the reader reaches instead of the current one (`GET /api/orgs/{orgId}/runs`) — the global view only. */
+  /** Every space the reader reaches instead of the current one (`GET /api/orgs/{orgId}/runs`) — any list but a schedule's. */
   spanning?: boolean;
   /** `false` keeps the query from asking (a badge the shell does not show). */
   enabled?: boolean;
@@ -67,8 +66,8 @@ export function useRuns({
   const { can } = usePermissions();
   // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
   const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
-  // The org route serves the global view only; inside an agent or a schedule the space is theirs.
-  const acrossSpaces = !scheduleId && !packageId && !!spanning;
+  // A schedule lives in one space; an agent's runs span its spaces like the global view's.
+  const acrossSpaces = !scheduleId && !!spanning;
   const scope = useListScope(acrossSpaces, canRead);
   const { orgId, keySpace } = scope;
 
@@ -76,6 +75,7 @@ export function useRuns({
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
 
+  // Names the list in the key: a schedule's, an agent's, or every run.
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
     : packageId
@@ -135,8 +135,9 @@ type RunPageRequest = Omit<UseRunsOptions, "spanning" | "enabled"> & {
 };
 
 /**
- * One page, from the door the request names. `user`/`kind`/`unread` exist only on the global
- * view; `acrossOrgId` moves it to the org route. Exported for its test.
+ * One page, from the door the request names: a schedule's own, else the run list of the current
+ * space (`packageId` narrowing it to one agent), which `acrossOrgId` moves to the org route.
+ * Exported for its test.
  */
 export async function fetchRunPage(
   {
@@ -161,17 +162,10 @@ export async function fetchRunPage(
     });
     return data!;
   }
-  if (packageId) {
-    const { scope, name } = splitPackageRef(packageId);
-    const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-      params: { path: { scope, name }, query: { limit, startingAfter, status, q } },
-      signal,
-    });
-    return data!;
-  }
   const query = {
     limit,
     startingAfter,
+    packageId,
     user,
     kind: kind && kind !== "all" ? kind : undefined,
     status,
