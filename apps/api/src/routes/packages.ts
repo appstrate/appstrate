@@ -1065,11 +1065,11 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 }
 
 /**
- * Reject (409) when an agent package has runs in progress. No-op for package
- * types that don't gate version/delete ops on running runs (skills, where
- * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
- * / restore-version / delete-version handlers so the conflict message + the
- * `(orgId, spaceId)` scoping stay identical across all four.
+ * Reject (409) when an agent package has runs in progress in ANY space of the
+ * organization: the delete / create-version / restore-version / delete-version
+ * handlers act on the package for every space it is placed in. No-op for
+ * package types that don't gate version/delete ops on running runs (skills,
+ * where `requireMutableForVersionOps` is unset).
  */
 async function assertNoRunningRuns(
   c: Context<AppEnv>,
@@ -1077,14 +1077,11 @@ async function assertNoRunningRuns(
   itemId: string,
 ): Promise<void> {
   if (!rcfg.requireMutableForVersionOps) return;
-  const running = await getRunningRunsForPackage(
-    { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
-    itemId,
-  );
+  const running = await getRunningRunsForPackage({ orgId: c.get("orgId") }, itemId);
   if (running > 0) {
     throw conflict(
       "agent_in_use",
-      `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}`,
+      `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}, in this space or another space of the organization`,
     );
   }
 }

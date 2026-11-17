@@ -6,13 +6,18 @@
  * `persistence:read`, each row naming its space. The actor partition is the
  * space route's, judged per space.
  *
- * The agent is homed in Un and placed in Deux; Trois holds rows but no
- * placement. Every space holds a shared row, the member's and the owner's.
+ * The agent is homed in Un and placed in Deux and Quatre; Trois holds rows but
+ * no placement. Every space holds a shared row, the member's and the owner's.
  *
- * | caller         | Un (`persistence:read`) | Deux (`+ persistence:delete`) | Trois (not placed) |
- * | -------------- | ----------------------- | ----------------------------- | ------------------ |
- * | member session | own + shared            | every actor                   | nothing            |
- * | owner session  | every actor             | every actor                   | nothing            |
+ * | caller                                   | Un (`persistence:read`) | Deux (`+ persistence:delete`) | Trois (not placed) | Quatre (`agents:read` only) |
+ * | ---------------------------------------- | ----------------------- | ----------------------------- | ------------------ | --------------------------- |
+ * | member session                           | own + shared            | every actor                   | nothing            | nothing                     |
+ * | owner session                            | every actor             | every actor                   | nothing            | every actor                 |
+ * | member loopback bearer, `persistence:read` ceiling | own + shared  | own + shared                  | nothing            | nothing                     |
+ * | API key pinned to Deux                   | nothing                 | every actor                   | nothing            | nothing                     |
+ *
+ * A credential whose ceiling lacks `persistence:read` and an end-user are
+ * refused; a role preview reads with the persona's actor partition.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -20,12 +25,15 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
+  seedApiKey,
+  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
   seedSpaceGrant,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 import {
   addMemory,
   upsertPinned,
@@ -46,7 +54,9 @@ interface Row {
 describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
   let owner: TestContext;
   let member: TestContext;
-  let s: Record<"un" | "deux" | "trois", string>;
+  let s: Record<"un" | "deux" | "trois" | "quatre", string>;
+  /** The run of each space's memories, by space. */
+  let runOf: Record<string, string>;
 
   async function seedRows(spaceId: string, label: string) {
     const run = await seedRun({
@@ -56,6 +66,7 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
       userId: owner.user.id,
       status: "success",
     });
+    runOf[spaceId] = run.id;
     const actors: Record<string, PersistenceScope> = {
       shared: { type: "shared" },
       member: { type: "user", id: member.user.id },
@@ -81,7 +92,13 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
     member = await memberContext(owner, "member");
     const space = async (name: string) =>
       (await seedSpace({ orgId: owner.orgId, name, visibility: "closed" })).id;
-    s = { un: await space("Un"), deux: await space("Deux"), trois: await space("Trois") };
+    s = {
+      un: await space("Un"),
+      deux: await space("Deux"),
+      trois: await space("Trois"),
+      quatre: await space("Quatre"),
+    };
+    runOf = {};
     await seedPackage({
       id: AGENT,
       orgId: owner.orgId,
@@ -90,15 +107,22 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
       draftManifest: { name: AGENT, version: "0.1.0", type: "agent" },
     });
     await seedSpacePackage(s.deux, AGENT);
+    await seedSpacePackage(s.quatre, AGENT);
     const join = (spaceId: string, permissions: string[]) =>
       seedSpaceGrant({ orgId: owner.orgId, spaceId, userId: member.user.id, permissions });
     await join(s.un, ["persistence:read"]);
     await join(s.deux, ["persistence:read", "persistence:delete"]);
     await join(s.trois, ["persistence:read", "persistence:delete"]);
+    await join(s.quatre, ["agents:read"]);
     await seedRows(s.un, "un");
     await seedRows(s.deux, "deux");
     await seedRows(s.trois, "trois");
+    await seedRows(s.quatre, "quatre");
   });
+
+  const everyActor = (label: string) =>
+    ["member", "owner", "shared"].map((who) => `${label}:${who}`);
+  const ownAndShared = (label: string) => [`${label}:member`, `${label}:shared`];
 
   const path = (agent = AGENT, query = "") =>
     `/api/orgs/${owner.orgId}/agents/${agent}/persistence${query}`;
@@ -125,9 +149,7 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
 
   it("serves every actor's rows where the caller holds persistence:delete", async () => {
     const { memories } = await read({ Cookie: owner.cookie });
-    expect(memories).toEqual(
-      ["un:member", "un:owner", "un:shared", "deux:member", "deux:owner", "deux:shared"].sort(),
-    );
+    expect(memories).toEqual(["un", "deux", "quatre"].flatMap((label) => everyActor(label)).sort());
   });
 
   it("honours `kind` and an actor scope only where it may cross actors", async () => {
@@ -159,13 +181,107 @@ describe("GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence", () => {
     expect(res.status).toBe(404);
   });
 
-  it("leaves the space route's rows without a space", async () => {
-    const res = await app.request(`/api/agents/${AGENT}/persistence?kind=memory`, {
+  it("names each row's space on the space route too", async () => {
+    const res = await app.request(`/api/agents/${AGENT}/persistence`, {
       headers: { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": s.deux },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { memories: Array<Record<string, unknown>> };
+    const body = (await res.json()) as { pinned: Row[]; memories: Row[] };
     expect(body.memories).toHaveLength(3);
-    expect(body.memories.every((row) => !("spaceId" in row))).toBe(true);
+    expect([...body.pinned, ...body.memories].every((row) => row.spaceId === s.deux)).toBe(true);
+  });
+
+  it("refuses an unknown parameter and a value outside a closed set, on both doors", async () => {
+    const spaceHeaders = { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": s.deux };
+    for (const query of ["?bogus=1", "?kind=all", "?actor_type=robot"]) {
+      const org = await app.request(path(AGENT, query), { headers: { Cookie: member.cookie } });
+      expect(org.status, query).toBe(400);
+      const space = await app.request(`/api/agents/${AGENT}/persistence${query}`, {
+        headers: spaceHeaders,
+      });
+      expect(space.status, query).toBe(400);
+    }
+  });
+
+  it("narrows to one run's rows with runId", async () => {
+    const { memories, pinned } = await read({ Cookie: member.cookie }, `?runId=${runOf[s.deux]}`);
+    expect(memories).toEqual(everyActor("deux").sort());
+    // The slots were written with no run.
+    expect(pinned).toEqual([]);
+  });
+
+  it("merges the spaces' rows in one order: pinned newest update first, memories oldest first", async () => {
+    await Bun.sleep(5);
+    await addMemory(AGENT, s.un, owner.orgId, { type: "shared" }, "un:latest", runOf[s.un]!);
+    await upsertPinned(
+      AGENT,
+      s.un,
+      owner.orgId,
+      { type: "shared" },
+      "slot_latest",
+      "un:latest",
+      null,
+    );
+    const { body } = await read({ Cookie: member.cookie });
+    expect(String(body.memories!.at(-1)!.content)).toBe("un:latest");
+    expect(String(body.pinned![0]!.content)).toBe("un:latest");
+    // Without the merge, Un's rows would come together, before or after Deux's.
+    const spaces = body.memories!.map((row) => row.spaceId);
+    expect(spaces.indexOf(s.deux)).toBeLessThan(spaces.lastIndexOf(s.un));
+  });
+
+  describe("credentials", () => {
+    const keyFor = async (spaceId: string, scopes: string[]) => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId,
+        createdBy: member.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    };
+
+    it("bounds an API key pinned to a space to that space's rows", async () => {
+      const { memories } = await read(
+        await keyFor(s.deux, ["persistence:read", "persistence:delete"]),
+      );
+      expect(memories).toEqual(everyActor("deux").sort());
+    });
+
+    it("refuses a credential whose ceiling holds no persistence:read", async () => {
+      const res = await app.request(path(), { headers: await keyFor(s.deux, ["agents:read"]) });
+      expect(res.status).toBe(403);
+      const bearer = await app.request(path(), {
+        headers: memberLoopbackHeaders(member, owner.orgId, ["agents:read"]),
+      });
+      expect(bearer.status).toBe(403);
+    });
+
+    it("reads a delegated bearer without persistence:delete in its own actor partition", async () => {
+      const { memories } = await read(
+        memberLoopbackHeaders(member, owner.orgId, ["persistence:read"]),
+      );
+      // The member holds `persistence:delete` in Deux; the bearer's ceiling does not.
+      expect(memories).toEqual([...ownAndShared("un"), ...ownAndShared("deux")].sort());
+    });
+
+    it("refuses an end-user", async () => {
+      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: s.deux });
+      const headers = {
+        ...(await keyFor(s.deux, ["persistence:read"])),
+        "Appstrate-User": endUser.id,
+      };
+      expect((await app.request(path(), { headers })).status).toBe(403);
+    });
+
+    it("reads a role preview with the persona's actor partition", async () => {
+      // The default space is open: its default role reads persistence, deletes none.
+      await seedSpacePackage(owner.defaultSpaceId, AGENT);
+      await seedRows(owner.defaultSpaceId, "default");
+      const asOwner = await read({ Cookie: owner.cookie });
+      expect(asOwner.memories).toEqual(expect.arrayContaining(everyActor("default")));
+      const previewed = await read({ Cookie: owner.cookie, "X-View-As": "org_role=member" });
+      expect(previewed.memories).toEqual(["default:owner", "default:shared"]);
+    });
   });
 });

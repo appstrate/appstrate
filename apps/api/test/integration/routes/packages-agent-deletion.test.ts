@@ -16,8 +16,8 @@ import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedRunLog } from "../../helpers/seed.ts";
-import { assertDbMissing } from "../../helpers/assertions.ts";
+import { seedAgent, seedRun, seedRunLog, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import { packages, runs, runLogs, llmUsage } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -121,6 +121,39 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("agent_in_use");
+  });
+
+  it("refuses deleting or versioning an agent while a run of it runs in another space", async () => {
+    await seedAgent({
+      id: "@delorg/elsewhere",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: { name: "@delorg/elsewhere", version: "0.2.0", type: "agent" },
+    });
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Ailleurs" });
+    await seedSpacePackage(other.id, "@delorg/elsewhere");
+    await seedRun({
+      packageId: "@delorg/elsewhere",
+      orgId: ctx.orgId,
+      spaceId: other.id,
+      status: "running",
+    });
+
+    for (const [method, suffix] of [
+      ["DELETE", ""],
+      ["POST", "/versions"],
+    ] as const) {
+      const res = await app.request(`/api/packages/agents/@delorg/elsewhere${suffix}`, {
+        method,
+        headers: authHeaders(ctx),
+      });
+      expect(res.status, method).toBe(409);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_in_use");
+      expect(body.detail).toContain("another space of the organization");
+    }
+    await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
   });
 
   it("orphaned runs surface in GET /api/runs with the denormalized name", async () => {

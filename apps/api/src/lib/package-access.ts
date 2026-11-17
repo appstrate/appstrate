@@ -153,30 +153,41 @@ export function placementGrantsRead(
 }
 
 /**
- * "Is this package readable from THIS space?" — VISIBILITY, not authorization:
- * the caller's `<type>:read` is a separate guard (the route's `readGuard`, or
- * `requirePackageReadPermission` where the type comes from the row). System
- * packages are readable from every space, and like `isPackageActiveHere` this does
- * not filter `orgId`: its callers add the org boundary on the row they read next.
+ * The spaces among `spaceIds` the package is readable from — VISIBILITY, not
+ * authorization: the caller's `<type>:read` is a separate guard (the route's
+ * `readGuard`, or `requirePackageReadPermission` where the type comes from the
+ * row). A system package is readable from every space; any other through
+ * {@link placementGrantsRead}. One query whatever the number of spaces. Like
+ * `isPackageActiveHere` this does not filter `orgId`: its callers add the org
+ * boundary on the row they read next.
  */
+export async function spacesReadingPackage(
+  packageId: string,
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  if (spaceIds.length === 0) return new Set();
+  const rows = await db
+    .select({
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      placedIn: spacePackages.spaceId,
+    })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceIds))
+    .where(and(eq(packages.id, packageId), notEphemeralFilter()));
+  const [pkg] = rows;
+  if (!pkg) return new Set();
+  if (pkg.source === "system") return new Set(spaceIds);
+  const placedIn = rows.flatMap((row) => (row.placedIn ? [row.placedIn] : []));
+  return new Set(spaceIds.filter((id) => placementGrantsRead(pkg, placedIn, new Set([id]))));
+}
+
+/** "Is this package readable from THIS space?" — {@link spacesReadingPackage} for one space. */
 export async function isPackageReadableInSpace(
   spaceId: string,
   packageId: string,
 ): Promise<boolean> {
-  const [row] = await db
-    .select({
-      source: packages.source,
-      homeSpaceId: packages.homeSpaceId,
-      rowHere: spacePackages.packageId,
-    })
-    .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .where(and(eq(packages.id, packageId), notEphemeralFilter()))
-    .limit(1);
-  if (!row) return false;
-  if (row.source === "system") return true;
-  const here = new Set([spaceId]);
-  return placementGrantsRead(row, row.rowHere ? here : [], here);
+  return (await spacesReadingPackage(packageId, [spaceId])).has(spaceId);
 }
 
 /**

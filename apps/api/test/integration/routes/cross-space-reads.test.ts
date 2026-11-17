@@ -4,7 +4,8 @@
  * The reach every list spanning the spaces of an organization shares
  * (`readAcrossSpaces`, `routes/cross-space-reads.ts`), one table over the
  * lists: which spaces a credential's rows come from. Each space holds one row
- * of every list, the owner's.
+ * of every list, the owner's (and of the notification feed, one of the owner's and one of
+ * the member's).
  *
  * | credential                                   | spaces read                                   |
  * | -------------------------------------------- | --------------------------------------------- |
@@ -45,6 +46,7 @@ import {
 } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
+import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
 
 const app = getTestApp();
 
@@ -58,6 +60,8 @@ const LISTS = [
   { list: "agents", read: "agents:read" },
   { list: "packages/skills", read: "skills:read" },
   { list: "packages/integrations", read: "integrations:read" },
+  // The caller's own feed: its ceiling is a run read, and no space asks a role grant.
+  { list: "notifications", read: "runs:read-all" },
 ] as const;
 const EVERY_READ = [...LISTS.map(({ read }) => read), "runs:read"];
 
@@ -128,6 +132,16 @@ describe("lists spanning the organization's spaces: the shared reach", () => {
       size: 1,
       sha256: "0".repeat(64),
     });
+    for (const recipient of [owner.user.id, member.user.id]) {
+      await createPackageShareNotification({
+        orgId: owner.orgId,
+        spaceId,
+        recipientUserId: recipient,
+        packageId: agent.id,
+        packageType: "agent",
+        sharedByName: "Ada",
+      });
+    }
   }
 
   beforeEach(async () => {

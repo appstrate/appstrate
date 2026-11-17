@@ -9,9 +9,10 @@ import {
   assertPackageMutationAccess,
   isInlineShadowRunReadable,
   isPackageReadableInSpace,
+  spacesReadingPackage,
 } from "../lib/package-access.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { callerPermissions } from "../lib/permissions.ts";
+import { callerPermissions, type SpaceGrant } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
 import { unnameableSpace } from "../lib/reachable-spaces.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -77,24 +78,23 @@ async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string
 
 /**
  * The placement rule of {@link requireAgent} over several spaces: the agent of
- * this org with the grants whose space reads it. `agent_not_found` when none
- * does, the same opaque refusal as one space.
+ * this org with the grants whose space reads it ({@link spacesReadingPackage},
+ * one read for every grant). `agent_not_found` when none does, the same opaque
+ * refusal as one space.
  */
-export async function loadAgentPlacedAcross<G extends { spaceId: string }>(
+export async function loadAgentPlacedAcross(
   packageId: string,
   orgId: string,
-  grants: readonly G[],
+  grants: readonly SpaceGrant[],
 ) {
   const agent = await getPackage(packageId, orgId);
-  const placed = agent
-    ? (
-        await Promise.all(
-          grants.map(async (grant) =>
-            (await isPackageReadableInSpace(grant.spaceId, packageId)) ? grant : (null as G | null),
-          ),
-        )
-      ).filter((grant) => grant !== null)
-    : [];
+  const reading = agent
+    ? await spacesReadingPackage(
+        packageId,
+        grants.map((grant) => grant.spaceId),
+      )
+    : new Set<string>();
+  const placed = grants.filter((grant) => reading.has(grant.spaceId));
   if (!agent || placed.length === 0) throw agentNotFound(packageId);
   return { agent, grants: placed };
 }

@@ -13,8 +13,10 @@
  * | `closed` space, not joined (Fermé)       | the member          | no     |
  * | another organization's space             | the member          | no     |
  *
- * One notification is read, and marked read, in its own space through the space
- * routes; the reach every org list shares is in `cross-space-reads.test.ts`.
+ * One notification is read in whichever space holds it through
+ * `GET /api/orgs/{orgId}/notifications/{id}`, and marked read in its own space
+ * through the space routes; the reach every org list shares is in
+ * `cross-space-reads.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -28,6 +30,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedEndUser, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
+import { memberLoopbackHeaders } from "../../helpers/loopback.ts";
 import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
@@ -197,6 +200,104 @@ describe("GET /api/orgs/{orgId}/notifications", () => {
       const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
       const headers = { ...(await keyFor(["runs:read"])), "Appstrate-User": endUser.id };
       expect((await app.request(listPath(), { headers })).status).toBe(403);
+    });
+  });
+
+  describe("the cursor and the query", () => {
+    it("answers an empty page for a cursor that is not an id", async () => {
+      expect(await list(member, "?startingAfter=not-a-uuid")).toEqual([]);
+    });
+
+    it("answers an empty page for a cursor of a space outside the reach", async () => {
+      // Fermé's notification is the newest: a cursor resolved outside the reach would page
+      // past it onto the member's two older ones.
+      expect(await list(member, `?startingAfter=${n.fermeMember}`)).toEqual([]);
+    });
+
+    it("refuses an `unread` that is neither true nor false, and an unknown parameter", async () => {
+      for (const query of ["?unread=1", "?bogus=1"]) {
+        const res = await app.request(listPath(query), { headers: session(member) });
+        expect(res.status, query).toBe(400);
+      }
+      const count = await app.request(
+        `/api/orgs/${owner.orgId}/notifications/unread-count?bogus=1`,
+        { headers: session(member) },
+      );
+      expect(count.status).toBe(400);
+    });
+  });
+
+  it("answers a role preview with the persona's reach, the previewer's own notifications", async () => {
+    const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
+    const res = await app.request(listPath(), {
+      headers: { ...session(owner), "X-View-As": "org_role=member" },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const rows = ((await res.json()) as { data: ListedNotification[] }).data;
+    // Un is closed and the persona joined none of it: its notification is out of reach.
+    expect(rows.map((row) => row.id)).toEqual([ownDefault]);
+  });
+
+  it("reaches with the chat's loopback bearer what the member's session reaches", async () => {
+    const res = await app.request(listPath(), {
+      headers: memberLoopbackHeaders(member, owner.orgId, ["runs:read"]),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const viaBearer = ((await res.json()) as { data: ListedNotification[] }).data;
+    expect(viaBearer.map((row) => row.id).sort()).toEqual(
+      (await list(member)).map((row) => row.id).sort(),
+    );
+  });
+
+  describe("GET /api/orgs/{orgId}/notifications/{id}", () => {
+    const onePath = (id: string) => `/api/orgs/${owner.orgId}/notifications/${id}`;
+    const status = async (id: string, headers: Record<string, string>) =>
+      (await app.request(onePath(id), { headers })).status;
+
+    it("finds the caller's notification in whichever space holds it", async () => {
+      const res = await app.request(onePath(n.unMember!), { headers: session(member) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as ListedNotification;
+      expect(body).toMatchObject({ id: n.unMember, spaceId: un, type: "package_shared" });
+    });
+
+    it("answers 404 for a space not reached, another recipient's, and an id that is none", async () => {
+      expect(await status(n.fermeMember!, session(member))).toBe(404);
+      expect(await status(n.foreign!, session(member))).toBe(404);
+      expect(await status(n.unOwner!, session(member))).toBe(404);
+      expect(await status("not-a-uuid", session(member))).toBe(404);
+    });
+
+    it("bounds a space-pinned API key to its space", async () => {
+      const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes: ["runs:read"],
+      });
+      const headers = { Authorization: `Bearer ${key.rawKey}` };
+      expect(await status(n.unOwner!, headers)).toBe(200);
+      expect(await status(ownDefault, headers)).toBe(404);
+    });
+
+    it("answers a role preview with the persona's reach", async () => {
+      const ownDefault = await share(owner.defaultSpaceId, owner.user.id);
+      const headers = { ...session(owner), "X-View-As": "org_role=member" };
+      expect(await status(ownDefault, headers)).toBe(200);
+      expect(await status(n.unOwner!, headers)).toBe(404);
+    });
+
+    it("refuses an end-user", async () => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes: ["runs:read"],
+      });
+      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
+      const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
+      expect(await status(n.unOwner!, headers)).toBe(403);
     });
   });
 

@@ -32,7 +32,6 @@ import {
   invalidRequest,
   notFound,
   validationFailed,
-  zodIssuesToFieldErrors,
   type ResolutionFieldError,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -77,6 +76,7 @@ import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { packageIdFilter, parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "@appstrate/core/list-query";
+import { parseStrictQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -448,25 +448,17 @@ function scheduleVersion(schedule: { updatedAt: string }): number {
   return Date.parse(schedule.updatedAt);
 }
 
+/** The query of `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`: strict, an unknown parameter is a 400. */
+const scheduleListQuerySchema = z.object({ packageId: packageIdFilter }).strict();
+
 /**
  * The schedule list over `grants`: `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`. The
  * caller is the VIEWER of the run counters (`unread_count` is recipient-scoped), never the
  * schedules' own execution actor.
  */
-/** The query of `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`: strict, an unknown parameter is a 400. */
-const scheduleListQuerySchema = z.object({ packageId: packageIdFilter }).strict();
-
 export async function respondScheduleList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
-  const parsed = scheduleListQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    const [issue] = zodIssuesToFieldErrors(parsed.error.issues);
-    throw invalidRequest(issue!.message, issue!.field);
-  }
-  return c.json(
-    listResponse(
-      await listSchedules(orgId, grants, getActor(c), { packageId: parsed.data.packageId }),
-    ),
-  );
+  const { packageId } = parseStrictQuery(c, scheduleListQuerySchema);
+  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c), { packageId })));
 }
 
 export function createSchedulesRouter() {

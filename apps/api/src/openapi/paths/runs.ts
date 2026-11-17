@@ -11,7 +11,7 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
-import { ORG_READ_REACH } from "../parameters.ts";
+import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -99,16 +99,7 @@ const runListQueryParameters = [
     schema: { type: "string" },
     description: "Return only runs launched from this chat session.",
   },
-  {
-    name: "packageId",
-    in: "query",
-    schema: {
-      type: "string",
-      pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
-    },
-    description:
-      "Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent.",
-  },
+  packageIdFilterParameter("runs", "page"),
   { $ref: "#/components/parameters/RunSearch" },
   {
     name: "unread",
@@ -154,6 +145,115 @@ const runListPageResponses = {
       },
     },
   },
+};
+
+/** The `wait` long-poll of both run reads. */
+const runWaitParameter = {
+  name: "wait",
+  in: "query",
+  required: false,
+  schema: {
+    oneOf: [
+      {
+        type: "boolean",
+        description: `\`true\` waits the maximum ${MAX_WAIT_SECONDS} s; \`false\` disables.`,
+      },
+      {
+        type: "integer",
+        minimum: 0,
+        description: `Wait budget in seconds. Values above ${MAX_WAIT_SECONDS} are clamped to ${MAX_WAIT_SECONDS}.`,
+      },
+    ],
+  },
+  description: `Hold the request until the run reaches a terminal status or this many seconds elapse (capped at ${MAX_WAIT_SECONDS}, see operation description), then return the run object. \`0\`/\`false\`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if \`wait\` were 0 (degrade-to-immediate, see operation description).`,
+};
+
+/** The answers of both run reads. */
+const runReadResponses = {
+  "200": {
+    description: "Run detail",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/Run" },
+        example: {
+          id: "run_cm1abc123def456",
+          packageId: "@acme/email-sorter",
+          userId: "usr_k7x9m2p4q1",
+          endUserId: null,
+          apiKeyId: null,
+          orgId: "org_r3t5w8y1z6",
+          spaceId: "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
+          scheduleId: "sched_cm1abc456def789",
+          status: "success",
+          input: { folder: "inbox", maxEmails: 50 },
+          result: { output: { processed: 42, labeled: 38 } },
+          artifacts: { status: "complete", published: 2, failed: [] },
+          checkpoint: { lastProcessedId: "msg_99f2a" },
+          error: null,
+          model_error: null,
+          metadata: null,
+          generation: { reasoning_level: "medium" },
+          generation_override: null,
+          started_at: "2026-01-15T10:30:00Z",
+          completed_at: "2026-01-15T10:31:12Z",
+          duration: 72000,
+          cost: 0.0034,
+          cost_pricing_status: "priced",
+          unread: true,
+          runNumber: 17,
+          token_usage: {
+            input_tokens: 8200,
+            output_tokens: 4250,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 1024,
+          },
+          version_label: "1.2.0",
+          version_ref: "1.2.0",
+          proxy_label: null,
+          model_label: "Claude Sonnet 4",
+          model_source: "system",
+          runner_name: null,
+          runner_kind: null,
+          agent_scope: "@acme",
+          agent_name: "email-sorter",
+          runOrigin: "platform",
+          contextSnapshot: null,
+          modelCredentialId: null,
+          connection_overrides: null,
+          dependency_overrides: null,
+          user_name: "Pierre",
+          end_user_name: null,
+          api_key_name: null,
+          schedule_name: "Weekday morning sort",
+          connections_used: null,
+          integrations_unbound: null,
+          package_ephemeral: false,
+          file_counts: { input: 0, output: 0 },
+        },
+      },
+    },
+  },
+  "400": {
+    description:
+      "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description), or a query parameter other than `wait`",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "about:blank",
+          title: "Bad Request",
+          status: 400,
+          detail: `Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max ${MAX_WAIT_SECONDS})`,
+          code: "invalid_request",
+          request_id: "req_abc123",
+        },
+      },
+    },
+  },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "404": { $ref: "#/components/responses/NotFound" },
 };
 
 const canonicalRunsPaths = {
@@ -1010,112 +1110,27 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
-        {
-          name: "wait",
-          in: "query",
-          required: false,
-          schema: {
-            oneOf: [
-              {
-                type: "boolean",
-                description: `\`true\` waits the maximum ${MAX_WAIT_SECONDS} s; \`false\` disables.`,
-              },
-              {
-                type: "integer",
-                minimum: 0,
-                description: `Wait budget in seconds. Values above ${MAX_WAIT_SECONDS} are clamped to ${MAX_WAIT_SECONDS}.`,
-              },
-            ],
-          },
-          description: `Hold the request until the run reaches a terminal status or this many seconds elapse (capped at ${MAX_WAIT_SECONDS}, see operation description), then return the run object. \`0\`/\`false\`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if \`wait\` were 0 (degrade-to-immediate, see operation description).`,
-        },
+        runWaitParameter,
       ],
       responses: {
-        "200": {
-          description: "Run detail",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/Run" },
-              example: {
-                id: "run_cm1abc123def456",
-                packageId: "@acme/email-sorter",
-                userId: "usr_k7x9m2p4q1",
-                endUserId: null,
-                apiKeyId: null,
-                orgId: "org_r3t5w8y1z6",
-                spaceId: "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
-                scheduleId: "sched_cm1abc456def789",
-                status: "success",
-                input: { folder: "inbox", maxEmails: 50 },
-                result: { output: { processed: 42, labeled: 38 } },
-                artifacts: { status: "complete", published: 2, failed: [] },
-                checkpoint: { lastProcessedId: "msg_99f2a" },
-                error: null,
-                model_error: null,
-                metadata: null,
-                generation: { reasoning_level: "medium" },
-                generation_override: null,
-                started_at: "2026-01-15T10:30:00Z",
-                completed_at: "2026-01-15T10:31:12Z",
-                duration: 72000,
-                cost: 0.0034,
-                cost_pricing_status: "priced",
-                unread: true,
-                runNumber: 17,
-                token_usage: {
-                  input_tokens: 8200,
-                  output_tokens: 4250,
-                  cache_creation_input_tokens: 0,
-                  cache_read_input_tokens: 1024,
-                },
-                version_label: "1.2.0",
-                version_ref: "1.2.0",
-                proxy_label: null,
-                model_label: "Claude Sonnet 4",
-                model_source: "system",
-                runner_name: null,
-                runner_kind: null,
-                agent_scope: "@acme",
-                agent_name: "email-sorter",
-                runOrigin: "platform",
-                contextSnapshot: null,
-                modelCredentialId: null,
-                connection_overrides: null,
-                dependency_overrides: null,
-                user_name: "Pierre",
-                end_user_name: null,
-                api_key_name: null,
-                schedule_name: "Weekday morning sort",
-                connections_used: null,
-                integrations_unbound: null,
-                package_ephemeral: false,
-                file_counts: { input: 0, output: 0 },
-              },
-            },
-          },
-        },
-        "400": {
-          description:
-            "Invalid `wait` parameter (negative, fractional, or non-numeric value — see the `wait` parameter description)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "about:blank",
-                title: "Bad Request",
-                status: 400,
-                detail: `Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max ${MAX_WAIT_SECONDS})`,
-                code: "invalid_request",
-                request_id: "req_abc123",
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...runReadResponses,
       },
+    },
+  },
+  "/api/orgs/{orgId}/runs/{id}": {
+    get: {
+      operationId: "getOrgRun",
+      tags: ["Runs"],
+      summary: "Get a run in any space of the organization",
+      description:
+        "One run, in whichever space of the organization holds it — `GET /api/runs/{id}` without naming the space, with the same body, the same `?wait` long-poll and the same rule, judged in the run's own space: where the caller holds `runs:read-all` there every run, where they hold `runs:read` only their own runs, and `input` is `null` on a registered agent's run where they lack `agents:read` there. The run carries its `spaceId`; every act on it (cancel, logs, read state) goes to its single-space route in that space. 404, the same as for an unknown id, for a run in a space the caller does not reach or may not read there. " +
+        ORG_READ_REACH,
+      parameters: [
+        { $ref: "#/components/parameters/OrgIdPath" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        runWaitParameter,
+      ],
+      responses: runReadResponses,
     },
   },
   "/api/runs/{id}/logs": {

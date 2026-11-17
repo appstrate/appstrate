@@ -186,6 +186,31 @@ describe("package indexes across the organization's spaces", () => {
     expect(off.space_ids).toEqual([s.un]);
   });
 
+  it("leaves out of the agent detail a space where the caller has no agent sight", async () => {
+    // Trois grants the member skills and integrations, no agent sight.
+    await seedSpacePackage(s.trois, id("a"));
+    const res = await app.request(`/api/packages/agents/${id("a")}`, {
+      headers: { ...session(member), "X-Org-Id": owner.orgId, "X-Space-Id": s.un },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { space_ids: string[] }).space_ids).toEqual([s.un, s.deux]);
+  });
+
+  it("names on the detail read through a space-pinned API key that space only", async () => {
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: s.un,
+      createdBy: member.user.id,
+      scopes: ["agents:read"],
+    });
+    const res = await app.request(`/api/packages/agents/${id("a")}`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    // Active in Un and Deux, both of which the member reaches: the key reaches Un only.
+    expect(((await res.json()) as { space_ids: string[] }).space_ids).toEqual([s.un]);
+  });
+
   it("names on the skill and integration details the spaces their index rows name", async () => {
     const detail = async (segment: string, name: string, spaceId: string) => {
       const res = await app.request(`/api/packages/${segment}/${id(name)}`, {

@@ -2,7 +2,8 @@
 
 /**
  * `GET /api/orgs/{orgId}/runs` — the runs of every space the caller reads runs
- * in, each space contributing what the caller's role THERE grants.
+ * in, each space contributing what the caller's role THERE grants — and
+ * `GET /api/orgs/{orgId}/runs/{id}`, one of them under the same rule.
  *
  * | credential                                 | space                                         | rows                                  |
  * | ------------------------------------------ | --------------------------------------------- | ------------------------------------- |
@@ -42,6 +43,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
+  seedEndUser,
   seedPackage,
   seedRun,
   seedSpace,
@@ -249,6 +251,9 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(page.total).toBe(2);
     // An agent the caller reaches in no space yields an empty page, not a refusal.
     expect((await list(session(member), "?packageId=@orgruns/nowhere")).total).toBe(0);
+    // A value that is not a package id is refused, never read as no filter.
+    const bad = await app.request(path("?packageId=not-a-package"), { headers: session(member) });
+    expect(bad.status).toBe(400);
   });
 
   it("serves a guest its own runs where it holds a row", async () => {
@@ -269,6 +274,67 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     const capped = await list(loopback(["runs:read"]));
     expect(ids(capped)).toEqual(sorted(r.unMember!, r.deuxMember!, r.defaultMember!));
     expect(capped.data.every((run) => run.input === null)).toBe(true);
+  });
+
+  describe("GET /api/orgs/{orgId}/runs/{id}", () => {
+    const onePath = (id: string, query = "") => `/api/orgs/${owner.orgId}/runs/${id}${query}`;
+    const read = (id: string, headers: Record<string, string>, query = "") =>
+      app.request(onePath(id, query), { headers });
+
+    it("finds a run in whichever space holds it, with the space route's body", async () => {
+      const res = await read(r.unOwner!, session(member));
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as ListedRun & { status: string };
+      expect(body).toMatchObject({ id: r.unOwner, spaceId: un, input: { imposed: "value" } });
+      const twin = await app.request(`/api/runs/${r.unOwner}`, {
+        headers: session(member, { "X-Org-Id": owner.orgId, "X-Space-Id": un }),
+      });
+      expect(await twin.json()).toEqual(body);
+    });
+
+    it("judges each run under the grant of its own space", async () => {
+      // Deux grants `runs:read` only: the member's own run, not the owner's, and no input.
+      const own = await read(r.deuxMember!, session(member));
+      expect(own.status).toBe(200);
+      expect(((await own.json()) as ListedRun).input).toBeNull();
+      expect((await read(r.deuxOwner!, session(member))).status).toBe(404);
+      // Trois grants no run read, Fermé and Privé are not reached, the foreign org is another's.
+      for (const id of [r.troisMember!, r.ferme!, r.prive!, foreignRun]) {
+        expect((await read(id, session(member))).status, id).toBe(404);
+      }
+    });
+
+    it("bounds a space-pinned API key to its space", async () => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes: ["runs:read-all"],
+      });
+      const headers = { Authorization: `Bearer ${key.rawKey}` };
+      expect((await read(r.unMember!, headers)).status).toBe(200);
+      expect((await read(r.defaultOwner!, headers)).status).toBe(404);
+    });
+
+    it("answers a role preview with the persona's reach", async () => {
+      const headers = session(owner, { "X-View-As": "org_role=member" });
+      expect((await read(r.defaultOwner!, headers)).status).toBe(200);
+      expect((await read(r.unOwner!, headers)).status).toBe(404);
+    });
+
+    it("refuses an end-user, and an unknown query parameter", async () => {
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: un,
+        createdBy: owner.user.id,
+        scopes: ["runs:read-all"],
+      });
+      const endUser = await seedEndUser({ orgId: owner.orgId, spaceId: un });
+      const headers = { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id };
+      expect((await read(r.unOwner!, headers)).status).toBe(403);
+      expect((await read(r.unOwner!, session(member), "?bogus=1")).status).toBe(400);
+      expect((await read(r.unOwner!, session(member), "?wait=-1")).status).toBe(400);
+    });
   });
 
   describe("personal spaces (RBAC spec §3.6)", () => {

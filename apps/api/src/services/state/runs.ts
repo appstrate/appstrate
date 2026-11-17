@@ -73,7 +73,7 @@ import {
 import type { z } from "zod";
 import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
 import { runModelErrorWire } from "@appstrate/shared-types";
-import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
+import type { SpaceScope, SpacesScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
   type ModelGenerationSettings,
@@ -1419,11 +1419,13 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
  *
  * `visibility` narrows the count to what a caller may read; the mutation
  * guards pass none, because "is this agent busy" is about the agent, not about
- * who is watching.
+ * who is watching. Omit `spaceId` for every space of the organization: the
+ * package-level mutations (delete, new version, restore) act on the package in
+ * all of them.
  */
 async function countActiveRunsForPackage(
   handle: Db | DbTx,
-  scope: SpaceScope,
+  scope: OrgScope & { spaceId?: string },
   packageId: string,
   visibility?: SQL,
 ): Promise<number> {
@@ -1431,8 +1433,8 @@ async function countActiveRunsForPackage(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     inArray(runs.status, [...activeRunStatusValues]),
-    eq(runs.spaceId, scope.spaceId),
   ];
+  if (scope.spaceId !== undefined) conditions.push(eq(runs.spaceId, scope.spaceId));
 
   if (visibility) conditions.push(visibility);
 
@@ -1444,7 +1446,7 @@ async function countActiveRunsForPackage(
 }
 
 export async function getRunningRunsForPackage(
-  scope: SpaceScope,
+  scope: OrgScope & { spaceId?: string },
   packageId: string,
   visibility?: SQL,
 ): Promise<number> {
@@ -1924,23 +1926,25 @@ export async function listScheduleRuns(
 }
 
 /**
- * One run, enriched. `visibility` is the caller's run-read predicate
- * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
- * the handler's existing `notFound` covers it — hidden is 404, never 403.
- * Agent input requires an explicit agents:read grant; callers without one
- * retain the run's observable result but cannot read imposed input values.
+ * One run of the spaces of `scope`, enriched. `visibility` is the caller's
+ * run-read predicate (`lib/run-visibility.ts`): a run the caller may not read
+ * simply misses, so the handler's existing `notFound` covers it — hidden is
+ * 404, never 403. `agentInput` answers, for the run's space, whether the caller
+ * holds `agents:read` there: without it the run keeps its observable result
+ * but not its imposed input values.
  */
 export async function getRunFull(
-  scope: SpaceScope,
+  scope: SpacesScope,
   id: string,
-  actor: Actor | null = null,
-  visibility?: SQL,
-  canReadAgentInput = false,
+  actor: Actor | null,
+  visibility: SQL | undefined,
+  agentInput: (spaceId: string) => boolean,
 ) {
+  if (scope.spaceIds.length === 0) return null;
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
-    eq(runs.spaceId, scope.spaceId),
+    inArray(runs.spaceId, [...scope.spaceIds]),
   ];
   if (visibility) conditions.push(visibility);
 
@@ -1984,7 +1988,7 @@ export async function getRunFull(
   }
 
   return {
-    ...mapEnrichedRun(row, canReadAgentInput),
+    ...mapEnrichedRun(row, agentInput(row.run.spaceId)),
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };

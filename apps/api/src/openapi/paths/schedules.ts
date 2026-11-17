@@ -4,7 +4,7 @@ import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { connectionConflictContent } from "../responses.ts";
-import { ORG_READ_REACH } from "../parameters.ts";
+import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 /**
  * The 409 both schedule writes answer when an armed schedule leaves a connection choice open, or
@@ -18,16 +18,7 @@ const scheduleConnectionNotChosen = {
 };
 
 /** The `packageId` filter of both schedule lists. */
-const schedulePackageFilter = {
-  name: "packageId",
-  in: "query",
-  schema: {
-    type: "string",
-    pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
-  },
-  description:
-    "Return only the schedules of this agent (`@scope/name`). A package the caller cannot read yields an empty list, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent.",
-};
+const schedulePackageFilter = packageIdFilterParameter("schedules", "list");
 
 /** A schedule write's success body: the schedule, plus what its fires would start without. */
 const scheduleWriteSchema = {

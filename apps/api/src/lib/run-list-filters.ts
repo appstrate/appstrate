@@ -9,7 +9,8 @@ import { parseListLimit } from "@appstrate/core/list-query";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import { GLOBAL_RUN_KINDS, type GlobalRunListFilters } from "../services/state/runs.ts";
-import { invalidRequest, zodIssuesToFieldErrors } from "./errors.ts";
+import { invalidRequest } from "./errors.ts";
+import { parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
 
 /** `runs.run_number` is an int4: a larger number names no run, and binding it overflows. */
@@ -68,7 +69,7 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
  * a list the caller reads as narrowed. An empty value (`?kind=`) reads as
  * absent — how a form or a URL builder emitting every key spells "no filter".
  */
-const closedSet = <const T extends readonly [string, ...string[]]>(values: T) =>
+export const closedSet = <const T extends readonly [string, ...string[]]>(values: T) =>
   z.preprocess((value) => (value === "" ? undefined : value), z.enum(values).optional());
 
 // Built on first use: `services/state/runs.ts` imports this module, so `GLOBAL_RUN_KINDS` is not
@@ -121,13 +122,7 @@ function parseDate(raw: string | undefined, name: string): Date | undefined {
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,
 ): GlobalRunListFilters & { limit: number } {
-  const parsed = runListQuerySchema().safeParse(c.req.query());
-  if (!parsed.success) {
-    // One `invalid_request` naming the parameter (`param`), as the run lists answer.
-    const [issue] = zodIssuesToFieldErrors(parsed.error.issues);
-    throw invalidRequest(issue!.message, issue!.field);
-  }
-  const query = parsed.data;
+  const query = parseStrictQuery(c, runListQuerySchema());
   const { status, search } = parseRunListFilters({ status: query.status, q: query.q });
   return {
     limit: parseListLimit(c, { defaultLimit: 20 }),

@@ -3,6 +3,7 @@
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 /** The query of both persistence reads: one space's, and the one spanning spaces. */
 const PERSISTENCE_QUERY = [
@@ -37,82 +38,85 @@ const PERSISTENCE_QUERY = [
   },
 ];
 
-/** The rows of a persistence snapshot; `namesSpace` adds the row's `spaceId` (the read spanning spaces). */
-function persistenceSnapshotResponse(namesSpace: boolean) {
-  const space = namesSpace
-    ? { spaceId: { type: "string", description: "The space this row belongs to." } }
-    : {};
-  const required = namesSpace ? ["spaceId"] : [];
-  return {
-    description:
-      "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
-    headers: STD_RESPONSE_HEADERS,
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          required: ["object"],
-          properties: {
-            object: { type: "string", enum: ["agent_persistence"] },
-            pinned: {
-              type: "array",
-              items: {
-                type: "object",
-                required: [
-                  "id",
-                  "key",
-                  "content",
-                  "runId",
-                  "actor_type",
-                  "actor_id",
-                  "createdAt",
-                  "updatedAt",
-                  ...required,
-                ],
-                properties: {
-                  id: { type: "integer" },
-                  key: { type: "string" },
-                  content: {},
-                  runId: { type: ["string", "null"] },
-                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                  actor_id: { type: ["string", "null"] },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  updatedAt: { type: ["string", "null"], format: "date-time" },
-                  ...space,
-                },
+/** The `spaceId` every persistence row carries, on both reads. */
+const persistenceRowSpace = {
+  spaceId: {
+    type: "string",
+    pattern: SPACE_ID_RE.source,
+    description: "The space this row belongs to.",
+  },
+};
+
+/** The persistence snapshot of both reads: one space's, and the one spanning spaces. */
+const persistenceSnapshotResponse = {
+  description:
+    "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
+  headers: STD_RESPONSE_HEADERS,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["object"],
+        properties: {
+          object: { type: "string", enum: ["agent_persistence"] },
+          pinned: {
+            type: "array",
+            items: {
+              type: "object",
+              required: [
+                "id",
+                "key",
+                "content",
+                "runId",
+                "actor_type",
+                "actor_id",
+                "createdAt",
+                "updatedAt",
+                "spaceId",
+              ],
+              properties: {
+                id: { type: "integer" },
+                key: { type: "string" },
+                content: {},
+                runId: { type: ["string", "null"] },
+                actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                actor_id: { type: ["string", "null"] },
+                createdAt: { type: ["string", "null"], format: "date-time" },
+                updatedAt: { type: ["string", "null"], format: "date-time" },
+                ...persistenceRowSpace,
               },
             },
-            memories: {
-              type: "array",
-              items: {
-                type: "object",
-                required: [
-                  "id",
-                  "content",
-                  "runId",
-                  "actor_type",
-                  "actor_id",
-                  "createdAt",
-                  ...required,
-                ],
-                properties: {
-                  id: { type: "integer" },
-                  content: { type: "string" },
-                  runId: { type: ["string", "null"] },
-                  actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
-                  actor_id: { type: ["string", "null"] },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  pinned: { type: "boolean" },
-                  ...space,
-                },
+          },
+          memories: {
+            type: "array",
+            items: {
+              type: "object",
+              required: [
+                "id",
+                "content",
+                "runId",
+                "actor_type",
+                "actor_id",
+                "createdAt",
+                "spaceId",
+              ],
+              properties: {
+                id: { type: "integer" },
+                content: { type: "string" },
+                runId: { type: ["string", "null"] },
+                actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                actor_id: { type: ["string", "null"] },
+                createdAt: { type: ["string", "null"], format: "date-time" },
+                pinned: { type: "boolean" },
+                ...persistenceRowSpace,
               },
             },
           },
         },
       },
     },
-  };
-}
+  },
+};
 
 /** The responses of both agent indexes: one space's, and the one spanning spaces. */
 const agentListResponses = {
@@ -416,7 +420,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote. Every row names its `spaceId`. An unknown query parameter, or a `kind` / `actor_type` outside its set, is a `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -425,7 +429,8 @@ export const agentsPaths = {
         ...PERSISTENCE_QUERY,
       ],
       responses: {
-        "200": persistenceSnapshotResponse(false),
+        "200": persistenceSnapshotResponse,
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -505,7 +510,8 @@ export const agentsPaths = {
         ...PERSISTENCE_QUERY,
       ],
       responses: {
-        "200": persistenceSnapshotResponse(true),
+        "200": persistenceSnapshotResponse,
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

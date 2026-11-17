@@ -1765,7 +1765,8 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
+          description:
+            "Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` of `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1884,7 +1885,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
+            "Agent in use (runs in progress in some space of the organization), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1900,7 +1901,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore an agent version into the draft",
       description:
-        "Restore a published version into the draft. Requires no runs in progress." +
+        "Restore a published version into the draft. Requires no runs in progress in any space of the organization." +
         PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1925,7 +1926,8 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent in use. RFC 9457 problem+json with `code` `agent_in_use`.",
+          description:
+            "Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1988,7 +1990,8 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Agent has runs in progress (`agent_in_use`).",
+          description:
+            "Agent has runs in progress in some space of the organization (`agent_in_use`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

@@ -18,7 +18,7 @@ import { zFilePurposeEnum } from "@appstrate/db/schema";
 import { parseListPagination, type ListPagination } from "@appstrate/core/list-query";
 import type { AppEnv } from "../types/index.ts";
 import type { ListFilesFilters } from "../services/files.ts";
-import { invalidRequest, parseBody } from "./errors.ts";
+import { invalidRequest, parseBody, zodIssuesToFieldErrors } from "./errors.ts";
 
 /**
  * The query of a list that reads none: any parameter is a 400 naming it, so a
@@ -27,6 +27,19 @@ import { invalidRequest, parseBody } from "./errors.ts";
 export function parseEmptyQuery(c: Context): void {
   const [name] = Object.keys(c.req.queries());
   if (name !== undefined) throw invalidRequest(`Unknown query parameter '${name}'`, name);
+}
+
+/**
+ * The query of a list read through `schema` (a `.strict()` object): an unknown
+ * parameter or an invalid value is one 400 naming the parameter.
+ */
+export function parseStrictQuery<S extends z.ZodType>(c: Context, schema: S): z.output<S> {
+  const parsed = schema.safeParse(c.req.query());
+  if (!parsed.success) {
+    const [issue] = zodIssuesToFieldErrors(parsed.error.issues);
+    throw invalidRequest(issue!.message, issue!.field);
+  }
+  return parsed.data;
 }
 
 /** Slice an in-memory array into a page + report `total` / `hasMore`. */

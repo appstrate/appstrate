@@ -97,7 +97,8 @@ const notificationListQueryParameters = [
     in: "query",
     required: false,
     schema: { type: "boolean" },
-    description: "When true, only unread notifications are returned",
+    description:
+      "When true, only unread notifications are returned. A value that is neither `true` nor `false` is rejected with `400`, as is any parameter this list does not name.",
   },
   {
     name: "limit",
@@ -181,6 +182,42 @@ const unreadCountResponse = {
   },
 };
 
+/** One notification, the answer of both single reads. */
+const notificationResponse = {
+  "200": {
+    description: "The notification",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: notificationObject,
+        example: {
+          id: "550e8400-e29b-41d4-a716-446655440000",
+          spaceId: "spc_8f14e45fceea167a5a36dedd4bea2543",
+          type: "agent_message",
+          runId: "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
+          payload: {
+            packageId: "@acme/weekly-report",
+            agent_name: "Weekly report",
+            title: "Report ready",
+            message: "This week's report is in the shared drive.",
+          },
+          read_at: null,
+          createdAt: "2026-01-15T10:31:12Z",
+        },
+      },
+    },
+  },
+};
+
+/** The `id` path parameter of a notification. */
+const notificationIdParameter = {
+  name: "id",
+  in: "path",
+  required: true,
+  schema: { type: "string", format: "uuid" },
+  description: "Notification id",
+};
+
 export const notificationsPaths = {
   "/api/notifications": {
     get: {
@@ -233,6 +270,7 @@ export const notificationsPaths = {
       parameters: [{ $ref: "#/components/parameters/OrgIdPath" }],
       responses: {
         ...unreadCountResponse,
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -277,29 +315,25 @@ export const notificationsPaths = {
         },
       ],
       responses: {
-        "200": {
-          description: "The notification",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: notificationObject,
-              example: {
-                id: "550e8400-e29b-41d4-a716-446655440000",
-                spaceId: "spc_8f14e45fceea167a5a36dedd4bea2543",
-                type: "agent_message",
-                runId: "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
-                payload: {
-                  packageId: "@acme/weekly-report",
-                  agent_name: "Weekly report",
-                  title: "Report ready",
-                  message: "This week's report is in the shared drive.",
-                },
-                read_at: null,
-                createdAt: "2026-01-15T10:31:12Z",
-              },
-            },
-          },
-        },
+        ...notificationResponse,
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/notifications/{id}": {
+    get: {
+      operationId: "getOrgNotification",
+      tags: ["Notifications"],
+      summary: "Get a notification in any space of the organization",
+      description:
+        "One notification of the current recipient, in whichever space of the organization they hold a role in — `GET /api/notifications/{id}` without naming the space. The item carries its `spaceId`, where its page opens and where `PUT /api/notifications/{id}/read` marks it read. 404, the same as for an unknown id, when it is another recipient's or lies in a space the caller does not reach. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, notificationIdParameter],
+      responses: {
+        ...notificationResponse,
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

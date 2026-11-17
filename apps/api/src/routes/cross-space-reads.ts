@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The lists spanning the spaces of one organization — runs, schedules, files,
- * the package indexes and the caller's notifications: read-only. Each is its
- * single-space list with one grant per space it admits.
+ * The reads spanning the spaces of one organization — runs, schedules, files,
+ * the package indexes, an agent's memory and the caller's notifications, and
+ * one run or notification found in whichever space holds it: read-only. Each
+ * is its single-space twin with one grant per space it admits.
  */
 
 import { Hono, type Context } from "hono";
@@ -21,7 +22,8 @@ import { requireAnyCeiling } from "../middleware/require-permission.ts";
 import { reachAcrossSpaces, readableSpacesAcross } from "../lib/reachable-spaces.ts";
 import type { Permission, SpaceGrant } from "../lib/permissions.ts";
 import { parseEmptyQuery } from "../lib/list-query.ts";
-import { respondRunList } from "./runs.ts";
+import type { SpacesScope } from "../lib/scope.ts";
+import { respondRun, respondRunList } from "./runs.ts";
 import { respondScheduleList } from "./schedules.ts";
 import { respondFileList } from "./files.ts";
 import { respondAgentIndex, respondAgentPersistence } from "./agents.ts";
@@ -30,10 +32,10 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { respondPackageIndex } from "./packages.ts";
 import {
   NOTIFICATION_FEED_CEILING,
+  respondNotification,
   respondNotificationList,
   respondUnreadNotificationCount,
 } from "./notifications.ts";
-import type { FeedReach } from "../services/state/notifications.ts";
 
 /**
  * The package indexes served across spaces besides the agents' own, each with
@@ -73,7 +75,9 @@ function readAcrossSpaces(
  * route asks no role grant, so every space the caller holds a role in admits it;
  * {@link NOTIFICATION_FEED_CEILING} caps a delegated credential.
  */
-function readOwnAcrossSpaces(respond: (c: Context<AppEnv>, reach: FeedReach) => Promise<Response>) {
+function readOwnAcrossSpaces(
+  respond: (c: Context<AppEnv>, reach: SpacesScope) => Promise<Response>,
+) {
   return [
     requireOrgPathMembership,
     requireAnyCeiling(NOTIFICATION_FEED_CEILING),
@@ -97,6 +101,7 @@ export function createCrossSpaceReadsRouter() {
   const router = new Hono<AppEnv>();
 
   router.get("/:orgId/runs", ...readAcrossSpaces(RUNS_READ_PERMISSIONS, respondRunList));
+  router.get("/:orgId/runs/:id", ...readAcrossSpaces(RUNS_READ_PERMISSIONS, respondRun));
   router.get("/:orgId/schedules", ...readAcrossSpaces(["schedules:read"], respondScheduleList));
   router.get("/:orgId/files", rateLimit(120), ...readAcrossSpaces(["files:read"], respondFileList));
   router.get(
@@ -109,7 +114,7 @@ export function createCrossSpaceReadsRouter() {
     ...readAcrossSpaces(["persistence:read"], async (c, orgId, grants) => {
       const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
       const placed = await loadAgentPlacedAcross(packageId, orgId, grants);
-      return respondAgentPersistence(c, placed.agent.id, placed.grants, { namesSpace: true });
+      return respondAgentPersistence(c, placed.agent.id, placed.grants);
     }),
   );
 
@@ -118,6 +123,7 @@ export function createCrossSpaceReadsRouter() {
     "/:orgId/notifications/unread-count",
     ...readOwnAcrossSpaces(respondUnreadNotificationCount),
   );
+  router.get("/:orgId/notifications/:id", ...readOwnAcrossSpaces(respondNotification));
 
   for (const { type, segment } of INDEXED_PACKAGE_TYPES) {
     router.get(

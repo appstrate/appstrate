@@ -14,7 +14,7 @@ import {
 } from "@appstrate/db/schema";
 import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
-import type { SpaceScope } from "../../lib/scope.ts";
+import type { SpaceScope, SpacesScope } from "../../lib/scope.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import type { ListEnvelope } from "@appstrate/shared-types";
 
@@ -222,23 +222,20 @@ function toNotificationDto(
   };
 }
 
-/** One notification of the caller; `null` when it is unknown or another's (the route's 404). */
+/**
+ * One notification of the caller in the spaces of `reach`; `null` when it is
+ * unknown, another's or outside them (the route's 404).
+ */
 export async function getNotification(
-  scope: SpaceScope,
+  reach: SpacesScope,
   notificationId: string,
   actor: Actor,
 ): Promise<NotificationDto | null> {
-  if (!isUuid(notificationId)) return null;
+  if (reach.spaceIds.length === 0 || !isUuid(notificationId)) return null;
   const [row] = await db
     .select(notificationColumns)
     .from(notifications)
-    .where(
-      scopedWhere(notifications, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
-      }),
-    )
+    .where(feedWhere(reach, actor, [eq(notifications.id, notificationId)]))
     .limit(1);
   return row ? toNotificationDto(row) : null;
 }
@@ -289,30 +286,27 @@ export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor):
 }
 
 /**
- * The spaces of one organization a feed read covers: the space route's own, or
- * every space the caller reaches (`GET /api/orgs/{orgId}/notifications`). The
- * caller's own rows are the rule in each, so no space asks a role grant.
+ * The caller's notifications in the spaces of `reach`. Every reader answers a
+ * reach of no space before building it: an empty `IN ()` is no filter here.
  */
-export interface FeedReach {
-  orgId: string;
-  spaceIds: readonly string[];
-}
-
-/** The caller's notifications in the spaces of `reach`; `undefined` when it covers none. */
-function feedWhere(reach: FeedReach, actor: Actor, extra: SQL[] = []): SQL | undefined {
-  if (reach.spaceIds.length === 0) return undefined;
+function feedWhere(reach: SpacesScope, actor: Actor, extra: SQL[] = []): SQL {
   return and(
     eq(notifications.orgId, reach.orgId),
     inArray(notifications.spaceId, [...reach.spaceIds]),
     recipientFilter(actor),
     ...extra,
-  );
+  )!;
 }
 
-export async function getUnreadNotificationCount(reach: FeedReach, actor: Actor): Promise<number> {
-  const where = feedWhere(reach, actor, [isNull(notifications.readAt)]);
-  if (!where) return 0;
-  const [row] = await db.select({ count: count() }).from(notifications).where(where);
+export async function getUnreadNotificationCount(
+  reach: SpacesScope,
+  actor: Actor,
+): Promise<number> {
+  if (reach.spaceIds.length === 0) return 0;
+  const [row] = await db
+    .select({ count: count() })
+    .from(notifications)
+    .where(feedWhere(reach, actor, [isNull(notifications.readAt)]));
   return row?.count ?? 0;
 }
 
@@ -330,15 +324,17 @@ export async function getUnreadNotificationCount(reach: FeedReach, actor: Actor)
  * cursor resolves to NULL → empty page (the caller restarts from the head).
  */
 export async function listNotifications(
-  reach: FeedReach,
+  reach: SpacesScope,
   actor: Actor,
   options: { unread?: boolean; limit: number; startingAfter?: string },
 ): Promise<ListEnvelope<NotificationDto>> {
   const { unread = false, limit, startingAfter } = options;
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
-  // Not an id at all: a cursor no row has, so the empty page a stale one gets.
-  if (startingAfter && !isUuid(startingAfter)) return listResponse([], { hasMore: false });
+  // No space, or not an id at all (a cursor no row has, so the empty page a stale one gets).
+  if (reach.spaceIds.length === 0 || (startingAfter && !isUuid(startingAfter))) {
+    return listResponse([], { hasMore: false });
+  }
 
   const extra: SQL[] = [];
   if (unread) extra.push(isNull(notifications.readAt));
@@ -357,13 +353,10 @@ export async function listNotifications(
     );
   }
 
-  const where = feedWhere(reach, actor, extra);
-  if (!where) return listResponse([], { hasMore: false });
-
   const rows = await db
     .select(notificationColumns)
     .from(notifications)
-    .where(where)
+    .where(feedWhere(reach, actor, extra))
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
     .limit(fetchLimit);
 

@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "@appstrate/core/list-query";
+import { parseStrictQuery } from "../lib/list-query.ts";
+import { closedSet } from "../lib/run-list-filters.ts";
 import { listAgentIndex } from "../services/package-index.ts";
 import {
   listPinnedSlots,
@@ -189,28 +191,34 @@ async function requireBundleDependencyReadPermissions(
 }
 
 /**
- * The persistence snapshot of `packageId` over `grants`: `GET /api/agents/{scope}/{name}/persistence`
- * (one grant, its rows without `spaceId`) and `GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence`
- * (one grant per space, each row naming its `spaceId`). The actor partition is judged per space:
- * a grant holding `persistence:delete` sees every actor's rows there (or the `actor_type` it
- * names); any other sees its own actor scope plus the shared rows.
+ * The query of both persistence reads. `actor_type` / `actor_id` are honoured
+ * only in a space whose grant holds `persistence:delete`.
+ */
+const persistenceQuerySchema = z
+  .object({
+    kind: closedSet(["pinned", "memory"]),
+    actor_type: closedSet(["user", "end_user", "shared"]),
+    actor_id: z.string().optional(),
+    runId: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * The persistence snapshot of `packageId` over `grants`, each row naming its `spaceId`:
+ * `GET /api/agents/{scope}/{name}/persistence` (one grant) and
+ * `GET /api/orgs/{orgId}/agents/{scope}/{name}/persistence` (one grant per space). The actor
+ * partition is judged per space: a grant holding `persistence:delete` sees every actor's rows
+ * there (or the `actor_type` it names); any other sees its own actor scope plus the shared rows.
  */
 export async function respondAgentPersistence(
   c: Context<AppEnv>,
   packageId: string,
   grants: readonly SpaceGrant[],
-  { namesSpace = false }: { namesSpace?: boolean } = {},
 ) {
-  const kindParam = c.req.query("kind");
-  const actorTypeParam = c.req.query("actor_type");
-  const actorIdParam = c.req.query("actor_id");
-  const runIdParam = c.req.query("runId");
-
-  const wantsPinned = !kindParam || kindParam === "pinned";
-  const wantsMemory = !kindParam || kindParam === "memory";
-  if (kindParam && !wantsPinned && !wantsMemory) {
-    throw invalidRequest("kind must be 'pinned' or 'memory'");
-  }
+  const query = parseStrictQuery(c, persistenceQuerySchema);
+  const wantsPinned = query.kind !== "memory";
+  const wantsMemory = query.kind !== "pinned";
+  const runIdParam = query.runId;
 
   const callerScope = scopeFromActor(getActor(c));
 
@@ -222,13 +230,12 @@ export async function respondAgentPersistence(
       // actor's rows; `runId` only filters rows, never changes whose.
       const readsEveryActor = permissions.has("persistence:delete");
       const visibleScope = readsEveryActor
-        ? (scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined)
+        ? (scopeFromQueryParams(query.actor_type, query.actor_id) ?? undefined)
         : callerScope;
       const [pinned, memories] = await Promise.all([
         wantsPinned ? listPinnedSlots(packageId, spaceId, visibleScope, runIdParam) : [],
         wantsMemory ? listMemories(packageId, spaceId, visibleScope, runIdParam) : [],
       ]);
-      const space = namesSpace ? { spaceId } : {};
       return {
         pinned: pinned.map((slot) => ({
           id: slot.id,
@@ -239,7 +246,7 @@ export async function respondAgentPersistence(
           actor_id: slot.actorId,
           createdAt: slot.createdAt?.toISOString() ?? null,
           updatedAt: slot.updatedAt?.toISOString() ?? null,
-          ...space,
+          spaceId,
         })),
         memories: memories.map((m) => ({
           id: m.id,
@@ -249,7 +256,7 @@ export async function respondAgentPersistence(
           actor_id: m.actorId,
           pinned: m.pinned,
           createdAt: m.createdAt?.toISOString() ?? null,
-          ...space,
+          spaceId,
         })),
       };
     }),
