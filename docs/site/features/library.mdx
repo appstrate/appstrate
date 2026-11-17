@@ -68,7 +68,7 @@ curl -X DELETE https://your-instance/api/spaces/spc_.../packages/@acme/support-t
 - Activation is the one door for every package type, integrations included. It needs the type's activation permission in the target space. That requirement is waived in your own personal space: ownership is the authorization, which is how a guest takes up a package offered to them.
 - If the package is not placed in the space yet, activation can create the offer in the same step, when you also hold `<type>:share` in the home space. An API key activates only what is already placed.
 - **Deactivation never deletes anything.** The space keeps its model, proxy, generation settings and stored input values, so activating the package again restores them. Only withdrawing the share removes them.
-- `PATCH /api/spaces/{id}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId`, `generation_config`, and `chat_enforced` for a skill). It has no `enabled` field: activation is its own act.
+- `PATCH /api/spaces/{id}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId` and `generation_config`). It has no `enabled` field: activation is its own act.
 - A deactivated agent answers `404 agent_not_active_in_space` on launch and schedule creation, while its detail and runs stay readable. A [schedule](/features/scheduling) of a deactivated agent produces visible failed runs and stays armed, so reactivating resumes it.
 
 Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`, `inactive`, `none`). `inactive` means the space's own row says off, either switched off or placed by someone who could not switch it on there. `none` means no row and a deployment default of off.

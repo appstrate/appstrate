@@ -231,7 +231,6 @@ describe("the composer's limit chip", () => {
                 onSelectionChange={() => {}}
                 showPicker={false}
                 authorsPackages={false}
-                showEnforced={false}
               />
             </TooltipProvider>
           </ConversationScopeProvider>

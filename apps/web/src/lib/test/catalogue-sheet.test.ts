@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  pinnedVersionState,
-  sheetChatEnforce,
-  sheetSpaceMode,
-  sheetSpaceRows,
-} from "../catalogue-sheet.ts";
+import { pinnedVersionState, sheetSpaceMode, sheetSpaceRows } from "../catalogue-sheet.ts";
 import type { CataloguePlacement } from "../catalogue-placement.ts";
 import type { ActivationGate } from "../catalogue-gates.ts";
 
@@ -108,53 +103,6 @@ describe("sheetSpaceMode", () => {
     expect(
       sheetSpaceMode(sheetSpaceRows(p, spaces, (id) => (id === "spc_b" ? ALLOW() : DENY()))),
     ).toBe("table");
-  });
-});
-
-// The chat-enforce control lives in the sheet's Espaces table.
-describe("sheetChatEnforce", () => {
-  const facts = { enforced: false, published: true, mayConfigure: true };
-
-  it("is offered on a placed, published skill to a caller who may configure the space", () => {
-    expect(sheetChatEnforce("skill", { state: "active" }, facts)).toEqual({
-      checked: false,
-      disabled: false,
-      refusal: null,
-    });
-  });
-
-  it("waits for a published version: what is imposed is never the draft", () => {
-    expect(sheetChatEnforce("skill", { state: "active" }, { ...facts, published: false })).toEqual({
-      checked: false,
-      disabled: true,
-      refusal: "publishFirst",
-    });
-  });
-
-  it("is refused without the space's configure right, personal owner included", () => {
-    expect(
-      sheetChatEnforce("skill", { state: "active" }, { ...facts, mayConfigure: false }),
-    ).toEqual({ checked: false, disabled: true, refusal: "configure" });
-  });
-
-  it("can still be released on a skill switched off there, even unpublished", () => {
-    expect(
-      sheetChatEnforce(
-        "skill",
-        { state: "inactive" },
-        { ...facts, enforced: true, published: false },
-      ),
-    ).toEqual({ checked: true, disabled: false, refusal: null });
-  });
-
-  it("draws no switch where there is no placement to configure", () => {
-    expect(sheetChatEnforce("skill", { state: null }, facts)).toBeNull();
-  });
-
-  it("draws no switch for any other type", () => {
-    for (const type of ["agent", "integration"] as const) {
-      expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
-    }
   });
 });
 

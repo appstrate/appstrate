@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Skill picker: the conversation's skill mode and chosen skills. Controlled;
-// nothing is written here — the next turn carries the selection. The skills the
-// space imposes are listed first, locked: no selection removes them.
+// nothing is written here — the next turn carries the selection.
 
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
-import { Badge, badgeVariants } from "@appstrate/ui/components/badge";
+import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -19,8 +18,7 @@ import {
   MAX_PINNED_SKILLS,
   type ChatSkillSelection,
 } from "../skills.ts";
-import { ownPins, pinCapReached, skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useEnforcedSkills } from "./use-enforced-skills.ts";
+import { skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
@@ -81,17 +79,14 @@ export function SkillsPickerPanel({
   const { t } = useChatHost();
   const catalogue = useSkillCatalogue(transport, true);
   const skills = catalogue.data ?? [];
-  const enforcedQuery = useEnforcedSkills(transport);
-  const enforced = enforcedQuery.data ?? [];
-  const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
-  // as "nothing". Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
-  const loading = catalogue.isLoading || enforcedQuery.isLoading;
+  // as "nothing".
+  const loading = catalogue.isLoading;
 
-  const pinned = ownPins(selection.pinnedSkills, enforcedIds);
+  const pinned = selection.pinnedSkills;
   const pinnedSet = new Set(pinned);
-  const atPinCap = pinCapReached(selection.pinnedSkills, enforcedIds);
-  const rows = skillPickerRows(skills, pinned, enforcedIds);
+  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
+  const rows = skillPickerRows(skills, pinned);
   // `auto` keeps the chosen skills but uses none: no list is offered then.
   const choosing = injectsSkills(selection.skillMode);
 
@@ -131,38 +126,9 @@ export function SkillsPickerPanel({
       </p>
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
-        {enforced.map((skill) => (
-          <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
-            <Checkbox
-              data-testid={`skill-enforced-${skill.packageId}`}
-              checked
-              disabled
-              aria-label={skill.display_name ?? skill.packageId}
-              className="mt-0.5 shrink-0"
-            />
-            <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-1.5">
-              <span className="truncate text-xs font-medium">
-                {skill.display_name ?? skill.packageId}
-              </span>
-              {skill.version && (
-                <span className="text-muted-foreground shrink-0 text-[0.65rem]">
-                  v{skill.version}
-                </span>
-              )}
-              <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
-                {t("skills.enforcedBadge")}
-              </Badge>
-            </span>
-          </div>
-        ))}
-        {enforcedQuery.isError && (
-          <p className="text-destructive px-1 pb-1 text-[0.7rem] leading-snug">
-            {t("skills.enforcedError")}
-          </p>
-        )}
         {!choosing ? (
           // Automatic: the assistant picks among the space's skills itself, so none is listed
-          // to choose from: only what the space imposes (above) is shown.
+          // to choose from.
           <p className="text-muted-foreground px-1 py-1 text-[0.7rem] leading-snug">
             {t("skills.chooseInAuto")}
           </p>
@@ -189,7 +155,7 @@ export function SkillsPickerPanel({
               <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
             ) : rows.length === 0 ? (
               <p className="text-muted-foreground px-1 py-3 text-center text-xs">
-                {t(enforced.length > 0 ? "skills.emptyBesidesEnforced" : "skills.empty")}
+                {t("skills.empty")}
               </p>
             ) : (
               rows.map(({ skill, available }, index) => {

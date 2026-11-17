@@ -35,11 +35,8 @@ const PACKAGE: LibraryPackageItem = {
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  published: true,
   activation: [],
-  placements: [
-    { space_id: "spc_on", via: "home", state: "active", chat_enforced: false, shared_by: null },
-  ],
+  placements: [{ space_id: "spc_on", via: "home", state: "active", shared_by: null }],
 };
 
 function sheet(options: { pinnedVersion?: string; latest?: string }): string {
@@ -60,7 +57,6 @@ function sheet(options: { pinnedVersion?: string; latest?: string }): string {
       spaces={SPACES}
       placement={cataloguePlacement(PACKAGE, "spc_on")}
       gateOf={() => ({ allowed: true, refusal: null })}
-      mayConfigureIn={() => true}
       integrations={[]}
       agents={[]}
       pinnedVersion={options.pinnedVersion}

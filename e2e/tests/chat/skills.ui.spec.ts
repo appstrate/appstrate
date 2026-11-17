@@ -3,14 +3,12 @@
 /**
  * Skills in the chat, from the browser: the picker's mode and chosen skills
  * stay in the page — nothing is written, no conversation is created — until a
- * message carries them. A skill the space imposes is set from its sheet
- * in the catalogue, behind a confirmation, and reaches the picker locked.
+ * message carries them.
  */
 
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
-import { openRow } from "../../helpers/table.ts";
 
 /** The picker sits behind the composer's « + » menu (its chip shows only off the defaults). */
 async function openSkillsPicker(page: Page) {
@@ -42,7 +40,7 @@ test("carries the chosen mode and skills with the first message, and writes noth
   const auto = popover.getByTestId("skills-mode-auto");
   const manual = popover.getByTestId("skills-mode-manual");
   await expect(auto).toHaveAttribute("data-state", "active");
-  // In auto the assistant chooses among the catalogue: the picker lists only imposed skills.
+  // In auto the assistant chooses among the catalogue: the picker lists no skill to choose.
   const pin = popover.getByTestId(`skill-pin-${packageId}`);
   await expect(pin).toHaveCount(0);
   await manual.click();
@@ -80,48 +78,4 @@ test("carries the chosen mode and skills with the first message, and writes noth
   const body = (await sent).postDataJSON() as { skill_mode?: string; pinned_skills?: string[] };
   expect(body.skill_mode).toBe("manual");
   expect(body.pinned_skills).toEqual([packageId]);
-});
-
-test("a skill imposed from the space library is locked in the picker, after a confirmation", async ({
-  authedPage: page,
-  apiClient,
-  browserCtx,
-}) => {
-  const scope = `@${browserCtx.org.orgSlug}`;
-  const name = `e2e-enforced-${Date.now()}`;
-  // Created in the default space: published (`0.1.0`) and active there, which
-  // is all imposing asks of it.
-  await createSkill(apiClient, scope, name);
-  const packageId = `${scope}/${name}`;
-
-  // The catalogue's « Par espace » view lists what is placed here; the skill's
-  // sheet carries one « Imposé dans le chat » switch per space.
-  await page.goto("/catalogue/skill?view=spaces");
-  await openRow(page, `Test Skill ${name}`);
-  const enforce = page.getByRole("switch", { name: /dans le chat|in the chat/ });
-  await expect(enforce).not.toBeChecked();
-  await enforce.click();
-
-  // Imposing discloses the content to every member who chats here: the reader
-  // is told so before anything is written.
-  const dialog = page.getByRole("alertdialog", { name: /Imposer ce skill|Require this skill/ });
-  await expect(dialog).toContainText(/quels que soient leurs droits|whatever their skill/);
-  const patched = page.waitForResponse(
-    (response) =>
-      response.request().method() === "PATCH" &&
-      response.url().includes(`/packages/${scope}/${name}`),
-  );
-  await dialog.getByRole("button", { name: /^(Imposer|Require)$/ }).click();
-  expect((await patched).status()).toBe(200);
-  await expect(enforce).toBeChecked();
-
-  // The composer lists it first, checked and locked, and not among the choices.
-  await page.goto("/chat");
-  await openSkillsPicker(page);
-  const popover = page.getByTestId("skills-picker-popover");
-  const locked = popover.getByTestId(`skill-enforced-${packageId}`);
-  await expect(locked).toBeChecked();
-  await expect(locked).toBeDisabled();
-  await expect(popover.getByText(/Imposée par l'espace|Required by the space/)).toBeVisible();
-  await expect(popover.getByTestId(`skill-pin-${packageId}`)).toHaveCount(0);
 });

@@ -31,8 +31,7 @@ import type {
   ReachedSpaces,
   UsageRejection,
 } from "@appstrate/core/module";
-import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
-import { logger } from "./logger.ts";
+import { invalidRequest } from "@appstrate/core/api-errors";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
 type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -42,8 +41,6 @@ import {
   type ChatUsageRecord,
   type ResolvedChatAttachment,
   type ChatModelResolution,
-  type EnforcedChatSkill,
-  type EnforcedChatSkillRef,
 } from "@appstrate/core/chat-contract";
 
 /** The permissions the chat's session routes ask. */
@@ -68,8 +65,7 @@ export function readableSpaceIds(reachable: readonly ReachableSpaceGrant[]): str
  * openable for them once the space is touched) and `mcp:read` (the tools can name it). The
  * one set behind the spaces the prompt and the tools advertise, the spaces a call may touch,
  * the bearer's ceiling and space allowlist, the attachments and the skills read; a space
- * outside it is neither listed nor acted in. A conversation's enforced skills are its origin
- * space's alone, not the set's. Visibility of a conversation stays `chat:read`.
+ * outside it is neither listed nor acted in. Visibility of a conversation stays `chat:read`.
  */
 export function actingSpaces(spaces: readonly ReachableSpaceGrant[]): ReachableSpaceGrant[] {
   return spaces.filter((space) => chatActsIn(space.permissions));
@@ -162,38 +158,11 @@ export interface ChatPlatformDeps {
     userId: string;
   }): Promise<UsageRejection | null>;
   /**
-   * A space's enforced skills, read with the platform's authority: a member
-   * without `skills:read` still gets them. A failure rejects with a 503 so the
-   * turn is refused rather than run without them.
-   */
-  loadEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkill[]>;
-  /**
    * The spaces the caller reaches, with their role and effective permissions
    * there, for the routes that serve the organization as a whole (no space
    * entered). A 403 for an end-user.
    */
   reachableSpaces(c: Context, orgId: string): Promise<ReachedSpaces>;
-  /** Their names only, from the database (no archive read); same 503 on failure. */
-  listEnforcedSkills(orgId: string, spaceId: string): Promise<EnforcedChatSkillRef[]>;
-}
-
-/**
- * A failed read of a space's enforced skills, as a 503. An `ApiError` cause
- * (a lost archive) names the skill, so its detail is kept: that fault does not
- * pass with a retry, and an admin must know which skill to release.
- */
-function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string): Promise<T> {
-  return read.catch((cause: unknown) => {
-    logger.warn("enforced chat skills unavailable", { orgId, spaceId, err: String(cause) });
-    const why = cause instanceof ApiError ? cause.message : "Retry shortly.";
-    throw new ApiError({
-      status: 503,
-      code: "enforced_skills_unavailable",
-      title: "Service Unavailable",
-      detail: `The skills this space requires in its conversations could not be loaded. ${why}`,
-      cause,
-    });
-  });
 }
 
 /**
@@ -220,9 +189,5 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.cleanupSessionFiles(chatSessionId, orgId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
     reachableSpaces: (c, orgId) => ctx.services.reachableSpaces(c, orgId),
-    loadEnforcedSkills: (orgId, spaceId) =>
-      enforcedSkillsRead(ctx.services.loadEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
-    listEnforcedSkills: (orgId, spaceId) =>
-      enforcedSkillsRead(ctx.services.listEnforcedChatSkills(orgId, spaceId), orgId, spaceId),
   };
 }

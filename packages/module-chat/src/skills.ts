@@ -5,12 +5,7 @@
 
 import { z } from "zod";
 import type { ChatSkillMode } from "@appstrate/db/schema";
-import {
-  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
-  type EnforcedChatSkill,
-  type InjectedSkill,
-  type InjectedSkills,
-} from "@appstrate/core/chat-contract";
+import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 
 export interface SkillHint {
   packageId: string;
@@ -53,6 +48,9 @@ export interface SkillContent {
   served: InjectedSkill;
 }
 
+/** The characters the chosen skills' SKILL.md bodies may take in one turn, all skills together. */
+export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
+
 /** Every chosen skill is injected in full on every turn: a context-budget bound. */
 export const MAX_PINNED_SKILLS = 5;
 
@@ -80,57 +78,26 @@ export function injectsSkills(mode: ChatSkillMode): boolean {
 }
 
 interface ResolvedChatSkills {
-  enforced: SkillContent[];
   chosen: SkillContent[];
   notices: string[];
 }
 
 /**
- * The skills to inject: the required ones first, in the platform's id order, then the
- * chosen ones in stored order (sorted and deduped by `ensureSession`), all out of
- * one budget. A pin naming an injected enforced skill is dropped silently; one
- * whose enforced copy was left out stands as an ordinary pin. `contents` holds
- * the chosen skills active here and read (`null`: answered malformed); any
- * other becomes a notice. `enforced`: the skills the origin space enforces, served
- * in that space (none without an origin space).
+ * The skills to inject: the chosen ones in stored order (sorted and deduped by
+ * `ensureSession`), out of one budget. `contents` holds the chosen skills active
+ * here and read (`null`: answered malformed); any other becomes a notice.
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
-  enforced?: { spaceId: string; skills: readonly EnforcedChatSkill[] },
 ): ResolvedChatSkills {
-  const resolved: ResolvedChatSkills = { enforced: [], chosen: [], notices: [] };
+  const resolved: ResolvedChatSkills = { chosen: [], notices: [] };
+  if (!injectsSkills(selection.skillMode)) return resolved;
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  const requiredBy = "this conversation's origin space";
-  const required = enforced
-    ? enforced.skills.map((skill) => ({ ...skill, spaceId: enforced.spaceId }))
-    : [];
-  for (const { packageId, version, uri, content, spaceId } of required) {
-    if (content === null || uri === null) {
-      resolved.notices.push(
-        `The skill \`${packageId}\` is required by ${requiredBy} but has no published version to follow.`,
-      );
-    } else if (content.length > left) {
-      resolved.notices.push(
-        `The skill \`${packageId}\` is required by ${requiredBy} but does not fit ${tooLong(content.length)}`,
-      );
-    } else {
-      left -= content.length;
-      resolved.enforced.push({
-        packageId,
-        version,
-        uri,
-        content,
-        served: { definition: "published", version, spaceId },
-      });
-    }
-  }
-  if (!injectsSkills(selection.skillMode)) return resolved;
-  const injectedIds = new Set(resolved.enforced.map((skill) => skill.packageId));
   // A chosen skill is the user's own act, so the model is told when it is left out.
-  for (const id of selection.pinnedSkills.filter((pinned) => !injectedIds.has(pinned))) {
+  for (const id of selection.pinnedSkills) {
     const skill = contents.get(id);
     if (skill === null) {
       resolved.notices.push(
@@ -157,7 +124,5 @@ export function resolveChatSkills(
  * definitions injected, never a skill that only got a notice.
  */
 export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {
-  return Object.fromEntries(
-    [...resolved.enforced, ...resolved.chosen].map(({ packageId, served }) => [packageId, served]),
-  );
+  return Object.fromEntries(resolved.chosen.map(({ packageId, served }) => [packageId, served]));
 }

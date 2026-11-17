@@ -11,7 +11,7 @@ import type { ChatSkillSelection } from "../skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
-/** The chat route `suffix` (`/sessions`, `/enforced-skills`, `` for the turn) of the transport's organization. */
+/** The chat route `suffix` (`/sessions`, `` for the turn) of the transport's organization. */
 export function chatPath(transport: Pick<ChatTransport, "orgId">, suffix = ""): string {
   return `/api/orgs/${transport.orgId}/chat${suffix}`;
 }
