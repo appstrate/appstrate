@@ -106,7 +106,7 @@ import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
-import { canAuthorPackages, canComposeInlineRuns, canPinSkills } from "../capabilities.ts";
+import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -392,7 +392,6 @@ export function ChatPage({
     [models, selectedModel, generation, modelsPending, modelsFailed],
   );
   const authorsPackages = canAuthorPackages(can);
-  const composesInline = canComposeInlineRuns(can);
 
   // The active row reduced to primitives so the memoised `Conversation` re-renders only when
   // they change (a few times per turn), not on every list refetch. `generating` and `updatedAt`
@@ -424,7 +423,6 @@ export function ChatPage({
               attachments={attachments}
               composerSlot={composerSlot}
               authorsPackages={authorsPackages}
-              composesInline={composesInline}
               canPinSkills={canPinSkills(can)}
               canWrite={canWrite}
               serverGenerating={serverGenerating}
@@ -449,8 +447,6 @@ interface ConversationProps {
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
-  /** The caller may compose inline runs: the inline-run model switch is offered. */
-  composesInline: boolean;
   canPinSkills: boolean;
   /** `chat:write`: without the picker, the enforced skills are still named. */
   canWrite: boolean;
@@ -485,7 +481,6 @@ const Conversation = memo(function Conversation({
   isPersisted,
   composerSlot,
   authorsPackages,
-  composesInline,
   canPinSkills,
   canWrite,
   storedSpaceId,
@@ -546,11 +541,10 @@ const Conversation = memo(function Conversation({
         onSelectionChange={chooseSkills}
         showPicker={showPicker}
         authorsPackages={authorsPackages}
-        composesInline={composesInline}
         showEnforced={canWrite}
       />
     ),
-    [transport, skills, chooseSkills, showPicker, authorsPackages, composesInline, canWrite],
+    [transport, skills, chooseSkills, showPicker, authorsPackages, canWrite],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -625,12 +619,7 @@ function ConversationInner({
   getCreation,
 }: Omit<
   ConversationProps,
-  | "canPinSkills"
-  | "canWrite"
-  | "authorsPackages"
-  | "composesInline"
-  | "storedSpaceId"
-  | "storedRestricted"
+  "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
 > & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];

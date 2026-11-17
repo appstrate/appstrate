@@ -864,7 +864,12 @@ export async function handleChatStream(
           // The launch body's `modelId`, judged by the inline route like any explicit
           // one (it exists, the caller pays, admission). Never a tool argument.
           ...(body.inline_runs_use_chat_model === true
-            ? { inlineRunModel: { modelId: chosen.id, generation: generationSettings } }
+            ? {
+                inlineRunModel: {
+                  modelId: chosen.id,
+                  ...(body.generation && { generation: body.generation }),
+                },
+              }
             : {}),
         },
         // Decoupled from the request connection (see `generation` above).

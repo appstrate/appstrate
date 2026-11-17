@@ -1319,10 +1319,8 @@ describe("handleChatStream", () => {
       });
       expect(res.status).toBe(200);
       await collectUiChunks(res);
-      expect(calls[0]!.platformMcp.inlineRunModel).toEqual({
-        modelId: MODEL_PRESET_ID,
-        generation: calls[0]!.generation,
-      });
+      // No override in the body: the run gets the model alone, and its own defaults.
+      expect(calls[0]!.platformMcp.inlineRunModel).toEqual({ modelId: MODEL_PRESET_ID });
     });
 
     it("leaves inline runs on the default model when absent or off", async () => {

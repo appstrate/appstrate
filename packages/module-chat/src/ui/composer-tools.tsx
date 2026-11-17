@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { cn } from "@appstrate/ui/cn";
+import { canComposeInlineRuns } from "../capabilities.ts";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
@@ -60,8 +61,6 @@ export interface ComposerToolsProps {
   showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
-  /** The caller may compose inline runs: the inline-run model switch is offered. */
-  composesInline: boolean;
   /** Without the picker, a writer still sees the space's imposed skills. */
   showEnforced: boolean;
 }
@@ -72,10 +71,9 @@ export function ComposerTools({
   onSelectionChange,
   showPicker,
   authorsPackages,
-  composesInline,
   showEnforced,
 }: ComposerToolsProps) {
-  const { t, actingSpaceIds } = useChatHost();
+  const { t, actingSpaceIds, can } = useChatHost();
   const scope = useConversationScope();
   const attach = useAttachAvailability();
   // The plain name, for the accessible names: the node below carries a tile the name does not.
@@ -85,7 +83,7 @@ export function ComposerTools({
   const spaceNode = useOriginSpaceNode();
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
-  const offersInlineRunModel = composesInline && creationMode;
+  const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
   const inlineRunModel = useInlineRunModelEnabled();
   const [skillsOpen, setSkillsOpen] = useState(false);
   // A popover opened while the menu is closing loses to the menu's focus
@@ -185,12 +183,10 @@ export function ComposerTools({
               aria-label={t("composer.inlineRunModel")}
               data-testid="composer-inline-run-model-item"
             >
-              <span className="flex flex-col">
-                {t("composer.inlineRunModel")}
-                <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">
-                  {t("composer.inlineRunModel.hint")}
-                </span>
-              </span>
+              <LabelWithHint
+                label={t("composer.inlineRunModel")}
+                hint={t("composer.inlineRunModel.hint")}
+              />
             </DropdownMenuCheckboxItem>
           )}
         </DropdownMenuContent>
@@ -270,16 +266,31 @@ function UnavailableItem({
   return (
     <DropdownMenuItem disabled data-testid={testId}>
       {icon}
-      <span className="flex flex-col">
-        {label}
-        <span
-          className="text-muted-foreground max-w-56 text-xs whitespace-normal"
-          data-testid={reasonTestId}
-        >
-          {reason}
-        </span>
-      </span>
+      <LabelWithHint label={label} hint={reason} hintTestId={reasonTestId} />
     </DropdownMenuItem>
+  );
+}
+
+/** A menu item's label with a line of explanation under it. */
+function LabelWithHint({
+  label,
+  hint,
+  hintTestId,
+}: {
+  label: ReactNode;
+  hint: ReactNode;
+  hintTestId?: string;
+}) {
+  return (
+    <span className="flex flex-col">
+      {label}
+      <span
+        className="text-muted-foreground max-w-56 text-xs whitespace-normal"
+        data-testid={hintTestId}
+      >
+        {hint}
+      </span>
+    </span>
   );
 }
 
