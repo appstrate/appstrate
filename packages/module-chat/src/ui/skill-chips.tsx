@@ -3,15 +3,14 @@
 /**
  * The skills the user chose for the conversation, as ONE pill in the composer's tool row. It shows
  * its count, or the name when there is a single skill; the tooltip lists the names. Removal
- * happens in the picker, which the pill opens.
+ * happens in the picker, which the pill opens; its X returns to the automatic mode.
  */
 
 import { BookOpenIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
-import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
+import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
@@ -36,11 +35,6 @@ function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSk
   }));
 }
 
-const PILL_CLASS = cn(
-  badgeVariants({ variant: "secondary" }),
-  "text-muted-foreground h-7 min-w-0 shrink gap-1.5 px-2.5 py-0 font-normal",
-);
-
 type Translate = ReturnType<typeof useChatHost>["t"];
 
 /** The pill's text: the count of several skills, the name of a single one. */
@@ -63,22 +57,35 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
   );
 }
 
-/** The skills the user chose, in one pill: it opens the picker, where they are removed. */
-function PinnedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen: () => void }) {
+/**
+ * The skills the user chose, in one pill: its body opens the picker, where they are removed; its X
+ * returns to the automatic mode, which keeps them unused.
+ */
+function PinnedPill({
+  skills,
+  onOpen,
+  onReset,
+}: {
+  skills: readonly LoadedSkill[];
+  onOpen: () => void;
+  onReset: () => void;
+}) {
   const { t } = useChatHost();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          data-testid="skill-pill-pinned"
-          aria-label={t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) })}
-          onClick={onOpen}
-          className={PILL_CLASS}
+        <RemovableChip
+          icon={<BookOpenIcon />}
+          open={{
+            onClick: onOpen,
+            label: t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) }),
+            testId: "skill-pill-pinned",
+          }}
+          removeLabel={t("skills.resetToAuto")}
+          onRemove={onReset}
         >
-          <BookOpenIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="max-w-32 truncate">{pillText(skills, t)}</span>
-        </button>
+          {pillText(skills, t)}
+        </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
@@ -91,14 +98,18 @@ interface SkillChipsProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onOpenPicker: () => void;
+  /** Back to the automatic mode: the pill's X. */
+  onResetMode: () => void;
 }
 
 /**
  * The skill pill of the composer's tool row. While no skill is chosen, the picker's summary chip
- * stands in (drawn only off the default selection).
+ * stands in (drawn only off the automatic mode).
  */
-export function SkillChips({ transport, selection, onOpenPicker }: SkillChipsProps) {
+export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: SkillChipsProps) {
   const pinned = useLoadedSkills(transport, selection);
-  if (pinned.length === 0) return <SkillsChip selection={selection} onClick={onOpenPicker} />;
-  return <PinnedPill skills={pinned} onOpen={onOpenPicker} />;
+  if (pinned.length === 0) {
+    return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onResetMode} />;
+  }
+  return <PinnedPill skills={pinned} onOpen={onOpenPicker} onReset={onResetMode} />;
 }

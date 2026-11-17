@@ -66,12 +66,6 @@ export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
   pinnedSkills: [],
 };
 
-export function isDefaultSkillSelection(selection: ChatSkillSelection): boolean {
-  return (
-    selection.skillMode === DEFAULT_SKILL_SELECTION.skillMode && selection.pinnedSkills.length === 0
-  );
-}
-
 /** `manual` and `strict` inject the chosen skills; `auto` lists the space's. */
 export function injectsSkills(mode: ChatSkillMode): boolean {
   return mode !== "auto";

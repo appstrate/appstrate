@@ -37,7 +37,12 @@ function render(selection: ChatSkillSelection = manual([])): string {
           value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
         >
           <TooltipProvider>
-            <SkillChips transport={scoped} selection={selection} onOpenPicker={() => {}} />
+            <SkillChips
+              transport={scoped}
+              selection={selection}
+              onOpenPicker={() => {}}
+              onResetMode={() => {}}
+            />
           </TooltipProvider>
         </ConversationScopeProvider>
       </ChatHostProvider>
@@ -64,14 +69,20 @@ describe("SkillChips", () => {
     );
   });
 
-  it("ignores pins in automatic mode, where none is injected", () => {
-    const html = render({ skillMode: "auto", pinnedSkills: ["@acme/b"] });
-    expect(html).toContain('data-testid="skills-picker-trigger"');
-    expect(html).not.toContain("skill-pill-pinned");
+  it("draws nothing in automatic mode, even with pins kept from another mode", () => {
+    expect(render({ skillMode: "auto", pinnedSkills: ["@acme/b"] })).toBe("");
   });
 
-  it("draws the picker's chip when nothing is loaded off the default selection", () => {
-    expect(render()).toContain('data-testid="skills-picker-trigger"');
+  it("draws the picker's chip, with its X back to automatic, when nothing is loaded off it", () => {
+    const html = render();
+    expect(html).toContain('data-testid="skills-picker-trigger"');
+    expect(html).toContain('aria-label="skills.resetToAuto"');
+  });
+
+  it("puts an X back to automatic on the pinned pill", () => {
+    const html = render(manual(["@acme/b"]));
+    expect(html).toContain('data-testid="skill-pill-pinned"');
+    expect(html).toContain('aria-label="skills.resetToAuto"');
   });
 
   it("draws nothing when nothing is loaded on the default selection", () => {

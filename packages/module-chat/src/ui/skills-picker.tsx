@@ -6,20 +6,15 @@
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
-import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import {
-  injectsSkills,
-  isDefaultSkillSelection,
-  MAX_PINNED_SKILLS,
-  type ChatSkillSelection,
-} from "../skills.ts";
+import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
 import { skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
+import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -34,7 +29,7 @@ interface SkillsPickerProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
-  /** Opened from the composer's "+" menu or the chip, never by a trigger of its own. */
+  /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The popover anchors to this: the composer's tools row. */
@@ -43,30 +38,30 @@ interface SkillsPickerProps {
 
 /**
  * The entry to the picker in the composer's tool row while no skill is loaded (drawn by
- * `SkillChips`): drawn for a non-default selection, it reopens the picker.
+ * `SkillChips`): drawn only off the automatic mode, it reopens the picker, and its X returns to
+ * the automatic mode (the chosen skills are kept, unused, as the mode switch keeps them).
  */
 export function SkillsChip({
   selection,
   onClick,
+  onReset,
 }: {
   selection: ChatSkillSelection;
   onClick: () => void;
+  onReset: () => void;
 }) {
   const { t } = useChatHost();
-  if (isDefaultSkillSelection(selection)) return null;
+  if (!injectsSkills(selection.skillMode)) return null;
   return (
-    <button
-      type="button"
-      data-testid="skills-picker-trigger"
-      onClick={onClick}
-      className={cn(
-        badgeVariants({ variant: "secondary" }),
-        "text-muted-foreground h-7 shrink-0 gap-1.5 px-2.5 py-0 font-normal",
-      )}
+    <RemovableChip
+      icon={<BookOpenIcon />}
+      open={{ onClick, label: t("skills.label"), testId: "skills-picker-trigger" }}
+      removeLabel={t("skills.resetToAuto")}
+      onRemove={onReset}
+      className="shrink-0"
     >
-      <BookOpenIcon className="size-3.5" />
-      <span>{t("skills.label")}</span>
-    </button>
+      {t("skills.label")}
+    </RemovableChip>
   );
 }
 

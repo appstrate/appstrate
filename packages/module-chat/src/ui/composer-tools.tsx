@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's left cluster: one "+" menu (attach files, skills, creation
- * mode) and, after it, a removable chip for each non-default setting that is
- * active. Settings live behind the menu, so the composer shows only what
- * differs from the defaults.
+ * The composer's left cluster: an attach button, a settings menu (skills, space limit, creation
+ * mode) and, after them, a removable chip for each non-default setting that is active. Settings
+ * live behind the menu, so the composer shows only what differs from the defaults.
  */
 
 import { useRef, useState, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
-import {
-  BookOpenIcon,
-  MapPinIcon,
-  PackageIcon,
-  PaperclipIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react";
-import { badgeVariants } from "@appstrate/ui/components/badge";
+import { BookOpenIcon, MapPinIcon, PackageIcon, PaperclipIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -26,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { cn } from "@appstrate/ui/cn";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
@@ -40,9 +31,12 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
+
+const ICON_BUTTON = "text-muted-foreground size-8 shrink-0 rounded-lg";
 
 const LIMIT_REASON_KEY = {
   generating: "composer.limit.generating",
@@ -83,17 +77,29 @@ export function ComposerTools({
 
   const cluster = (
     <div className="flex min-w-0 items-center gap-1.5">
+      <AttachButton
+        label={t("composer.attach")}
+        // An upload lands in the working space: where the chat does not act, or off the origin
+        // of a limited conversation.
+        unavailableReason={
+          attach.available
+            ? null
+            : attach.reason === "limited"
+              ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
+              : t("composer.attachUnavailable")
+        }
+      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="text-muted-foreground size-8 shrink-0 rounded-lg"
-            aria-label={t("composer.tools")}
-            data-testid="composer-tools-trigger"
+            className={ICON_BUTTON}
+            aria-label={t("composer.settings")}
+            data-testid="composer-settings-trigger"
           >
-            <PlusIcon />
+            <SettingsIcon />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -106,28 +112,6 @@ export function ComposerTools({
             setSkillsOpen(true);
           }}
         >
-          {attach.available ? (
-            <ComposerPrimitive.AddAttachment multiple asChild>
-              <DropdownMenuItem>
-                <PaperclipIcon />
-                {t("composer.attach")}
-              </DropdownMenuItem>
-            </ComposerPrimitive.AddAttachment>
-          ) : (
-            // An upload lands in the working space: where the chat does not act, or off the
-            // origin of a limited conversation.
-            <UnavailableItem
-              icon={<PaperclipIcon />}
-              label={t("composer.attach")}
-              reason={
-                attach.reason === "limited"
-                  ? sentenceWithNode(t, "composer.attachLimited", spaceNode)
-                  : t("composer.attachUnavailable")
-              }
-              testId="composer-attach-item"
-              reasonTestId="composer-attach-reason"
-            />
-          )}
           {showPicker && (
             <DropdownMenuItem
               onSelect={() => {
@@ -186,7 +170,7 @@ export function ComposerTools({
           removeLabel={t("composer.limit.undo", { name: spaceLabel })}
           removeDisabled={scope.generating || scope.pending}
           onRemove={() => scope.setRestricted(false)}
-          testId="composer-limit-chip"
+          data-testid="composer-limit-chip"
         >
           {sentenceWithNode(t, "composer.limitChip", spaceNode)}
         </RemovableChip>
@@ -196,6 +180,7 @@ export function ComposerTools({
           transport={transport}
           selection={selection}
           onOpenPicker={() => setSkillsOpen(true)}
+          onResetMode={() => onSelectionChange({ ...selection, skillMode: "auto" })}
         />
       )}
     </div>
@@ -221,65 +206,65 @@ function UnavailableItem({
   label,
   reason,
   testId,
-  reasonTestId,
 }: {
   icon: ReactNode;
   label: ReactNode;
   reason: ReactNode;
   testId: string;
-  reasonTestId?: string;
 }) {
   return (
     <DropdownMenuItem disabled data-testid={testId}>
       {icon}
       <span className="flex flex-col">
         {label}
-        <span
-          className="text-muted-foreground max-w-56 text-xs whitespace-normal"
-          data-testid={reasonTestId}
-        >
-          {reason}
-        </span>
+        <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">{reason}</span>
       </span>
     </DropdownMenuItem>
   );
 }
 
-/** A setting that departs from the default, shown as a chip whose X restores the default. */
-function RemovableChip({
-  icon,
-  children,
-  removeLabel,
-  removeDisabled = false,
-  onRemove,
-  testId,
+/**
+ * Opens the file dialog. Unavailable (`unavailableReason` set), it stays in place, disabled, with the
+ * reason in a tooltip: a disabled button fires no pointer events, so the tooltip hangs on a
+ * focusable wrapper that also carries the reason for a screen reader.
+ */
+function AttachButton({
+  label,
+  unavailableReason,
 }: {
-  icon: ReactNode;
-  children: ReactNode;
-  removeLabel: string;
-  removeDisabled?: boolean;
-  onRemove: () => void;
-  testId?: string;
+  label: string;
+  unavailableReason: ReactNode | null;
 }) {
-  return (
-    <span
-      data-testid={testId}
-      className={cn(
-        badgeVariants({ variant: "secondary" }),
-        "text-muted-foreground h-7 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-1 pl-2.5 font-normal [&>svg]:size-3.5 [&>svg]:shrink-0",
-      )}
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      disabled={unavailableReason !== null}
+      className={ICON_BUTTON}
+      aria-label={label}
     >
-      {icon}
-      <span className="block min-w-0 truncate">{children}</span>
-      <button
-        type="button"
-        aria-label={removeLabel}
-        disabled={removeDisabled}
-        onClick={onRemove}
-        className="hover:bg-foreground/10 flex size-5 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-50"
-      >
-        <XIcon className="size-3" />
-      </button>
-    </span>
+      <PaperclipIcon />
+    </Button>
+  );
+  if (unavailableReason === null) {
+    return (
+      <ComposerPrimitive.AddAttachment multiple asChild>
+        {button}
+      </ComposerPrimitive.AddAttachment>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex shrink-0">
+          {button}
+          <span className="sr-only">{unavailableReason}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs">
+        {unavailableReason}
+      </TooltipContent>
+    </Tooltip>
   );
 }
