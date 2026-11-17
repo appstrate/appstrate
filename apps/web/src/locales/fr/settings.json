@@ -1374,7 +1374,6 @@
   "catalogue.sheet.homeHint": "C'est là qu'on le modifie.",
   "integration.clients.promote.action": "Partager à toute l’organisation",
   "integration.clients.promote.confirm": "Le client passe au niveau de l'organisation. Il en devient le client par défaut seulement si elle n'en a pas encore. S'il était le client par défaut de cet espace, l'espace utilisera celui de l'organisation pour ses nouvelles connexions ; sinon, son client par défaut ne change pas. Les connexions existantes continuent de fonctionner.",
-  "catalogue.sheet.chatEnforcedIn": "Imposé dans le chat de : {{spaces}}",
   "integration.admin.orgDefault.dropUnavailable": "Retirer du défaut",
   "integration.admin.orgDefault.pickBeforeMode": "Les connexions du défaut ne sont plus partagées : choisissez-en d’autres avant de changer de mode.",
   "integration.admin.orgDefault.clearsMemberChoices": "Imposer le défaut de l’espace, ou modifier, retirer ou rendre non obligatoire un défaut déjà obligatoire, supprime les choix de connexions de tous les membres pour cette intégration dans l’espace. Les planifications ne sont désactivées que si le défaut est retiré ou cesse d’être obligatoire, pas quand son ensemble change.",

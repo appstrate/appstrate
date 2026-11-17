@@ -58,8 +58,6 @@ export interface ComposerToolsProps {
   showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
-  /** Without the picker, a writer still sees the space's imposed skills. */
-  showEnforced: boolean;
 }
 
 export function ComposerTools({
@@ -68,7 +66,6 @@ export function ComposerTools({
   onSelectionChange,
   showPicker,
   authorsPackages,
-  showEnforced,
 }: ComposerToolsProps) {
   const { t, actingSpaceIds } = useChatHost();
   const scope = useConversationScope();
@@ -194,11 +191,11 @@ export function ComposerTools({
           {sentenceWithNode(t, "composer.limitChip", spaceNode)}
         </RemovableChip>
       )}
-      {(showPicker || showEnforced) && (
+      {showPicker && (
         <SkillChips
           transport={transport}
           selection={selection}
-          onOpenPicker={showPicker ? () => setSkillsOpen(true) : undefined}
+          onOpenPicker={() => setSkillsOpen(true)}
         />
       )}
     </div>

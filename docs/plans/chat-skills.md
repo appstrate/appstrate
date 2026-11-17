@@ -71,7 +71,7 @@ the turn may load, and a `strict` turn lists no skill.
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
 surface derived from the route guards drops `listSkills` and `getSkill`, the turn holds no `list_skills`,
 `read_resource` reads only the skills injected in the turn (named in the turn's
-signed MCP bearer, see `docs/plans/chat-enforced-skills.md`), declaring a skill in an agent (`dependencies.skills`, checked by
+signed MCP bearer), declaring a skill in an agent (`dependencies.skills`, checked by
 `assertPackageDependenciesAccessible`) is refused, and so is writing one — a
 write answers with the package detail, `SKILL.md` included, so `skills:write`
 alone would read any skill the caller authors. The persona already teaches
@@ -89,16 +89,6 @@ The system prompt is ONE `cache_control` block: what renders there is
 byte-identical across turns for the same session state (the chosen skills are
 stored sorted, no clocks, no counters). Changing the mode or the chosen skills, or editing a chosen skill,
 may miss the cache once.
-
-## Space-enforced skills
-
-A space can impose skills on every conversation held in it (#1586,
-`docs/plans/chat-enforced-skills.md`). They sit above the three modes: injected
-in full in `auto`, `manual` and `strict` alike, before the chosen skills and out
-of the shared budget first, read with the platform's authority rather than the
-caller's, so no `skills:*` grant is needed. `strict` is unchanged: its turn
-still holds no `skills:*`, and its note names the space's skills as part of the
-restriction the user cannot lift.
 
 ## Per-conversation choice
 
@@ -156,6 +146,5 @@ detail, and sends only what the user changed.
   any `@scope`, so a new system id can collide with an organization package.
 - A `/skill` mention that loads a body into one message (#1309 open question
   5): `manual` covers it; propose it on its own if usage asks.
-- Per-space default mode inherited by new sessions (per-space skills: see
-  "Space-enforced skills" above).
+- Per-space default mode inherited by new sessions.
 - `resolved_skill_versions` on runs and `dependency_overrides` (#1165).

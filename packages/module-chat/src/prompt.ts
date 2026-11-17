@@ -21,7 +21,7 @@ import {
 } from "@appstrate/core/skill-uri";
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
 import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
-import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
+import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   platformToolName,
@@ -84,8 +84,6 @@ export type ChatEnv = {
 
 // Named by the persona and rendered by the context block: one string for both.
 const SKILLS_HEADING = "## Skills";
-const enforcedLead = (origin: { id: string; name: string }) =>
-  `This space — ${origin.name} (\`${origin.id}\`), where this conversation was started — requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.`;
 // The turn's MCP bearer names every injected definition, so `resources/read`
 // serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
@@ -100,7 +98,7 @@ const SKILLS_INJECTED_LEAD =
 const SKILLS_MANUAL_NOTE =
   "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
 const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills shown here — those this conversation's origin space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the origin space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "This conversation is restricted to the skills shown here — those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts this restriction by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -295,39 +293,23 @@ interface RenderedContext {
 
 /**
  * `## Skills`, or "". Kept apart so {@link buildCallerContextBlock} appends it on
- * every path: the origin space's required skills never depend on anything else answering.
+ * every path, whatever else answers.
  */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   capabilities: TurnCapabilities;
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
-  enforced: readonly EnforcedChatSkill[];
-  /** The origin space, which owns the enforced skills. */
-  origin?: { id: string; name: string };
 }): RenderedContext {
-  const skills = resolveChatSkills(
-    opts.selection,
-    opts.contents,
-    opts.origin && { spaceId: opts.origin.id, skills: opts.enforced },
-  );
+  const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
-  const injected = new Set(skills.enforced.map((skill) => skill.packageId));
   // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
   const listed =
-    opts.capabilities.readsSkills && !injectsSkills(opts.selection.skillMode)
-      ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
-      : [];
+    opts.capabilities.readsSkills && !injectsSkills(opts.selection.skillMode) ? opts.catalogue : [];
   const groups: string[][] = [];
   if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
   if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
     groups.push([SKILLS_MANUAL_NOTE]);
-  }
-  if (skills.enforced.length && opts.origin) {
-    groups.push([
-      `${enforcedLead(opts.origin)} ${files}`,
-      ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
-    ]);
   }
   if (listed.length) groups.push(listed.map(skillLine));
   if (skills.chosen.length) {
@@ -362,8 +344,6 @@ type CallerContextOpts = {
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
   skillCatalogue?: readonly CatalogueSkill[];
-  /** Required: a caller that forgot it would drop the origin space's required skills silently. */
-  enforced: readonly EnforcedChatSkill[];
 };
 
 /** Render the caller context into a system-prompt block, with the skills it injected. */
@@ -376,8 +356,6 @@ export function formatCallerContext(
     capabilities: opts.capabilities,
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
-    enforced: opts.enforced,
-    origin: opts.origin,
   });
   const skillSection = skills.text;
   const name = identity.user.name?.trim();
@@ -635,8 +613,7 @@ function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served
  * already-authenticated request context, with no read of the platform: the integrations and
  * the agents differ per space, so the model looks them up with its tools. The skills are
  * those of the turn's spaces, one per package (the first in reach order), each bound in the
- * claim to the space its URI names; the enforced ones are the origin space's. A rejected
- * `enforced` rejects the block: the turn is refused rather than run without them.
+ * claim to the space its URI names.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
@@ -653,8 +630,6 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
-    /** Already loading; a rejection rejects the block. */
-    enforced: Promise<readonly EnforcedChatSkill[]>;
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
@@ -672,20 +647,17 @@ export async function buildCallerContextBlock(
     },
   };
   const injects = injectsSkills(skills.skillMode);
-  const [turnSkills, enforced] = await Promise.all([
-    readChatSkills(
-      args.openSkillsClient,
-      args.spaces.map((space) => space.id),
-      {
-        catalogue: capabilities.readsSkills && !injects,
-        // The drafts the caller reads are the turn's only while the turn keeps the
-        // caller's `skills:write` (the authoring switch drops it).
-        catalogueDrafts: args.permissions.includes("skills:write"),
-        chosen: injects ? skills.pinnedSkills : [],
-      },
-    ),
-    args.enforced,
-  ]);
+  const turnSkills = await readChatSkills(
+    args.openSkillsClient,
+    args.spaces.map((space) => space.id),
+    {
+      catalogue: capabilities.readsSkills && !injects,
+      // The drafts the caller reads are the turn's only while the turn keeps the
+      // caller's `skills:write` (the authoring switch drops it).
+      catalogueDrafts: args.permissions.includes("skills:write"),
+      chosen: injects ? skills.pinnedSkills : [],
+    },
+  );
   const { text, injected } = formatCallerContext(identity, {
     locale,
     capabilities,
@@ -697,7 +669,6 @@ export async function buildCallerContextBlock(
     skills,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
-    enforced,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
   return { text, injected: { skills: injected } };

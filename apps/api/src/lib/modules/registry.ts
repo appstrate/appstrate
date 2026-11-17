@@ -29,10 +29,6 @@ import {
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
-import {
-  listEnforcedChatSkills,
-  loadEnforcedChatSkills,
-} from "../../services/chat-enforced-skills.ts";
 import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
 import type { AppEnv } from "../../types/index.ts";
@@ -82,10 +78,6 @@ function buildPlatformServices(): PlatformServices {
     // file (or validate an existing file) and hand back its stable
     // `appfile://` URI. The files service (ACL, storage, quota) is the platform's.
     resolveChatAttachment,
-    // Space-enforced chat skills — read with platform authority, since the
-    // members they bind may hold no `skills:read`.
-    loadEnforcedChatSkills,
-    listEnforcedChatSkills,
     // Chat session teardown — detach-or-delete the session's contained files
     // before the session row is removed (the module has no storage access).
     cleanupSessionFiles: (chatSessionId, orgId, tx) =>

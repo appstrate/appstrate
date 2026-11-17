@@ -571,11 +571,6 @@ export const spacesPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
-                chat_enforced: {
-                  type: "boolean",
-                  description:
-                    "Skills only. `true` injects the skill's latest published `SKILL.md` in every chat conversation held in this space, for every member whatever their `skills:*` grants — its content is disclosed to them. Refused unless the skill has a published version, and within the space's cap of enforced skills and the chat's skills content budget. Audited as `package.chat_enforced` / `package.chat_released`, only when the stored value changes.",
-                },
               },
               additionalProperties: false,
             },
@@ -592,11 +587,7 @@ export const spacesPaths = {
             },
           },
         },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description:
-            "Validation error (`validation_failed`), or `chat_enforced` sent for a package that is not a skill (`chat_enforced_not_skill`).",
-        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
@@ -604,24 +595,6 @@ export const spacesPaths = {
             "The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "422": {
-          description:
-            "Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },

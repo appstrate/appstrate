@@ -7,7 +7,6 @@ import {
   organizationMembers,
   packageTypeValues,
   type PackageType,
-  packageDistTags,
   packages,
   spacePackages,
   user,
@@ -17,7 +16,6 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { AppEnv } from "../types/index.ts";
 import { callerPersonalOwnerId } from "../lib/view-as.ts";
@@ -33,8 +31,6 @@ interface Placement {
   space_id: string;
   via: PlacementVia;
   state: PlacementState;
-  /** Whether this space enforces the skill in its chat; `false` with no row. */
-  chat_enforced: boolean;
   /** Who placed it (`shared` only); `null` for a row a home move left or a gone account. */
   shared_by: { user_id: string; name: string } | null;
 }
@@ -64,8 +60,6 @@ interface LibraryPackage {
   home_writable: boolean;
   home_deletable: boolean;
   home_shareable: boolean;
-  /** A `latest` published version exists (or a system package) — what enforcing a skill needs. */
-  published: boolean;
   placements: Placement[];
   activation: ActivationCell[];
 }
@@ -151,10 +145,8 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
       draftManifest: packages.draftManifest,
-      latestVersionId: packageDistTags.versionId,
       spaceId: spacePackages.spaceId,
       enabled: spacePackages.enabled,
-      chatEnforced: spacePackages.chatEnforced,
       sharedBy: spacePackages.sharedBy,
       sharerName: user.name,
     })
@@ -175,7 +167,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ),
     )
     .leftJoin(user, eq(user.id, organizationMembers.userId))
-    .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
     .orderBy(packages.id);
 
@@ -186,7 +177,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       string,
       {
         enabled: boolean;
-        chatEnforced: boolean;
         sharedBy: { user_id: string; name: string } | null;
       }
     >
@@ -197,7 +187,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     if (!bySpace) placementRows.set(row.id, (bySpace = new Map()));
     bySpace.set(row.spaceId, {
       enabled: row.enabled!,
-      chatEnforced: row.chatEnforced!,
       sharedBy: sharerView(row),
     });
   }
@@ -250,7 +239,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
         space_id: space,
         via,
         state: placementState({ id: row.id, type, source: row.source }, placementRow?.enabled),
-        chat_enforced: placementRow?.chatEnforced ?? false,
         shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
       });
     }
@@ -285,7 +273,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       ...home,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",
-      published: isPublished(row),
       placements,
       activation,
     });

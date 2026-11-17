@@ -8,7 +8,7 @@
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
  *   - REST surface under `/api/orgs/:orgId/chat/*`: session CRUD, history READ, resume,
- *     stop and the enforced-skill names — none of which writes a message. Persistence is server-authoritative
+ *     and stop — none of which writes a message. Persistence is server-authoritative
  *     and its two writers both live in `persistence.ts`; exactly ONE route
  *     reaches them, `POST /api/orgs/:orgId/chat` (the conversational loop below), which
  *     stores the user turn before inference and the assistant turn when the

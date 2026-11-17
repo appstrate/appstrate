@@ -337,7 +337,7 @@ describe("skill:// — a skill the chat turn injected", () => {
 
   it("keeps serving the turn after the skill is switched off, and without any skills:*", async () => {
     // Deliberate: its SKILL.md is already in the turn's context; the next turn
-    // no longer injects it. Releasing an enforcement is the same case.
+    // no longer injects it.
     await seedSpacePackage(owner.defaultSpaceId, TONE, { enabled: false });
     const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 });
     expect(await readResource(headers, uriOf(TONE, "scripts/run.sh"))).toEqual({

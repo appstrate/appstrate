@@ -16,7 +16,6 @@ import {
 } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
-import type { EnforcedChatSkill } from "@appstrate/core/chat-contract";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
@@ -87,11 +86,7 @@ const BASE_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
-  enforced: [],
 } as const;
-
-/** The origin space, which owns the enforced skills. */
-const ORIGIN = { id: "spc_1", name: "One" };
 
 /** A line of the `auto` catalogue: the published entry of `@<scope>/<name>`, or its draft. */
 const listedSkill = (packageId: string, description: string, version: string | null = null) => {
@@ -275,124 +270,26 @@ describe("formatCallerContext", () => {
     expect(manual).not.toContain("This conversation is restricted");
   });
 
-  describe("space-enforced skills", () => {
-    const HOUSE: EnforcedChatSkill = {
-      packageId: "@acme/house",
-      name: "House rules",
-      version: "2.0.0",
-      uri: "skill://space-1/acme/house/house/SKILL.md",
-      content: "---\nname: house\n---\nHouse body.",
-    };
-    const HOUSE_BLOCK =
-      '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\n---\nname: house\n---\nHouse body.\n</skill>';
-    const ENFORCED_LEAD =
-      "This space — One (`spc_1`), where this conversation was started — requires these skills in every conversation.";
+  describe("chosen skills", () => {
     const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
-
-    it("renders them in every mode, for a turn that cannot read skills", () => {
-      for (const skillMode of ["auto", "manual", "strict"] as const) {
-        const out = contextText(
-          { user: { name: "Ada" }, org: { role: "member" } },
-          {
-            ...BASE_OPTS,
-            origin: ORIGIN,
-            capabilities: caps(NO_SKILLS),
-            skills: { skillMode, pinnedSkills: [] },
-            enforced: [HOUSE],
-          },
-        );
-        expect(out.split("## Skills")).toHaveLength(2);
-        expect(out).toContain(ENFORCED_LEAD);
-        expect(out).toContain("where it conflicts with a skill the user chose, it wins");
-        expect(out).toContain(
-          "read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.",
-        );
-        expect(out).not.toContain("out of reach unless");
-        expect(out).toContain(HOUSE_BLOCK);
-      }
+    const mine = (content = "Mine body.") => ({
+      packageId: "@acme/mine",
+      uri: "skill://space-1/acme/mine/mine/SKILL.md",
+      version: "1.0.0",
+      served: { definition: "published", version: "1.0.0" } as const,
+      content,
     });
+    const MINE_BLOCK =
+      '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">';
 
-    it("names `read_resource` only to a turn that holds the MCP transport", () => {
-      const lead = (permissions: readonly string[]) =>
-        contextText(
-          { user: { name: "Ada" } },
-          { ...BASE_OPTS, origin: ORIGIN, capabilities: caps(permissions), enforced: [HOUSE] },
-        );
-      const noTransport = lead(NO_SKILLS.filter((p) => p !== "mcp:read"));
-      expect(noTransport).toContain(`${ENFORCED_LEAD} Each is a procedure`);
-      expect(noTransport).toContain("it wins. Only each SKILL.md is provided.\n");
-      expect(noTransport).not.toContain("read_resource");
-      expect(noTransport).toContain(HOUSE_BLOCK);
-      // Control: the same turn with the transport is told the tool.
-      expect(lead(NO_SKILLS)).toContain("read a file it references with `read_resource`");
-    });
-
-    it("leaves the injected ones out of the `auto` listing", () => {
+    it("orders the strict note, the chosen skills, then the notices", () => {
       const out = contextText(
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
-          origin: ORIGIN,
-          enforced: [HOUSE],
-          skillCatalogue: [
-            listedSkill("@acme/house", "House rules"),
-            listedSkill("@acme/pdf", "PDF"),
-          ],
-        },
-      );
-      expect(out).toContain("- `@acme/pdf` `skill://space-1/acme/pdf@draft/pdf/SKILL.md` — PDF");
-      expect(out).not.toContain("- `@acme/house`");
-      expect(out.split("@acme/house")).toHaveLength(2);
-
-      // One the turn could not inject stays listed, so the model can still load it.
-      const unpublished = contextText(
-        { user: { name: "Ada" } },
-        {
-          ...BASE_OPTS,
-          origin: ORIGIN,
-          enforced: [{ ...HOUSE, version: null, uri: null, content: null }],
-          skillCatalogue: [listedSkill("@acme/house", "House rules")],
-        },
-      );
-      expect(unpublished).toContain(
-        "- `@acme/house` `skill://space-1/acme/house@draft/house/SKILL.md` — House rules",
-      );
-    });
-
-    it("orders the strict note, the space's skills, the chosen ones, then the notices", () => {
-      const out = contextText(
-        { user: { name: "Ada" } },
-        {
-          ...BASE_OPTS,
-          origin: ORIGIN,
           capabilities: caps(NO_SKILLS),
-          skills: {
-            skillMode: "strict",
-            pinnedSkills: ["@acme/gone", "@acme/house", "@acme/mine"],
-          },
-          skillContents: new Map([
-            [
-              "@acme/mine",
-              {
-                packageId: "@acme/mine",
-                uri: "skill://space-1/acme/mine/mine/SKILL.md",
-                version: "1.0.0",
-                served: { definition: "published", version: "1.0.0" },
-                content: "Mine body.",
-              },
-            ],
-            [
-              "@acme/house",
-              {
-                packageId: "@acme/house",
-                uri: "skill://space-1/acme/house/house/SKILL.md",
-                version: "1.0.0",
-                served: { definition: "published", version: "1.0.0" },
-                content: "Pinned copy.",
-              },
-            ],
-          ]),
-          enforced: [HOUSE],
+          skills: { skillMode: "strict", pinnedSkills: ["@acme/gone", "@acme/mine"] },
+          skillContents: new Map([["@acme/mine", mine()]]),
         },
       );
       const at = (text: string) => {
@@ -400,50 +297,28 @@ describe("formatCallerContext", () => {
         return out.indexOf(text);
       };
       expect(at("This conversation is restricted to the skills shown here")).toBeLessThan(
-        at(ENFORCED_LEAD),
+        at("The user chose these skills"),
       );
-      expect(at(ENFORCED_LEAD)).toBeLessThan(at("The user chose these skills"));
-      expect(
-        at('<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">'),
-      ).toBeLessThan(at("`@acme/gone` was chosen"));
-      // A pin naming an enforced skill is dropped: one copy, the space's.
-      expect(out).not.toContain("Pinned copy.");
-      expect(out).not.toContain("`@acme/house` was chosen");
+      expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` was chosen"));
     });
 
-    it("names `read_resource` on both leads with the transport, in manual and strict, and none without", () => {
+    it("names `read_resource` on the lead with the transport, in manual and strict, and none without", () => {
       const render = (skillMode: "manual" | "strict", permissions: readonly string[]) =>
         contextText(
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
-            origin: ORIGIN,
             capabilities: caps(permissions),
             skills: { skillMode, pinnedSkills: ["@acme/mine"] },
-            skillContents: new Map([
-              [
-                "@acme/mine",
-                {
-                  packageId: "@acme/mine",
-                  uri: "skill://space-1/acme/mine/mine/SKILL.md",
-                  version: "1.0.0",
-                  served: { definition: "published", version: "1.0.0" },
-                  content: "Mine body.",
-                },
-              ],
-            ]),
-            enforced: [HOUSE],
+            skillContents: new Map([["@acme/mine", mine()]]),
           },
         );
       const files =
         "Only each SKILL.md is shown: read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.";
       for (const skillMode of ["manual", "strict"] as const) {
         const tool = render(skillMode, NO_SKILLS);
-        expect(tool).toContain(`it wins. ${files}`);
         expect(tool).toContain(`follow it whenever it applies. ${files}`);
-        expect(tool).toContain(
-          '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">',
-        );
+        expect(tool).toContain(MINE_BLOCK);
         const none = render(
           skillMode,
           NO_SKILLS.filter((p) => p !== "mcp:read"),
@@ -453,51 +328,31 @@ describe("formatCallerContext", () => {
       }
     });
 
-    it("keeps strict's note true: the space's requirement stays whatever the composer says", () => {
+    it("keeps strict's note true: it describes the user's own skills only", () => {
       const out = contextText(
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
-          origin: ORIGIN,
           capabilities: caps(NO_SKILLS),
           skills: { skillMode: "strict", pinnedSkills: [] },
-          enforced: [HOUSE],
         },
       );
-      expect(out).toContain(
-        "those this conversation's origin space requires and those the user chose",
-      );
-      expect(out).toContain("The user lifts only their own restriction");
-      expect(out).toContain("the origin space's requirement stays");
-    });
-
-    it("notices an enforced skill with no readable version", () => {
-      const out = contextText(
-        { user: { name: "Ada" } },
-        { ...BASE_OPTS, origin: ORIGIN, enforced: [{ ...HOUSE, version: null, content: null }] },
-      );
-      expect(out).toContain(
-        "`@acme/house` is required by this conversation's origin space but has no published version to follow.",
-      );
-      expect(out).not.toContain(ENFORCED_LEAD);
+      expect(out).toContain("restricted to the skills shown here — those the user chose, if any");
+      expect(out).toContain("The user lifts this restriction by switching");
     });
 
     it("renders byte-identical across two turns", () => {
-      const other: EnforcedChatSkill = { ...HOUSE, packageId: "@acme/alpha", content: "Alpha." };
       const render = () =>
         contextText(
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
-            origin: ORIGIN,
             now: new Date("2026-06-25T09:05:00.000Z"),
-            enforced: [other, HOUSE],
-            skillCatalogue: [listedSkill("@acme/pdf", "PDF")],
+            skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
+            skillContents: new Map([["@acme/mine", mine()]]),
           },
         );
-      const first = render();
-      expect(render()).toBe(first);
-      expect(first.indexOf("@acme/alpha")).toBeLessThan(first.indexOf("@acme/house"));
+      expect(render()).toBe(render());
     });
   });
 
@@ -605,9 +460,6 @@ describe("formatCallerContext", () => {
   });
 });
 
-/** The space enforces nothing: the turn's load resolved empty. */
-const NO_ENFORCED: Promise<readonly EnforcedChatSkill[]> = Promise.resolve([]);
-
 /** A skills connection that fails the test if the block opens it. */
 const NO_SKILLS = async (): Promise<ChatSkillsClient> => {
   throw new Error("the skills connection was opened");
@@ -694,7 +546,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read"],
         skills: DEFAULT_SKILL_SELECTION,
-        enforced: NO_ENFORCED,
         openSkillsClient: NO_SKILLS,
       });
     expect(await build({ orgRole: "owner", viewAs: { orgRole: "member" } })).toContain(
@@ -731,7 +582,6 @@ describe("buildCallerContextBlock", () => {
           skillMode: "strict",
           pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
         },
-        enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
       },
     );
@@ -775,7 +625,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
-      enforced: NO_ENFORCED,
       openSkillsClient: NO_SKILLS,
     });
     expect(out).not.toContain("<skill");
@@ -798,7 +647,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
-        enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
       },
     );
@@ -826,7 +674,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
-        enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
       },
     );
@@ -856,7 +703,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
-        enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
       },
     );
@@ -886,7 +732,6 @@ describe("buildCallerContextBlock", () => {
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
         skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
-        enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
       },
     );
@@ -915,7 +760,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillMode: "auto", pinnedSkills: [] },
-      enforced: NO_ENFORCED,
       openSkillsClient: readOnly.open,
     });
     expect(readOnlyOut).toContain("- `@acme/a` (v1.0.0) `skill://spc_1/acme/a/a/SKILL.md` — A");
@@ -931,7 +775,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
-      enforced: NO_ENFORCED,
       openSkillsClient: async (signal) => {
         opened = true;
         return skills.open(signal);
@@ -952,47 +795,10 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
-      enforced: NO_ENFORCED,
       openSkillsClient: skills.open,
     });
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
     expect(skills.calls).toContain("close");
-  });
-
-  describe("space-enforced skills", () => {
-    const HOUSE: EnforcedChatSkill = {
-      packageId: "@acme/house",
-      name: "House rules",
-      version: "2.0.0",
-      uri: "skill://space-1/acme/house/house/SKILL.md",
-      content: "House body.",
-    };
-    const HOUSE_BLOCK =
-      '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nHouse body.\n</skill>';
-    const build = (enforced: Promise<readonly EnforcedChatSkill[]>) =>
-      blockText(fakeContext({ orgRole: "member" }), {
-        spaces: REACH,
-        restricted: false,
-        origin: ORIGIN,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
-        skills: DEFAULT_SKILL_SELECTION,
-        enforced,
-        openSkillsClient: NO_SKILLS,
-      });
-
-    it("renders them in the block, after the identity", async () => {
-      const out = await build(Promise.resolve([HOUSE]));
-      expect(out).toContain("## Your context");
-      expect(out).toContain("Ada (ada@acme.com)");
-      expect(out).toContain(HOUSE_BLOCK);
-    });
-
-    it("rejects when they cannot be loaded, rather than render without them", async () => {
-      const failure = new Error("enforced skills unavailable");
-      await expect(build(Promise.reject(failure))).rejects.toBe(failure);
-    });
   });
 });

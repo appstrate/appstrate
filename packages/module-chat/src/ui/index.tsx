@@ -447,7 +447,7 @@ interface ConversationProps {
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
-  /** `chat:write`: without the picker, the enforced skills are still named. */
+  /** `chat:write`. */
   canWrite: boolean;
   /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
   serverGenerating: boolean | undefined;
@@ -540,10 +540,9 @@ const Conversation = memo(function Conversation({
         onSelectionChange={chooseSkills}
         showPicker={showPicker}
         authorsPackages={authorsPackages}
-        showEnforced={canWrite}
       />
     ),
-    [transport, skills, chooseSkills, showPicker, authorsPackages, canWrite],
+    [transport, skills, chooseSkills, showPicker, authorsPackages],
   );
 
   if (persistedAtMount && history.isPending) {

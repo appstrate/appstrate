@@ -3099,26 +3099,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgId}/chat/enforced-skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the skills a space enforces in chat
-         * @description The skills `spaceId` imposes on the conversations started in it, whatever the conversation's `skill_mode` and the caller's `skills:*` grants: each turn injects their latest published `SKILL.md`. The composer shows them for a new conversation in the selected space, or for an existing conversation's origin space. Names only — the content is never returned here. Sorted by id. `spaceId` is required and must be a space the caller reads chats in (`chat:read`); else a 400 naming the field. Ignores `X-Space-Id`; admitted when some reachable space grants `chat:read`. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403).
-         */
-        get: operations["listChatEnforcedSkills"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgId}/chat/sessions": {
         parameters: {
             query?: never;
@@ -6049,13 +6029,13 @@ export interface components {
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read. */
             unread: boolean;
             /**
-             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. In every mode, the skills the origin space enforces (GET /api/orgs/{orgId}/chat/enforced-skills) are injected first. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
+             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
              * @enum {string}
              */
             skill_mode: "auto" | "manual" | "strict";
             /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
             pinned_skills: string[];
-            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the enforced skills, the default space of a request naming none, and the space a limited conversation is confined to. */
+            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the default space of a request naming none, and the space a limited conversation is confined to. */
             spaceId: string | null;
             /** @description Whether the conversation is limited to its origin space: its tools act there alone. Always false without an origin space. */
             restricted: boolean;
@@ -6393,8 +6373,6 @@ export interface components {
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
-            /** @description Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published. */
-            published: boolean;
             /** @description What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance. */
             activation: {
                 spaceId: string;
@@ -6887,8 +6865,6 @@ export interface components {
              * @enum {string}
              */
             state: "active" | "inactive" | "none";
-            /** @description Whether this space enforces the skill in its chat (`SpacePackage.chat_enforced`). `false` with no placement row, and for every type but `skill`. */
-            chat_enforced: boolean;
             /** @description Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`. */
             shared_by: {
                 user_id: string;
@@ -7536,8 +7512,6 @@ export interface components {
             /** @description Proxy override for this space */
             proxyId: string | null;
             enabled: boolean;
-            /** @description Skills only: while the skill is active here, its latest published `SKILL.md` is injected in every chat conversation held in this space, whatever the member's `skills:*` grants. Kept across deactivation. Always `false` for other types. */
-            chat_enforced: boolean;
             /** Format: date-time */
             installed_at: string;
             /** Format: date-time */
@@ -15705,20 +15679,17 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
-                     *             "published": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "via": "home",
                      *                 "state": "active",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               },
                      *               {
                      *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "via": "shared",
                      *                 "state": "inactive",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": {
                      *                   "user_id": "usr_1",
                      *                   "name": "Alex"
@@ -15751,20 +15722,17 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
-                     *             "published": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "via": "system",
                      *                 "state": "active",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               },
                      *               {
                      *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "via": "system",
                      *                 "state": "inactive",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               }
                      *             ],
@@ -20498,59 +20466,7 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the origin space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    listChatEnforcedSkills: {
-        parameters: {
-            query: {
-                /** @description The space whose enforced skills are listed. */
-                spaceId: string;
-            };
-            header?: never;
-            path: {
-                /** @description Organization ID. */
-                orgId: components["parameters"]["OrgIdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Enforced skills */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: {
-                            /** @description `@scope/name` package id */
-                            id: string;
-                            /** @description Display name, else the id */
-                            name: string;
-                            /** @description Latest published version; null when none can be read now (the turn then tells the model the skill is unavailable). */
-                            version: string | null;
-                        }[];
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (120/min per caller) */
-            429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded. RFC 9457 problem+json. */
+            /** @description `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -27018,20 +26934,17 @@ export interface operations {
                      *             "home_writable": true,
                      *             "home_deletable": true,
                      *             "home_shareable": true,
-                     *             "published": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "via": "home",
                      *                 "state": "active",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               },
                      *               {
                      *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "via": "shared",
                      *                 "state": "inactive",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": {
                      *                   "user_id": "usr_1",
                      *                   "name": "Alex"
@@ -27064,20 +26977,17 @@ export interface operations {
                      *             "home_writable": false,
                      *             "home_deletable": false,
                      *             "home_shareable": false,
-                     *             "published": true,
                      *             "placements": [
                      *               {
                      *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *                 "via": "system",
                      *                 "state": "active",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               },
                      *               {
                      *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *                 "via": "system",
                      *                 "state": "inactive",
-                     *                 "chat_enforced": false,
                      *                 "shared_by": null
                      *               }
                      *             ],
@@ -27481,8 +27391,6 @@ export interface operations {
                     generation_config?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
-                    /** @description Skills only. `true` injects the skill's latest published `SKILL.md` in every chat conversation held in this space, for every member whatever their `skills:*` grants — its content is disclosed to them. Refused unless the skill has a published version, and within the space's cap of enforced skills and the chat's skills content budget. Audited as `package.chat_enforced` / `package.chat_released`, only when the stored value changes. */
-                    chat_enforced?: boolean;
                 };
             };
         };
@@ -27497,30 +27405,11 @@ export interface operations {
                     "application/json": components["schemas"]["SpacePackage"];
                 };
             };
-            /** @description Validation error (`validation_failed`), or `chat_enforced` sent for a package that is not a skill (`chat_enforced_not_skill`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
