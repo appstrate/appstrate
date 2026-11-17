@@ -183,7 +183,7 @@ const READD_LEVEL_CHECKS_NOT_VALID = `
  * re-enables in step 6.
  *
  * Those two triggers are NOT in this database. `createNotifyTriggers()` is
- * called from exactly one place — `bootBackground()` in `apps/api/src/lib/
+ * called from exactly one place — `bootServing()` in `apps/api/src/lib/
  * boot.ts` — and the test harness never boots the API, so every `DISABLE` /
  * `ENABLE` the script aims at them is a guarded no-op here. Deleting steps 2
  * and 6 from the script outright therefore changed no test outcome: the whole
@@ -764,7 +764,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
 
     // GUARD, and a deliberate tripwire. The four `createNotifyTriggers()` names
     // must be FREE here: they are a boot-time artifact installed from
-    // `bootBackground()`, and the harness never boots the API. If one of them is
+    // `bootServing()`, and the harness never boots the API. If one of them is
     // already present, something has turned it into a MIGRATION artifact — the
     // exact regression that made `run_metric-streaming` and
     // `run-metric-broadcaster` receive one extra `send` per assertion, because

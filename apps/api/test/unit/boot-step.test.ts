@@ -28,9 +28,9 @@ describe("bootStep", () => {
 
   it("accepts a synchronous function", async () => {
     const { calls, log } = sink();
-    expect(await bootStep("background", "sync", () => "x", log)).toBe("x");
+    expect(await bootStep("serving", "sync", () => "x", log)).toBe("x");
     expect(calls).toHaveLength(1);
-    expect(calls[0]![1].phase).toBe("background");
+    expect(calls[0]![1].phase).toBe("serving");
   });
 
   it("rethrows the same error object and logs failed once", async () => {

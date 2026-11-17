@@ -37,6 +37,7 @@
  * the sentinel below — plaintext bundle bytes never touch stdout/stderr/logs.
  */
 
+import { assertRunCapacityReady } from "../orchestrator/agent-runtime-readiness.ts";
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
@@ -373,6 +374,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
           "This connection method is unavailable on this deployment. Contact your administrator.",
       });
     }
+    // A connect login spawns a sidecar container: refused until the boot's
+    // run-capacity phase is done (see `assertRunCapacityReady`).
+    assertRunCapacityReady();
     const orch = this.orchestrator ?? getOrchestrator();
     // Prefix comes from the grant module so the mint site and the
     // `/internal/*` discriminator can never drift apart.

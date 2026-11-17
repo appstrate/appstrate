@@ -2,7 +2,7 @@
 
 import { logger } from "./logger.ts";
 
-export type BootPhase = "critical" | "background";
+export type BootPhase = "critical" | "serving" | "run-capacity" | "housekeeping";
 
 export type BootStepLogger = (
   message: string,

@@ -263,6 +263,7 @@
   "apiError.sync_url_templated": "This integration's MCP server depends on each connection: it cannot be synchronized.",
   "apiError.missing_integration_connection": "An integration connection is missing or must be chosen before launching.",
   "apiError.model_not_configured": "No model is configured for this agent. Pick one or set the organization's default model.",
+  "apiError.run_capacity_starting": "Run execution is still starting up, retry in a few seconds.",
   "apiError.model_credential_missing": "This model's key is gone. Choose its models again under Settings › Models.",
   "apiError.model_needs_reconnection": "This model's key must be reconnected.",
   "apiError.model_disabled": "The default model must stay accessible to the organization. First pick another default model, or give access back to this one.",

@@ -2160,7 +2160,7 @@
             }
           },
           "503": {
-            "$ref": "#/components/responses/EncryptionKeyUnavailable"
+            "$ref": "#/components/responses/RunLaunchUnavailable"
           }
         }
       }
@@ -2617,7 +2617,7 @@
             }
           },
           "503": {
-            "$ref": "#/components/responses/EncryptionKeyUnavailable"
+            "$ref": "#/components/responses/RunLaunchUnavailable"
           }
         }
       }
@@ -8282,7 +8282,7 @@
             }
           },
           "503": {
-            "description": "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+            "description": "`run_capacity_starting` — the platform is still starting its run capacity (orphan cleanup, runtime initialisation); retry after the `Retry-After` delay. Otherwise (`connect_unavailable`) the configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9030,7 +9030,7 @@
             }
           },
           "503": {
-            "description": "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+            "description": "`run_capacity_starting` — the platform is still starting its run capacity (orphan cleanup, runtime initialisation); retry after the `Retry-After` delay. Otherwise (`connect_unavailable`) the configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37407,6 +37407,24 @@
       },
       "EncryptionKeyUnavailable": {
         "description": "`encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "RunLaunchUnavailable": {
+        "description": "`run_capacity_starting` — the platform is still starting: its orphan-run cleanup and first runtime initialisation are not done, so no run is accepted yet and nothing was written. Transient; retry after the `Retry-After` delay (seconds). The rest of the API already answers. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying (`run_capacity_starting`).",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
         "content": {
           "application/problem+json": {
             "schema": {

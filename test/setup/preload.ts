@@ -460,6 +460,13 @@ const { initSystemIntegrations } =
   await import("../../apps/api/src/services/integration-client-registry.ts");
 initSystemIntegrations([]);
 
+// Run launches are refused until the boot's run-capacity phase ends
+// (`assertRunCapacityReady`); the harness never runs that phase, so mark it
+// done once for the whole process. A test that resets the flag restores it.
+const { markRunCapacityReady } =
+  await import("../../apps/api/src/services/orchestrator/agent-runtime-readiness.ts");
+markRunCapacityReady();
+
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.
 // Without this, the bootstrap test would only ever see the org row — the

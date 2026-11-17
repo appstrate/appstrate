@@ -14,6 +14,7 @@
  * catalog queries. Collisions are prevented by the 128-bit UUID payload.
  */
 
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, runs } from "@appstrate/db/schema";
@@ -379,6 +380,8 @@ export async function triggerInlineRun(params: {
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
+  // Before the shadow package below: nothing may be written while run capacity is starting.
+  assertRunCapacityReady();
   const { orgId, spaceId, actor, payerUserId, runId, preflight, parsed, apiKeyId, traceparent } =
     params;
   const { manifest, prompt, modelIdOverride, proxyIdOverride, launchOverrides } = preflight;

@@ -5,6 +5,7 @@
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
+import { assertRunCapacityReady } from "./orchestrator/agent-runtime-readiness.ts";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import { logger } from "../lib/logger.ts";
 import {
@@ -362,6 +363,9 @@ export async function freezeRunSpawnDependencies(params: {
  * catch `ApiError` to translate into their own failure semantics.
  */
 export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
+  // Before anything is written: refused until the boot's run-capacity phase is
+  // done (see `assertRunCapacityReady`).
+  assertRunCapacityReady();
   const {
     runId,
     orgId,

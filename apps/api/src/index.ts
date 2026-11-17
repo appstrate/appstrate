@@ -4,7 +4,13 @@ import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
-import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
+import {
+  bootCritical,
+  bootServing,
+  bootRunCapacity,
+  bootHousekeeping,
+  probeUsercontentReachability,
+} from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
@@ -119,7 +125,7 @@ app.use("*", async (c, next) => {
   return globalBodyLimit(c, next);
 });
 
-// Boot gate — 503 on every route until `bootBackground()` (kicked off after
+// Boot gate — 503 on every route until `bootServing()` (kicked off after
 // the export at the bottom of this file) resolves. Registered BEFORE
 // `healthRouter` so the probe is answered by the gate while starting.
 // Definition + rationale: `routes/health.ts`.
@@ -444,31 +450,44 @@ export default {
 
 logger.info("Server listening (starting up)", { port: env.PORT });
 
-// Boot phase 2 — orphan cleanup, system-package DB sync, workers. Deliberately
-// NOT awaited: Bun binds the port once this module finishes evaluating, so
-// awaiting here would keep the socket closed for the whole of it (worst case
-// the per-orphan container stops, which is exactly the restart-after-incident
-// path where the API should come back fastest). Until it resolves, the boot
-// gate above answers 503 on every route.
+// Boot phase 2 — readiness by capacity. Deliberately NOT awaited: Bun binds the
+// port once this module finishes evaluating, so awaiting here would keep the
+// socket closed for the whole of it.
+//   1. `bootServing()` (system-package sync, LISTEN/NOTIFY, cancel subscriber,
+//      metering recovery): until it resolves the boot gate above answers 503 on
+//      every route; then `markServerReady()` opens reads, auth and the dashboard.
+//   2. `bootRunCapacity()` (orphan cleanup, runtime first initialisation, run
+//      workers) and `bootHousekeeping()` run after. Until the first one calls
+//      `markRunCapacityReady()`, every run launch is refused with 503
+//      `run_capacity_starting` (`assertRunCapacityReady`, in the services).
 //
-// A rejection is fatal, matching the previous blocking `await boot()`: the
-// metering retry worker's init is deliberately uncaught upstream because a
+// A rejection anywhere is fatal, matching the previous blocking `await boot()`:
+// the metering retry worker's init is deliberately uncaught upstream because a
 // missing durable recovery channel can lose billable spend permanently.
 const bootStartedAt = Date.now();
-const backgroundStartedAt = performance.now();
-void bootBackground()
+const servingStartedAt = performance.now();
+void bootServing()
   .then(() => {
     markServerReady();
     logger.info("Server ready", {
       port: env.PORT,
       startupMs: Date.now() - bootStartedAt,
       criticalMs,
-      backgroundMs: Math.round(performance.now() - backgroundStartedAt),
+      servingMs: Math.round(performance.now() - servingStartedAt),
     });
     // Fire-and-forget reachability probe for USERCONTENT_URL.
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
     void probeUsercontentReachability();
+    const runCapacityStartedAt = performance.now();
+    return Promise.all([
+      bootRunCapacity().then(() =>
+        logger.info("Run capacity ready", {
+          runCapacityMs: Math.round(performance.now() - runCapacityStartedAt),
+        }),
+      ),
+      bootHousekeeping(),
+    ]);
   })
   .catch((err: unknown) => {
     logger.error("Boot failed — exiting", {

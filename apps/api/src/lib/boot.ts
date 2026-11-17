@@ -57,7 +57,10 @@ import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { startRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { initializeAgentRuntime } from "../services/orchestrator/agent-runtime-readiness.ts";
+import {
+  initializeAgentRuntime,
+  markRunCapacityReady,
+} from "../services/orchestrator/agent-runtime-readiness.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
@@ -90,7 +93,8 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
  * config, and aborting is only meaningful before anything is listening.
  *
  * Everything that is merely *state the handlers read* moves to
- * {@link bootBackground}, behind the readiness gate in `index.ts`.
+ * {@link bootServing} / {@link bootRunCapacity} / {@link bootHousekeeping}, behind the
+ * readiness gates in `index.ts`.
  */
 export async function bootCritical(): Promise<void> {
   // First, so the unread-key line is logged even if a later boot step fails.
@@ -261,7 +265,7 @@ export async function bootCritical(): Promise<void> {
   // Read the `.afps` archives off disk into the in-memory registry. Cheap
   // and consulted by request-path helpers (`isSystemPackage`), so it
   // stays pre-bind; the DB + S3 reconciliation it used to be bundled with is
-  // the slow half and runs in `bootBackground`.
+  // the slow half and runs in `bootServing`.
   await bootStep("critical", "init-system-packages", () =>
     initSystemPackages().catch((err) => {
       logger.warn("Could not load system packages", {
@@ -272,18 +276,16 @@ export async function bootCritical(): Promise<void> {
 }
 
 /**
- * Phase 2 — state, workers and cleanup. Runs AFTER the port is bound, behind
- * the readiness gate in `index.ts`, which answers 503 on every route until
- * this resolves. Nothing here changes the route table.
+ * Phase 2a — serving. Runs AFTER the port is bound, behind the readiness gate in
+ * `index.ts`, which answers 503 on every route until this resolves; reads, auth
+ * and the dashboard need nothing more. Nothing here changes the route table.
  *
- * A rejection here is fatal exactly as it was when this code lived in a
- * blocking `await boot()`: the caller in `index.ts` exits the process.
+ * A rejection is fatal exactly as it was when this code lived in a blocking
+ * `await boot()`: the caller in `index.ts` exits the process.
  */
-export async function bootBackground(): Promise<void> {
-  const env = (await import("@appstrate/env")).getEnv();
-
+export async function bootServing(): Promise<void> {
   // Reconcile the loaded system packages into the DB + S3.
-  await bootStep("background", "sync-system-packages", () =>
+  await bootStep("serving", "sync-system-packages", () =>
     syncSystemPackagesToDb().catch((err) => {
       logger.warn("Could not sync system packages", {
         error: getErrorMessage(err),
@@ -292,7 +294,7 @@ export async function bootBackground(): Promise<void> {
   );
 
   // Surface orgs whose stored API-version pin this build cannot serve.
-  await bootStep("background", "api-version-pins", () =>
+  await bootStep("serving", "api-version-pins", () =>
     warnOnUnserveableApiVersionPins().catch((err) => {
       logger.warn("Could not check organization API version pins", {
         error: getErrorMessage(err),
@@ -301,13 +303,13 @@ export async function bootBackground(): Promise<void> {
   );
 
   // Read in the background: boot never waits on the channel.
-  await bootStep("background", "model-catalog-sync", () => startModelCatalogSync());
+  await bootStep("serving", "model-catalog-sync", () => startModelCatalogSync());
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
     // `error`, not `warn`: without the triggers every dashboard SSE is silent
     // for the life of the process, and without LISTEN until a retry succeeds.
-    bootStep("background", "notify-triggers", () =>
+    bootStep("serving", "notify-triggers", () =>
       createNotifyTriggers(db)
         .then(() => logger.info("NOTIFY triggers installed"))
         .catch((err) => {
@@ -316,7 +318,7 @@ export async function bootBackground(): Promise<void> {
           });
         }),
     ),
-    bootStep("background", "realtime-listen", () =>
+    bootStep("serving", "realtime-listen", () =>
       retryUntilSuccess("Realtime LISTEN", () => initRealtime(), {
         initialDelayMs: 1_000,
         level: "error",
@@ -325,7 +327,7 @@ export async function bootBackground(): Promise<void> {
     // Cross-replica cache invalidation rides the same LISTEN client. Without
     // it every `@appstrate/core/cache` invalidation stays process-local and
     // other replicas fall back to their TTL — degraded, not broken.
-    bootStep("background", "cache-bus", () =>
+    bootStep("serving", "cache-bus", () =>
       initCacheBus().catch((err) => {
         logger.warn("Could not initialize the cache invalidation bus", {
           error: getErrorMessage(err),
@@ -334,6 +336,25 @@ export async function bootBackground(): Promise<void> {
     ),
   ]);
 
+  // Initialize cross-instance cancel subscriber
+  await bootStep("serving", "cancel-subscriber", () => initCancelSubscriber());
+
+  // Billing correctness barrier: unlike ancillary workers, this init is not
+  // caught/degraded. Boot must fail if the durable metering recovery channel
+  // is unavailable; otherwise a transient ledger write failure after
+  // provider spend could be lost permanently.
+  await bootStep("serving", "llm-usage-retry-worker", () => initLlmUsageRetryWorker());
+}
+
+/**
+ * Phase 2b — run capacity. Orphan cleanup then the runtime's first
+ * `initialize()` attempt (image pre-pull); only execution needs them. When they
+ * are done {@link markRunCapacityReady} lifts the launch refusal
+ * (`assertRunCapacityReady`) and the run-related workers start. A rejection is
+ * fatal, as for {@link bootServing}.
+ */
+export async function bootRunCapacity(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
   // Sequential cleanup: orphan runs must be finalized before container
   // cleanup, and containers must be cleaned before orchestrator init.
   //
@@ -343,7 +364,7 @@ export async function bootBackground(): Promise<void> {
   // makes this race-safe against a delayed metric POST that lands during
   // the same boot window.
   const orchestrator = getOrchestrator();
-  await bootStep("background", "orphan-runs", async () => {
+  await bootStep("run-capacity", "orphan-runs", async () => {
     try {
       const orphanIds = await listOrphanRunIds();
       if (orphanIds.length > 0) {
@@ -403,7 +424,7 @@ export async function bootBackground(): Promise<void> {
     }
   });
 
-  await bootStep("background", "orphan-resources", async () => {
+  await bootStep("run-capacity", "orphan-resources", async () => {
     try {
       const report = await orchestrator.cleanupOrphans();
       if (report.workloads > 0 || report.isolationBoundaries > 0) {
@@ -416,32 +437,25 @@ export async function bootBackground(): Promise<void> {
     }
   });
 
-  // Initialize cross-instance cancel subscriber
-  await bootStep("background", "cancel-subscriber", () => initCancelSubscriber());
+  await bootStep("run-capacity", "agent-runtime", () => initializeAgentRuntime(orchestrator));
+  markRunCapacityReady();
 
-  // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
-  const parallelInits: Promise<void>[] = [
-    // Billing correctness barrier: unlike ancillary workers, this init is not
-    // caught/degraded. Boot must fail if the durable metering recovery channel
-    // is unavailable; otherwise a transient ledger write failure after
-    // provider spend could be lost permanently.
-    bootStep("background", "llm-usage-retry-worker", () => initLlmUsageRetryWorker()),
-    bootStep("background", "agent-runtime", () => initializeAgentRuntime(orchestrator)),
-    bootStep("background", "schedule-worker", () =>
+  await Promise.all([
+    bootStep("run-capacity", "schedule-worker", () =>
       initScheduleWorker().catch((err) => {
         logger.warn("Could not initialize schedule worker", {
           error: getErrorMessage(err),
         });
       }),
     ),
-    bootStep("background", "inline-compaction-worker", () =>
+    bootStep("run-capacity", "inline-compaction-worker", () =>
       initInlineCompactionWorker().catch((err) => {
         logger.warn("Could not initialize inline compaction worker", {
           error: getErrorMessage(err),
         });
       }),
     ),
-    bootStep("background", "personal-space-sweeper-worker", () =>
+    bootStep("run-capacity", "personal-space-sweeper-worker", () =>
       initPersonalSpaceSweeperWorker().catch((err) => {
         logger.warn("Could not initialize personal-space sweeper", {
           error: getErrorMessage(err),
@@ -453,7 +467,7 @@ export async function bootBackground(): Promise<void> {
     // cover correctness without it; the worker only matters for credentials
     // that go dormant long enough that their refresh_token would expire
     // upstream.
-    bootStep("background", "oauth-model-refresh-worker", () =>
+    bootStep("run-capacity", "oauth-model-refresh-worker", () =>
       (env.OAUTH_REFRESH_WORKER_ENABLED ? initOAuthModelRefreshWorker() : Promise.resolve()).catch(
         (err) => {
           logger.warn("Could not initialize OAuth model refresh worker", {
@@ -465,14 +479,14 @@ export async function bootBackground(): Promise<void> {
     // Pairing-table cleanup runs unconditionally — pure table-bloat
     // janitor for `model_provider_pairings`, unrelated to the refresh
     // hot path.
-    bootStep("background", "pairing-cleanup-worker", () =>
+    bootStep("run-capacity", "pairing-cleanup-worker", () =>
       initPairingCleanupWorker().catch((err) => {
         logger.warn("Could not initialize OAuth model pairing cleanup worker", {
           error: getErrorMessage(err),
         });
       }),
     ),
-    bootStep("background", "run-watchdog", () =>
+    bootStep("run-capacity", "run-watchdog", () =>
       startRunWatchdog({
         intervalSeconds: env.RUN_WATCHDOG_INTERVAL_SECONDS,
         stallThresholdSeconds: env.RUN_STALL_THRESHOLD_SECONDS,
@@ -488,7 +502,7 @@ export async function bootBackground(): Promise<void> {
     // owns its own artifact locality. `initialize()` above pre-pulls once;
     // this is what keeps that true against host-level image pruning between
     // runs (see services/orchestrator/runtime-image-warmer.ts).
-    bootStep("background", "runtime-image-warmer", () =>
+    bootStep("run-capacity", "runtime-image-warmer", () =>
       Promise.resolve().then(() => {
         if (getExecutionMode() !== "docker") return;
         startRuntimeImageWarmer({
@@ -500,7 +514,16 @@ export async function bootBackground(): Promise<void> {
         });
       }),
     ),
-    bootStep("background", "expire-invitations", () =>
+  ]);
+}
+
+/**
+ * Phase 2c — housekeeping. Table-bloat janitors and storage GC; nothing waits
+ * on them. A rejection is fatal, as for {@link bootServing}.
+ */
+export async function bootHousekeeping(): Promise<void> {
+  await Promise.all([
+    bootStep("housekeeping", "expire-invitations", () =>
       expireOldInvitations()
         .then((expiredCount) => {
           if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
@@ -511,7 +534,7 @@ export async function bootBackground(): Promise<void> {
           });
         }),
     ),
-    bootStep("background", "cleanup-expired-keys", () =>
+    bootStep("housekeeping", "cleanup-expired-keys", () =>
       cleanupExpiredKeys()
         .then((expiredKeyCount) => {
           if (expiredKeyCount > 0)
@@ -523,7 +546,7 @@ export async function bootBackground(): Promise<void> {
           });
         }),
     ),
-    bootStep("background", "cleanup-expired-uploads", () =>
+    bootStep("housekeeping", "cleanup-expired-uploads", () =>
       cleanupExpiredUploads()
         .then((count) => {
           if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
@@ -534,7 +557,7 @@ export async function bootBackground(): Promise<void> {
           });
         }),
     ),
-    bootStep("background", "cleanup-expired-files", () =>
+    bootStep("housekeeping", "cleanup-expired-files", () =>
       cleanupExpiredFiles()
         .then((count) => {
           if (count > 0) logger.info("Removed expired files", { count });
@@ -545,9 +568,7 @@ export async function bootBackground(): Promise<void> {
           });
         }),
     ),
-  ];
-
-  await Promise.all(parallelInits);
+  ]);
 
   // Kick off the recurring upload + file sweeps once initial cleanup is scheduled.
   startUploadGc();
