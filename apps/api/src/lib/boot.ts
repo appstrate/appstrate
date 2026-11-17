@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db, isEmbeddedDb } from "@appstrate/db/client";
-import { applyCoreMigrations, assertCoreMigrationsApplied } from "@appstrate/db/core-migrations";
+import {
+  applyCoreMigrations,
+  assertCoreMigrationsApplied,
+  CORE_MIGRATIONS_FOLDER,
+} from "@appstrate/db/core-migrations";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -585,9 +589,8 @@ export async function bootHousekeeping(): Promise<void> {
  * boot path and the tier0 test preload run identical migration logic.
  */
 async function applyEmbeddedMigrations(): Promise<void> {
-  const { resolve } = await import("node:path");
   const { applyCorePGliteMigrations } = await import("./pglite-migrate.ts");
-  await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
+  await applyCorePGliteMigrations(CORE_MIGRATIONS_FOLDER);
 }
 
 /**
