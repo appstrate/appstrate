@@ -12,7 +12,8 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
-import { testHost, transportOf } from "./fake-request.ts";
+import { transportOf } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 
 const host = testHost();

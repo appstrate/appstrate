@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The host's seams, faked: `ChatRequest` (a non-2xx answer thrown with its `status`/`code`) and `ChatHost`. */
+/** The host's request seam, faked: `ChatRequest` (a non-2xx answer thrown with its `status`/`code`) and the transport. */
 
-import type { ChatHost, ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
+import type { ChatRequest, ChatTransport } from "../src/ui/runtime-context.ts";
 
 class FakeProblem extends Error {
   constructor(
@@ -34,20 +34,4 @@ export function requestAnswering(
 /** The transport a static render is given: headers as the host scopes them, requests never answered. */
 export function transportOf(getHeaders: () => Record<string, string>): ChatTransport {
   return { getHeaders, request: () => Promise.reject(new Error("no request in a static render")) };
-}
-
-/** A host granting everything, keys echoed: `overrides` set what a test reads. */
-export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
-  return {
-    openFile: () => {},
-    downloadFile: () => {},
-    useFileImageSrc: () => null,
-    t: (key) => key,
-    can: () => true,
-    personalModelCredentials: true,
-    modelCredentials: [],
-    formatBytes: String,
-    onPackagesChanged: () => {},
-    ...overrides,
-  };
 }

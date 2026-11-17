@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { SkillsChip } from "../src/ui/skills-picker.tsx";
 import type { ChatSkillSelection } from "../src/skills.ts";
-import { testHost } from "./fake-request.ts";
+import { testHost } from "./test-host.ts";
 
 function html(selection: ChatSkillSelection): string {
   return renderToStaticMarkup(

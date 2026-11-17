@@ -7,16 +7,16 @@
  * tooltip lists the names. Removal happens in the picker, which both pills open.
  */
 
-import type { ReactNode } from "react";
-import { BookOpenIcon, LockIcon, PlusIcon } from "lucide-react";
+import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { badgeVariants } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
+import { injectsSkills, isDefaultSkillSelection, type ChatSkillSelection } from "../skills.ts";
 import { ownPins } from "./chat-skills.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { SkillsChip } from "./skills-picker.tsx";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
 
@@ -26,23 +26,30 @@ interface LoadedSkill {
 }
 
 /**
- * What the conversation loads: the space's imposed skills and the user's own pins. Pins
- * count only in a mode that injects them (`auto` keeps them but uses none); an enforced skill is
- * never listed twice.
+ * What the conversation loads: the space's imposed skills and, for who can pick, the user's own
+ * pins. Pins count only in a mode that injects them (`auto` keeps them but uses none); an enforced
+ * skill is never listed twice. The catalogue is read only to name pins, so only when there are.
  */
-function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
+function useLoadedSkills(
+  transport: ChatTransport | undefined,
+  selection: ChatSkillSelection,
+  pickable: boolean,
+) {
   const enforcedQuery = useEnforcedSkills(transport);
-  const { catalogue } = useSkillCatalogue(transport);
   const enforcedSkills = enforcedQuery.data ?? [];
   const enforcedIds = new Set(enforcedSkills.map((skill) => skill.packageId));
+  const pinnedIds =
+    pickable && injectsSkills(selection.skillMode)
+      ? ownPins(selection.pinnedSkills, enforcedIds)
+      : [];
+  const { catalogue } = useSkillCatalogue(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
   const enforced: LoadedSkill[] = enforcedSkills.map((s) => ({
     packageId: s.packageId,
     name: s.display_name ?? s.packageId,
   }));
-  const pinned: LoadedSkill[] = (
-    injectsSkills(selection.skillMode) ? ownPins(selection.pinnedSkills, enforcedIds) : []
-  ).map((id) => ({
+  // Named by the package's bare name until the catalogue answers.
+  const pinned: LoadedSkill[] = pinnedIds.map((id) => ({
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
   }));
@@ -55,17 +62,16 @@ const PILL_CLASS = cn(
   "text-muted-foreground h-7 min-w-0 shrink gap-1.5 px-2.5 py-0 font-normal",
 );
 
+type Translate = ReturnType<typeof useChatHost>["t"];
+
 /** The pill's text: the count of several skills, the name of a single one. */
-function pillText(
-  skills: readonly LoadedSkill[],
-  countKey: string,
-  t: ReturnType<typeof useChatHost>["t"],
-): string {
+function pillText(skills: readonly LoadedSkill[], countKey: string, t: Translate): string {
   return skills.length === 1 ? skills[0]!.name : t(countKey, { n: skills.length });
 }
 
-function namesOf(skills: readonly LoadedSkill[]): string {
-  return skills.map((skill) => skill.name).join(", ");
+/** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
+function skillsSummary(skills: readonly LoadedSkill[], t: Translate): string {
+  return skills.length === 1 ? skills[0]!.name : t("skills.count", { n: skills.length });
 }
 
 function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
@@ -81,7 +87,7 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
 /** The imposed skills, locked in one pill: it opens the picker for who can pick, else is a focusable note. */
 function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen?: () => void }) {
   const { t } = useChatHost();
-  const label = t("skills.enforcedIndicator", { names: namesOf(skills) });
+  const summary = skillsSummary(skills, t);
   const body = (
     <>
       <LockIcon className="size-3.5 shrink-0" aria-hidden="true" />
@@ -95,7 +101,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
           <button
             type="button"
             data-testid="skill-pill-enforced"
-            aria-label={label}
+            aria-label={t("skills.enforcedPillAction", { skills: summary })}
             onClick={onOpen}
             className={PILL_CLASS}
           >
@@ -106,7 +112,7 @@ function EnforcedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOp
             role="note"
             tabIndex={0}
             data-testid="skill-pill-enforced"
-            aria-label={label}
+            aria-label={t("skills.enforcedPillLabel", { skills: summary })}
             className={PILL_CLASS}
           >
             {body}
@@ -130,7 +136,7 @@ function PinnedPill({ skills, onOpen }: { skills: readonly LoadedSkill[]; onOpen
         <button
           type="button"
           data-testid="skill-pill-pinned"
-          aria-label={t("skills.pinnedPillLabel", { names: namesOf(skills) })}
+          aria-label={t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) })}
           onClick={onOpen}
           className={PILL_CLASS}
         >
@@ -150,24 +156,25 @@ interface SkillChipsProps {
   selection: ChatSkillSelection;
   /** Absent for a member who cannot pick: the pill is then read-only and enforced-only. */
   onOpenPicker?: () => void;
-  /** Drawn when no skill is loaded: the entry to the picker (its summary chip). */
-  fallback?: ReactNode;
 }
 
-/** The skill pills of the composer's tool row, or `fallback` while no skill is loaded. */
-export function SkillChips({
-  transport,
-  selection,
-  onOpenPicker,
-  fallback = null,
-}: SkillChipsProps) {
+/**
+ * The skill pills of the composer's tool row. While no skill is loaded, who can pick gets the
+ * picker's summary chip instead (drawn only off the default selection).
+ */
+export function SkillChips({ transport, selection, onOpenPicker }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { enforced, pinned: allPinned, loading } = useLoadedSkills(transport, selection);
-  // Pins are the user's to edit: without the picker, only what the space imposes shows.
-  const pinned = onOpenPicker ? allPinned : [];
-  // Same footprint as a real pill: no layout shift when the read answers.
-  if (loading) return <Skeleton className="h-7 w-28 shrink-0 rounded-full" aria-hidden />;
-  if (enforced.length === 0 && pinned.length === 0) return <>{fallback}</>;
+  const { enforced, pinned, loading } = useLoadedSkills(transport, selection, !!onOpenPicker);
+  if (loading) {
+    // A placeholder only where something is sure to be drawn once the read answers (the chip
+    // for a non-default selection) or is the only thing this row is for (no picker): elsewhere
+    // the common case draws nothing, and a placeholder would itself be the shift.
+    const reserve = !onOpenPicker || !isDefaultSkillSelection(selection);
+    return reserve ? <Skeleton className="h-7 w-28 shrink-0 rounded-full" aria-hidden /> : null;
+  }
+  if (enforced.length === 0 && pinned.length === 0) {
+    return onOpenPicker ? <SkillsChip selection={selection} onClick={onOpenPicker} /> : null;
+  }
 
   return (
     <div
@@ -177,18 +184,7 @@ export function SkillChips({
       className="flex min-w-0 flex-nowrap items-center gap-1.5"
     >
       {enforced.length > 0 && <EnforcedPill skills={enforced} onOpen={onOpenPicker} />}
-      {pinned.length > 0 && <PinnedPill skills={pinned} onOpen={onOpenPicker!} />}
-      {onOpenPicker && (
-        <button
-          type="button"
-          data-testid="skill-chips-add"
-          aria-label={t("skills.add")}
-          onClick={onOpenPicker}
-          className="text-muted-foreground hover:bg-foreground/10 flex size-7 shrink-0 items-center justify-center rounded-full"
-        >
-          <PlusIcon className="size-3.5" aria-hidden="true" />
-        </button>
-      )}
+      {onOpenPicker && pinned.length > 0 && <PinnedPill skills={pinned} onOpen={onOpenPicker} />}
     </div>
   );
 }
