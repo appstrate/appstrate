@@ -54,10 +54,9 @@ export interface AgentActionsProps {
 
 /**
  * The agent page's Actions menu and the dialogs its deeds open. With a space selected every deed
- * acts there. In « Tous les espaces » each asks its space (`SpaceDeed`): the run, the schedule
- * and the copy enter it (their dialogs act in the working space), the deletions name it in their
- * request, the bundle is read from any space the agent is active in. `menu` is `undefined` while
- * the agent is read.
+ * acts there. In « Tous les espaces », run and schedule dialogs enter the chosen space.
+ * Forks and deletions send the chosen space with their request. The bundle can be read
+ * from any active placement. The menu is available once the agent detail has loaded.
  */
 export function useAgentActions({
   packageId,

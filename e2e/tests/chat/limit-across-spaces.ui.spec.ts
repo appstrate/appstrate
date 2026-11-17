@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Limiting a conversation from « Tous les espaces ». A conversation with no origin space has
+ * Attachment and conversation destinations from « Tous les espaces ». A conversation with no origin space has
  * nothing to confine it to, so « Limiter à un espace » asks which space among those the chat acts
  * in; the space picked becomes its origin, in one `PATCH { spaceId, restricted: true }`. From
  * then on it is listed under that space's filter and no other's (before, holding no space, it
- * belonged to every filter). No turn is generated: the conversation is created through the API.
+ * belonged to every filter).
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
@@ -55,19 +55,6 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const chip = page.getByTestId("composer-limit-chip");
     await expect(chip).toHaveCount(0);
 
-    const attach = page.getByRole("button", { name: "Joindre des fichiers", exact: true });
-    await attach.click();
-    const files = page.waitForEvent("filechooser");
-    await page.getByRole("menuitem", { name: beta.name }).click();
-    await (
-      await files
-    ).setFiles({
-      name: "beta.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("Beta"),
-    });
-    await expect(page.getByText("beta.txt", { exact: true })).toBeVisible();
-
     // Settings › « Limiter à un espace » › the acting spaces.
     await page.getByTestId("composer-settings-trigger").click();
     const limit = page.getByTestId("composer-limit-item");
@@ -107,4 +94,41 @@ test("a conversation with no origin is limited to the space picked from « Tous 
   // Alpha is now its origin: listed under Alpha's filter, no longer under Beta's.
   expect(await listedUnder(alpha.id)).toContain(session.id);
   expect(await listedUnder(beta.id)).not.toContain(session.id);
+});
+
+test("the overview attach button stages the file in the chosen space", async ({
+  browser,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const { orgId, defaultSpaceId } = browserCtx.org;
+  const destination = await createSpace(orgOnlyClient, `Atelier ${Date.now()}`);
+  const context = await createOverviewContext(browser, browserCtx.auth, orgId, defaultSpaceId);
+  const page = await context.newPage();
+  try {
+    // Uploads reach the real server. The turn itself does not need a provider.
+    await page.route(`**/api/orgs/${orgId}/chat`, (route) => route.fulfill({ status: 503 }));
+    await page.goto("/chat");
+    await page.getByRole("button", { name: "Joindre des fichiers", exact: true }).click();
+    const choosing = page.waitForEvent("filechooser");
+    await page.getByRole("menuitem", { name: destination.name }).click();
+    await (
+      await choosing
+    ).setFiles({
+      name: "atelier.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Atelier"),
+    });
+    await expect(page.getByText("atelier.txt", { exact: true })).toBeVisible();
+    const upload = page.waitForResponse(
+      (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/uploads",
+    );
+    await page.getByPlaceholder("Message Appstrate…").fill("Voici le fichier.");
+    await page.getByRole("button", { name: "Envoyer", exact: true }).click();
+    const response = await upload;
+    expect(await response.request().headerValue("X-Space-Id")).toBe(destination.id);
+    expect(response.ok()).toBe(true);
+  } finally {
+    await context.close();
+  }
 });
