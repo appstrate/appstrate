@@ -6,8 +6,9 @@
  * query and keeps its button disabled while it is in flight.
  */
 
+import { Alert } from "@appstrate/ui/components/alert";
 import { Trans, useTranslation } from "react-i18next";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import type { useConnectionDeleteImpact } from "../../hooks/use-me-connections";
 import { errorDetail } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
@@ -44,7 +45,7 @@ export function ConnectionDeleteImpact({
       <AlertTitle>{t("connections.impact.title")}</AlertTitle>
       <AlertDescription>
         {(data.pins.length > 0 || data.schedules.length > 0) && (
-          <ul className="mt-1 list-disc space-y-1 pl-5">
+          <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
             {data.pins.map((pin) => {
               const effect =
                 pin.connection_count > 1

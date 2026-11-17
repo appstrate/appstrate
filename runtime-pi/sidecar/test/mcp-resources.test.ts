@@ -61,8 +61,8 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
   );
   return createTestApp({
     ...appDeps,
-    runtimeDeps,
-    additionalMcpToolsProvider: () => host.buildTools(),
+    blobStore: runtimeDeps.blobStore,
+    mcpToolsProvider: () => host.buildTools(),
   });
 }
 
@@ -131,7 +131,7 @@ describe("POST /mcp — api_call resource spillover", () => {
     expect(result.content).toHaveLength(1);
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.mimeType).toBe("application/pdf");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\/run-test\/[A-Z0-9]{26}$/);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\/run-test\/[A-Z0-9]{26}$/);
   });
 
   it("treats OOXML media types as binary even though their subtype contains xml", async () => {
@@ -492,7 +492,7 @@ describe("POST /mcp — api_call response body survives (no outputSchema / no st
 
 describe("POST /mcp — resources/list + resources/read", () => {
   it("returns an empty resources/list initially", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, { method: "resources/list" });
     const result = res.json.result as { resources: unknown[] };
     expect(result.resources).toEqual([]);
@@ -521,7 +521,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     });
     const callResult = callRes.json.result as { content: Array<{ uri: string }> };
     const uri = callResult.content[0]!.uri;
-    expect(uri).toMatch(/^appstrate:\/\/api-response\/run-test\//);
+    expect(uri).toMatch(/^appstrate:\/\/tool-output\/run-test\//);
 
     // 2. Read the resource and verify the bytes round-trip.
     const readRes = await rpc(app, {
@@ -575,10 +575,10 @@ describe("POST /mcp — resources/list + resources/read", () => {
   });
 
   it("rejects reads for unknown URIs with InvalidParams", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://api-response/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://tool-output/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);
@@ -586,17 +586,17 @@ describe("POST /mcp — resources/list + resources/read", () => {
   });
 
   it("rejects reads for cross-run URIs (security invariant)", async () => {
-    const app = createTestApp(makeDeps()); // runId = run-test
+    const app = await makeResourcesApp(); // runId = run-test
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://api-response/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://tool-output/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);
   });
 
   it("rejects reads for malformed URIs", async () => {
-    const app = createTestApp(makeDeps());
+    const app = await makeResourcesApp();
     const res = await rpc(app, {
       method: "resources/read",
       params: { uri: "file:///etc/passwd" },

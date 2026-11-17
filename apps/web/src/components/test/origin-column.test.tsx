@@ -32,7 +32,7 @@ function columnsOf<T>(useColumns: () => DataColumn<T>[]): DataColumn<T>[] {
 }
 
 const packageOrigin = columnsOf(() => usePackageColumns("agent")).find((c) => c.id === "origin")!;
-const integrationOrigin = columnsOf(() => useIntegrationListColumns()).find(
+const integrationOrigin = columnsOf(() => useIntegrationListColumns(undefined, false)).find(
   (c) => c.id === "origin",
 )!;
 
@@ -55,5 +55,12 @@ describe("the origin column", () => {
   it("keeps the mark of a package installed on its own", () => {
     const auto = { id: "@acme/x", source: "local", autoInstalled: true } as CardItem;
     expect(render(<>{packageOrigin.cell(auto)}</>)).toContain(agentsFr["list.badgeAutoInstalled"]);
+  });
+});
+
+describe("the origin column's width", () => {
+  it("caps its lines at the column, so a long organization name truncates instead of spilling over its neighbour", () => {
+    const html = render(<>{packageOrigin.cell({ id: "@acme/x", source: "local" } as CardItem)}</>);
+    expect(html).toContain("[&amp;&gt;*]:max-w-full");
   });
 });

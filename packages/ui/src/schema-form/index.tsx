@@ -13,7 +13,7 @@
  *     onSubmit={…}
  *     upload={uploadClient}
  *   >
- *     {/* custom footer, or leave empty to let RJSF render a submit button *\/}
+ *     {/* host-owned controls submit through the forwarded ref *\/}
  *   </SchemaForm>
  *
  * The AFPS `SchemaWrapper` (schema + file_constraints + ui_hints + property_order)
@@ -35,7 +35,6 @@ import {
   ArrayFieldItemTemplate,
   ObjectFieldTemplate,
   MultiSchemaFieldTemplate,
-  SubmitButton,
 } from "./templates.tsx";
 import {
   FileWidget,
@@ -69,7 +68,6 @@ const templates = {
   ArrayFieldItemTemplate,
   ObjectFieldTemplate,
   MultiSchemaFieldTemplate,
-  ButtonTemplates: { SubmitButton },
 };
 
 export interface SchemaFormProps extends Omit<

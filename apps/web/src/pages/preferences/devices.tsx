@@ -72,7 +72,7 @@ export function PreferencesDevicesPage() {
       </div>
 
       <DataTable
-        tableId="cli-sessions-me"
+        tableId="devices"
         columns={columns}
         rows={sessions}
         rowKey={(s) => s.familyId}
@@ -84,6 +84,7 @@ export function PreferencesDevicesPage() {
             icon={Laptop}
             message={t("devices.emptyTitle")}
             hint={t("devices.emptyDescription")}
+            compact
           />
         }
       />

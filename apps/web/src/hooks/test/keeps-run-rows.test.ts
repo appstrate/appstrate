@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Which key changes keep a run list's rows on screen while the next page loads. */
+/** Which key changes keep a run list's rows on screen while the next key loads. */
 
 import { describe, it, expect } from "bun:test";
-import { paginatedRunsKeys } from "../../lib/query-keys.ts";
+import { ACROSS_SPACES, paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { keepsRunRows } from "../use-paginated-runs.ts";
 
-const key = (overrides: { status?: string; search?: string; offset?: number } = {}) =>
+const key = (overrides: { status?: string; search?: string; limit?: number } = {}) =>
   paginatedRunsKeys.list(
     "org_1",
     "spc_1",
@@ -14,14 +14,14 @@ const key = (overrides: { status?: string; search?: string; offset?: number } = 
     undefined,
     undefined,
     overrides.status,
+    undefined,
     overrides.search ?? "",
-    20,
-    overrides.offset ?? 0,
+    overrides.limit ?? 25,
   );
 
 describe("keepsRunRows", () => {
-  it("keeps the rows while paging", () => {
-    expect(keepsRunRows(key({ offset: 0 }), key({ offset: 20 }))).toBe(true);
+  it("drops the rows when the page size changes", () => {
+    expect(keepsRunRows(key({ limit: 25 }), key({ limit: 1 }))).toBe(false);
   });
 
   it("keeps the rows while the search changes, so typing never flashes a skeleton", () => {
@@ -30,5 +30,23 @@ describe("keepsRunRows", () => {
 
   it("drops the rows when a filter changes", () => {
     expect(keepsRunRows(key(), key({ status: "failed" }))).toBe(false);
+  });
+
+  it("treats a list across spaces like any list: searching keeps, entering or leaving it drops", () => {
+    const across = (search = "") =>
+      paginatedRunsKeys.list(
+        "org_1",
+        ACROSS_SPACES,
+        "/runs",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        search,
+        20,
+      );
+    expect(keepsRunRows(across(), across("rap"))).toBe(true);
+    expect(keepsRunRows(key(), across())).toBe(false);
+    expect(keepsRunRows(across(), key())).toBe(false);
   });
 });

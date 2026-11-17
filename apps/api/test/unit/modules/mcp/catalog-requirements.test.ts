@@ -158,6 +158,11 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
     route: "ALL /api/mcp/o/:org/s/:space",
     why: "405 `Allow: POST` for every verb the POST route leaves",
   },
+  {
+    route: "ALL /api/runs/:id/mcp",
+    why: "405 `Allow: POST` for every verb the POST route leaves",
+  },
+  { route: "ALL /internal/mcp", why: "405 `Allow: POST` for every verb the POST route leaves" },
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 
@@ -198,21 +203,25 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     why: "the per-authorization-server OAuth redirect (AFPS §7.3) — the echoed `state` is the credential, and its tag must match",
   },
   {
+    path: "/api/integrations/callback/cimd/{tag}",
+    why: "the OAuth redirect a client metadata document lists — the echoed `state` is the credential; its tag and iss must match",
+  },
+  {
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },
-  { path: "/api/runs/{runId}/events", why: "runner ingestion — HMAC `verifyRunSignature`" },
-  { path: "/api/runs/{runId}/events/*", why: "runner ingestion — HMAC `verifyRunSignature`" },
-  // NOT `/api/runs/{runId}*`: `sink/extend` carries `agents:run`.
+  { path: "/api/runs/{id}/events", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{id}/events/*", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  // NOT `/api/runs/{id}*`: `sink/extend` carries `agents:run`.
   {
-    path: "/api/runs/{runId}/files",
+    path: "/api/runs/{id}/files",
     why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
   },
   {
-    path: "/api/runs/{runId}/files/*",
+    path: "/api/runs/{id}/files/*",
     why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
   },
-  { path: "/api/runs/{runId}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{id}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
   { path: "/api/oauth/logout", why: "ends the session its own cookie names" },
   { path: "/api/uploads/_content", why: "HMAC upload sink — skips the auth pipeline outright" },
   // Only with `@appstrate/module-ee` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
@@ -230,12 +239,12 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   // Exact: every other route under `/api/orgs/…` IS guarded.
   { path: "/api/orgs", why: "the caller's own orgs, listed or created outside any org context" },
   { path: "/api/orgs/{orgId}", why: "membership (`orgRole`) is the gate, and every role reads" },
-  { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
   {
     methods: ["GET"],
-    path: "/api/orgs/{orgId}/logo",
-    why: "membership (`orgRole`) is the gate, every role reads",
+    path: "/api/org-roles",
+    why: "membership is the gate: the four roles' grants, the same for every caller",
   },
+  { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
   {
     path: "/api/orgs/{orgId}/leave",
     why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
@@ -243,12 +252,31 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
 
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
-  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+  ...rowDecided("the caller's own credential, then each space's own guards, read in the handler", [
     [["GET"], "/api/library"],
   ]),
+  ...rowDecided("the run-read grant of each space the caller reaches, read in the handler", [
+    [["GET"], "/api/orgs/{orgId}/runs"],
+  ]),
+  ...rowDecided(
+    "`schedules:read` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/schedules"]],
+  ),
+  ...rowDecided(
+    "`files:read` in each space the caller reaches, and its run-read and `files:delete` grants there per row, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/files"]],
+  ),
+  ...rowDecided(
+    "`agents:read` or `agents:run` in each space the caller reaches, and its run-read grant there for the counters, read in the handler",
+    [[["GET"], "/api/orgs/{orgId}/agents"]],
+  ),
+  ...rowDecided("`<type>:read` in each space the caller reaches, read in the handler", [
+    [["GET"], "/api/orgs/{orgId}/packages/skills"],
+    [["GET"], "/api/orgs/{orgId}/packages/integrations"],
+  ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
-    [["POST"], "/api/spaces/{spaceId}/packages"],
-    [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+    [["POST"], "/api/spaces/{id}/packages"],
+    [["PATCH", "DELETE"], "/api/spaces/{id}/packages/{scope}/{name}"],
   ]),
   ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
     [["GET"], "/api/realtime/runs"],
@@ -265,6 +293,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["POST"], "/api/webhooks/{id}/rotate"],
     [["GET"], "/api/webhooks/{id}/deliveries"],
   ]),
+  ...rowDecided(
+    "write authority on the package's home; `credential-proxy:call-own` only when the draft declares auths",
+    [[["POST"], "/api/integrations/{packageId}/discover"]],
+  ),
   ...rowDecided("the package's home space", [
     [["GET", "PUT"], "/api/packages/{scope}/{name}/home"],
   ]),
@@ -389,9 +421,7 @@ describe("requirement anchors", () => {
       deleteMyIntegrationPin: req(["integrations:connect"]),
       listNotifications: req(["runs:read|runs:read-all"]),
       getUnreadNotificationCount: req(["runs:read|runs:read-all"]),
-      getUnreadCountsByAgent: req(["runs:read|runs:read-all"]),
       markNotificationReadById: req(["runs:read|runs:read-all"]),
-      markNotificationRead: req(["runs:read|runs:read-all"]),
       markAllNotificationsRead: req(["runs:read|runs:read-all"]),
       createUpload: req(["agents:run"]),
     };
@@ -549,7 +579,7 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       guards: transport,
     },
     {
-      // `read_skill` is declared on every connection, so the transport is the
+      // `resources/read` on `skill://` is served on every connection, so the transport is the
       // only MCP half; a skill the space does not enforce is served on
       // `getSkill`'s guard, and `listSkills` names the rest.
       name: "turnCapabilities.readsSkills ↔ mcp:read ∧ getSkill ∧ listSkills",

@@ -38,8 +38,8 @@ export function OnboardingWaitingStep() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="flex max-w-md flex-col items-center gap-6 text-center">
-        <div className="bg-muted flex h-12 w-12 items-center justify-center rounded-full">
-          <Mail className="text-muted-foreground h-6 w-6" aria-hidden />
+        <div className="bg-muted flex size-12 items-center justify-center rounded-full">
+          <Mail className="text-muted-foreground size-6" aria-hidden />
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">{t("onboarding.waitingTitle")}</h1>

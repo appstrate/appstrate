@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { CredentialFields } from "../credential-fields.tsx";
@@ -175,6 +177,22 @@ describe("CredentialFields — widget per field", () => {
     it(`renders ${field} as ${widget}`, () => expectWidget(html(auth), field, widget));
   }
 
+  it("masks the refresh token Garmin Connect's connect.login asks for", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            "../../../../../../scripts/system-packages/integration-garmin-connect-1.0.0/manifest.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ) as { auths: Record<string, IntegrationManifestAuth> };
+    const [garmin] = Object.values(manifest.auths);
+    expectWidget(html(garmin!), "refresh_token", "password");
+  });
+
   it("masks the secret of an api_key or basic auth with no declared schema", () => {
     expectWidget(
       html({ type: "api_key" } as unknown as IntegrationManifestAuth),
@@ -200,5 +218,39 @@ describe("initialCredentialValues", () => {
     expect(initialCredentialValues(SSH_AUTH)).toEqual({
       port: "22",
     });
+  });
+});
+
+describe("CredentialFields — a conventional field without a title", () => {
+  it("labels `api_key` in the UI language, not by its raw name", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", writeOnly: true } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Clé API</label>");
+    expect(markup).not.toContain(">api_key</label>");
+  });
+});
+
+describe("CredentialFields — a declared title wins", () => {
+  it("keeps the manifest's title over the conventional label", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", title: "Jeton du projet en lecture seule" } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Jeton du projet en lecture seule</label>");
+    expect(markup).not.toContain(">Clé API</label>");
   });
 });

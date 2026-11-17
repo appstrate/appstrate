@@ -64,6 +64,7 @@ const CORE_TABLES = [
   "storage_deletion_jobs",
   // Leaf tables (no dependents)
   "notifications",
+  "run_reads",
   "audit_events",
   // Journal with no FKs, like `audit_events`: nothing cascades into it.
   "connection_calls",
@@ -76,10 +77,10 @@ const CORE_TABLES = [
   "package_persistence",
   "package_version_dependencies",
   "package_dist_tags",
-  // A package's placement, in both its halves: the offer and the activation.
-  // Both cascade from `packages` and `spaces`, so the order below would clean
-  // them anyway — they are named because a table this list does not name is a
-  // table whose isolation nobody checked, and these two are the newest.
+  // A package's placement. Both cascade from `packages` and `spaces`, so the
+  // order below would clean them anyway — they are named because a table this
+  // list does not name is a table whose isolation nobody checked.
+  // `package_shares` is read only by script 0048 and its boot guard.
   "package_shares",
   "space_packages",
   "integration_connections",

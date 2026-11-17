@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Badge } from "@appstrate/ui/components/badge";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,7 +8,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
-import { EmptyState, EmptyStateAction } from "./page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
 import { useLocalListParams } from "../lib/list-params";
 import { matchesSearch } from "../lib/strings";
@@ -15,7 +16,6 @@ import { TableRowActions } from "./table-row-actions";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellDate } from "./table-cells";
 import { ConfirmModal } from "./confirm-modal";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Trash2, RotateCcw, History, GitCompareArrows } from "lucide-react";
 
 interface VersionHistoryProps {
@@ -49,10 +49,12 @@ export function VersionHistory({
   const states = list.values("status", ["published", "yanked"] as const);
   const restoreVersion = useRestoreVersion(type, packageId);
   const deleteVersion = useDeleteVersion(type, packageId);
+  const busy = restoreVersion.isPending || deleteVersion.isPending;
   const [confirmState, setConfirmState] = useState<{
     type: "restore" | "delete";
     version: string;
   } | null>(null);
+  const restoring = confirmState?.type === "restore";
 
   const rows = (versions ?? []).filter(
     (version) =>
@@ -63,7 +65,6 @@ export function VersionHistory({
   return (
     <>
       <ListToolbar
-        placement="panel"
         search={{ value: search, onChange: list.setSearch, placeholder: t("version.search") }}
         filters={[
           {
@@ -80,32 +81,31 @@ export function VersionHistory({
         onReset={list.reset}
       />
       <DataTable
-        tableId="versions"
+        tableId="package-versions"
         label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}
-        surface="integrated"
-        columnMode="scroll"
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState
-            icon={History}
-            message={t(search || states.length ? "version.noMatch" : "version.noVersions")}
-            compact
-          >
-            {onCreate && !search && !states.length && (
-              <EmptyStateAction
-                action={{ label: t("version.createVersion"), onSelect: onCreate }}
-              />
-            )}
-          </EmptyState>
+          search || states.length ? (
+            <NoMatchState message={t("version.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState icon={History} message={t("version.noVersions")} compact>
+              {onCreate && (
+                <EmptyStateAction
+                  action={{ label: t("version.createVersion"), onSelect: onCreate }}
+                />
+              )}
+            </EmptyState>
+          )
         }
         columns={[
           {
             id: "version",
-            header: t("version.version"),
-            width: "minmax(80px,1fr)",
+            header: t("run.infoVersion"),
+            width: 80,
+            elastic: true,
             cell: (version) =>
               type === "integration" ? (
                 <span className="font-mono text-sm">{version.version}</span>
@@ -121,14 +121,16 @@ export function VersionHistory({
           {
             id: "date",
             header: t("version.created"),
-            width: "minmax(120px,1fr)",
+            width: 120,
+            elastic: true,
             align: "end",
             cell: (version) => <CellDate value={version.createdAt} />,
           },
           {
             id: "status",
             header: t("version.status"),
-            width: "minmax(100px,1fr)",
+            width: 100,
+            elastic: true,
             cell: (version) => (
               <Badge variant={version.yanked ? "warning" : "secondary"}>
                 {t(version.yanked ? "version.yanked" : "version.published")}
@@ -152,7 +154,7 @@ export function VersionHistory({
                         id: "restore",
                         label: t("version.restore"),
                         icon: RotateCcw,
-                        disabled: restoreVersion.isPending || deleteVersion.isPending,
+                        disabled: busy,
                         onSelect: () =>
                           setConfirmState({ type: "restore", version: version.version }),
                         hidden: !canRestore,
@@ -162,7 +164,7 @@ export function VersionHistory({
                         label: t("btn.delete", { ns: "common" }),
                         icon: Trash2,
                         destructive: true,
-                        disabled: deleteVersion.isPending || restoreVersion.isPending,
+                        disabled: busy,
                         onSelect: () =>
                           setConfirmState({ type: "delete", version: version.version }),
                         hidden: !canDelete,
@@ -178,32 +180,17 @@ export function VersionHistory({
       <ConfirmModal
         open={confirmState !== null}
         onClose={() => setConfirmState(null)}
-        title={
-          confirmState?.type === "restore" ? t("version.restoreTitle") : t("version.deleteTitle")
-        }
-        confirmLabel={
-          confirmState?.type === "restore"
-            ? t("version.restore")
-            : t("btn.delete", { ns: "common" })
-        }
-        description={
-          confirmState?.type === "restore"
-            ? t("version.restoreConfirm", { version: confirmState.version })
-            : t("version.deleteConfirm", { version: confirmState?.version })
-        }
-        variant={confirmState?.type === "restore" ? "default" : "destructive"}
-        isPending={restoreVersion.isPending || deleteVersion.isPending}
+        title={restoring ? t("version.restoreTitle") : t("version.deleteTitle")}
+        confirmLabel={restoring ? t("version.restore") : t("btn.delete", { ns: "common" })}
+        description={t(restoring ? "version.restoreConfirm" : "version.deleteConfirm", {
+          version: confirmState?.version,
+        })}
+        variant={restoring ? "default" : "destructive"}
+        isPending={busy}
         onConfirm={() => {
           if (!confirmState) return;
-          if (confirmState.type === "restore") {
-            restoreVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-            });
-          } else {
-            deleteVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-            });
-          }
+          const mutation = restoring ? restoreVersion : deleteVersion;
+          mutation.mutate(confirmState.version, { onSuccess: () => setConfirmState(null) });
         }}
       />
     </>

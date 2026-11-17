@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  allowsUndeclaredTools,
   resolveIntegrationToolCatalog,
   resolveIntegrationToolSurface,
   getConnectToolNames,
@@ -28,7 +29,8 @@ import {
 } from "../src/integration.ts";
 
 function localSourceManifest(opts: {
-  serverName?: string;
+  /** The advisory `source.server.tools` catalog of the local server. */
+  serverTools?: { name: string; description?: string }[];
   tools?: Record<string, unknown>;
   hidden_tools?: string[];
   connectToolName?: string;
@@ -56,7 +58,15 @@ function localSourceManifest(opts: {
     name: "@me/integ",
     version: "1.0.0",
     display_name: "Integ",
-    source: { kind: "local", server: { name: opts.serverName ?? "@me/server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+        ...(opts.serverTools ? { tools: opts.serverTools } : {}),
+      },
+    },
     auths: { primary: auth },
     ...(opts.tools ? { tools_policy: opts.tools } : {}),
     ...(opts.hidden_tools ? { hidden_tools: opts.hidden_tools } : {}),
@@ -112,6 +122,12 @@ function driveLikeManifest(): IntegrationManifest {
 describe("resolveIntegrationToolCatalog", () => {
   it("explains hidden and policy tools without widening the effective catalog", () => {
     const integration = localSourceManifest({
+      serverTools: [
+        { name: "read" },
+        { name: "write", description: "Write records" },
+        { name: "delete" },
+        { name: "login" },
+      ],
       hidden_tools: ["delete", "unknown_hidden"],
       connectToolName: "login",
       tools: {
@@ -119,15 +135,7 @@ describe("resolveIntegrationToolCatalog", () => {
         stale: { required_scopes: { primary: ["read"] } },
       },
     });
-    const result = resolveIntegrationToolSurface({
-      integration,
-      mcpServerTools: [
-        { name: "read" },
-        { name: "write", description: "Write records" },
-        { name: "delete" },
-        { name: "login" },
-      ],
-    });
+    const result = resolveIntegrationToolSurface({ integration });
     expect(result.catalog.map((tool) => tool.name)).toEqual(["read", "write"]);
     expect(result.inspection.basis).toBe("mcp_package");
     expect(result.inspection.entries.find((tool) => tool.name === "delete")).toMatchObject({
@@ -175,7 +183,7 @@ describe("resolveIntegrationToolCatalog", () => {
   it("reports API tools as platform additions even alongside an MCP package", () => {
     const result = resolveIntegrationToolSurface({
       integration: apiSourceManifest(),
-      mcpServerTools: [{ name: "search" }],
+      listedTools: [{ name: "search" }],
     });
     expect(result.inspection.entries).toEqual([
       { name: "search", origin: "mcp_package", exposure: "available" },
@@ -183,18 +191,28 @@ describe("resolveIntegrationToolCatalog", () => {
     ]);
   });
 
-  it("local source: surfaces mcp-server tools as the base catalog (MCPB-canonical)", () => {
+  it("local source: surfaces source.server.tools as the base catalog", () => {
     const out = resolveIntegrationToolCatalog({
-      integration: localSourceManifest({}),
-      mcpServerTools: [
-        { name: "kv_set", description: "set a key" },
-        { name: "kv_get", description: "get a key" },
-        { name: "hash" },
-      ],
+      integration: localSourceManifest({
+        serverTools: [
+          { name: "kv_set", description: "set a key" },
+          { name: "kv_get", description: "get a key" },
+          { name: "hash" },
+        ],
+      }),
     });
     expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", "hash"]);
     expect(out[0]!.description).toBe("set a key");
     expect(out[0]!.policy).toBeUndefined();
+  });
+
+  it("a server's listed tools stand for the catalog when the caller passes them", () => {
+    const out = resolveIntegrationToolCatalog({
+      integration: localSourceManifest({ serverTools: [{ name: "declared" }] }),
+      listedTools: [{ name: "listed_a", description: "live" }, { name: "listed_b" }],
+    });
+    expect(out.map((e) => e.name)).toEqual(["listed_a", "listed_b"]);
+    expect(out[0]!.description).toBe("live");
   });
 
   it("attaches policy from integration.tools_policy[name] without forcing every tool to be declared", () => {
@@ -205,8 +223,8 @@ describe("resolveIntegrationToolCatalog", () => {
             required_scopes: { primary: ["read"] },
           },
         },
+        serverTools: [{ name: "kv_set" }, { name: "fetch_echo" }],
       }),
-      mcpServerTools: [{ name: "kv_set" }, { name: "fetch_echo" }],
     });
     expect(out).toHaveLength(2);
     const fetchEcho = out.find((e) => e.name === "fetch_echo")!;
@@ -217,24 +235,27 @@ describe("resolveIntegrationToolCatalog", () => {
 
   it("subtracts hidden_tools (explicit opt-out)", () => {
     const out = resolveIntegrationToolCatalog({
-      integration: localSourceManifest({ hidden_tools: ["internal_dbg"] }),
-      mcpServerTools: [{ name: "public" }, { name: "internal_dbg" }],
+      integration: localSourceManifest({
+        hidden_tools: ["internal_dbg"],
+        serverTools: [{ name: "public" }, { name: "internal_dbg" }],
+      }),
     });
     expect(out.map((e) => e.name)).toEqual(["public"]);
   });
 
   it("auto-subtracts tools used as a run-start connect.tool primitive", () => {
     const out = resolveIntegrationToolCatalog({
-      integration: localSourceManifest({ connectToolName: "login" }),
-      mcpServerTools: [{ name: "login" }, { name: "fetch_data" }],
+      integration: localSourceManifest({
+        connectToolName: "login",
+        serverTools: [{ name: "login" }, { name: "fetch_data" }],
+      }),
     });
     expect(out.map((e) => e.name)).toEqual(["fetch_data"]);
   });
 
   it("none source with api_call _meta: appends api_call to the base catalog", () => {
     // A `none` source has no MCP base catalog of its own, so the appended
-    // api_call tool is the only entry. (Any `mcpServerTools` passed here are
-    // a no-op the resolver still prepends — see the local+api_call case below.)
+    // api_call tool is the only entry (see the local+api_call case below for a local source).
     const out = resolveIntegrationToolCatalog({
       integration: apiSourceManifest(),
     });
@@ -242,27 +263,19 @@ describe("resolveIntegrationToolCatalog", () => {
   });
 
   it("local source WITH api_call _meta: api_call is appended to the mcp tools", () => {
-    const integration = localSourceManifest({});
+    const integration = localSourceManifest({
+      serverTools: [{ name: "kv_set" }, { name: "kv_get" }],
+    });
     (integration as unknown as { _meta: unknown })._meta = {
       "dev.appstrate/api": { auths: { primary: {} } },
     };
-    const out = resolveIntegrationToolCatalog({
-      integration,
-      mcpServerTools: [{ name: "kv_set" }, { name: "kv_get" }],
-    });
+    const out = resolveIntegrationToolCatalog({ integration });
     expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", API_CALL_TOOL_NAME]);
   });
 
   it("gives a declared synthetic capability precedence over same-named native tools", () => {
-    const integration = localSourceManifest({});
-    (integration as unknown as { _meta: unknown })._meta = {
-      "dev.appstrate/api": {
-        auths: { primary: { upload_protocols: ["google-resumable"] } },
-      },
-    };
-    const out = resolveIntegrationToolCatalog({
-      integration,
-      mcpServerTools: [
+    const integration = localSourceManifest({
+      serverTools: [
         { name: "api_call", description: "native collision" },
         { name: "api.call", description: "normalised native collision" },
         { name: "api_upload", description: "native collision" },
@@ -273,6 +286,12 @@ describe("resolveIntegrationToolCatalog", () => {
         { name: "kv_get" },
       ],
     });
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: { primary: { upload_protocols: ["google-resumable"] } },
+      },
+    };
+    const out = resolveIntegrationToolCatalog({ integration });
     expect(out).toEqual([
       { name: "api-call" },
       { name: "drive__api_upload" },
@@ -284,15 +303,26 @@ describe("resolveIntegrationToolCatalog", () => {
 
   it("keeps native api-like names when no synthetic capability is declared", () => {
     const out = resolveIntegrationToolCatalog({
-      integration: localSourceManifest({}),
-      mcpServerTools: [{ name: "api_call" }, { name: "api_upload" }],
+      integration: localSourceManifest({
+        serverTools: [{ name: "api_call" }, { name: "api_upload" }],
+      }),
     });
     expect(out.map((entry) => entry.name)).toEqual(["api_call", "api_upload"]);
   });
 
   it("no longer reserves the raw long-key spelling against native MCP tools", () => {
     const longAuthKey = "authentication_key_that_is_valid_but_long";
-    const integration = localSourceManifest({});
+    const integration = localSourceManifest({
+      serverTools: [
+        // These used to be swallowed: the synthetic surface reserved the raw
+        // `api_call__{authKey}` spelling as well as its bounded canonical
+        // form. That alias is gone, so a native tool that happens to carry the
+        // raw name is just a native tool — it collides with nothing.
+        { name: `api_call__${longAuthKey}`, description: "native, not an alias" },
+        { name: `api_upload__${longAuthKey}`, description: "native, not an alias" },
+        { name: "native_keep" },
+      ],
+    });
     (integration as unknown as { auths: Record<string, unknown> }).auths = {
       short: apiKeyAuth(),
       [longAuthKey]: apiKeyAuth(),
@@ -305,18 +335,7 @@ describe("resolveIntegrationToolCatalog", () => {
         },
       },
     };
-    const out = resolveIntegrationToolCatalog({
-      integration,
-      mcpServerTools: [
-        // These used to be swallowed: the synthetic surface reserved the raw
-        // `api_call__{authKey}` spelling as well as its bounded canonical
-        // form. That alias is gone, so a native tool that happens to carry the
-        // raw name is just a native tool — it collides with nothing.
-        { name: `api_call__${longAuthKey}`, description: "native, not an alias" },
-        { name: `api_upload__${longAuthKey}`, description: "native, not an alias" },
-        { name: "native_keep" },
-      ],
-    });
+    const out = resolveIntegrationToolCatalog({ integration });
     expect(out.map((entry) => entry.name)).toEqual([
       `api_call__${longAuthKey}`,
       `api_upload__${longAuthKey}`,
@@ -399,18 +418,15 @@ describe("resolveIntegrationToolCatalog", () => {
   });
 
   it("local source WITH upload_protocols: the pair is appended after the mcp tools", () => {
-    const integration = localSourceManifest({});
+    const integration = localSourceManifest({ serverTools: [{ name: "kv_set" }] });
     (integration as unknown as { _meta: unknown })._meta = {
       "dev.appstrate/api": { auths: { primary: { upload_protocols: ["s3-multipart"] } } },
     };
-    const out = resolveIntegrationToolCatalog({
-      integration,
-      mcpServerTools: [{ name: "kv_set" }],
-    });
+    const out = resolveIntegrationToolCatalog({ integration });
     expect(out.map((e) => e.name)).toEqual(["kv_set", API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME]);
   });
 
-  it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {
+  it("local source without source.server.tools: falls back to integration.tools_policy keys", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
         tools: { policy_only: { required_scopes: { primary: ["read"] } } },
@@ -420,12 +436,12 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out[0]!.policy?.required_scopes).toEqual({ primary: ["read"] });
   });
 
-  it("an explicitly empty mcp-server catalog is authoritative, not a fallback signal", () => {
+  it("an explicitly empty source.server.tools is authoritative, not a fallback signal", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
         tools: { policy_only: { required_scopes: { primary: ["read"] } } },
+        serverTools: [],
       }),
-      mcpServerTools: [],
     });
     expect(out).toEqual([]);
   });
@@ -443,15 +459,15 @@ describe("getConnectToolNames", () => {
 });
 
 describe("validateAgentIntegrationScopes — uses the catalog, not the policy table", () => {
-  it("accepts an mcp-server tool the integration did NOT declare in its policy table", () => {
+  it("accepts a server tool the integration did NOT declare in its policy table", () => {
     // Regression: before the catalog refactor, this returned `unknown_tool`
     // because `integration.tools_policy{}` was treated as the whitelist.
     const errors = validateAgentIntegrationScopes(
       { id: "@me/integ", tools: ["kv_set"] },
       localSourceManifest({
         tools: { fetch_echo: { required_scopes: { primary: ["read"] } } }, // policy only for one tool
+        serverTools: [{ name: "kv_set" }, { name: "fetch_echo" }],
       }),
-      [{ name: "kv_set" }, { name: "fetch_echo" }],
     );
     expect(errors).toEqual([]);
   });
@@ -459,19 +475,20 @@ describe("validateAgentIntegrationScopes — uses the catalog, not the policy ta
   it("rejects tools not present in the catalog", () => {
     const errors = validateAgentIntegrationScopes(
       { id: "@me/integ", tools: ["doesnt_exist"] },
-      localSourceManifest({}),
-      [{ name: "kv_set" }],
+      localSourceManifest({ serverTools: [{ name: "kv_set" }] }),
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]!.code).toBe("unknown_tool");
     expect(errors[0]!.field).toBe("integrations_configuration.@me/integ.tools");
   });
 
-  it("rejects a hidden tool even if the mcp-server advertises it", () => {
+  it("rejects a hidden tool even if the server advertises it", () => {
     const errors = validateAgentIntegrationScopes(
       { id: "@me/integ", tools: ["login"] },
-      localSourceManifest({ connectToolName: "login" }),
-      [{ name: "login" }, { name: "fetch_data" }],
+      localSourceManifest({
+        connectToolName: "login",
+        serverTools: [{ name: "login" }, { name: "fetch_data" }],
+      }),
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]!.code).toBe("unknown_tool");
@@ -534,5 +551,14 @@ describe("api_call / api_upload tool-name helpers", () => {
     for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
       expect(isApiCallToolName(name)).toBe(false);
     }
+  });
+});
+
+describe("allowsUndeclaredTools", () => {
+  it("is true only for a literal `allow_undeclared_tools: true`", () => {
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: true })).toBe(true);
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: "true" })).toBe(false);
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: false })).toBe(false);
+    expect(allowsUndeclaredTools({})).toBe(false);
   });
 });

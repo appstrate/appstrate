@@ -11,9 +11,9 @@
  * keys the local plugin mints with.
  *
  * Rotation safety is upstream's: it trusts a cached key set for 300 s under
- * `jwksCacheKey`, and a token whose `kid` that set does not carry forces one
- * refetch before the token is refused. The `jwt` plugin rotates its ES256
- * keypair every 90 days with a 7-day grace window; both halves of the window
+ * `jwksCacheKey`, and a token whose `kid` that set does not carry forces a
+ * refetch before the token is refused, at most one per 30 s. The `jwt` plugin
+ * rotates its ES256 keypair every 90 days with a 7-day grace window; both halves of the window
  * therefore verify within a single call, with no process restart.
  */
 

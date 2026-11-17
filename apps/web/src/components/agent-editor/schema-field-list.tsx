@@ -32,11 +32,17 @@ import {
   useSortable,
   verticalListSortingStrategy,
   arrayMove,
+  sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { Button } from "@appstrate/ui/components/button";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import {
   Table,
   TableBody,
@@ -46,10 +52,10 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { PageActionsMenu } from "../page-actions-menu";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
 import { toLiveSlug } from "../../lib/strings";
 import { fieldKeyVerdict } from "../../lib/schema-field-key";
@@ -73,15 +79,16 @@ import {
   textToValue,
   toKeywordNumber,
   valueToText,
+  type NumericKeyword,
 } from "./utils";
 
 type SchemaMode = "input" | "output";
 
-/** Each list's two addresses: both lists can sit on one page. */
-const FIELD_PARAMS = {
-  input: { add: "newInputField", edit: "editInputField" },
-  output: { add: "newOutputField", edit: "editOutputField" },
-} as const satisfies Record<SchemaMode, { add: string; edit: string }>;
+/** Each list's edit address: both lists can sit on one page. */
+const EDIT_PARAMS = {
+  input: "editInputField",
+  output: "editOutputField",
+} as const satisfies Record<SchemaMode, string>;
 
 const TYPE_OPTIONS: JSONSchema7TypeName[] = [
   "string",
@@ -105,24 +112,24 @@ export function SchemaFieldList({
   onChange: (fields: SchemaField[]) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // Addresses like every modal: a field by its key, which survives a reload.
-  const adding = useModalParam(FIELD_PARAMS[mode].add);
-  const editing = useModalTarget(FIELD_PARAMS[mode].edit, fields, (field) => field.key);
+  const [adding, setAdding] = useState(false);
+  // A field's edit has an address: its key, which survives a reload.
+  const editing = useUrlModalTarget(EDIT_PARAMS[mode], fields, (field) => field.key);
   const target = editing.target;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const from = fields.findIndex((f) => f._id === active.id);
-    const to = fields.findIndex((f) => f._id === over.id);
+    const from = fields.findIndex((f) => f.key === active.id);
+    const to = fields.findIndex((f) => f.key === over.id);
     onChange(arrayMove(fields, from, to));
   };
 
   return (
-    <section aria-label={title} className="space-y-3">
+    <section aria-label={title} className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">{title}</h3>
@@ -132,7 +139,7 @@ export function SchemaFieldList({
             skills and integrations sections have it. */}
         <PageActionsMenu
           actions={[
-            { id: "add", label: t("editor.fieldAdd"), icon: Plus, onSelect: () => adding.open() },
+            { id: "add", label: t("editor.fieldAdd"), icon: Plus, onSelect: () => setAdding(true) },
           ]}
         />
       </div>
@@ -140,7 +147,7 @@ export function SchemaFieldList({
       {fields.length === 0 ? (
         <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact>
           <EmptyStateAction
-            action={{ label: t("editor.fieldAdd"), onSelect: () => adding.open() }}
+            action={{ label: t("editor.fieldAdd"), onSelect: () => setAdding(true) }}
           />
         </EmptyState>
       ) : (
@@ -152,24 +159,24 @@ export function SchemaFieldList({
                 <TableRow>
                   <TableHead className="w-8" />
                   <TableHead className="w-[26%]">{t("editor.fieldKeyLabel")}</TableHead>
-                  <TableHead className="w-[16%]">{t("editor.fieldTypeLabel")}</TableHead>
-                  <TableHead className="w-[12%]">{t("editor.fieldRequired")}</TableHead>
+                  <TableHead className="w-[16%]">{t("log.filterType")}</TableHead>
+                  <TableHead className="w-[12%]">{t("manifest.required")}</TableHead>
                   <TableHead>{t("editor.fieldDescLabel")}</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 <SortableContext
-                  items={fields.map((f) => f._id)}
+                  items={fields.map((f) => f.key)}
                   strategy={verticalListSortingStrategy}
                 >
                   {fields.map((field) => (
                     <FieldRow
-                      key={field._id}
+                      key={field.key}
                       field={field}
                       mode={mode}
                       onEdit={() => editing.open(field.key)}
-                      onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
+                      onRemove={() => onChange(fields.filter((f) => f.key !== field.key))}
                     />
                   ))}
                 </SortableContext>
@@ -179,26 +186,26 @@ export function SchemaFieldList({
         </div>
       )}
 
-      {adding.value !== null ? (
+      {adding ? (
         <FieldModal
           mode={mode}
           takenKeys={fields.map((f) => f.key)}
-          onClose={adding.close}
+          onClose={() => setAdding(false)}
           onSave={(next) => {
             onChange([...fields, next]);
-            adding.close();
+            setAdding(false);
           }}
         />
       ) : (
         target && (
           <FieldModal
-            key={target._id}
+            key={target.key}
             mode={mode}
             field={target}
-            takenKeys={fields.filter((f) => f._id !== target._id).map((f) => f.key)}
+            takenKeys={fields.filter((f) => f.key !== target.key).map((f) => f.key)}
             onClose={editing.close}
             onSave={(next) => {
-              onChange(fields.map((f) => (f._id === next._id ? next : f)));
+              onChange(fields.map((f) => (f.key === target.key ? next : f)));
               editing.close();
             }}
           />
@@ -209,7 +216,7 @@ export function SchemaFieldList({
 }
 
 function blankField(): SchemaField {
-  return { _id: crypto.randomUUID(), key: "", required: false, prop: { type: "string" } };
+  return { key: "", required: false, prop: { type: "string" } };
 }
 
 function FieldRow({
@@ -225,14 +232,10 @@ function FieldRow({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
-    id: field._id,
+    id: field.key,
   });
   return (
-    <TableRow
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className="relative data-[dragging=true]:z-10"
-    >
+    <TableRow ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}>
       <TableCell>
         <Button
           type="button"
@@ -243,7 +246,7 @@ function FieldRow({
           {...attributes}
           {...listeners}
         >
-          <GripVertical className="size-4" />
+          <GripVertical />
         </Button>
       </TableCell>
       <TableCell className="text-sm">{field.key || "—"}</TableCell>
@@ -262,7 +265,7 @@ function FieldRow({
       </TableCell>
       <TableCell className="text-right">
         <TableRowActions
-          menuLabel={t("editor.fieldActions", { name: field.key })}
+          menuLabel={t("editor.rowActions", { name: field.key })}
           actions={[
             {
               id: "edit",
@@ -301,7 +304,6 @@ function FieldModal({
   const { t } = useTranslation(["agents", "common"]);
   const [draft, setDraft] = useState<SchemaField>(() => field ?? blankField());
   const ids = useId();
-  const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<SchemaField>) => setDraft((d) => ({ ...d, ...patch }));
 
   const { prop } = draft;
@@ -316,10 +318,23 @@ function FieldModal({
   const isNumeric = type === "number" || type === "integer";
   const isArray = type === "array";
   const itemsEnum = itemsEnumText(prop);
+  const enumRow = isArray
+    ? {
+        show: isTextType(itemType(prop)) || itemsEnum.locked,
+        value: itemsEnum,
+        commit: (text: string) => setProp(setItemsEnum(prop, textToList(text, itemType(prop)))),
+      }
+    : {
+        show: isTextType(type) || prop.enum !== undefined,
+        value: listToText(prop.enum, type),
+        commit: (text: string) => {
+          const values = textToList(text, type);
+          setProp(setKeyword(prop, "enum", values.length > 0 ? values : undefined));
+        },
+      };
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={field ? t("editor.fieldEditTitle", { name: field.key }) : t("editor.fieldNew")}
       className="sm:max-w-xl"
@@ -338,260 +353,172 @@ function FieldModal({
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Row label={t("editor.fieldKeyLabel")} error={draft.key ? keyError : null}>
-            {(id) => (
-              <Input
-                id={id}
-                value={draft.key}
-                onChange={(e) => set({ key: toLiveSlug(e.target.value) })}
-                className="font-mono"
-                autoFocus
-              />
-            )}
+            <Input
+              value={draft.key}
+              onChange={(e) => set({ key: toLiveSlug(e.target.value) })}
+              className="font-mono"
+              autoFocus
+            />
           </Row>
-          <Row label={t("editor.fieldTypeLabel")}>
-            {(id) => (
-              <OptionSelect
-                id={id}
-                value={isFile ? "file" : type}
-                onValueChange={(v) => {
-                  if (v === "file") {
-                    if (!isFile) setProp(setFileKind(prop, "single"));
-                    return;
-                  }
-                  const next = TYPE_OPTIONS.find((o) => o === v);
-                  if (next && (isFile || next !== type)) setProp(changeType(prop, next));
-                }}
-                options={[
-                  ...TYPE_OPTIONS.map((option) => ({ value: option, label: option })),
-                  ...(mode === "input"
-                    ? [{ value: "file", label: t("editor.fieldTypeFile") }]
-                    : []),
-                ]}
-              />
-            )}
+          <Row label={t("log.filterType")}>
+            <OptionSelect
+              value={isFile ? "file" : type}
+              onValueChange={(v) => {
+                if (v === "file") {
+                  if (!isFile) setProp(setFileKind(prop, "single"));
+                  return;
+                }
+                const next = TYPE_OPTIONS.find((o) => o === v);
+                if (next && (isFile || next !== type)) setProp(changeType(prop, next));
+              }}
+              options={[
+                ...TYPE_OPTIONS.map((option) => ({ value: option, label: option })),
+                ...(mode === "input" ? [{ value: "file", label: t("editor.fieldTypeFile") }] : []),
+              ]}
+            />
           </Row>
         </div>
         <Row label={t("editor.fieldDescLabel")}>
-          {(id) => (
-            <Input
-              id={id}
-              value={prop.description ?? ""}
-              onChange={(e) =>
-                setProp(setKeyword(prop, "description", e.target.value || undefined))
-              }
-            />
-          )}
+          <Input
+            value={prop.description ?? ""}
+            onChange={(e) => setProp(setKeyword(prop, "description", e.target.value || undefined))}
+          />
         </Row>
         <CheckboxField
           id={`${ids}-required`}
-          label={t("editor.fieldRequired")}
+          label={t("manifest.required")}
           checked={draft.required}
           onCheckedChange={(v) => set({ required: Boolean(v) })}
         />
 
         {mode === "input" && (
-          <div className="border-border border-t pt-3">
-            <button
+          <Collapsible className="border-border border-t pt-3">
+            <CollapsibleTrigger
               type="button"
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm"
-              aria-expanded={advanced}
-              onClick={() => setAdvanced((v) => !v)}
+              className="group text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm"
             >
-              <ChevronDown className={advanced ? "size-4 rotate-180" : "size-4"} />
+              <ChevronDown className="size-4 group-data-[state=open]:rotate-180" />
               {t("editor.fieldAdvanced")}
-            </button>
-            {advanced && (
-              <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                {isFile ? (
-                  <>
-                    <Row label={t("editor.fieldAcceptLabel")}>
-                      {(id) => (
-                        <Input
-                          id={id}
-                          value={draft.accept ?? ""}
-                          onChange={(e) => set({ accept: e.target.value })}
-                        />
-                      )}
-                    </Row>
-                    <Row label={t("editor.fieldMaxSizeLabel")}>
-                      {(id) => (
-                        <DraftInput
-                          id={id}
-                          text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
-                          onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
-                        />
-                      )}
-                    </Row>
-                    <CheckboxField
-                      id={`${ids}-multiple`}
-                      label={t("editor.fieldMultipleLabel")}
-                      checked={kind === "multiple"}
-                      onCheckedChange={(v) => setProp(setFileKind(prop, v ? "multiple" : "single"))}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3 grid gap-4 sm:grid-cols-2">
+              {isFile ? (
+                <>
+                  <Row label={t("editor.fieldAcceptLabel")}>
+                    <Input
+                      value={draft.accept ?? ""}
+                      onChange={(e) => set({ accept: e.target.value })}
                     />
-                    {kind === "multiple" && (
-                      <Row label={t("editor.fieldMaxFilesLabel")}>
-                        {(id) => (
-                          <NumberKeywordInput
-                            id={id}
-                            prop={prop}
-                            keyword="maxItems"
-                            onChange={setProp}
-                          />
-                        )}
-                      </Row>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {(isTextType(type) || prop.default !== undefined) && (
-                      <Row label={t("editor.fieldDefaultLabel")}>
-                        {(id) => (
-                          <KeywordInput
-                            id={id}
-                            value={valueToText(prop.default, type)}
-                            onCommit={(text) =>
-                              setProp(setKeyword(prop, "default", textToValue(text, type)))
-                            }
-                          />
-                        )}
-                      </Row>
-                    )}
-                    <Row label={t("editor.fieldPlaceholderLabel")}>
-                      {(id) => (
-                        <Input
-                          id={id}
-                          value={draft.placeholder ?? ""}
-                          onChange={(e) => set({ placeholder: e.target.value })}
-                        />
-                      )}
+                  </Row>
+                  <Row label={t("editor.fieldMaxSizeLabel")}>
+                    <DraftInput
+                      text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
+                      onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
+                    />
+                  </Row>
+                  <CheckboxField
+                    id={`${ids}-multiple`}
+                    label={t("editor.fieldMultipleLabel")}
+                    checked={kind === "multiple"}
+                    onCheckedChange={(v) => setProp(setFileKind(prop, v ? "multiple" : "single"))}
+                  />
+                  {kind === "multiple" && (
+                    <NumberRow
+                      label={t("editor.fieldMaxFilesLabel")}
+                      keyword="maxItems"
+                      prop={prop}
+                      onChange={setProp}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  {(isTextType(type) || prop.default !== undefined) && (
+                    <Row label={t("editor.fieldDefaultLabel")}>
+                      <KeywordInput
+                        value={valueToText(prop.default, type)}
+                        onCommit={(text) =>
+                          setProp(setKeyword(prop, "default", textToValue(text, type)))
+                        }
+                      />
                     </Row>
-                    {isArray
-                      ? (isTextType(itemType(prop)) || itemsEnum.locked) && (
-                          <Row label={t("editor.fieldEnumLabel")}>
-                            {(id) => (
-                              <KeywordInput
-                                id={id}
-                                value={itemsEnum}
-                                onCommit={(text) =>
-                                  setProp(setItemsEnum(prop, textToList(text, itemType(prop))))
-                                }
-                              />
-                            )}
-                          </Row>
-                        )
-                      : (isTextType(type) || prop.enum !== undefined) && (
-                          <Row label={t("editor.fieldEnumLabel")}>
-                            {(id) => (
-                              <KeywordInput
-                                id={id}
-                                value={listToText(prop.enum, type)}
-                                onCommit={(text) => {
-                                  const values = textToList(text, type);
-                                  setProp(
-                                    setKeyword(
-                                      prop,
-                                      "enum",
-                                      values.length > 0 ? values : undefined,
-                                    ),
-                                  );
-                                }}
-                              />
-                            )}
-                          </Row>
-                        )}
-                    {isString && (
-                      <>
-                        <Row label={t("editor.fieldFormat")}>
-                          {(id) => (
-                            <OptionSelect
-                              id={id}
-                              value={prop.format || "__none"}
-                              onValueChange={(v) =>
-                                setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
-                              }
-                              options={STRING_FORMATS.map((format) => ({
-                                value: format || "__none",
-                                label: format || "—",
-                              }))}
-                            />
-                          )}
-                        </Row>
-                        <Row label={t("editor.fieldMinLength")}>
-                          {(id) => (
-                            <NumberKeywordInput
-                              id={id}
-                              prop={prop}
-                              keyword="minLength"
-                              onChange={setProp}
-                            />
-                          )}
-                        </Row>
-                        <Row label={t("editor.fieldMaxLength")}>
-                          {(id) => (
-                            <NumberKeywordInput
-                              id={id}
-                              prop={prop}
-                              keyword="maxLength"
-                              onChange={setProp}
-                            />
-                          )}
-                        </Row>
-                        <Row label={t("editor.fieldPattern")}>
-                          {(id) => (
-                            <Input
-                              id={id}
-                              value={prop.pattern ?? ""}
-                              onChange={(e) =>
-                                setProp(setKeyword(prop, "pattern", e.target.value || undefined))
-                              }
-                              className="font-mono"
-                            />
-                          )}
-                        </Row>
-                      </>
-                    )}
-                    {isNumeric && (
-                      <>
-                        <Row label={t("editor.fieldMin")}>
-                          {(id) => (
-                            <NumberKeywordInput
-                              id={id}
-                              prop={prop}
-                              keyword="minimum"
-                              onChange={setProp}
-                            />
-                          )}
-                        </Row>
-                        <Row label={t("editor.fieldMax")}>
-                          {(id) => (
-                            <NumberKeywordInput
-                              id={id}
-                              prop={prop}
-                              keyword="maximum"
-                              onChange={setProp}
-                            />
-                          )}
-                        </Row>
-                        <Row label={t("editor.fieldStep")}>
-                          {(id) => (
-                            <NumberKeywordInput
-                              id={id}
-                              prop={prop}
-                              keyword="multipleOf"
-                              onChange={setProp}
-                            />
-                          )}
-                        </Row>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+                  <Row label={t("editor.fieldPlaceholderLabel")}>
+                    <Input
+                      value={draft.placeholder ?? ""}
+                      onChange={(e) => set({ placeholder: e.target.value })}
+                    />
+                  </Row>
+                  {enumRow.show && (
+                    <Row label={t("editor.fieldEnumLabel")}>
+                      <KeywordInput value={enumRow.value} onCommit={enumRow.commit} />
+                    </Row>
+                  )}
+                  {isString && (
+                    <>
+                      <Row label={t("editor.fieldFormat")}>
+                        <OptionSelect
+                          value={prop.format || "__none"}
+                          onValueChange={(v) =>
+                            setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
+                          }
+                          options={STRING_FORMATS.map((format) => ({
+                            value: format || "__none",
+                            label: format || "—",
+                          }))}
+                        />
+                      </Row>
+                      <NumberRow
+                        label={t("editor.fieldMinLength")}
+                        keyword="minLength"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <NumberRow
+                        label={t("editor.fieldMaxLength")}
+                        keyword="maxLength"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <Row label={t("editor.fieldPattern")}>
+                        <Input
+                          value={prop.pattern ?? ""}
+                          onChange={(e) =>
+                            setProp(setKeyword(prop, "pattern", e.target.value || undefined))
+                          }
+                          className="font-mono"
+                        />
+                      </Row>
+                    </>
+                  )}
+                  {isNumeric && (
+                    <>
+                      <NumberRow
+                        label={t("editor.fieldMin")}
+                        keyword="minimum"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <NumberRow
+                        label={t("editor.fieldMax")}
+                        keyword="maximum"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                      <NumberRow
+                        label={t("editor.fieldStep")}
+                        keyword="multipleOf"
+                        prop={prop}
+                        onChange={setProp}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
     </Modal>
@@ -605,13 +532,30 @@ function Row({
 }: {
   label: string;
   error?: string | null;
-  /** Renders the control, given the id its label names. */
-  children: (id: string) => React.ReactElement;
+  children: React.ReactElement;
 }) {
   const id = useId();
   return (
     <FormItem id={id} label={label} error={error ?? undefined}>
-      {children(id)}
+      {children}
     </FormItem>
+  );
+}
+
+function NumberRow({
+  label,
+  keyword,
+  prop,
+  onChange,
+}: {
+  label: string;
+  keyword: NumericKeyword;
+  prop: JSONSchema7;
+  onChange: (prop: JSONSchema7) => void;
+}) {
+  return (
+    <Row label={label}>
+      <NumberKeywordInput prop={prop} keyword={keyword} onChange={onChange} />
+    </Row>
   );
 }

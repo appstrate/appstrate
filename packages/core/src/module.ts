@@ -958,12 +958,21 @@ interface AuthResolutionBase {
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
   extra?: Record<string, unknown>;
   /**
-   * Declares this caller a first-party, server-minted loopback bearer: a request
-   * the server constructed for itself (process-local secret, never persisted or
-   * transmitted, not reachable from a browser). The bearer-only proxy surfaces
-   * gate on THIS capability rather than on a specific module id, so a strategy
-   * opts into the trusted-loopback path by declaring it here. Only set it on a
-   * strategy whose token never leaves the process. Propagated to
+   * Declares the bearer this strategy verified a server-minted one: a token the
+   * server constructed for its own calls (process-local secret, never persisted,
+   * transmitted or handed to a browser). It carries no ambient-credential (CSRF)
+   * risk, which is the whole reason the credential proxy refuses a cookie, so the
+   * credential proxy accepts it like an allowlisted bearer — gating on THIS
+   * capability rather than on a specific module id. Only set it on a strategy whose
+   * token never leaves the process. Propagated to `c.get("serverMinted")`.
+   */
+  serverMinted?: boolean;
+  /**
+   * Declares this caller a first-party inference loopback: a server-minted bearer
+   * (see {@link serverMinted}) that the LLM proxy accepts without an API key, books
+   * as chat usage, and that is shown the backing of a model alias. Narrower in what
+   * it is FOR than `serverMinted`, wider in what it opens: a strategy declares it
+   * only on the token its own inference calls carry. Propagated to
    * `c.get("firstPartyLoopback")`.
    */
   firstPartyLoopback?: boolean;

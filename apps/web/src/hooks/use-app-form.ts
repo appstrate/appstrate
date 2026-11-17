@@ -4,12 +4,9 @@ import { useCallback, useRef } from "react";
 import { useForm, type UseFormProps, type FieldValues, type Path } from "react-hook-form";
 
 /**
- * Thin wrapper around react-hook-form's useForm with "reward early, punish late" validation:
- * - mode: "onTouched" — validates on first blur, re-validates onChange
- * - showError(field) — only surfaces errors for fields that were ever modified, or after submit
- *
- * Uses an "ever dirty" tracker instead of the live dirtyFields, because dirtyFields
- * flips back to false when the value returns to its default (e.g. user types then clears).
+ * useForm with "reward early, punish late" validation (`onTouched`): `showError(field)` surfaces
+ * errors only for fields ever modified, or after submit. "Ever dirty" is tracked here because
+ * `dirtyFields` flips back to false when the value returns to its default.
  */
 export function useAppForm<T extends FieldValues>(props: Omit<UseFormProps<T>, "mode">) {
   const form = useForm<T>({ ...props, mode: "onTouched" });

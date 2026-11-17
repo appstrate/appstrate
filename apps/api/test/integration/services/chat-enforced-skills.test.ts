@@ -29,6 +29,19 @@ import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../../src/services/pack
 
 let ctx: TestContext;
 
+/** The authored SKILL.md of `id`: its frontmatter `name` is the package name segment. */
+const skillMd = (id: string) =>
+  `---\nname: ${id.split("/")[1]}\ndescription: Policy.\n---\npublished ${id}\n`;
+
+/** What the MCP Skills extension serves for `id` at 1.0.0: `metadata.version` written in. */
+const servedMd = (id: string) =>
+  `---\nname: ${id.split("/")[1]}\ndescription: Policy.\nmetadata:\n  version: 1.0.0\n---\npublished ${id}\n`;
+
+const uriOf = (id: string) => {
+  const name = id.split("/")[1];
+  return `skill://${ctx.defaultSpaceId}/policy/${name}/${name}/SKILL.md`;
+};
+
 const load = () => loadEnforcedChatSkills(ctx.orgId, ctx.defaultSpaceId);
 
 async function seedSkill(
@@ -41,7 +54,7 @@ async function seedSkill(
     type: "skill",
     homeSpaceId: ctx.defaultSpaceId,
     draftManifest: { name: id, version: "1.0.0", type: "skill", display_name: `Name ${id}` },
-    draftContent: `published ${id}`,
+    draftContent: skillMd(id),
   });
   await seedSpacePackage(ctx.defaultSpaceId, id, {
     chatEnforced: opts.enforced ?? true,
@@ -56,7 +69,7 @@ beforeEach(async () => {
 });
 
 describe("loadEnforcedChatSkills", () => {
-  it("returns the active flagged skills, sorted by id, with their published SKILL.md", async () => {
+  it("returns the active flagged skills, sorted by id, with their served SKILL.md and its URI", async () => {
     await seedSkill("@policy/zeta");
     await seedSkill("@policy/alpha");
     await seedSkill("@policy/chosen-only", { enforced: false });
@@ -66,13 +79,15 @@ describe("loadEnforcedChatSkills", () => {
         packageId: "@policy/alpha",
         name: "Name @policy/alpha",
         version: "1.0.0",
-        content: "published @policy/alpha",
+        uri: uriOf("@policy/alpha"),
+        content: servedMd("@policy/alpha"),
       },
       {
         packageId: "@policy/zeta",
         name: "Name @policy/zeta",
         version: "1.0.0",
-        content: "published @policy/zeta",
+        uri: uriOf("@policy/zeta"),
+        content: servedMd("@policy/zeta"),
       },
     ]);
   });
@@ -83,7 +98,7 @@ describe("loadEnforcedChatSkills", () => {
       .update(packages)
       .set({ draftContent: "work in progress" })
       .where(eq(packages.id, "@policy/tone"));
-    expect((await load())[0]?.content).toBe("published @policy/tone");
+    expect((await load())[0]?.content).toBe(servedMd("@policy/tone"));
   });
 
   it("drops a deactivated skill and brings it back on re-activation", async () => {
@@ -99,7 +114,7 @@ describe("loadEnforcedChatSkills", () => {
     await db.delete(packageVersions).where(eq(packageVersions.packageId, "@policy/tone"));
 
     expect(await load()).toEqual([
-      { packageId: "@policy/tone", name: "@policy/tone", version: null, content: null },
+      { packageId: "@policy/tone", name: "@policy/tone", version: null, uri: null, content: null },
     ]);
   });
 

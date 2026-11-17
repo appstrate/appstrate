@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -14,6 +15,7 @@ import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { CheckCircle2 } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingDoneStep() {
@@ -24,9 +26,11 @@ export function OnboardingDoneStep() {
   const { features } = useAppConfig();
   const { prevRoute } = useOnboardingNav("complete");
 
-  const { data: models } = useModels();
-  const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: orgData } = useOrgDetail();
+  const { data: models, isLoading: modelsLoading } = useModels();
+  const { data: billing, isLoading: billingLoading } = useBilling({
+    enabled: features.billing && !!orgId,
+  });
+  const { data: orgData, isLoading: orgLoading } = useOrgDetail();
 
   const defaultModel = models?.find((m) => m.is_default);
   // A default whose credential is dead is not a completed step — it is named
@@ -55,15 +59,26 @@ export function OnboardingDoneStep() {
       nextLabel={t("onboarding.goToDashboard")}
     >
       <div className="flex flex-col gap-4">
-        <SummaryCard title={t("onboarding.summaryOrg")} value={currentOrg?.name} done />
+        <SummaryCard title={t("source.org")} value={currentOrg?.name} done />
 
-        {features.billing && billing && (
-          <SummaryCard title={t("onboarding.summaryPlan")} value={billing.plan.name} done />
+        {/* The plan slot is held while billing loads so the cards below do not drop. */}
+        {features.billing && (billing || billingLoading) && (
+          <SummaryCard
+            title={t("onboarding.summaryPlan")}
+            value={billing?.plan.name}
+            done={!!billing}
+          />
         )}
 
         <SummaryCard
           title={t("onboarding.summaryModel")}
-          value={defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
+          value={
+            modelsLoading
+              ? undefined
+              : defaultModel
+                ? defaultModel.label
+                : t("onboarding.summaryModelNone")
+          }
           done={modelReady}
           aside={defaultModel?.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
         />
@@ -71,9 +86,11 @@ export function OnboardingDoneStep() {
         <SummaryCard
           title={t("onboarding.summaryMembers")}
           value={
-            invitationCount > 0
-              ? t("onboarding.summaryMembersCount", { count: invitationCount })
-              : t("onboarding.summaryMembersNone")
+            orgLoading
+              ? undefined
+              : invitationCount > 0
+                ? t("onboarding.summaryMembersCount", { count: invitationCount })
+                : t("onboarding.summaryMembersNone")
           }
           done={invitationCount > 0}
         />
@@ -82,7 +99,7 @@ export function OnboardingDoneStep() {
   );
 }
 
-/** One recap line: green check once the step is done, a muted one while it is not. */
+/** One recap line: green check once the step is done, a muted one while it is not. An undefined `value` is a read on its way. */
 function SummaryCard({
   title,
   value,
@@ -90,12 +107,12 @@ function SummaryCard({
   aside,
 }: {
   title: string;
-  value: ReactNode;
+  value: ReactNode | undefined;
   done: boolean;
   aside?: ReactNode;
 }) {
   return (
-    <div className="border-border bg-card rounded-lg border p-4">
+    <Card className="p-4">
       <div className="flex items-center gap-3">
         <CheckCircle2
           size={20}
@@ -103,10 +120,14 @@ function SummaryCard({
         />
         <div className="flex-1">
           <h3 className="text-sm font-semibold">{title}</h3>
-          <span className="text-muted-foreground text-sm">{value}</span>
+          {value === undefined ? (
+            <Skeleton className="mt-1 h-4 w-32" />
+          ) : (
+            <span className="text-muted-foreground text-sm">{value}</span>
+          )}
         </div>
         {aside}
       </div>
-    </div>
+    </Card>
   );
 }

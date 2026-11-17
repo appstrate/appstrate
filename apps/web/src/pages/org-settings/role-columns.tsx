@@ -9,8 +9,6 @@
  * to read it when it is a preset or not yours to change, to edit it when it
  * is. Previewing it and deleting it live in the menu, the second being the
  * one destructive deed.
- *
- * Out of the page so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import { Eye, Trash2 } from "lucide-react";
@@ -38,7 +36,8 @@ export function useRoleColumns({
     {
       id: "role",
       header: t("roles.colRole"),
-      width: "minmax(160px,2fr)",
+      width: 160,
+      elastic: true,
       cell: (role) => (
         <span className="block min-w-0">
           <CellText strong title={spaceRoleLabel(role, t) ?? role.name}>
@@ -53,9 +52,8 @@ export function useRoleColumns({
     {
       id: "permissions",
       header: t("roles.permissionsLabel"),
-      width: "120px",
+      width: 120,
       align: "end",
-      tier: 2,
       cell: (role) => (
         <span className="text-muted-foreground text-xs">
           {t("roles.permissionCount", { count: role.permissions.length })}
@@ -65,7 +63,7 @@ export function useRoleColumns({
     rowActionsColumn((role: RoleObject) =>
       onPreview || canDelete(role) ? (
         <TableRowActions
-          menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
+          menuLabel={t("providers.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
           isPending={isDeleting}
           actions={[
             {

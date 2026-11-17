@@ -9,7 +9,7 @@
  *    org column, so the org tier is enforced here, in the service.
  */
 
-import { and, asc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnectionShares,
@@ -22,7 +22,7 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
-import type { SpaceMember } from "@appstrate/shared-types";
+import type { OrganizationMemberSpace, SpaceMember } from "@appstrate/shared-types";
 import { ApiError, conflict, notFound } from "../lib/errors.ts";
 import {
   customRoleOn,
@@ -71,12 +71,45 @@ export async function listSpaceMembers(
   spaceId: string,
   includeImplicit: boolean,
 ): Promise<SpaceMember[]> {
-  // The space, the org members and their explicit rows in ONE statement (RBAC
-  // spec §4.4). Without `includeImplicit` the answer is confined to explicit rows.
+  const rows = await listMembersOfSpaces(orgId, [{ spaceId, includeImplicit }]);
+  return rows.map(({ space: _space, ...member }) => member);
+}
+
+/**
+ * {@link listSpaceMembers} for several spaces at once, grouped by member: the
+ * spaces each org member reaches among `spaces`, in the order given. Each entry
+ * carries its own `includeImplicit`, decided by the caller per space exactly as
+ * the per-space route decides it, so this answers no more than N reads of
+ * `GET /api/spaces/{id}/members` would.
+ */
+export async function listSpacesOfMembers(
+  orgId: string,
+  spaces: readonly { spaceId: string; includeImplicit: boolean }[],
+): Promise<Map<string, OrganizationMemberSpace[]>> {
+  const order = new Map(spaces.map(({ spaceId }, index) => [spaceId, index]));
+  const rows = await listMembersOfSpaces(orgId, spaces);
+  rows.sort((a, b) => order.get(a.space.id)! - order.get(b.space.id)!);
+  const byUser = new Map<string, OrganizationMemberSpace[]>();
+  for (const row of rows) {
+    const entry = { id: row.space.id, name: row.space.name, source: row.source, role: row.role };
+    byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), entry]);
+  }
+  return byUser;
+}
+
+async function listMembersOfSpaces(
+  orgId: string,
+  targets: readonly { spaceId: string; includeImplicit: boolean }[],
+): Promise<Array<SpaceMember & { space: { id: string; name: string } }>> {
+  if (targets.length === 0) return [];
+  const implicitIds = targets.filter((t) => t.includeImplicit).map((t) => t.spaceId);
+  // The spaces, the org members and their explicit rows in ONE statement (RBAC
+  // spec §4.4). A space read without `includeImplicit` is confined to explicit rows.
   const rows = await db
     .select({
       space: {
         id: spaces.id,
+        name: spaces.name,
         visibility: spaces.visibility,
         defaultRole: spaces.defaultRole,
         ownerUserId: spaces.ownerUserId,
@@ -100,13 +133,20 @@ export async function listSpaceMembers(
     .leftJoin(spaceRoles, customRoleOn)
     .where(
       and(
-        eq(spaces.id, spaceId),
+        inArray(
+          spaces.id,
+          targets.map((t) => t.spaceId),
+        ),
         eq(spaces.orgId, orgId),
-        includeImplicit ? undefined : isNotNull(spaceMembers.userId),
+        implicitIds.length === targets.length
+          ? undefined
+          : implicitIds.length === 0
+            ? isNotNull(spaceMembers.userId)
+            : or(inArray(spaces.id, implicitIds), isNotNull(spaceMembers.userId)),
       ),
     );
 
-  const out: SpaceMember[] = [];
+  const out: Array<SpaceMember & { space: { id: string; name: string } }> = [];
   for (const row of rows) {
     const member = memberFromJoin(row);
     // The fourth argument is the user THIS row is about, not the request's
@@ -116,6 +156,7 @@ export async function listSpaceMembers(
     const effective = resolveSpaceRole(row.orgRole, row.space, member, row.userId);
     if (!effective) continue;
     out.push({
+      space: { id: row.space.id, name: row.space.name },
       object: "space_member",
       userId: row.userId,
       name: row.displayName ?? row.name ?? null,
@@ -384,7 +425,7 @@ export async function deleteSpaceMembershipsInOrg(
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
-  scope: { orgId: string; userId?: string; spaceId?: string },
+  scope: { orgId: string; userId?: string; spaceId?: string; stopSharingAllSpaces?: boolean },
   alsoLockSchedules?: SQL,
 ): Promise<ConnectionsUnshared> {
   const c = integrationConnections;
@@ -401,13 +442,27 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
     ),
   );
+  const stopAllSpaces = scope.stopSharingAllSpaces
+    ? and(
+        eq(c.orgId, scope.orgId),
+        scope.userId ? eq(c.userId, scope.userId) : undefined,
+        eq(c.shareAllSpaces, true),
+      )
+    : undefined;
   const locked =
-    lost.length === 0
+    lost.length === 0 && !stopAllSpaces
       ? []
       : await tx
-          .select({ id: c.id, userId: c.userId, endUserId: c.endUserId })
+          .select({
+            id: c.id,
+            userId: c.userId,
+            endUserId: c.endUserId,
+            shareAllSpaces: c.shareAllSpaces,
+          })
           .from(c)
-          .where(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]))
+          .where(
+            or(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]), stopAllSpaces),
+          )
           .orderBy(asc(c.id))
           .for("update");
   const withdrawn: ConnectionShare[] = [];
@@ -420,8 +475,11 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       .delete(s)
       .where(and(eq(s.connectionId, row.id), inArray(s.spaceId, targets)))
       .returning({ spaceId: s.spaceId });
-    if (gone.length === 0) continue;
-    await tx.update(c).set({ updatedAt: new Date() }).where(eq(c.id, row.id));
+    if (gone.length === 0 && !(scope.stopSharingAllSpaces && row.shareAllSpaces)) continue;
+    await tx
+      .update(c)
+      .set({ updatedAt: new Date(), shareAllSpaces: false })
+      .where(eq(c.id, row.id));
     for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }
   const ownerOf = new Map(locked.map((row) => [row.id, actorFromIds(row.userId, row.endUserId)!]));
@@ -490,11 +548,13 @@ export async function assertConnectionShareable(
   await lockOrgMember(tx, conn.orgId, conn.userId);
   const target = eq(spaces.id, spaceId);
   const [locked] = await tx
-    .select({ id: spaces.id })
+    .select({ id: spaces.id, ownerUserId: spaces.ownerUserId })
     .from(spaces)
     .where(and(target, eq(spaces.orgId, conn.orgId)))
     .for("share");
   if (!locked) throw invalidShareTarget(`'${spaceId}' is not a space of this organization`);
+  if (locked.ownerUserId !== null)
+    throw invalidShareTarget("Connections can only be shared with team spaces");
   const [lost] = await sharesOfOwnersWithoutAccess(
     tx,
     target,

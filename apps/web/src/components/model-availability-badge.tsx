@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
+import { useTranslation } from "react-i18next";
 
 /**
  * "This model's credential can no longer serve inference" — the read-side

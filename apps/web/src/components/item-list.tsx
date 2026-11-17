@@ -8,7 +8,7 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
-import { CollectionStates } from "./collection-frame";
+import { CollectionStates } from "./collection-states";
 
 const SKELETON_ITEMS = 3;
 
@@ -16,11 +16,14 @@ export function ItemList<T>({
   items,
   renderItem,
   itemKey,
+  placeholder,
   ...state
 }: {
   items: T[];
   renderItem: (item: T) => ReactNode;
   itemKey: (item: T) => string;
+  /** An item while the list loads: `renderItem`'s shape, so the item lands where it waited. */
+  placeholder?: ReactNode;
 } & CollectionState) {
   const verdict = collectionVerdict(state, items.length);
 
@@ -30,10 +33,14 @@ export function ItemList<T>({
         verdict={verdict}
         state={state}
         skeleton={
-          <div className="space-y-2">
-            {Array.from({ length: SKELETON_ITEMS }, (_, i) => (
-              <Skeleton key={i} className="h-14 rounded-lg" />
-            ))}
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: SKELETON_ITEMS }, (_, i) =>
+              placeholder ? (
+                <div key={i}>{placeholder}</div>
+              ) : (
+                <Skeleton key={i} className="h-14 rounded-lg" />
+              ),
+            )}
           </div>
         }
       />
@@ -41,7 +48,7 @@ export function ItemList<T>({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {items.map((item) => (
         <div key={itemKey(item)}>{renderItem(item)}</div>
       ))}

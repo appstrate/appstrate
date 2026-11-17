@@ -2,7 +2,10 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { buildPlatformPromptInputs } from "../../src/bundle/platform-prompt-inputs.ts";
+import {
+  buildPlatformPromptInputs,
+  integrationsFromBundle,
+} from "../../src/bundle/platform-prompt-inputs.ts";
 import { renderPlatformPrompt } from "../../src/bundle/platform-prompt.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "../../src/bundle/types.ts";
 import type { ExecutionContext } from "../../src/types/execution-context.ts";
@@ -75,29 +78,32 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("collects skill dependencies (mcp-servers are advertised via MCP tools/list, not derived here)", () => {
+  it("collects skill dependencies (a local integration's server tools are advertised via MCP tools/list, not derived here)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    // An `mcp-server` package must NOT surface — only skills are collected;
-    // mcp-server tools reach the model via MCP `tools/list`.
+    // A local integration member carries its own server payload; its tools reach
+    // the model via MCP `tools/list`, never this prompt.
     const mcp = pkg(
       "@acme/m1@1.0.0",
       {
-        manifest_version: "0.3",
         name: "@acme/m1",
         version: "1.0.0",
-        type: "mcp-server",
+        type: "integration",
         schema_version: "0.1",
-        server: {
-          type: "node",
-          entry_point: "server/index.js",
-          mcp_config: { command: "node", args: ["server/index.js"] },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
         },
       },
       { "server/index.js": "//" },
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
     const inputs = buildPlatformPromptInputs(bundleOf(root, mcp, skill), ctx());
-    expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
+    // Skills are announced by the runner from SKILL.md, never by this prompt.
+    expect(renderPlatformPrompt(inputs)).not.toContain("skill-one");
   });
 
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
@@ -121,24 +127,30 @@ describe("buildPlatformPromptInputs", () => {
       },
       { "prompt.md": "Do the thing." },
     );
-    const mcp = pkg("@acme/m@1.0.0", {
-      manifest_version: "0.3",
-      name: "@acme/m",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+    const mcp = pkg(
+      "@acme/m@1.0.0",
+      {
+        name: "@acme/m",
+        version: "1.0.0",
+        type: "integration",
+        schema_version: "0.1",
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
       },
-    });
+      { "server/index.js": "//" },
+    );
     const prompt = renderPlatformPrompt(
       buildPlatformPromptInputs(bundleOf(root, mcp), ctx(), { platformName: "Test" }),
     );
     expect(prompt).toContain("running on the Test platform");
     expect(prompt).toContain("**Timeout**: You have 60 seconds");
-    // mcp-server tools are advertised via MCP tools/list — not in the prompt.
+    // local-server tools are advertised via MCP tools/list — not in the prompt.
     expect(prompt).not.toContain("### Tools");
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("Do the thing.");
@@ -147,9 +159,20 @@ describe("buildPlatformPromptInputs", () => {
   it("omits section-driving fields when the bundle has none", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
-    expect(inputs.availableSkills).toEqual([]);
+    expect(inputs.integrations).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();
+  });
+
+  it("renders no output section for an empty `output.schema`", () => {
+    const root = pkg(
+      "@acme/agent@1.0.0",
+      { type: "agent", output: { schema: {} } },
+      { "prompt.md": "Do the thing." },
+    );
+    const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
+    expect(inputs.outputSchema).toBeUndefined();
+    expect(renderPlatformPrompt(inputs)).not.toContain("## Output Format");
   });
 
   it("overrides never leak context — caller-supplied context always wins", () => {
@@ -157,5 +180,131 @@ describe("buildPlatformPromptInputs", () => {
     const myCtx = ctx({ checkpoint: { a: 1 } });
     const inputs = buildPlatformPromptInputs(bundleOf(root), myCtx);
     expect(inputs.context).toBe(myCtx);
+  });
+});
+
+function agentDeclaring(...ids: string[]): BundlePackage {
+  return pkg(
+    "@acme/agent@1.0.0",
+    {
+      type: "agent",
+      dependencies: { integrations: Object.fromEntries(ids.map((id) => [id, "^1.0.0"])) },
+    },
+    { "prompt.md": "T" },
+  );
+}
+
+/** An integration member, named like the platform names it (`manifest.name`). */
+function integration(
+  identity: PackageIdentity,
+  manifest: Record<string, unknown> = {},
+  files: Record<string, string> = {},
+): BundlePackage {
+  const name = identity.slice(0, identity.lastIndexOf("@"));
+  return pkg(identity, { name, type: "integration", ...manifest }, files);
+}
+
+describe("integrationsFromBundle", () => {
+  it("lists the root's declared integrations in declaration order, with description and location", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+      integration("@appstrate/gmail@1.2.0", {}, { "INTEGRATION.md": "# Gmail" }),
+      integration(
+        "@appstrate/vapi@1.0.0",
+        { description: "Voice calls" },
+        { "INTEGRATION.md": "# Vapi" },
+      ),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([
+      {
+        id: "@appstrate/vapi",
+        description: "Voice calls",
+        location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md",
+      },
+      { id: "@appstrate/gmail", location: ".pi/integrations/@appstrate/gmail/INTEGRATION.md" },
+    ]);
+  });
+
+  it("sets location only when the member ships INTEGRATION.md", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      integration("@appstrate/vapi@1.0.0"),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
+  });
+
+  it("still lists a declared integration the bundle carries no member for", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+      integration("@appstrate/gmail@1.0.0", {}, { "INTEGRATION.md": "# Gmail" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([
+      { id: "@appstrate/vapi" },
+      { id: "@appstrate/gmail", location: ".pi/integrations/@appstrate/gmail/INTEGRATION.md" },
+    ]);
+  });
+
+  it("ignores integration members the root does not declare", () => {
+    const bundle = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      integration("@appstrate/vapi@1.0.0"),
+      // Pulled in by a skill, not declared by the agent.
+      integration("@appstrate/drive@1.0.0", {}, { "INTEGRATION.md": "# Drive" }),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([{ id: "@appstrate/vapi" }]);
+  });
+
+  it("returns nothing when the root declares no integrations", () => {
+    const bundle = bundleOf(
+      pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "T" }),
+      integration("@appstrate/vapi@1.0.0"),
+    );
+    expect(integrationsFromBundle(bundle)).toEqual([]);
+  });
+});
+
+describe("buildPlatformPromptInputs integrations", () => {
+  const bundle = bundleOf(
+    agentDeclaring("@appstrate/vapi", "@appstrate/gmail"),
+    integration("@appstrate/vapi@1.0.0", {}, { "INTEGRATION.md": "# Vapi" }),
+    integration("@appstrate/gmail@1.0.0"),
+  );
+
+  it("lists only the bundle's integrations in availableIntegrationIds", () => {
+    const inputs = buildPlatformPromptInputs(bundle, ctx(), {
+      availableIntegrationIds: new Set(["@appstrate/vapi", "@appstrate/unknown"]),
+      unavailableIntegrations: [{ id: "@appstrate/gmail", reason: "it is switched off" }],
+    });
+    expect(inputs.integrations).toEqual([
+      { id: "@appstrate/vapi", location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md" },
+    ]);
+    expect("availableIntegrationIds" in inputs).toBe(false);
+    const prompt = renderPlatformPrompt(inputs);
+    expect(prompt).toContain("<name>@appstrate/vapi</name>");
+    expect(prompt).not.toContain("<name>@appstrate/gmail</name>");
+    expect(prompt).toContain("- **@appstrate/gmail**: it is switched off");
+  });
+
+  it("lists no integration when availableIntegrationIds is absent", () => {
+    const inputs = buildPlatformPromptInputs(bundle, ctx());
+    expect(inputs.integrations).toEqual([]);
+    expect(renderPlatformPrompt(inputs)).not.toContain("### Integrations");
+  });
+
+  it("never inlines INTEGRATION.md, however large, only its location", () => {
+    const marker = "LARGE_DOC_MARKER";
+    const doc = `# Big\n${marker}\n${"x".repeat(60 * 1024)}`;
+    const big = bundleOf(
+      agentDeclaring("@appstrate/vapi"),
+      integration("@appstrate/vapi@1.0.0", {}, { "INTEGRATION.md": doc }),
+    );
+    const prompt = renderPlatformPrompt(
+      buildPlatformPromptInputs(big, ctx(), { availableIntegrationIds: ["@appstrate/vapi"] }),
+    );
+    expect(prompt).not.toContain(marker);
+    expect(prompt).toContain(
+      "<location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",
+    );
+    expect(prompt.length).toBeLessThan(20 * 1024);
   });
 });

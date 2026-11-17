@@ -67,6 +67,24 @@ export function parseScopedName(scopedName: string): { scope: string; name: stri
   return { scope: match[1]!, name: match[3]! };
 }
 
+/** Scope of the system packages the deployment ships (`@appstrate/<name>`, no owning organization). */
+const SYSTEM_PACKAGE_SCOPE = "appstrate";
+
+/** Scope of inline runs' ephemeral shadow packages (`@inline/r-<uuid>`). Never publishable. */
+export const INLINE_SHADOW_SCOPE = "inline";
+
+const RESERVED_SCOPES: ReadonlySet<string> = new Set([SYSTEM_PACKAGE_SCOPE, INLINE_SHADOW_SCOPE]);
+
+/**
+ * Whether `scope` (without `@`) belongs to the platform. The API refuses one
+ * both as an organization slug (the scope its ZIP/skill uploads, forks and demo
+ * agent are created under, and the one `isOwnedByOrg` compares) and as the
+ * scope of any organization package, whose id is otherwise caller-chosen.
+ */
+export function isReservedScope(scope: string): boolean {
+  return RESERVED_SCOPES.has(scope);
+}
+
 /** Single source of truth for package ownership. */
 export function isOwnedByOrg(packageId: string, orgSlug: string): boolean {
   if (!orgSlug) return false;
@@ -120,7 +138,7 @@ export function toSlug(value: string, maxLen?: number): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-|-$/g, "");
   return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
 }
 
@@ -250,7 +268,7 @@ export function decodeFilenameHeader(raw: string): string | null {
 }
 
 /**
- * Canonical MIME → filename-extension table for the text-shaped and common
+ * Canonical MIME → filename-extension table for the text-shaped, image and common
  * file formats the platform names files after. Values carry no leading dot.
  *
  * ONE table because the same question is asked on both sides of the run
@@ -272,6 +290,13 @@ const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   ["application/x-yaml", "yaml"],
   ["application/yaml", "yaml"],
   ["application/pdf", "pdf"],
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
+  ["image/gif", "gif"],
+  ["image/webp", "webp"],
+  ["image/bmp", "bmp"],
+  ["image/svg+xml", "svg"],
 ]);
 
 /**

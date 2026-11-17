@@ -2,7 +2,7 @@
 
 /** The skill picker's data and pure rules. */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   fetchEnforcedSkills,
   fetchSkills,
@@ -12,62 +12,45 @@ import {
   togglePinned,
 } from "../src/ui/chat-skills.ts";
 import { MAX_PINNED_SKILLS } from "../src/skills.ts";
-
-const realFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
+import { requestAnswering } from "./fake-request.ts";
 
 describe("fetchSkills", () => {
-  it("GETs the space listing with the scoping headers and parses its rows", async () => {
-    let input: RequestInfo | URL | undefined;
-    let init: RequestInit | undefined;
-    globalThis.fetch = (async (i: RequestInfo | URL, o?: RequestInit) => {
-      input = i;
-      init = o;
-      return Response.json({
+  it("GETs the space listing and parses its rows", async () => {
+    const request = requestAnswering(() =>
+      Response.json({
         data: [{ id: "@acme/tone", name: "Tone", description: null, version: "1.2.0" }],
-      });
-    }) as typeof fetch;
+      }),
+    );
 
-    const got = await fetchSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
+    const got = await fetchSkills(request);
 
-    expect(String(input)).toBe("/api/packages/skills");
-    expect(init?.credentials).toBe("include");
-    expect(init?.headers).toEqual({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/packages/skills"]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", description: null, version: "1.2.0" },
     ]);
   });
 
-  it("throws on a refusal", async () => {
-    globalThis.fetch = (async (_input: RequestInfo | URL) =>
-      new Response(null, { status: 403 })) as typeof fetch;
-    await expect(fetchSkills(() => ({}))).rejects.toThrow("HTTP 403");
+  it("throws on a refusal, as the host raised it", async () => {
+    const request = requestAnswering(() => new Response(null, { status: 403 }));
+    await expect(fetchSkills(request)).rejects.toMatchObject({ status: 403 });
   });
 });
 
 describe("fetchEnforcedSkills", () => {
-  it("GETs the chat read with the scoping headers and parses its rows", async () => {
-    let input: RequestInfo | URL | undefined;
-    let init: RequestInit | undefined;
-    globalThis.fetch = (async (i: RequestInfo | URL, o?: RequestInit) => {
-      input = i;
-      init = o;
-      return Response.json({
+  it("GETs the chat read and parses its rows", async () => {
+    const request = requestAnswering(() =>
+      Response.json({
         object: "list",
         data: [
           { id: "@acme/tone", name: "Tone", version: "1.2.0" },
           { id: "@acme/gone", name: "Gone", version: null },
         ],
-      });
-    }) as typeof fetch;
+      }),
+    );
 
-    const got = await fetchEnforcedSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
+    const got = await fetchEnforcedSkills(request);
 
-    expect(String(input)).toBe("/api/chat/enforced-skills");
-    expect(init?.credentials).toBe("include");
-    expect(init?.headers).toEqual({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+    expect(request.calls.map((c) => c.path)).toEqual(["/api/chat/enforced-skills"]);
     expect(got).toEqual([
       { packageId: "@acme/tone", display_name: "Tone", version: "1.2.0" },
       { packageId: "@acme/gone", display_name: "Gone", version: null },
@@ -75,9 +58,8 @@ describe("fetchEnforcedSkills", () => {
   });
 
   it("throws on a refusal", async () => {
-    globalThis.fetch = (async (_input: RequestInfo | URL) =>
-      new Response(null, { status: 503 })) as typeof fetch;
-    await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("HTTP 503");
+    const request = requestAnswering(() => new Response(null, { status: 503 }));
+    await expect(fetchEnforcedSkills(request)).rejects.toMatchObject({ status: 503 });
   });
 
   // Fail closed: a drifted policy read is an error, never "nothing imposed".
@@ -87,8 +69,8 @@ describe("fetchEnforcedSkills", () => {
     ["a missing data member", { object: "list" }],
   ] as const) {
     it(`throws on ${label}`, async () => {
-      globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json(body)) as typeof fetch;
-      await expect(fetchEnforcedSkills(() => ({}))).rejects.toThrow("Unexpected");
+      const request = requestAnswering(() => Response.json(body));
+      await expect(fetchEnforcedSkills(request)).rejects.toThrow("Unexpected");
     });
   }
 });

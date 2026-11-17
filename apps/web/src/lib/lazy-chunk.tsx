@@ -52,3 +52,15 @@ export function chunkComponent<M, P extends object>(
   }
   return ChunkComponent;
 }
+
+/**
+ * `module[name]`, a page split into a chunk of its own: callable and typed like the export
+ * itself, drawn through `chunkComponent` so a prefetched chunk renders at once.
+ */
+export function lazyPage<M extends Record<K, ComponentType<never>>, K extends string>(
+  importer: () => Promise<M>,
+  name: K,
+): M[K] {
+  const Page = chunkComponent(chunk(importer), (module) => module[name] as ComponentType<object>);
+  return Page as unknown as M[K];
+}

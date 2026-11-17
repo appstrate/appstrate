@@ -82,7 +82,7 @@ export interface RuntimePiEnvOptions {
   /** Hosts excluded from the forward proxy (names the sidecar's own host) → `NO_PROXY`. */
   noProxy: string;
   sink?: {
-    /** POST target for each {@link RunEvent} — typically `…/api/runs/{runId}/events`. */
+    /** POST target for each {@link RunEvent} — typically `…/api/runs/{id}/events`. */
     url: string;
     /** POST target for the terminal `RunResult` — typically `…/events/finalize`. */
     finalizeUrl: string;
@@ -248,7 +248,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 export const SIDECAR_OPERATOR_ENV_KEYS = [
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
-  // Runner image refs per MCPB `server.type`, consumed sidecar-side. Absent keys
+  // Runner image refs per `source.server.type`, consumed sidecar-side. Absent keys
   // fall back to bare `:latest` (local dev); production sets versioned GHCR refs.
   "RUNNER_IMAGE_NODE",
   "RUNNER_IMAGE_BUN",

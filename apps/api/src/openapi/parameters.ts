@@ -6,6 +6,10 @@ import { runStatusValues } from "@appstrate/core/run-status";
 /**
  * Reusable OpenAPI parameter definitions.
  */
+/** The closing sentences of every list spanning the spaces of an organization (`/api/orgs/{orgId}/…`). */
+export const ORG_READ_REACH =
+  "A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.";
+
 export const parameters = {
   Offset: {
     name: "offset",
@@ -58,6 +62,13 @@ export const parameters = {
     description:
       "Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key).",
     schema: { type: "string", format: "uuid" },
+  },
+  OrgIdPath: {
+    name: "orgId",
+    in: "path" as const,
+    required: true,
+    description: "Organization ID.",
+    schema: { type: "string" },
   },
   SseOrgId: {
     name: "orgId",
@@ -127,8 +138,10 @@ export const parameters = {
     required: false,
     description:
       "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
-      "item of a 409 `missing_integration_connection`, and each such item of a " +
-      "launch response's `warnings`, also carries a ready-to-open `connect_url` " +
+      "item of a 409 `missing_integration_connection`, each such item of a " +
+      "launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` " +
+      "connection-selection 409, and each such `refusal` of a `not_ready` entry of " +
+      "`GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` " +
       "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
       "connect card or hand the link to that human. An `Idempotency-Key` replay returns the " +
       "`warnings` without it.",

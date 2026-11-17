@@ -66,6 +66,7 @@ import { createModelProviderCredentialsRouter } from "../../src/routes/model-pro
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createSpacesRouter } from "../../src/routes/spaces.ts";
 import { createRolesRouter } from "../../src/routes/roles.ts";
+import { createOrgRolesRouter } from "../../src/routes/org-roles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -80,11 +81,13 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "../../src/routes/org-integrations.ts";
+import { createCrossSpaceReadsRouter } from "../../src/routes/cross-space-reads.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "../../src/routes/oauth-client-metadata.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
 
 import type { AppstrateModule } from "@appstrate/core/module";
@@ -271,12 +274,14 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
   app.route("/api/orgs", orgsRouter);
+  app.route("/api/orgs", createCrossSpaceReadsRouter());
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
+  app.route("/api/org-roles", createOrgRolesRouter());
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
-  // more-specific `/runs/:runId/events` path wins — mirrors the
+  // more-specific `/runs/:id/events` path wins — mirrors the
   // production wiring in `apps/api/src/index.ts`.
   app.route("/api", createRunsEventsRouter());
   // Runner-facing remote-run creation (`POST /api/runs/remote` + sink
@@ -318,6 +323,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
+  app.route("/oauth", createOAuthClientMetadataRouter());
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
   app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());

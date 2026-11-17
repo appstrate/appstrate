@@ -48,11 +48,13 @@ import {
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
-import { resolveMcpServerForSpawn } from "../integration-service.ts";
-import { effectiveMcpServerType } from "@appstrate/core/mcp-server-meta";
 import {
   getIntegrationSourceKind,
-  getLocalServerRef,
+  getLocalServer,
+  getLocalServerEnv,
+} from "@appstrate/core/integration";
+import { effectiveMcpServerType } from "@appstrate/core/mcp-server";
+import {
   getAppstrateConnectMeta,
   runnerEgressFor,
   type AfpsManifestAuth,
@@ -86,8 +88,8 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 /**
  * Extract the caller-safe login diagnostic from a raw `APPSTRATE_CONNECT_ERROR:`
  * message, or `null` when the message is a sidecar-internal fault (which the
- * caller must never see). Returns a sentence — the tool's own text when it
- * carried one, a neutral fallback when it did not.
+ * caller must never see). Returns the tool's own text as a sentence, or `""`
+ * when it carried none.
  *
  * The discriminator is `CONNECT_LOGIN_TOOL_ERROR_PREFIX`, which the sidecar's
  * connect-login primitive puts on a failure the LOGIN TOOL ITSELF reported — the
@@ -104,7 +106,7 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 function loginToolDiagnostic(msg: string): string | null {
   if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
   const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
-  if (!detail) return "The integration rejected the submitted credentials.";
+  if (!detail) return "";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
   const clipped =
@@ -120,11 +122,6 @@ interface ConnectRunExecutorOptions {
   orchestrator?: RunOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
-  /**
-   * Injectable mcp-server resolver (local-source server lookup). Production
-   * defaults to the package-store lookup; unit tests supply a fixture.
-   */
-  resolveMcpServer?: McpServerResolver;
 }
 
 /**
@@ -137,70 +134,8 @@ interface ConnectRunExecutorOptions {
  * serialization. Throws (mapped onto a structured strategy error) when the
  * manifest auth is mis-declared (missing auth or `delivery.http`).
  */
-/**
- * Resolver for the mcp-server a local-source integration references
- * (`source.server.name`). Injectable so unit tests can supply a fixture
- * without a DB; production defaults to {@link resolveMcpServerForSpawn}, the
- * SAME kernel the agent-run spawn resolver uses.
- *
- * It returns the CONCRETE published version alongside the manifest because
- * the sidecar's byte route (`GET /internal/mcp-server-bundle/:scope/:name`)
- * requires it: past the system-package short-circuit an absent `?version=` is
- * rejected outright (serving "latest" would skew the manifest from the
- * bytes). `version: null` is the system-mcp-server case, the
- * one population the byte route serves by id alone.
- *
- * `pin` is the manifest's `source.server.version` RANGE (e.g. `^1.0.0`), not
- * a concrete version — resolving it is this resolver's job, never the
- * caller's.
- */
-export type McpServerResolver = (
-  packageId: string,
-  orgId: string,
-  pin: string | null,
-) => Promise<{
-  server?: { type?: string; entry_point?: string };
-  /** Concrete published version, or `null` for a system mcp-server. */
-  version?: string | null;
-} | null>;
-
-/**
- * Production resolver — the published-version kernel shared with
- * `integration-spawn-resolver.ts`. `orgId` scopes the lookup to the run's own
- * org (or a system package), so a connect-run can never resolve a
- * cross-tenant mcp-server.
- */
-const defaultMcpServerResolver: McpServerResolver = async (packageId, orgId, pin) => {
-  const resolution = await resolveMcpServerForSpawn(packageId, orgId, pin);
-  if (!resolution.ok) return null;
-  // Same narrowing cast `integration-spawn-resolver.ts` uses on the same
-  // field: the AFPS schema types `server.type` as its own enum, and the
-  // resolver contract here is deliberately the loose `{ type?, entry_point? }`
-  // so a test fixture needs no schema import.
-  const run = (resolution.manifest as { server?: { type?: string; entry_point?: string } }).server;
-  if (!run) return { version: resolution.version };
-  // `effectiveMcpServerType` — the SAME core reader the agent-run spawn
-  // resolver uses, so both paths spawn a given package under one interpreter.
-  // Forwarding the raw `server.type` here did not: MCPB has no `bun` type, so a
-  // bun-native server keeps an MCPB-vocabulary `server.type: "node"` and
-  // declares `bun` in `_meta`, and the same package ran under bun for an agent
-  // run and under node for a connect login.
-  //
-  // Applied HERE, at the resolution boundary, rather than in
-  // `buildConnectLoginSpec`: the builder only ever sees `{ type, entry_point }`,
-  // so resolving it there would mean widening the contract to carry the whole
-  // manifest. `type` stays optional — `buildConnectLoginSpec` is the one that
-  // fails closed on a server it cannot run.
-  const type = effectiveMcpServerType(resolution.manifest);
-  return {
-    server: { ...run, ...(type ? { type } : {}) },
-    version: resolution.version,
-  };
-};
-
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  resolveMcpServer: McpServerResolver = defaultMcpServerResolver,
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   const auth = auths[execution.authKey];
@@ -216,29 +151,25 @@ export async function buildConnectLoginSpec(
     );
   }
 
-  // AFPS: resolve the spawnable server from the `source` discriminant.
-  // connect.tool requires a LOCAL runner — `remote`/`api` sources have no
-  // spawnable server. For a local source the runnable server config lives on
-  // the SEPARATE mcp-server package referenced by `source.server.name`.
+  // connect.tool requires a LOCAL runner — `remote`/`api` sources have no spawnable server. A
+  // local source declares its server inline and ships its payload in the integration's own
+  // archive.
   const sourceKind = getIntegrationSourceKind(execution.manifest);
   if (sourceKind !== "local") {
     throw new Error(
       `connect-run: integration '${execution.integrationId}' has no spawnable server (connect.tool requires a local node|python|binary|uv runner)`,
     );
   }
-  const ref = getLocalServerRef(execution.manifest);
-  if (!ref) {
+  // The runtime this server actually spawns under — the SAME core reader the agent-run spawn
+  // resolver uses, so both paths spawn a given integration under one interpreter.
+  const localServer = getLocalServer(execution.manifest);
+  const type = localServer ? effectiveMcpServerType(execution.manifest) : undefined;
+  if (!localServer || !type) {
     throw new Error(
-      `connect-run: integration '${execution.integrationId}' local source is missing source.server`,
+      `connect-run: integration '${execution.integrationId}' local source has no runnable source.server`,
     );
   }
-  const mcpServer = await resolveMcpServer(ref.name, execution.scope.orgId, ref.version ?? null);
-  const run = mcpServer?.server;
-  if (!mcpServer || !run?.type || !run.entry_point) {
-    throw new Error(
-      `connect-run: referenced mcp-server '${ref.name}' could not be resolved (missing or invalid)`,
-    );
-  }
+  const version = execution.bundleVersion;
 
   const connectMeta = getAppstrateConnectMeta(auth.connect);
   const reauthOn = connectMeta?.reauth_on;
@@ -250,33 +181,24 @@ export async function buildConnectLoginSpec(
     // McpHost.normaliseNamespace slugs/caps this — the package id is the same
     // namespace the spawn resolver uses for the agent-run path.
     namespace: execution.integrationId,
-    // connect-run only spawns local mcp-server bundles (the connect-login
+    // connect-run only spawns local servers (the connect-login
     // tool can't run against a remote managed MCP — `runConnectOnce`
     // hard-rejects `sourceKind === "remote"`).
     sourceKind: "local",
     manifest: {
       name: execution.manifest.name,
       version: execution.manifest.version,
-      // AFPS — the runnable bytes live on the SEPARATE mcp-server package this
-      // integration references, so the spawn spec must NAME it: the sidecar
-      // fetches `server.packageId`'s bundle, never the integration's own. The
-      // sidecar hard-fails a local spec that omits it (it used to fall back to
-      // `spec.integrationId`, i.e. fetch a different package's bytes into a
-      // code-execution position), which made every orchestrated
-      // `connect.tool` login abort at boot until this builder started
-      // emitting the field.
+      // The runnable bytes live in the integration's own archive, fetched by `integrationId`.
       server: {
-        type: run.type,
-        entry_point: run.entry_point,
-        packageId: ref.name,
-        // The CONCRETE version the resolver picked, forwarded to the
-        // byte route as `?version=` so the bytes match the manifest read
-        // above. Absent only for a system mcp-server (served from the boot
-        // registry by id alone), which is the one case the route allows.
-        ...(mcpServer.version ? { version: mcpServer.version } : {}),
+        type,
+        entry_point: localServer.entry_point,
+        // The published version the manifest was read from, served by the byte route as
+        // `?version=`. Absent for a system integration and for an unpublished draft.
+        ...(version ? { version } : {}),
       },
     },
-    spawnEnv: {},
+    // The server's literal `mcp_config.env`, as on the agent-run path.
+    spawnEnv: getLocalServerEnv(execution.manifest),
     // Placeholder MITM auth so the sidecar creates the per-integration source +
     // listener. The real session is captured by runConnectLogin at boot.
     httpDeliveryAuths: {
@@ -392,7 +314,10 @@ export function parseConnectResult(
         // their input, not a server fault. Surface the tool's diagnostic so the
         // connect form can say "wrong password" / "MFA required" instead of
         // "An internal error occurred", and name the remedy.
-        throw loginRejected(diagnostic);
+        // The tool's own text, if any, rides `integration_diagnostic` for a client to show as is.
+        throw diagnostic
+          ? loginRejected(diagnostic, { kind: "integration", diagnostic })
+          : loginRejected("The integration rejected the submitted credentials.");
       }
       // Anything else on this channel is a sidecar-internal fault: stay a plain
       // Error so the routes map it to a generic 500 (the raw text is logged
@@ -406,12 +331,10 @@ export function parseConnectResult(
 class ConnectRunExecutor implements ConnectToolExecutor {
   private readonly orchestrator: RunOrchestrator | undefined;
   private readonly timeoutMs: number;
-  private readonly resolveMcpServer: McpServerResolver;
 
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.resolveMcpServer = opts.resolveMcpServer ?? defaultMcpServerResolver;
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -462,19 +385,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     // stack frame; never logged, serialized, or persisted.
     const resultKey = randomBytes(32);
 
-    const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
-    // `buildConnectLoginSpec` always names the referenced mcp-server for a
-    // local source (and rejects every other source kind), so this is an
-    // invariant check, not a fallback. It is here rather than folded into the
-    // grant below because an unnamed server would mint a grant that authorises
-    // nothing, and a connect run that boots without a usable grant fails as
-    // "bundle not found" three layers away from the cause.
-    const grantedMcpServerId = spec.manifest.server?.packageId;
-    if (!grantedMcpServerId) {
-      throw new Error(
-        "connect-run: spawn spec carries no server.packageId — refusing to launch a sidecar it cannot authorise",
-      );
-    }
+    const spec = await buildConnectLoginSpec(execution);
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
@@ -483,7 +394,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       // The connect run's ENTIRE authorization on `/internal/*`. There is no
       // `runs` row behind `connectId` and no agent manifest to walk, so the
       // grant is what the byte + credentials routes match against — one
-      // integration, one mcp-server, one concrete version, for as long as this
+      // integration, one concrete version, for as long as this
       // connect run lives. Written BEFORE the sidecar exists so its first call
       // already finds it, and revoked in the `finally` below.
       await writeConnectRunGrant(
@@ -491,11 +402,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         {
           orgId: execution.scope.orgId,
           integrationId: execution.integrationId,
-          mcpServerId: grantedMcpServerId,
-          // `null` = system mcp-server (no published version; the byte route
-          // serves it from the boot registry by id alone). The grant then
-          // authorises ONLY that short-circuit.
-          mcpServerVersion: spec.manifest.server?.version ?? null,
+          // `null` = a system integration or an unpublished draft (no version for the byte route
+          // to look up). The grant then authorises ONLY that unversioned answer.
+          version: spec.manifest.server?.version ?? null,
         },
         connectRunGrantTtlSeconds(this.timeoutMs),
       );

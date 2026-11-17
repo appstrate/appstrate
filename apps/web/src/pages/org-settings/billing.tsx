@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
+import { Alert } from "@appstrate/ui/components/alert";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, CreditCard } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { CreditCard } from "lucide-react";
+import { AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
@@ -150,7 +152,7 @@ function BillingOverview() {
 
   return (
     <>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
+      <Card className="mb-4 p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="text-[0.95rem] font-semibold">
@@ -196,7 +198,7 @@ function BillingOverview() {
         {(storageLoading || storage) && (
           <UsageMeter
             className="mt-4"
-            label={t("billing.storageUsage")}
+            label={t("orgStorage.section")}
             loading={storageLoading}
             percent={storageLimit === null ? null : (storagePercent ?? 0)}
             summary={
@@ -213,21 +215,17 @@ function BillingOverview() {
             }
           />
         )}
-      </div>
+      </Card>
 
       {billing.status === "past_due" && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle />
           <AlertTitle>{t("billing.pastDueWarning")}</AlertTitle>
-          <AlertDescription className="text-muted-foreground">
-            {t("billing.pastDueDescription")}
-          </AlertDescription>
+          <AlertDescription>{t("billing.pastDueDescription")}</AlertDescription>
         </Alert>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle />
           <AlertTitle>
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
           </AlertTitle>
@@ -235,7 +233,7 @@ function BillingOverview() {
       )}
 
       {billing.plans.length > 0 && (
-        <div className="border-border bg-card mb-4 rounded-lg border p-5">
+        <Card className="mb-4 p-5">
           <h3 className="mb-3 text-[0.95rem] font-semibold">{t("billing.upgradePlans")}</h3>
           <PlanGrid
             plans={billing.plans}
@@ -244,7 +242,7 @@ function BillingOverview() {
             disabled={checkoutMutation.isPending || changePlanMutation.isPending}
             onSelect={handleSelectPlan}
           />
-        </div>
+        </Card>
       )}
     </>
   );

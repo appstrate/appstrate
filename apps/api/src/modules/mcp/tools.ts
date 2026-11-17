@@ -32,6 +32,9 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyDetached,
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
   type AppstrateRequestExtra,
   type AppstrateResourceProvider,
   type AppstrateToolDefinition,
@@ -41,11 +44,14 @@ import {
   enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
+  INLINE_MANIFEST_RULE,
+  RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
   type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
+import type { RunLogEvent } from "@appstrate/shared-types";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
@@ -63,6 +69,11 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import {
+  credentialProxyClosedDetail,
+  reachOutsideRunIfPermitted,
+} from "../../services/credential-proxy/access.ts";
+import type { SpaceContextRow } from "../../lib/space-lookup.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -80,16 +91,21 @@ import {
   asRecord,
   asString,
   dispatchHeaders,
-  RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
   ToolRefusal,
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
-import { buildConnectionTools } from "./connection-tools.ts";
+import { buildIntegrationTools } from "./integration-tools.ts";
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  rankByKeywords,
+  searchLimit,
+  searchTokens,
+} from "./search.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
-import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 import {
   describeSpace,
   grantedIn,
@@ -113,12 +129,11 @@ export type McpToolName =
   | "run_and_wait"
   | "list_files"
   | "read_file"
-  | "read_skill"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
-  | "list_connections"
-  | "api_call"
+  | "search_integration_tools"
+  | "call_integration_tool"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -138,7 +153,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** Rows returned to the caller (after `limit`), not rows matched; `api_call`: its entries. */
+  /** Rows returned to the caller (after `limit`), not rows matched; `call_integration_tool`: its entries. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -174,11 +189,15 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
-  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
-  /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
-  readSkill: SkillToolContext["readSkill"];
+  placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
   requestId: string;
+  /**
+   * Deliver the `run_log` frames (info and above) of a run the caller may read
+   * until the returned function is called (`followRunLogs` in
+   * `services/realtime-access.ts`). Feeds `run_and_wait`'s progress messages.
+   */
+  followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) => () => void;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -206,8 +225,6 @@ function emit(ctx: McpToolContext, event: McpToolEvent): void {
   }
 }
 
-const DEFAULT_SEARCH_LIMIT = 25;
-const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
 /**
  * Auth-context headers the router forwards from the inbound MCP request onto
@@ -263,13 +280,6 @@ const MAX_RESPONSE_CHARS = 100_000;
 // — the tool layer stays free of the files service's DB/storage graph
 // while sharing one contract.
 
-/**
- * Ceiling on inlining a file's bytes into a `resources/read` text block.
- * Above it (or for a non-textual mime) the read returns metadata only — MCP has
- * no partial-content standard, so we keep it simple.
- */
-const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
-
 /** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
 function fileResourceLink(doc: RunAndWaitFile): {
   type: "resource_link";
@@ -287,15 +297,6 @@ function fileResourceLink(doc: RunAndWaitFile): {
     size: doc.size,
     description: `File published by this run — read it with read_file or pass its URI to a follow-up run_and_wait input file field.`,
   };
-}
-
-function scoreOperation(op: CatalogOperation, tokens: string[]): number {
-  if (tokens.length === 0) return 0;
-  const haystack =
-    `${op.operationId} ${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`.toLowerCase();
-  let score = 0;
-  for (const token of tokens) if (haystack.includes(token)) score += 1;
-  return score;
 }
 
 /**
@@ -410,24 +411,26 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const { operations, componentSchemas } = getCatalog();
-    const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
-    const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
-    const limit = Math.min(Math.max(1, Math.floor(rawLimit)), MAX_SEARCH_LIMIT);
-    const tokens = query.split(/\s+/).filter(Boolean);
+    const limit = searchLimit(args.limit);
+    const tokens = searchTokens(args.query);
 
     let matches = [...operations.values()];
     if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
 
-    const scored = matches
-      .map((op) => ({ op, score: scoreOperation(op, tokens) }))
-      .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
+    const scored = rankByKeywords(
+      matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
+      tokens,
+      (op) => ({
+        name: op.operationId,
+        text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+      }),
+    );
 
     // A denied match is answered, not hidden — its id and requirement only.
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
-    for (const { op } of scored) {
+    for (const op of scored) {
       (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
     }
     const shown = granted.slice(0, limit);
@@ -971,9 +974,14 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /** Well under the SDK client's request timeout, which each progress notification resets. */
 export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 4;
-/** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
-export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
-  DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
+/**
+ * Wait budget, in seconds and launch included, of a call without `wait`: 10 s under the
+ * 60 s per-call timeout that is the shortest one MCP clients commonly apply, whether or
+ * not they send a progress token.
+ */
+export const RUN_AND_WAIT_DEFAULT_WAIT_SECONDS = 50;
+/** Ceiling of the `wait` argument, in seconds: the fallback wait ceiling of `run_and_wait`. */
+export const RUN_AND_WAIT_MAX_WAIT_SECONDS = RUN_AND_WAIT_MAX_MS / 1000;
 
 export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
   ", ",
@@ -982,7 +990,40 @@ export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) 
 /** The resume instruction for a caller with time to wait (not the chat). */
 export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
 
-function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+/** At most one log notification per period; a line arriving within it waits, replaced by any newer one. */
+export const RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS = 1_000;
+/** Longest log message a progress notification carries, in code points. */
+export const RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS = 200;
+
+/** `Run <id> [<level>] <message>` on one line, message cut to its cap; `null` for nothing to show. */
+function logProgressMessage(runId: string, log: RunLogEvent): string | null {
+  if (log.level === "debug") return null;
+  const line = (log.message ?? "").replace(/\s+/g, " ").trim();
+  if (line === "") return null;
+  // Counted and cut in code points, so a character outside the BMP is never split.
+  const chars = [...line];
+  const message =
+    chars.length > RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS
+      ? `${chars.slice(0, RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1).join("")}…`
+      : line;
+  return `Run ${runId} [${log.level}] ${message}`;
+}
+
+/**
+ * Progress of a streamed `run_and_wait` (the caller sent a `progressToken`): a
+ * heartbeat every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS} plus the run's
+ * latest log line, throttled to {@link RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS}.
+ * Both share one strictly increasing `progress` counter. `null` without a token.
+ *
+ * The returned stop takes whether the wait completed: a completed wait first
+ * sends the line still held by the throttle (often the run's final error), as
+ * the response has not left yet; a cancelled or disconnected call sends nothing.
+ */
+function startRunProgress(
+  ctx: McpToolContext,
+  extra: AppstrateRequestExtra,
+  runId: string,
+): ((waitCompleted: boolean) => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
@@ -1005,8 +1046,38 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
     const elapsedS = Math.round((performance.now() - startedAt) / 1000);
     beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
-  return () => clearInterval(timer);
+
+  let cooldown: ReturnType<typeof setTimeout> | undefined;
+  let waiting: string | null = null;
+  const sendLog = (message: string) => {
+    beat(message);
+    cooldown = setTimeout(() => {
+      cooldown = undefined;
+      if (waiting === null) return;
+      const next = waiting;
+      waiting = null;
+      sendLog(next);
+    }, RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS);
+  };
+  const stopLogs = ctx.followRunLogs(runId, (log) => {
+    const message = logProgressMessage(runId, log);
+    if (message === null) return;
+    if (cooldown === undefined) sendLog(message);
+    else waiting = message;
+  });
+
+  return (waitCompleted) => {
+    clearInterval(timer);
+    clearTimeout(cooldown);
+    if (waitCompleted && waiting !== null && !extra.signal?.aborted) beat(waiting);
+    stopLogs();
+  };
 }
+
+/** What a caller composing an inline run tells it about the `log` tool. */
+export const INLINE_LOG_INSTRUCTION =
+  "The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level " +
+  "`prompt` to log meaningful steps whenever that tool is selected.";
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
@@ -1018,13 +1089,8 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
     type: "object",
     description:
-      "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
-      "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-      "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
-      "provided field is an exact top-level replacement: arrays and nested objects are not " +
-      "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
-      "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
-      "the manifest — it goes in the separate top-level `prompt` argument.",
+      `${INLINE_MANIFEST_RULE} Do NOT put the prompt inside the manifest — it goes in the ` +
+      "separate top-level `prompt` argument.",
     properties: {
       display_name: {
         type: "string",
@@ -1047,14 +1113,6 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
         type: "object",
         description: "Exact AFPS integration configuration override.",
         additionalProperties: true,
-      },
-      runtime_tools: {
-        type: "array",
-        description:
-          "Exact runtime-tool selection. Omit for " +
-          "log/output/publish_file defaults; " +
-          "an explicit [] disables them all.",
-        items: { type: "string" },
       },
       output: {
         type: "object",
@@ -1110,17 +1168,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
-        ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
-          "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-          "publish_file), and an open object output schema. Defaults apply only " +
-          "to fields you omit; " +
-          "every field you provide replaces its default exactly, with no array or nested-object merge. " +
-          "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
-          "A complete deterministic manifest may override every field, including a strict " +
-          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
-          "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        ? `${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION} ` +
+          "Never use an id or a generic display name such as `one-shot`. "
         : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +
@@ -1179,6 +1228,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: true,
         },
         ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
+        wait: {
+          type: "integer",
+          minimum: 0,
+          description:
+            "Seconds this call waits for the run to end, launch included: " +
+            `${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS} when omitted, at most ` +
+            `${RUN_AND_WAIT_MAX_WAIT_SECONDS} (a larger value is clamped to it); \`0\` returns ` +
+            "right after the launch. Set it only when you know your client keeps a tool call " +
+            "open longer than the default. When the wait ends first, the call returns " +
+            "`done:false` and the run goes on.",
+        },
         connection_overrides: {
           type: "object",
           additionalProperties: connectionIdSetJsonSchema,
@@ -1189,7 +1249,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
             "`[]` runs without that integration — only for one the agent does not mark " +
-            "`required` (a 400 otherwise). " +
+            "`required` (`required_integration_unbound` otherwise, unless an admin imposes a set, " +
+            "where `[]` adds nothing). Connections an admin imposes on an integration stay " +
+            "bound whatever is passed: here the map only adds to them, and a connection outside " +
+            "an imposed set that allows no additions is a `409 override_outranked`. " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
@@ -1235,6 +1298,27 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       });
     }
 
+    // `wait` is this tool's own argument; the launch reads every other one.
+    const { wait, ...launchArgs } = args;
+    const waitSeconds =
+      wait === undefined
+        ? RUN_AND_WAIT_DEFAULT_WAIT_SECONDS
+        : typeof wait === "number" && Number.isInteger(wait) && wait >= 0
+          ? Math.min(wait, RUN_AND_WAIT_MAX_WAIT_SECONDS)
+          : null;
+    if (waitSeconds === null) {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return refusalResult({
+        code: "invalid_argument",
+        error: "`wait` must be a non-negative integer number of seconds.",
+        arguments: ["wait"],
+      });
+    }
+
     // Trusted in-process dispatch: forward the caller's auth + the self-dispatch
     // marker (same as invoke_operation), and route the launch and poll fetches
     // back through the platform app. `launchRunAndWait` (shared with the chat
@@ -1246,7 +1330,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return ctx.dispatch(request);
     }) as typeof fetch;
 
-    const launched = await launchRunAndWait(args, {
+    const launched = await launchRunAndWait(launchArgs, {
       origin: ctx.origin,
       headers: forwarded,
       fetch: dispatchFetch,
@@ -1294,7 +1378,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const stopHeartbeat = startProgressHeartbeat(extra, runId);
+    const stopProgress = startRunProgress(ctx, extra, runId);
     const waitOpts = {
       origin: ctx.origin,
       headers: forwarded,
@@ -1303,8 +1387,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     };
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
-      maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
-    }).finally(() => stopHeartbeat?.());
+      maxMs: waitSeconds * 1000,
+    }).then(
+      (result) => {
+        stopProgress?.(true);
+        return result;
+      },
+      (err: unknown) => {
+        stopProgress?.(false);
+        throw err;
+      },
+    );
 
     // A failed poll reports its HTTP status; otherwise the run's own status (the
     // wait may have ended on `pending`/`running`), not the polling GET's 200.
@@ -1613,15 +1706,14 @@ function buildFileResourceReader(ctx: McpToolContext): {
         canonicalUri,
         row,
         capabilities,
-        "Content omitted — it exceeds the inline size limit (1 MiB text / 700 KiB binary). " +
-          "Fetch it from the content_url.",
+        `${RESOURCE_OVERSIZED_NOTE} Fetch it from the content_url.`,
       );
     },
   };
 }
 
 /** JSON-RPC code for an unknown resource (MCP 2025-11-25, resources "Error Handling"). */
-const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
+export const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 
 /**
  * `resources/read` for `appfile://` URIs: a refusal is a JSON-RPC error here, as
@@ -1645,14 +1737,25 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
-function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
       "Return the caller's working context: identity (name, email), role in this organization, " +
       "the space the request resolved to (every list returned is scoped to it), " +
-      "and the integrations the caller already has connected and could attach to an agent " +
-      "(their own or org-shared). Call this first to ground who you are acting for, what the " +
+      "and the integrations the caller already has connected and could attach to an agent: one " +
+      "entry per integration active in that space with a connection the caller may bind there, " +
+      "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
+      "connection: its owner must reconnect it before use. " +
+      (surface.proxies
+        ? "The integration tools you can call with them are listed by `search_integration_tools`; " +
+          "integrations active in the space without a usable connection are listed there under " +
+          "`not_ready`. "
+        : surface.proxiesClosed
+          ? "You cannot call them directly here: an admin closed this space's credential proxy " +
+            "outside a run. Agents you run still use them. "
+          : "") +
+      "Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
     annotations: {
@@ -1710,8 +1813,13 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
-  /** `list_connections` and `api_call`: the credential proxy outside a run. */
+  /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
+  /**
+   * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
+   * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
+   */
+  proxiesClosed: boolean;
 }
 
 export function deriveMcpSurface(
@@ -1720,11 +1828,17 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
+  /** The space, whose setting the proxy's access rule reads (`reachOutsideRunIfPermitted`). */
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && granted("runAgent") && granted("getRun");
+  // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the listing's
+  // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
+  const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
+  const closed = reachOutsideRunIfPermitted(permissions, space) === "closed";
   return {
     invokes,
     runs,
@@ -1735,10 +1849,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the
-    // listing's route, which guards as `/proxy` does.
-    // `mcp:invoke` is checked here and nowhere else.
-    proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
+    proxies: mayProxy && !closed,
+    proxiesClosed: mayProxy && closed,
   };
 }
 
@@ -1797,15 +1909,9 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    buildReadSkillTool({
-      readSkill: ctx.readSkill,
-      origin: ctx.origin,
-      requestId: ctx.requestId,
-      observe: (event) => emit(ctx, event),
-    }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
-      ? buildConnectionTools({
+      ? buildIntegrationTools({
           origin: ctx.origin,
           authHeaders: ctx.authHeaders,
           dispatch: ctx.dispatch,
@@ -1814,7 +1920,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface)]),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
@@ -1835,11 +1941,10 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   run_and_wait: "runs",
   list_files: "listsFiles",
   read_file: null,
-  read_skill: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
-  list_connections: "proxies",
-  api_call: "proxies",
+  search_integration_tools: "proxies",
+  call_integration_tool: "proxies",
   get_me: null,
   get_runtime_capabilities: false,
 };
@@ -1887,6 +1992,18 @@ function withSpaceArgument(
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
+      // In the proxy route's order: its permission first (`not_granted` below), then the space's
+      // barrier, met only by a caller the permission admits. The credential kind never reaches
+      // here: the proxy refuses it for every space of the request, so neither tool is declared.
+      if (need === "proxies" && current.surface.proxiesClosed) {
+        return refusalResult({
+          code: "credential_proxy_closed",
+          error: credentialProxyClosedDetail(current),
+          space: spaceRef(current),
+          ...grantedIn(spaces, holds(need)),
+          hint: NO_FALLBACK_HINT,
+        });
+      }
       if (!holds(need)(current)) {
         return refusalResult({
           code: "not_granted",

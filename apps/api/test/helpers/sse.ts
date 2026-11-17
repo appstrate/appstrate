@@ -41,6 +41,7 @@ const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
     space_id: "spc-default",
     schedule_id: null,
     error: null,
+    model_error: null,
     started_at: null,
     completed_at: null,
     duration: null,

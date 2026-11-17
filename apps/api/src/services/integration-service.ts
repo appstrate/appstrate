@@ -8,23 +8,25 @@
  * and the runtime credential/spawn path live in their own services.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, packageVersions, packageDistTags } from "@appstrate/db/schema";
+import { packages, packageVersions, packageDistTags, spacePackages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { canonicalUrl } from "@appstrate/afps-shared/authorized-uris";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { isManifestTextFallback } from "../lib/manifest-utils.ts";
+import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
+import { likeContains } from "../lib/like-pattern.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Manifest loading
@@ -84,16 +86,17 @@ export type IntegrationManifestCache = Map<string, Promise<IntegrationManifestLo
 export async function fetchIntegrationManifest(
   packageId: string,
   cache?: IntegrationManifestCache,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  if (!cache) return fetchIntegrationManifestUncached(packageId);
+  if (!cache) return fetchIntegrationManifestUncached(packageId, executor);
   const hit = cache.get(packageId);
   if (hit) return hit;
-  const promise = fetchIntegrationManifestUncached(packageId);
+  const promise = fetchIntegrationManifestUncached(packageId, executor);
   cache.set(packageId, promise);
   return promise;
 }
 
-function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
+export function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
   const parsed = integrationManifestSchema.safeParse(raw);
   if (!parsed.success)
     return {
@@ -105,8 +108,9 @@ function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
 
 async function fetchIntegrationManifestUncached(
   packageId: string,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  const [pkgRow] = await db
+  const [pkgRow] = await executor
     .select({ manifest: packages.draftManifest, type: packages.type })
     .from(packages)
     .where(eq(packages.id, packageId))
@@ -116,53 +120,6 @@ async function fetchIntegrationManifestUncached(
     return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
   }
   return parseIntegrationManifest(pkgRow.manifest);
-}
-
-/**
- * Resolve an `mcp-server` package's MCPB manifest from the package store.
- *
- * An integration whose `source.kind: "local"` references a SEPARATE
- * `mcp-server` package via `source.server.name`. Reads that package's DRAFT; runs
- * go through {@link resolveMcpServerForSpawn}. Returns `null` when it does not resolve.
- */
-export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
-  const [pkgRow] = await db
-    .select({ manifest: packages.draftManifest, type: packages.type })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  // `debug`: every read of an integration's draft comes through here.
-  if (!pkgRow) {
-    logger.debug("referenced mcp-server package not found", { packageId });
-    return null;
-  }
-  if (pkgRow.type !== "mcp-server") {
-    logger.debug("referenced package is not an mcp-server", {
-      packageId,
-      actualType: pkgRow.type,
-    });
-    return null;
-  }
-  const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) {
-    logger.debug("mcp-server manifest failed validation", { packageId });
-    return null;
-  }
-  return parsed.data;
-}
-
-/** An mcp-server's MCPB `tools[]`, a `local` integration's catalog; `undefined` when absent. */
-export function readMcpServerTools(
-  manifest: McpServerManifest,
-): { name: string; description?: string }[] | undefined {
-  const tools = (manifest as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-  if (!Array.isArray(tools)) return undefined;
-  return tools
-    .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-    .map((e) => ({
-      name: e.name,
-      description: typeof e.description === "string" ? e.description : undefined,
-    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -191,8 +148,7 @@ type PublishedManifestResolution =
  * Resolve a package to a CONCRETE published version honoring its pin, and
  * return that version's RAW manifest (unparsed — the caller validates with the
  * schema for its package type). This is the single version-resolution kernel
- * behind both the mcp-server spawn path and the integration spawn path:
- * the manifest comes from `package_versions.manifest` for the SAME
+ * behind the integration spawn path: the manifest comes from `package_versions.manifest` for the SAME
  * `version` the byte route is told to serve, so manifest and bytes can never
  * skew.
  *
@@ -210,9 +166,9 @@ type PublishedManifestResolution =
  */
 async function resolvePublishedManifest(
   packageId: string,
-  expectedType: "integration" | "mcp-server",
   orgId: string,
   pin?: string | null,
+  executor: DbOrTx = db,
 ): Promise<PublishedManifestResolution> {
   // System packages are loaded once at boot and answered from the in-memory
   // registry by id, which holds ONE version per id — so there is no version to
@@ -226,13 +182,13 @@ async function resolvePublishedManifest(
     return { ok: true, rawManifest: sys.manifest, version: null, source: "system" };
   }
 
-  const [pkgRow] = await db
+  const [pkgRow] = await executor
     .select({ type: packages.type })
     .from(packages)
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!pkgRow) return { ok: false, reason: "not_found" };
-  if (pkgRow.type !== expectedType) {
+  if (pkgRow.type !== "integration") {
     return { ok: false, reason: "wrong_type", actualType: pkgRow.type };
   }
 
@@ -241,7 +197,7 @@ async function resolvePublishedManifest(
   // N published versions would otherwise pull N manifest jsonb blobs to keep
   // exactly one. The winner's manifest is fetched by itself below.
   const [versionRows, tagRows] = await Promise.all([
-    db
+    executor
       .select({
         version: packageVersions.version,
         integrity: packageVersions.integrity,
@@ -257,7 +213,7 @@ async function resolvePublishedManifest(
       )
       .where(eq(packageVersions.packageId, packageId))
       .orderBy(desc(packageVersions.createdAt)),
-    db
+    executor
       .select({ tag: packageDistTags.tag, version: packageVersions.version })
       .from(packageDistTags)
       .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
@@ -276,7 +232,7 @@ async function resolvePublishedManifest(
   // Manifest of the WINNING version only — same tenant boundary as the list
   // read above, so the two reads cannot skew across a concurrent
   // delete/recreate of the package id.
-  const [manifestRow] = await db
+  const [manifestRow] = await executor
     .select({ manifest: packageVersions.manifest })
     .from(packageVersions)
     .innerJoin(packages, and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)))
@@ -291,62 +247,6 @@ async function resolvePublishedManifest(
     version: picked.version,
     source: "version",
   };
-}
-
-/**
- * Discriminated failure modes for {@link resolveMcpServerForSpawn}. Mirrors
- * {@link PublishedManifestFailure} with the mcp-server-specific `not_mcp_server`
- * name preserved for existing call-site logging.
- */
-type McpServerResolveFailure =
-  | "not_found"
-  | "not_mcp_server"
-  | "invalid_manifest"
-  | "unsatisfiable_pin"
-  | "no_published_version";
-
-type McpServerResolution =
-  | {
-      ok: true;
-      manifest: McpServerManifest;
-      /**
-       * The CONCRETE version the spawn will run. `null` for system
-       * mcp-servers (single version served from the boot registry — no
-       * `package_versions` row, no `?version=` needed on the byte route).
-       */
-      version: string | null;
-      /** `"system"` → boot registry bytes; `"version"` → published `.afps`. */
-      source: "system" | "version";
-    }
-  | { ok: false; reason: McpServerResolveFailure };
-
-/**
- * Resolve a referenced `mcp-server` package to a CONCRETE version, honoring the
- * `source.server.version` pin, and return that version's manifest. Thin wrapper
- * over {@link resolvePublishedManifest} + MCPB schema validation.
- *
- * `orgId` is the run's org — required so the spawn can only ever resolve a
- * package the org owns or a system package (defense in depth against a
- * cross-tenant reference).
- */
-export async function resolveMcpServerForSpawn(
-  packageId: string,
-  orgId: string,
-  pin?: string | null,
-): Promise<McpServerResolution> {
-  const res = await resolvePublishedManifest(packageId, "mcp-server", orgId, pin);
-  if (!res.ok) {
-    const reason: McpServerResolveFailure =
-      res.reason === "wrong_type" ? "not_mcp_server" : res.reason;
-    logger.warn("mcp-server could not be resolved for spawn", { packageId, pin, reason });
-    return { ok: false, reason };
-  }
-  const parsed = mcpServerManifestSchema.safeParse(res.rawManifest);
-  if (!parsed.success) {
-    logger.warn("mcp-server manifest failed validation", { packageId, version: res.version });
-    return { ok: false, reason: "invalid_manifest" };
-  }
-  return { ok: true, manifest: parsed.data, version: res.version, source: res.source };
 }
 
 // ---------------------------------------------------------------------------
@@ -423,8 +323,9 @@ export function resolvedIntegrationVersionToDescriptor(
 export async function readIntegrationManifestAt(
   packageId: string,
   descriptor: SpawnVersionDescriptor,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  if (descriptor.kind === "draft") return fetchIntegrationManifestUncached(packageId);
+  if (descriptor.kind === "draft") return fetchIntegrationManifestUncached(packageId, executor);
 
   if (descriptor.kind === "system") {
     const sys = getSystemPackages().get(packageId);
@@ -432,7 +333,7 @@ export async function readIntegrationManifestAt(
     return parseIntegrationManifest(sys.manifest);
   }
 
-  const [row] = await db
+  const [row] = await executor
     .select({ manifest: packageVersions.manifest })
     .from(packageVersions)
     .where(
@@ -480,7 +381,7 @@ export async function readIntegrationManifestForProxy(
   frozen: ResolvedIntegrationVersion | null,
 ): Promise<IntegrationManifestLoadResult | { ok: false; failure: { kind: "not_published" } }> {
   if (frozen) return readIntegrationManifestForRun(packageId, frozen);
-  const res = await resolvePublishedManifest(packageId, "integration", orgId);
+  const res = await resolvePublishedManifest(packageId, orgId);
   if (res.ok) return parseIntegrationManifest(res.rawManifest);
   if (res.reason === "not_found") return { ok: false, failure: { kind: "not_found" } };
   if (res.reason === "wrong_type") {
@@ -525,10 +426,12 @@ export async function resolveRunIntegrationVersions(params: {
   orgId: string;
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
+  executor?: DbOrTx;
 }): Promise<RunIntegrationVersionsResult> {
   const entries = parseManifestIntegrations(params.agentManifest);
   const versions: ResolvedIntegrationVersionMap = {};
   const unresolved: Array<{ name: string; versionSpec: string }> = [];
+  const seeded: Array<Promise<IntegrationManifestLoadResult>> = [];
 
   for (const entry of entries) {
     const override = params.dependencyOverrides?.[entry.id];
@@ -539,7 +442,7 @@ export async function resolveRunIntegrationVersions(params: {
     } else {
       // A non-draft override replaces the manifest pin; otherwise the pin wins.
       const spec = override ?? entry.version;
-      const res = await resolvePublishedManifest(entry.id, "integration", params.orgId, spec);
+      const res = await resolvePublishedManifest(entry.id, params.orgId, spec, params.executor);
       if (res.ok) {
         descriptor =
           res.source === "system" ? { kind: "system" } : { kind: "version", version: res.version! };
@@ -563,13 +466,36 @@ export async function resolveRunIntegrationVersions(params: {
     // pinned manifest transparently (one entry per integration, overwriting any
     // draft entry an earlier readiness pass may have memoized).
     if (params.manifestCache) {
-      params.manifestCache.set(entry.id, readIntegrationManifestAt(entry.id, descriptor));
+      const read = readIntegrationManifestAt(entry.id, descriptor, params.executor);
+      params.manifestCache.set(entry.id, read);
+      seeded.push(read);
     }
     versions[entry.id] = descriptorToResolved(descriptor);
   }
 
+  // The freeze is complete when this function returns: every seeded read has
+  // settled, so a draft saved afterwards cannot reach this run through a read
+  // still in flight.
+  await Promise.all(seeded);
+
   if (unresolved.length > 0) return { ok: false, unresolved };
   return { ok: true, versions };
+}
+
+/**
+ * The frozen map, or the `DEPENDENCY_UNRESOLVED` BundleError (`details.missing`)
+ * that `toBundleApiError` renders as `422 dependency_unresolved` — the one
+ * place an unresolved integration pin becomes a refusal, for runs and exports.
+ */
+export function assertIntegrationVersionsResolved(
+  result: RunIntegrationVersionsResult,
+): ResolvedIntegrationVersionMap {
+  if (result.ok) return result.versions;
+  throw new BundleError(
+    "DEPENDENCY_UNRESOLVED",
+    `${result.unresolved.length} integration pin(s) resolved to no published version`,
+    { missing: result.unresolved },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -590,7 +516,7 @@ function asIntegrationManifest(raw: unknown): IntegrationManifest | null {
 
 /**
  * Fetch a single integration by id, PLACED in the caller's space — homed
- * there, offered there, or shipped with the deployment. Returns `null` when
+ * there, holding a row there, or shipped with the deployment. Returns `null` when
  * absent, out of placement, or when the row has been corrupted enough to fail
  * manifest parsing — the caller should treat all three as `404` for UX
  * consistency.
@@ -638,7 +564,7 @@ async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),
@@ -653,7 +579,16 @@ async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
 }
 
 export type ConnectManifestRead =
-  | { ok: true; manifest: IntegrationManifest }
+  | {
+      ok: true;
+      manifest: IntegrationManifest;
+      /**
+       * The published version the manifest was read from, from the same read: the archive a
+       * connect-run fetches is that version's. `null` for a system integration (boot registry)
+       * and for a draft (nothing published; its files are served).
+       */
+      version: string | null;
+    }
   /** `no_usable_version`: versions exist, none of which resolves as `latest` and parses. */
   | { ok: false; reason: "not_found" | "no_usable_version" };
 
@@ -680,10 +615,16 @@ export async function readIntegrationManifestForConnect(
       ? await findPlacedIntegrationRow({ orgId: scope.orgId, spaceId: scope.spaceId }, packageId)
       : undefined;
   if (placed === null) return { ok: false, reason: "not_found" };
-  const res = await resolvePublishedManifest(packageId, "integration", scope.orgId);
+  const res = await resolvePublishedManifest(packageId, scope.orgId);
   if (res.ok) {
     const parsed = parseIntegrationManifest(res.rawManifest);
-    if (parsed.ok) return { ok: true, manifest: parsed.manifest };
+    if (parsed.ok) {
+      return {
+        ok: true,
+        manifest: parsed.manifest,
+        version: res.source === "version" ? res.version : null,
+      };
+    }
     logger.warn("Published integration manifest failed validation", {
       packageId,
       version: res.version,
@@ -697,7 +638,7 @@ export async function readIntegrationManifestForConnect(
   const draft = placed
     ? asIntegrationManifest(placed.draftManifest)
     : await getOrgWideIntegrationManifest(scope.orgId, packageId);
-  return draft ? { ok: true, manifest: draft } : { ok: false, reason: "not_found" };
+  return draft ? { ok: true, manifest: draft, version: null } : { ok: false, reason: "not_found" };
 }
 
 /**
@@ -737,124 +678,34 @@ export async function getOrgWideIntegrationManifest(
 }
 
 /**
- * Per-integration prompt companion returned by
- * {@link fetchIntegrationPromptDocs}. `description` comes from the
- * integration manifest; `doc` is the raw `INTEGRATION.md` content
- * (AFPS §3.5) parsed at import time and persisted on
- * `packages.draftContent`. Either may be absent.
- */
-interface IntegrationPromptDoc {
-  packageId: string;
-  description?: string;
-  doc?: string;
-}
-
-/** Soft cap on `INTEGRATION.md` content inlined in the platform prompt. */
-const INTEGRATION_DOC_INLINE_LIMIT_BYTES = 50 * 1024;
-
-/**
- * Decode `bytes` as UTF-8, capped at `limit` bytes. Backs up to the nearest
- * UTF-8 leading-byte boundary so the tail of the truncated output never
- * contains a U+FFFD replacement char from a partial multi-byte sequence.
- */
-function truncateUtf8(bytes: Uint8Array, limit: number): string {
-  if (bytes.length <= limit) return new TextDecoder().decode(bytes);
-  let cut = limit;
-  // Back up while the byte at `cut - 1` is a UTF-8 continuation byte (0b10xxxxxx).
-  // Max 3 step-backs needed (a 4-byte sequence has at most 3 continuation bytes).
-  while (cut > 0 && ((bytes[cut - 1] ?? 0) & 0xc0) === 0x80) {
-    cut--;
-  }
-  // If the byte at `cut - 1` is itself a leading byte of a multi-byte sequence
-  // (0b11xxxxxx), its continuation bytes were just cut off — back up one more
-  // to exclude the partial start byte.
-  if (cut > 0) {
-    const lead = bytes[cut - 1] ?? 0;
-    if ((lead & 0xc0) === 0xc0) {
-      cut--;
-    }
-  }
-  return new TextDecoder().decode(bytes.slice(0, cut));
-}
-
-/**
- * Truncate `raw` to the inline byte budget, respecting UTF-8 code-point
- * boundaries so the tail never holds a partial multi-byte sequence. Appends
- * a plain truncation marker with the original/cap byte counts.
- */
-function truncateIntegrationDoc(raw: string): string {
-  const bytes = new TextEncoder().encode(raw);
-  if (bytes.byteLength <= INTEGRATION_DOC_INLINE_LIMIT_BYTES) return raw;
-  const truncated = truncateUtf8(bytes, INTEGRATION_DOC_INLINE_LIMIT_BYTES);
-  return `${truncated}\n\n[…truncated — original ${bytes.length} bytes capped at ${INTEGRATION_DOC_INLINE_LIMIT_BYTES} bytes]`;
-}
-
-/**
- * Batch-load `(description, INTEGRATION.md)` for a set of integration
- * package ids. Reads from `packages.draftManifest` (description) +
- * `packages.draftContent` (the `INTEGRATION.md` content captured at
- * import time by `zip.ts`) — never re-fetches the bundle from object
- * storage. Returned entries are sized to the inline-budget; oversized
- * docs are truncated on a UTF-8 code-point boundary with a plain
- * truncation marker.
- *
- * Rows with no `INTEGRATION.md` (the optional companion is absent) yield
- * an entry with `doc` undefined. Rows that fail to load yield no entry.
- */
-export async function fetchIntegrationPromptDocs(
-  packageIds: readonly string[],
-): Promise<IntegrationPromptDoc[]> {
-  if (packageIds.length === 0) return [];
-  const rows = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-    })
-    .from(packages)
-    .where(and(inArray(packages.id, packageIds as string[]), eq(packages.type, "integration")));
-
-  const out: IntegrationPromptDoc[] = [];
-  for (const row of rows) {
-    const manifest = asIntegrationManifest(row.draftManifest);
-    const description = manifest?.description;
-    // `draftContent` for integrations is the raw INTEGRATION.md when
-    // present, or a fallback to the manifest JSON when the package was
-    // uploaded without an INTEGRATION.md (see `packages/core/src/zip.ts`).
-    // Only inline content that looks like markdown documentation, not
-    // the manifest JSON fallback — the SAME predicate the file explorer's
-    // overlay and the package write paths use, so the four of them cannot
-    // disagree about what the column holds.
-    const rawContent = row.draftContent ?? "";
-    const doc =
-      rawContent.trim().length > 0 && !isManifestTextFallback(rawContent)
-        ? truncateIntegrationDoc(rawContent)
-        : undefined;
-    out.push({
-      packageId: row.id,
-      ...(description ? { description } : {}),
-      ...(doc ? { doc } : {}),
-    });
-  }
-  return out;
-}
-
-/**
- * List every integration PLACED in the caller's space — homed there, offered
- * there, or shipped with the deployment. Manifests that fail validation are
+ * List every integration PLACED in the caller's space — homed there, holding a
+ * row there, or shipped with the deployment. Manifests that fail validation are
  * skipped (with a structured warning) rather than aborting the whole query —
  * one broken row shouldn't hide the rest.
  *
- * Placement, not activation: an offer the space has not taken up and a package
- * switched off are both still placed, and this listing decorates each row with
- * its own `active` flag afterwards. The conjunct is {@link
+ * Placement, not activation: a package switched off is still placed, and this
+ * listing decorates each row with its own `active` flag afterwards. The conjunct is {@link
  * placementReadFilter} — the same rule the per-type index and the space
  * library read — so an integration homed in a PERSONAL space of somebody else
  * never reaches the response, whatever the caller's organization role
  * (RBAC spec §3.6).
  */
-export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSummary[]> {
+/**
+ * Narrowing of {@link listIntegrations}, combined with the placement rule.
+ * `ids`: only these package ids (an id not placed here is absent, never an
+ * error). `search`: case-insensitive substring of the id, the manifest's
+ * `display_name` or its `description`, taken as typed.
+ */
+export interface IntegrationListFilters {
+  ids?: readonly string[];
+  search?: string;
+}
+
+export async function listIntegrations(
+  scope: SpaceScope,
+  filters: IntegrationListFilters = {},
+): Promise<IntegrationSummary[]> {
+  const pattern = filters.search ? likeContains(filters.search) : undefined;
   const rows = await db
     .select({
       id: packages.id,
@@ -863,13 +714,22 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
         placementReadFilter(scope.spaceId),
         eq(packages.type, "integration"),
+        // An empty list would be `IN ()`, SQL for "nothing", where the caller meant no filter.
+        filters.ids?.length ? inArray(packages.id, [...filters.ids]) : undefined,
+        pattern
+          ? or(
+              ilike(packages.id, pattern),
+              ilike(sql`${packages.draftManifest}->>'display_name'`, pattern),
+              ilike(sql`${packages.draftManifest}->>'description'`, pattern),
+            )
+          : undefined,
       ),
     )
     // The route paginates this in memory: a stable order keeps pages disjoint.
@@ -890,4 +750,21 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
     });
   }
   return out;
+}
+
+/**
+ * The integrations {@link listIntegrations} shows in `scope` whose remote MCP server is `url`:
+ * equal after {@link canonicalUrl}, nothing looser. Ordered by package id.
+ */
+export async function listIntegrationsAtRemoteUrl(
+  scope: SpaceScope,
+  url: string,
+): Promise<IntegrationSummary[]> {
+  const target = canonicalUrl(url);
+  if (!target) return [];
+  const summaries = await listIntegrations(scope);
+  return summaries.filter(({ manifest }) => {
+    const source = manifest.source;
+    return source?.kind === "remote" && canonicalUrl(source.remote.url) === target;
+  });
 }

@@ -15,12 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bu
 import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import {
-  seedPackage,
-  seedPackageShare,
-  seedRun,
-  seedPublishedVersion,
-} from "../../helpers/seed.ts";
+import { seedPackage, seedRun, seedPublishedVersion } from "../../helpers/seed.ts";
 import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
@@ -90,8 +85,8 @@ async function setup(
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
-  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
+    enabled: true,
     spaceId: ctx.defaultSpaceId,
     packageId,
   });
@@ -148,8 +143,8 @@ async function setupSystemPinned(
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
-  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
+    enabled: true,
     spaceId: ctx.defaultSpaceId,
     packageId,
   });
@@ -747,8 +742,9 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
       }),
     });
     await seedPublishedVersion(id, "1.0.0");
-    await seedPackageShare(ctx.defaultSpaceId, id);
-    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: id });
+    await db
+      .insert(spacePackages)
+      .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: id });
     const [conn] = await db
       .insert(integrationConnections)
       .values({

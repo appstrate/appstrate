@@ -30,6 +30,7 @@ import {
   type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import {
+  assertIntegrationVersionsResolved,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
@@ -40,6 +41,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
@@ -270,10 +272,11 @@ export async function resolveRunPreflight(params: {
 
 /** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
 export async function seedPinnedIntegrationManifests(params: {
-  agent: LoadedPackage;
+  agent: Pick<LoadedPackage, "manifest">;
   orgId: string;
   dependencyOverrides: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
+  executor?: DbOrTx;
 }): Promise<IntegrationManifestCache> {
   const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
   await resolveRunIntegrationVersions({
@@ -281,6 +284,7 @@ export async function seedPinnedIntegrationManifests(params: {
     orgId: params.orgId,
     dependencyOverrides: params.dependencyOverrides,
     manifestCache,
+    executor: params.executor,
   });
   return manifestCache;
 }
@@ -336,16 +340,13 @@ export async function freezeRunSpawnDependencies(params: {
     dependencyOverrides: params.dependencyOverrides ?? null,
     manifestCache: params.manifestCache,
   });
-  if (!resolved.ok) {
-    const list = resolved.unresolved.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
-    throw new ApiError({
-      status: 422,
-      code: "dependency_unresolved",
-      title: "Dependency Unresolved",
-      detail: `Could not resolve ${list} against published versions — publish the integration, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
-    });
+  // Mapped here rather than by each caller: both origins call this outside the
+  // try that maps bundle-layer errors, and an unmapped BundleError is a 500.
+  try {
+    return assertIntegrationVersionsResolved(resolved);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
   }
-  return resolved.versions;
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +538,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
+        resolvedIntegrationVersions,
         traceparent: params.traceparent,
         resolvedConnections,
         manifestCache,

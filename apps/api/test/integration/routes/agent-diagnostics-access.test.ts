@@ -135,7 +135,6 @@ describe("agent overview reads — access", () => {
         source: "local",
         draftManifest: localIntegrationManifest({
           name: integration,
-          serverName: "@diagaccess/svc-server",
           version: "1.0.0",
           auths: {
             primary: {

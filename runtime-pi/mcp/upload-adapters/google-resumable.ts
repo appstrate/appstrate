@@ -33,6 +33,7 @@
 
 import {
   UploadError,
+  serverSessionUrl,
   type AdapterContext,
   type ChunkInfo,
   type SessionState,
@@ -129,7 +130,7 @@ export const googleResumableAdapter: UploadAdapter = {
       );
     }
     return {
-      sessionUrl,
+      sessionUrl: serverSessionUrl(sessionUrl, "google-resumable: Location header", res),
       lastStatus: res.status,
       lastHeaders: res.headers,
       lastBody: res.body,

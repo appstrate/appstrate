@@ -166,6 +166,12 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
    * cookies or can skip the SSRF gate, so a connection-supplied host never does.
    */
   declaredUris: readonly string[];
+  /**
+   * The integration's own remote MCP endpoint (`server.url` and its transport), when it has one.
+   * `api_call` refuses it on every hop ({@link targetsMcpEndpoint}): that server is reached
+   * through its tools, under the agent's tool selection.
+   */
+  mcpEndpoint?: McpEndpoint;
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
@@ -201,6 +207,48 @@ function* jsonStringLeaves(value: unknown): Generator<string> {
   else if (value && typeof value === "object") {
     for (const v of Object.values(value)) yield* jsonStringLeaves(v);
   }
+}
+
+/** Lower-cased, percent-decoded path with repeated and trailing slashes collapsed. */
+function normalisedPath(url: URL): string {
+  let path = url.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // A malformed escape stays as written: the comparison is then on the raw path.
+  }
+  return path
+    .toLowerCase()
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/, "");
+}
+
+/** A remote MCP server as its integration declares it: `server.url` and `server.transport`. */
+export interface McpEndpoint {
+  url: string;
+  transport?: string;
+}
+
+/**
+ * Whether `target` falls on the MCP endpoint: same origin (scheme, host without a trailing dot,
+ * port), and
+ *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
+ *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
+ *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
+ *     case-insensitively after percent-decoding, with repeated and trailing slashes collapsed;
+ *     query and fragment ignored. An endpoint at the origin root matches the root path only, so
+ *     the other paths of that host stay reachable.
+ */
+export function targetsMcpEndpoint(target: string | URL, endpoint: McpEndpoint): boolean {
+  if (!URL.canParse(String(target)) || !URL.canParse(endpoint.url)) return false;
+  const t = new URL(target);
+  const e = new URL(endpoint.url);
+  const host = (u: URL) => u.hostname.replace(/\.$/, "");
+  if (t.protocol !== e.protocol || host(t) !== host(e) || t.port !== e.port) return false;
+  if (endpoint.transport === "sse") return true;
+  const base = normalisedPath(e);
+  const path = normalisedPath(t);
+  return path === base || (base !== "" && path.startsWith(`${base}/`));
 }
 
 /** Exhaustiveness guard: a new body kind without a buildBody case fails to compile here. */
@@ -282,6 +330,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
   const resolvedUrl = prepared.request.url;
+  // Checked by `fetchApiCall` on every hop, the initial target included, before it is sent.
+  const { mcpEndpoint } = deps;
+  const refusedTarget = mcpEndpoint
+    ? {
+        matches: (url: URL) => targetsMcpEndpoint(url, mcpEndpoint),
+        message: "its MCP endpoint is reached through its tools, not api_call",
+      }
+    : undefined;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
@@ -398,6 +454,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // The sidecar's network is not the manifest author's to declare: a literal `authorized_uris`
       // host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
       internalHost: isOperatorTrustedEgressHost,
+      ...(refusedTarget ? { refusedTarget } : {}),
       cookies,
       integrationId,
       ...(fetchFn ? { fetchFn } : {}),

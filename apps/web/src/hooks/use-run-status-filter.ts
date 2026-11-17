@@ -14,7 +14,7 @@ export function useRunStatusFilter(list: Pick<ListState, "values" | "setValues">
   const statuses = list.values("status", runStatusValues);
   const filter: FilterSpec = {
     id: "status",
-    label: t("runs.filterStatus"),
+    label: t("version.status"),
     values: statuses,
     options: runStatusValues.map((value) => ({
       value,

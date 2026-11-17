@@ -4,33 +4,33 @@
 import { createContext, useContext } from "react";
 
 /**
- * The few strings the primitives of this package render themselves (a dialog's
- * close button, the copy button, the sidebar's screen-reader chrome, a carousel's arrows). The package carries no
+ * The few strings the primitives of this package render themselves (the copy button, a dialog's close button, the
+ * sidebar's screen-reader chrome). The package carries no
  * i18n runtime: the host application provides its translations once, at its
  * root, and every primitive reads them from there. English is the default.
  */
 interface UiLabels {
-  carouselNext: string;
-  carouselPrevious: string;
   close: string;
-  copy: string;
-  copied: string;
-  copyFailed: string;
   sidebar: string;
   sidebarDescription: string;
   toggleSidebar: string;
+  breadcrumb: string;
+  breadcrumbMore: string;
+  copy: string;
+  copied: string;
+  copyFailed: string;
 }
 
 export const UiLabelsContext = createContext<UiLabels>({
-  carouselNext: "Next slide",
-  carouselPrevious: "Previous slide",
   close: "Close",
-  copy: "Copy",
-  copied: "Copied",
-  copyFailed: "Could not copy: the browser refused access to the clipboard.",
   sidebar: "Sidebar",
   sidebarDescription: "Displays the mobile sidebar.",
   toggleSidebar: "Toggle Sidebar",
+  breadcrumb: "Breadcrumb",
+  breadcrumbMore: "More items",
+  copy: "Copy",
+  copied: "Copied",
+  copyFailed: "Could not copy: the browser refused access to the clipboard.",
 });
 
 export function useUiLabels(): UiLabels {

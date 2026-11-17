@@ -3,13 +3,13 @@
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
+  candidateSelectOption,
   integrationIdOfField,
   isChoiceRequest,
   pendingConnectionChoices,
   picksAfterActorChange,
   refusalForActor,
   refusalReasonKey,
-  refusedScheduleWrite,
   retryDecision,
   scheduleConnectionChoices,
   withConnectionPickAs,
@@ -63,12 +63,19 @@ describe("scheduleConnectionChoices", () => {
         code: "required_integration_unbound",
         message: "required",
       },
+      // The imposed set and the schedule's additions over the cap: fewer additions clear it.
+      {
+        field: "integrations.@acme/drive",
+        code: "connection_set_too_large",
+        message: "too many",
+      },
     ]);
     expect(scheduleConnectionChoices(err)).toEqual([
       { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
       { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
       { integrationId: "@acme/ssh", code: "auth_serves_no_selected_tool", candidates: [] },
       { integrationId: "@acme/crm", code: "required_integration_unbound", candidates: [] },
+      { integrationId: "@acme/drive", code: "connection_set_too_large", candidates: [] },
     ]);
   });
 
@@ -204,38 +211,6 @@ describe("refusalForActor", () => {
   });
 });
 
-describe("refusedScheduleWrite", () => {
-  const outranked = missingConnection([
-    { field: "integrations.@acme/gmail", code: "override_outranked", message: "pinned" },
-  ]);
-  const stored = { actor: ALICE, picks: ALICE_PICKS };
-
-  it("answers a write of any field: a cron change is judged with the stored picks, as Alice", () => {
-    expect(refusedScheduleWrite(outranked, { cron_expression: "0 8 * * *" }, stored)).toEqual({
-      choices: [{ integrationId: "@acme/gmail", code: "override_outranked", candidates: [] }],
-      runsAs: ALICE,
-      picks: ALICE_PICKS,
-    });
-  });
-
-  it("is judged with the picks the write sent, for the actor it moved to", () => {
-    const sent = { actor: BOB, connection_overrides: null };
-    expect(refusedScheduleWrite(outranked, sent, stored)).toMatchObject({ runsAs: BOB, picks: {} });
-    const named = { connection_overrides: BOB_PICKS };
-    expect(refusedScheduleWrite(outranked, named, stored)?.picks).toBe(BOB_PICKS);
-  });
-
-  it("is null for any other outcome", () => {
-    const write = { cron_expression: "0 8 * * *" };
-    expect(refusedScheduleWrite(null, write, stored)).toBeNull();
-    expect(refusedScheduleWrite(new ApiError("forbidden", "no", 403), write, stored)).toBeNull();
-    const notConnected = missingConnection([
-      { field: "integrations.@acme/slack", code: "not_connected", message: "connect" },
-    ]);
-    expect(refusedScheduleWrite(notConnected, write, stored)).toBeNull();
-  });
-});
-
 describe("refusalReasonKey", () => {
   const key = (code: ConnectionRefusal["code"]) =>
     refusalReasonKey({ integrationId: "@acme/gmail", code, candidates: [] });
@@ -244,6 +219,7 @@ describe("refusalReasonKey", () => {
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
+    expect(key("connection_set_too_large")).toBe("error.connectionSetTooLarge");
     expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
 });
@@ -304,5 +280,46 @@ describe("retryDecision", () => {
       canRetry: false,
     });
     expect(retryDecision(mixed, false, []).canRetry).toBe(true);
+  });
+});
+
+describe("candidate labels", () => {
+  const labels = {
+    sharedByOther: "shared by another member",
+    needsReconnection: "needs reconnection",
+  };
+  const base = {
+    id: "c1",
+    label: "Work",
+    account_id: "me@x.io",
+    owned_by_actor: true,
+    needs_reconnection: false,
+    scopes_granted: [],
+    missing_scopes: [],
+  };
+
+  it("names the account and keeps a live own connection selectable", () => {
+    expect(candidateSelectOption(base, labels)).toEqual({
+      value: "c1",
+      label: "Work · me@x.io",
+      disabled: false,
+    });
+  });
+
+  it("says who owns a shared one and disables a dead one", () => {
+    expect(
+      candidateSelectOption(
+        { ...base, account_id: "default", owned_by_actor: false, needs_reconnection: true },
+        labels,
+      ),
+    ).toEqual({
+      value: "c1",
+      label: "Work · shared by another member · needs reconnection",
+      disabled: true,
+    });
+  });
+
+  it("shows the bare label for an own connection without account identity", () => {
+    expect(candidateSelectOption({ ...base, account_id: "default" }, labels).label).toBe("Work");
   });
 });

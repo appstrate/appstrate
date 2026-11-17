@@ -1,13 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Loader2 } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
+
 import { cn } from "../cn.ts";
 
-export function Spinner({ className, label }: { className?: string; label?: string }) {
+/**
+ * Decorative unless named: without an `aria-label` it is hidden from assistive
+ * technology, so a spinner inside a button leaves the button's name alone. With
+ * one, it is a `status` announcing that label.
+ */
+function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (
-    <Loader2
-      className={cn("h-4 w-4 animate-spin", className)}
-      {...(label ? { role: "status", "aria-label": label } : { "aria-hidden": true })}
+    <Loader2Icon
+      {...(props["aria-label"] ? { role: "status" } : { "aria-hidden": true })}
+      className={cn("size-4 animate-spin", className)}
+      {...props}
     />
   );
 }
+
+export { Spinner };

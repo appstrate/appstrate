@@ -60,6 +60,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect page cookie; manifest display data only",
   },
   getInvitationInfo: { category: "public", reason: "invitation token in URL is the credential" },
+  getOAuthClientMetadataDocument: {
+    category: "public",
+    reason: "OAuth client metadata document an authorization server fetches, no credential",
+  },
   getOpenApiSpec: { category: "public", reason: "static instance spec, skipAuth" },
   getSwaggerUI: { category: "public", reason: "static Swagger UI shell, skipAuth" },
   integrationsOAuthCallback: {
@@ -69,6 +73,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   integrationsOAuthCallbackForServer: {
     category: "public",
     reason: "server-side OAuth state minted under integrations:connect, tag-checked",
+  },
+  integrationsOAuthCallbackForMetadataDocument: {
+    category: "public",
+    reason: "server-side OAuth state minted under integrations:connect, tag- and iss-checked",
   },
   mcpProtectedResourceMetadata: { category: "public", reason: "RFC 9728 static metadata" },
   mcpProtectedResourceMetadataInSpace: {
@@ -187,16 +195,16 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
-  getMcpServerBundle: {
+  getIntegrationBundle: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
   },
   getOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
-  getRunHistory: { category: "internal", reason: "verifyRunToken" },
   heartbeatRemoteRun: { category: "internal", reason: "verifyRunSignature" },
   ingestRunEvent: { category: "internal", reason: "verifyRunSignature" },
+  internalRunToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  internalRunToolsMcpPost: { category: "internal", reason: "verifyRunToken" },
   publishRunFile: { category: "internal", reason: "verifyRunUploadSignature" },
-  recallMemories: { category: "internal", reason: "verifyRunToken" },
   refreshIntegrationCredentials: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",
@@ -207,6 +215,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiResponses: { category: "internal", reason: "verifyRunToken" },
+  runToolsMcpGet: { category: "internal", reason: "405 on every verb but POST" },
+  runToolsMcpPost: { category: "internal", reason: "verifyRunSignature, remote-origin runs" },
 
   // handler-guarded — the permission is checked inside the handler (or by a
   // guard the route table cannot read) against the ceiling-applied permission set.
@@ -222,10 +232,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   createIntegrationPackageVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
-  },
-  createMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
   },
   createSkillVersion: {
     category: "handler-guarded",
@@ -254,14 +260,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   deleteIntegrationPackageVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:delete in home space",
-  },
-  deleteMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
-  },
-  deleteMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:delete in home space",
   },
   deleteSkill: {
     category: "handler-guarded",
@@ -320,17 +318,14 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
   },
-  restoreMcpServerPackageVersion: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
-  },
   restoreSkillVersion: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: skills:write in home space",
   },
   revokePackageShare: {
     category: "handler-guarded",
-    reason: "assertPackageShareAccess: <type>:share in home space",
+    reason:
+      "assertPlacementRemovalAccess: <type>:share in home space, or the type's deactivation permission in the target space",
   },
   rotateWebhookSecret: {
     category: "handler-guarded",
@@ -349,6 +344,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "validateSSEAuth: ceilinged canReadRuns + run ownership or read-all",
   },
+  syncIntegrationFromServer: {
+    category: "handler-guarded",
+    reason:
+      "assertPackageMutationAccess: integrations:write in home space; credential-proxy:call-own when the draft declares auths",
+  },
   testWebhook: {
     category: "handler-guarded",
     reason: "loadWebhookForAction: webhooks:write|org-webhooks:write",
@@ -360,10 +360,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   updateIntegrationPackage: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",
-  },
-  updateMcpServerPackage: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: mcp-servers:write in home space",
   },
   updateSkill: {
     category: "handler-guarded",
@@ -388,9 +384,9 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "self",
     reason: "bound org's own non-secret identity; members/invitations gated in-handler",
   },
-  getOrganizationLogo: {
+  listOrgRoles: {
     category: "self",
-    reason: "bound org's own logo image, the identity getOrganization already exposes",
+    reason: "bound org's role matrix, the same in every org; no caller or tenant data",
   },
   getOrgSettings: {
     category: "self",

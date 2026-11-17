@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Thin REST helpers over the chat session API. Auth = the host shell's scoping
- * headers (org/space). The server is the single writer of messages, so there is
- * no client message-write helper — only session list/CRUD + history load.
+ * Thin REST helpers over the chat session API, sent through the host's `request`
+ * (scoping headers added, RFC 9457 failures thrown as the host's error). The server
+ * is the single writer of messages, so there is no client message-write helper —
+ * only session list/CRUD + history load.
  */
 
 import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
-import type { GetHeaders } from "./runtime-context.ts";
+import { errorStatus, jsonInit, type ChatRequest, type GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
 export { mintSessionId } from "../session-id.ts";
@@ -44,6 +45,16 @@ export function sessionsQueryKey(spaceId: string | null): readonly unknown[] {
   return [...SESSIONS_QUERY_KEY, spaceId];
 }
 
+/**
+ * The title-search results of ONE space. Nested under `sessionsQueryKey` on
+ * purpose: an invalidation (or `setQueriesData`) on the prefix reaches the
+ * filtered lists too. The default list's key shape is unchanged — the
+ * local-first patch in `index.tsx` addresses it exactly.
+ */
+export function sessionsSearchQueryKey(spaceId: string | null, q: string): readonly unknown[] {
+  return [...sessionsQueryKey(spaceId), "search", q];
+}
+
 /** One conversation's stored history, in one space. */
 export function sessionQueryKey(spaceId: string | null, id: string): readonly unknown[] {
   return ["chat", "session", id, spaceId];
@@ -58,27 +69,23 @@ export function spaceIdFromHeaders(getHeaders: GetHeaders | null | undefined): s
   return getHeaders?.()["X-Space-Id"] ?? null;
 }
 
-function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
-  return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
-}
-
 export interface SessionsPage {
   data: SessionSummary[];
   hasMore: boolean;
 }
 
-export type SessionsCache = InfiniteData<SessionsPage, string | null>;
+export type SessionsCache = InfiniteData<SessionsPage, string | undefined>;
 
 export async function fetchSessionsPage(
-  getHeaders: GetHeaders | null | undefined,
-  startingAfter: string | null,
+  request: ChatRequest,
+  startingAfter: string | undefined,
+  q?: string,
 ): Promise<SessionsPage> {
-  const query = startingAfter ? `?startingAfter=${encodeURIComponent(startingAfter)}` : "";
-  const res = await fetch(`/api/chat/sessions${query}`, {
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (startingAfter) params.set("startingAfter", startingAfter);
+  const query = params.size > 0 ? `?${params}` : "";
+  const res = await request(`/api/chat/sessions${query}`);
   const body = (await res.json()) as Partial<SessionsPage>;
   return { data: body.data ?? [], hasMore: body.hasMore ?? false };
 }
@@ -89,7 +96,8 @@ export function patchSessionsCache(
   fn: (rows: SessionSummary[], first: boolean) => SessionSummary[],
   seed?: SessionSummary,
 ): SessionsCache | undefined {
-  if (!prev) return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [null] } : prev;
+  if (!prev)
+    return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [undefined] } : prev;
   return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
 }
 
@@ -100,55 +108,25 @@ export function flattenSessions(cache: SessionsCache): SessionSummary[] {
 }
 
 export async function renameSession(
-  getHeaders: GetHeaders | null | undefined,
+  request: ChatRequest,
   id: string,
   title: string,
 ): Promise<void> {
-  const res = await fetch(`/api/chat/sessions/${id}`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: headers(getHeaders, true),
-    body: JSON.stringify({ title }),
-  });
-  if (!res.ok) throw new Error(`Failed to rename session (HTTP ${res.status})`);
+  await request(`/api/chat/sessions/${id}`, jsonInit("PATCH", { title }));
 }
 
-export async function deleteSession(
-  getHeaders: GetHeaders | null | undefined,
-  id: string,
-): Promise<void> {
-  const res = await fetch(`/api/chat/sessions/${id}`, {
-    method: "DELETE",
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (!res.ok) throw new Error(`Failed to delete session (HTTP ${res.status})`);
+export async function deleteSession(request: ChatRequest, id: string): Promise<void> {
+  await request(`/api/chat/sessions/${id}`, { method: "DELETE" });
 }
 
 /** Mark the session read server-side (clears `unread`). Idempotent. */
-export async function markSessionRead(
-  getHeaders: GetHeaders | null | undefined,
-  id: string,
-): Promise<void> {
-  const res = await fetch(`/api/chat/sessions/${id}/read`, {
-    method: "PUT",
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (!res.ok) throw new Error(`Failed to mark session read (HTTP ${res.status})`);
+export async function markSessionRead(request: ChatRequest, id: string): Promise<void> {
+  await request(`/api/chat/sessions/${id}/read`, { method: "PUT" });
 }
 
 /** Explicitly stop the server-side producer for an active conversation. */
-export async function stopSession(
-  getHeaders: GetHeaders | null | undefined,
-  id: string,
-): Promise<void> {
-  const res = await fetch(`/api/chat/sessions/${id}/stop`, {
-    method: "POST",
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (!res.ok) throw new Error(`Failed to stop session (HTTP ${res.status})`);
+export async function stopSession(request: ChatRequest, id: string): Promise<void> {
+  await request(`/api/chat/sessions/${id}/stop`, { method: "POST" });
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */
@@ -169,15 +147,16 @@ interface SessionHistory {
  * such conversation (the route's 404).
  */
 export async function loadHistory(
-  getHeaders: GetHeaders | null | undefined,
+  request: ChatRequest,
   id: string,
 ): Promise<SessionHistory | null> {
-  const res = await fetch(`/api/chat/sessions/${id}`, {
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
+  let res: Response;
+  try {
+    res = await request(`/api/chat/sessions/${id}`);
+  } catch (error) {
+    if (errorStatus(error) === 404) return null;
+    throw error;
+  }
   const body = (await res.json()) as {
     messages?: StoredMessage[];
     skill_mode: ChatSkillMode;

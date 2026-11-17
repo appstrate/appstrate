@@ -26,6 +26,7 @@ function integration(
     home_deletable: true,
     home_shareable: true,
     published: true,
+    activation: [],
     placements: placements.map((p) => ({
       space_id: p.space_id,
       via: "home" as const,
@@ -52,7 +53,7 @@ describe("missingIntegrations", () => {
     expect(missing.map((entry) => entry.id)).toEqual(["@appstrate/drive"]);
   });
 
-  it("counts a pending offer as missing: placed is not switched on", () => {
+  it("counts a placement with no row as missing: placed is not switched on", () => {
     const missing = missingIntegrations(
       [{ id: "@appstrate/gmail" }],
       [integration("@appstrate/gmail", [{ space_id: "spc_b", state: "none" }])],

@@ -24,8 +24,11 @@
  * default to stay well within the sidecar envelope.
  */
 
+import { placeholderKeys, urlTemplateAuthority } from "@appstrate/afps-shared/request-template";
 import {
   UploadError,
+  serverSessionUrl,
+  type AdapterApiCallResponse,
   type AdapterContext,
   type ChunkInfo,
   type SessionState,
@@ -92,7 +95,13 @@ export const tusAdapter: UploadAdapter = {
       );
     }
     return {
-      sessionUrl: resolveLocation(ctx.target, sessionUrl),
+      // Checked raw (new URL() %7B-encodes a '{{' in a path) and resolved (it strips tab/newline,
+      // so '{\t{' becomes '{{' in a query).
+      sessionUrl: serverSessionUrl(
+        resolveLocation(ctx.target, serverSessionUrl(sessionUrl, "tus: Location header", res), res),
+        "tus: Location header",
+        res,
+      ),
       serverOffset: 0,
       lastStatus: res.status,
       lastHeaders: res.headers,
@@ -214,14 +223,33 @@ function encodeTusMetadata(metadata: Record<string, unknown> | undefined): strin
 }
 
 /**
- * tus servers may return a relative `Location:` (e.g. `/files/abc`).
- * Resolve it against the request target. Absolute URLs pass through
- * unchanged.
+ * A relative `Location:` (e.g. `/files/abc`) resolves against the request target. A target holding
+ * `{{field}}` is a template the sidecar renders per call: a reference is resolved only where the
+ * rendering cannot change the result — absolute, or path-absolute under a literal origin. A base-URL
+ * placeholder may carry a path, a path-relative reference depends on a templated path.
  */
-function resolveLocation(base: string, location: string): string {
-  try {
-    return new URL(location, base).toString();
-  } catch {
-    return location;
+function resolveLocation(target: string, location: string, res: AdapterApiCallResponse): string {
+  const refuse = (reason: string): never => {
+    throw new UploadError(`tus: ${reason}`, res.status, res.headers, res.body);
+  };
+  const resolve = (base?: string): string => {
+    try {
+      return new URL(location, base).toString();
+    } catch {
+      return refuse(`Location '${location}' is not a valid URL`);
+    }
+  };
+  if (URL.canParse(location)) {
+    const { protocol } = new URL(location);
+    if (protocol !== "http:" && protocol !== "https:") {
+      refuse(`Location '${location}' must be an http(s) URL`);
+    }
+    return resolve();
   }
+  if (placeholderKeys(target).length === 0) return resolve(target);
+  const origin = urlTemplateAuthority(target);
+  if (/^[/\\]/.test(location) && placeholderKeys(origin).length === 0) return resolve(origin);
+  return refuse(
+    `relative Location '${location}' cannot be resolved against target '${target}' before its {{field}} placeholders are rendered`,
+  );
 }

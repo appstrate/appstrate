@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
@@ -66,20 +67,19 @@ export function MissingConnectionsModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={t("missingConnections.title")}
       actions={
         <div className="flex items-center gap-2">
           {showRetry && (
-            <Button
+            <PendingButton
               onClick={onRetry}
               pending={retrying}
               disabled={!canRetry}
               data-testid="missing-connections-retry"
             >
               {t("missingConnections.retry")}
-            </Button>
+            </PendingButton>
           )}
         </div>
       }
@@ -88,7 +88,7 @@ export function MissingConnectionsModal({
       {/* Cap the list height so a long set of integrations scrolls inside the
           modal instead of overflowing past it (and pushing the footer out of
           view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
-      <div className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
+      <div className="-mr-2 flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-2">
         {errors.map((err, i) => (
           <MissingRow
             key={`${err.field}-${i}`}
@@ -156,7 +156,7 @@ export function MissingRow({
       : "text-amber-500";
 
   return (
-    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
+    <Card className="flex flex-col gap-2 rounded-md px-3 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
@@ -184,6 +184,6 @@ export function MissingRow({
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }

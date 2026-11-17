@@ -20,7 +20,7 @@ import { useSpaceLabelOf, useSpaces } from "../hooks/use-spaces";
 import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
-import { useModalTarget } from "../hooks/use-modal-param";
+import { useUrlModalTarget } from "../hooks/use-url-modal";
 import { ConfirmModal } from "./confirm-modal";
 import { DataTable } from "./data-table";
 import { Modal } from "./modal";
@@ -36,7 +36,8 @@ export function InvitationsTable({
   spaceId,
 }: {
   orgId: string;
-  invitations: Invitation[];
+  /** `undefined` while the list loads: the URL target is only judged on a loaded list. */
+  invitations: Invitation[] | undefined;
   spaceId?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -50,12 +51,11 @@ export function InvitationsTable({
 
   const canInvite = currentOrg?.id === orgId && can("members:invite");
   const canEdit = currentOrg?.id === orgId && can("members:change-role");
-  const visible = spaceId
-    ? invitations.filter((invitation) =>
-        invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
-      )
-    : invitations;
-  const editParam = useModalTarget("invitation", canEdit ? visible : undefined);
+  const visible = (invitations ?? []).filter(
+    (invitation) =>
+      !spaceId || invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
+  );
+  const editParam = useUrlModalTarget("invitation", canEdit && invitations ? visible : undefined);
   const editing = editParam.target;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
   const spaceName = (id: string) => spaceLabelOf(id) ?? t("orgSettings.assignmentUnavailableSpace");
@@ -93,8 +93,8 @@ export function InvitationsTable({
   return (
     <SettingsGroup title={t("orgSettings.pendingInvitations")} className="mt-8">
       <DataTable
-        label={t("orgSettings.pendingInvitations")}
         tableId="invitations"
+        label={t("orgSettings.pendingInvitations")}
         columns={columns}
         rows={visible}
         rowKey={(invitation) => invitation.id}
@@ -102,13 +102,12 @@ export function InvitationsTable({
         rowLabel={(invitation) => t("orgSettings.editInvitationOf", { email: invitation.email })}
         isLoading={false}
       />
-      <Modal
-        open={!!editing}
-        onClose={editParam.close}
-        title={t("orgSettings.editInvitation")}
-        className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
-      >
-        {editing && (
+      {editing && (
+        <Modal
+          onClose={editParam.close}
+          title={t("orgSettings.editInvitation")}
+          className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
+        >
           <OrgInvitationForm
             key={`${orgId}:${editing.id}`}
             orgId={orgId}
@@ -116,8 +115,8 @@ export function InvitationsTable({
             onSuccess={editParam.close}
             onCancel={editParam.close}
           />
-        )}
-      </Modal>
+        </Modal>
+      )}
       <ConfirmModal
         open={!!canceling}
         onClose={() => {
@@ -146,10 +145,7 @@ export function InvitationsTable({
           cancel.mutate(
             { params: { path: { orgId, invitationId: canceling.id } } },
             {
-              onSuccess: () => {
-                setCancelingId(null);
-                toast.success(t("orgSettings.invitationCanceled"));
-              },
+              onSuccess: () => setCancelingId(null),
             },
           );
         }}

@@ -5,15 +5,16 @@ import { useTranslation } from "react-i18next";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
 import { RowsEditor } from "../rows-editor";
-import { EditorSection, type EditorSurface } from "./editor-section";
-import { StringListInput } from "./string-list-input";
+import { StringListInput } from "../app-ui/string-list-input";
 import {
   getAuths,
+  isWildcardUsable,
   setAuths,
   emptyAuth,
   AUTH_TYPES,
@@ -23,25 +24,23 @@ import {
 } from "./utils";
 
 interface AuthsSectionProps {
-  /** `settings` inside the edit panel, `card` on the editor page. */
-  surface?: EditorSurface;
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
-export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSectionProps) {
+export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   // Local row state preserves in-progress rows (e.g. a momentarily-empty key)
   // that setAuths drops from the manifest. Initialised once per mount; the tab
   // unmounts on switch, so an external JSON-tab edit is picked up on remount.
   const [rows, setRows] = useState<AuthState[]>(() => getAuths(manifest));
   // AFPS §7.8 — when `allow_undeclared_tools: true` is set on the manifest,
-  // at least one auth MUST be "wildcard-usable": non-oauth2 (no scope
-  // mechanism — always usable) or oauth2 with non-empty `default_scopes`.
+  // the integration declares no auths, or at least one auth is "wildcard-usable":
+  // non-oauth2 (no scope mechanism) or oauth2 with non-empty `default_scopes`.
   // Surface the gate inline only when no auth currently qualifies, on the
   // oauth2 row(s) where the user actually has a fix (add `default_scopes`).
   const wildcardEnabled = manifest.allow_undeclared_tools === true;
-  const hasWildcardUsableAuth = rows.some((r) => r.type !== "oauth2" || r.defaultScopes.length > 0);
+  const hasWildcardUsableAuth = isWildcardUsable(rows);
 
   const commit = (next: AuthState[]) => {
     setRows(next);
@@ -63,28 +62,21 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
   const removeAuth = (idx: number) => commit(rows.filter((_, i) => i !== idx));
 
   return (
-    <EditorSection
-      surface={surface}
-      title={t("integrationEditor.auths.title")}
-      headerRight={
+    <section className="flex max-w-2xl flex-col gap-5">
+      <div className="flex items-center justify-end">
         <Button type="button" size="sm" variant="outline" onClick={addAuth}>
-          <Plus size={14} />
-          {t("integrationEditor.auths.add")}
+          <Plus />
+          {t("common:btn.add")}
         </Button>
-      }
-    >
+      </div>
       {rows.length === 0 && (
         <p className="text-muted-foreground text-sm">{t("integrationEditor.auths.empty")}</p>
       )}
 
       {rows.map((auth, idx) => (
-        <div key={idx} className="border-border space-y-3 rounded-md border p-3">
+        <div key={idx} className="border-border flex flex-col gap-3 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <FormItem
-              id={`auth-key-${idx}`}
-              label={t("integrationEditor.auths.key")}
-              className="flex-1"
-            >
+            <FormItem id={`auth-key-${idx}`} label={t("editor.fieldKeyLabel")} className="flex-1">
               <Input
                 value={auth.key}
                 onChange={(e) => updateAuth(idx, { key: e.target.value })}
@@ -100,13 +92,13 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
               onClick={() => removeAuth(idx)}
               title={t("btn.delete", { ns: "common" })}
             >
-              <Trash2 size={14} className="text-destructive" />
+              <Trash2 className="text-destructive" />
             </Button>
           </div>
 
           <FormField
             id={`auth-type-${idx}`}
-            label={t("integrationEditor.auths.type")}
+            label={t("log.filterType")}
             value={auth.type}
             onChange={(v) =>
               updateAuth(idx, {
@@ -152,8 +144,10 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
               {t("integrationEditor.auths.mtlsDelivery")}
             </p>
           ) : (
-            <div className="border-border space-y-2 rounded border border-dashed p-2">
-              <Label className="text-xs uppercase">{t("integrationEditor.auths.delivery")}</Label>
+            <div className="border-border flex flex-col gap-2 rounded border border-dashed p-2">
+              <Label className="mb-0 text-xs uppercase">
+                {t("integrationEditor.auths.delivery")}
+              </Label>
               <FormField
                 id={`auth-hdr-name-${idx}`}
                 label={t("integrationEditor.auths.headerName")}
@@ -180,7 +174,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
           )}
 
           {auth.type === "oauth2" ? (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <FormField
                 id={`auth-authz-${idx}`}
                 label={t("integrationEditor.auths.authorizationEndpoint")}
@@ -224,7 +218,7 @@ export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSect
           )}
         </div>
       ))}
-    </EditorSection>
+    </section>
   );
 }
 

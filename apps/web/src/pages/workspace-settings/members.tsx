@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
@@ -24,7 +23,6 @@ import { ApiError } from "../../api/client";
 import { useInviteMember, useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { useCanReach } from "../../hooks/use-can-reach";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
@@ -44,16 +42,21 @@ import { useSpace } from "../../hooks/use-spaces";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { DataTable } from "../../components/data-table";
+import { ListFooter, ListToolbar } from "../../components/list-toolbar";
+import { useLocalListParams } from "../../lib/list-params";
+import { useSearchPlaceholder } from "../../lib/search-placeholder";
+import { matchesSearch } from "../../lib/strings";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
 import { FormModal } from "../../components/form-modal";
 import type { MenuAction } from "../../lib/menu-action";
+import { RetryAlert } from "../../components/retry-alert";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../../components/page-states";
 import { useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
@@ -78,6 +81,12 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { data, isLoading, error } = useSpaceMembers(spaceId, canRead);
   // Disabling a query does not remove previously cached rows after a role change.
   const members = canRead ? data : undefined;
+  // The page holds other lists and dialogs: its search stays local rather than writing `?q=`.
+  const list = useLocalListParams();
+  const searchPlaceholder = useSearchPlaceholder(t("spaceMembers.tabTitle"));
+  const shownMembers = (members ?? []).filter((member) =>
+    matchesSearch(list.search, [memberLabel(member), member.email]),
+  );
   const {
     options: roleOptions,
     roles,
@@ -88,12 +97,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   } = useSpaceRoleOptions(spaceId);
   const { data: space, error: spaceError, refetch: refetchSpace } = useSpace(spaceId);
   const [memberToRemove, setMemberToRemove] = useState<SpaceMemberObject | null>(null);
-  // Both modals have an address: `?add-member` and `?view-as`.
-  const addParam = useModalParam("addMember");
-  const viewAsParam = useModalParam("viewAs");
+  const [adding, setAdding] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const canPreview = useCanPreviewRole();
 
-  const assignRole = useAssignSpaceRole(roleOptions);
+  const assignRole = useAssignSpaceRole();
   const removeMember = useRemoveSpaceMember();
 
   const canInvite = can("space-members:invite");
@@ -106,20 +114,23 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const canSeeInvitations = can("members:invite");
   const { data: orgDetail } = useOrgDetail({ enabled: canSeeInvitations });
 
+  const defaultRoleName = t(`roles.preset.${space?.default_role}`);
+
   const remove = (member: SpaceMemberObject) => {
     removeMember.mutate(
       { params: { path: { id: spaceId, userId: member.userId } } },
       {
         onSuccess: (result) => {
           setMemberToRemove(null);
-          toast.success(
-            result.access_after === "implicit"
-              ? t("spaceMembers.removedImplicit", {
-                  name: memberLabel(member),
-                  role: t(`roles.preset.${space?.default_role}`),
-                })
-              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
-          );
+          // The row leaving the table says it all, except when the member keeps a seat.
+          if (result.access_after === "implicit") {
+            toast.success(
+              t("spaceMembers.removedImplicit", {
+                name: memberLabel(member),
+                role: defaultRoleName,
+              }),
+            );
+          }
         },
       },
     );
@@ -138,8 +149,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     roles,
     roleOptions,
     isChangingRole: assignRole.isPending,
-    onChangeRole: (member, value) =>
-      assignRole.assign({ spaceId, member, name: memberLabel(member) }, value),
+    onChangeRole: (member, value) => assignRole.assign({ spaceId, member }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -149,8 +159,18 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const explicitUserIds = new Set(
     (members ?? []).filter((m) => m.source === "explicit").map((m) => m.userId),
   );
-  const removalRestoresDefault =
-    memberToRemove?.org_role === "member" && space?.visibility === "open";
+  const removal =
+    memberToRemove?.org_role === "member" && space?.visibility === "open"
+      ? ({
+          titleKey: "spaceMembers.resetRole",
+          confirmKey: "spaceMembers.resetConfirm",
+          variant: "default",
+        } as const)
+      : ({
+          titleKey: "spaceMembers.removeAccess",
+          confirmKey: "spaceMembers.removeConfirm",
+          variant: "destructive",
+        } as const);
   const canManageRoles = canInvite || canChangeRole;
   const deeds = spaceMembersPageDeeds({ canInvite, canPreview });
   const add: MenuAction = {
@@ -158,7 +178,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     icon: Plus,
     testId: "add-space-member-button",
     label: t("spaceMembers.add"),
-    onSelect: () => addParam.open(),
+    onSelect: () => setAdding(true),
     hidden: !deeds.includes("add"),
   };
   const viewAs: MenuAction = {
@@ -166,7 +186,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     icon: Eye,
     testId: "view-as-space-button",
     label: t("viewAs.trigger"),
-    onSelect: () => viewAsParam.open(),
+    onSelect: () => setPreviewing(true),
     hidden: !deeds.includes("view-as"),
   };
 
@@ -189,34 +209,53 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         />
       )}
       {canRemove && spaceError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertDescription>
-            <p>{t("spaceMembers.spaceLoadError")}</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetchSpace()}>
-              {t("btn.retry", { ns: "common" })}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <RetryAlert
+          className="mb-4"
+          message={t("spaceMembers.spaceLoadError")}
+          onRetry={() => void refetchSpace()}
+        />
       )}
 
+      {canRead && (
+        <ListToolbar
+          search={{
+            value: list.search,
+            onChange: list.setSearch,
+            placeholder: searchPlaceholder,
+          }}
+        />
+      )}
       {canRead && (
         <DataTable
           tableId="space-members"
           label={t("spaceMembers.tabTitle")}
           columns={columns}
-          rows={members ?? []}
+          rows={shownMembers}
           rowKey={(member) => member.userId}
           isLoading={isLoading}
           failure={error}
           empty={
-            <EmptyState
-              message={t("spaceMembers.empty")}
-              hint={t("spaceMembers.emptyHint")}
-              icon={Users}
-              compact
-            >
-              <EmptyStateAction action={add} />
-            </EmptyState>
+            list.search ? (
+              <NoMatchState message={t("spaceMembers.noMatch")} onReset={list.reset} />
+            ) : (
+              <EmptyState
+                message={t("spaceMembers.empty")}
+                hint={t("spaceMembers.emptyHint")}
+                icon={Users}
+                compact
+              >
+                <EmptyStateAction action={add} />
+              </EmptyState>
+            )
+          }
+        />
+      )}
+      {canRead && (
+        <ListFooter
+          count={
+            isLoading || error
+              ? undefined
+              : t("list.count", { ns: "agents", count: shownMembers.length })
           }
         />
       )}
@@ -226,12 +265,12 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           key={`${currentOrg.id}:${spaceId}`}
           orgId={currentOrg.id}
           spaceId={spaceId}
-          invitations={orgDetail?.invitations ?? []}
+          invitations={orgDetail?.invitations}
         />
       )}
 
-      {viewAsParam.value !== null && canPreview && (
-        <ViewAsDialog spaceId={spaceId} onClose={viewAsParam.close} />
+      {previewing && canPreview && (
+        <ViewAsDialog spaceId={spaceId} onClose={() => setPreviewing(false)} />
       )}
 
       <ConfirmModal
@@ -239,32 +278,24 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         onClose={() => {
           if (!removeMember.isPending) setMemberToRemove(null);
         }}
-        title={t(removalRestoresDefault ? "spaceMembers.resetRole" : "spaceMembers.removeAccess")}
+        title={t(removal.titleKey)}
         description={
           memberToRemove
-            ? t(
-                removalRestoresDefault ? "spaceMembers.resetConfirm" : "spaceMembers.removeConfirm",
-                {
-                  name: memberLabel(memberToRemove),
-                  role: t(`roles.preset.${space?.default_role}`),
-                },
-              )
+            ? t(removal.confirmKey, { name: memberLabel(memberToRemove), role: defaultRoleName })
             : ""
         }
-        confirmLabel={t(
-          removalRestoresDefault ? "spaceMembers.resetRole" : "spaceMembers.removeAccess",
-        )}
-        variant={removalRestoresDefault ? "default" : "destructive"}
+        confirmLabel={t(removal.titleKey)}
+        variant={removal.variant}
         isPending={removeMember.isPending}
         onConfirm={() => {
           if (memberToRemove && space && !spaceError) remove(memberToRemove);
         }}
       />
 
-      {canInvite && addParam.value !== null && (
+      {canInvite && adding && (
         <AddSpaceMemberModal
-          key={`${spaceId}:${addParam.value}`}
-          onClose={addParam.close}
+          key={spaceId}
+          onClose={() => setAdding(false)}
           spaceId={spaceId}
           orgId={currentOrg?.id}
           excludedUserIds={explicitUserIds}
@@ -306,10 +337,9 @@ function AddSpaceMemberModal({
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  // The address already holds a pending invitation: the fix is to EDIT that
+  // `conflict`: the address already holds a pending invitation. The fix is to EDIT that
   // one (add this space), never a second token — the server refuses with 409.
-  const [pendingConflict, setPendingConflict] = useState(false);
+  const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
   const inviteGuest = useInviteMember();
   const isPending = addMember.isPending || inviteGuest.isPending;
 
@@ -345,7 +375,6 @@ function AddSpaceMemberModal({
     event.preventDefault();
     if (!canSubmit) return;
     setFormError(null);
-    setPendingConflict(false);
     if (invitingExternal) {
       if (!orgId) return;
       inviteGuest.mutate(
@@ -360,15 +389,16 @@ function AddSpaceMemberModal({
         {
           onSuccess: (invitation) => {
             setInvitationToken(invitation.token);
-            toast.success(t("spaceMembers.invited", { email: email.trim() }));
           },
           onError: (err) => {
             if (err instanceof ApiError && err.code === "invitation_already_pending") {
-              setPendingConflict(true);
-              setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
+              setFormError({
+                message: t("spaceMembers.invitationPending", { email: email.trim() }),
+                conflict: true,
+              });
               return;
             }
-            setFormError(errorMessage(err));
+            setFormError({ message: errorMessage(err), conflict: false });
           },
         },
       );
@@ -384,31 +414,23 @@ function AddSpaceMemberModal({
       },
       {
         onSuccess: () => {
-          const candidate = candidates.find((member) => member.userId === userId);
-          toast.success(
-            t("spaceMembers.added", {
-              name: canReadDirectory ? (candidate ? memberLabel(candidate) : userId) : email.trim(),
-              role: roleOptions.find((option) => option.value === effectiveRole)?.label,
-            }),
-          );
-          setUserId("");
-          setEmail("");
-          setRole("");
           onClose();
         },
         onError: (err) =>
-          setFormError(
-            err instanceof ApiError && err.code === "redundant_space_role"
-              ? t("spaceMembers.redundantRole")
-              : errorMessage(err),
-          ),
+          setFormError({
+            message:
+              err instanceof ApiError && err.code === "redundant_space_role"
+                ? t("spaceMembers.redundantRole")
+                : errorMessage(err),
+            conflict: false,
+          }),
       },
     );
   };
 
   if (invitationToken) {
     return (
-      <Modal open onClose={onClose} title={t("spaceMembers.addTitle")}>
+      <Modal onClose={onClose} title={t("spaceMembers.addTitle")}>
         <div className="flex flex-col items-start gap-4">
           <p>{t("spaceMembers.invited", { email: email.trim() })}</p>
           <p className="text-muted-foreground text-sm">{t("spaceMembers.invitationLinkHint")}</p>
@@ -444,7 +466,6 @@ function AddSpaceMemberModal({
               onValueChange={(value) => {
                 setMode(value);
                 setFormError(null);
-                setPendingConflict(false);
               }}
               disabled={isPending}
             >
@@ -466,7 +487,7 @@ function AddSpaceMemberModal({
           <Field data-disabled={usersLoading || !!usersError || isPending}>
             <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
             {usersLoading ? (
-              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-10 w-full" />
             ) : (
               <Select
                 value={userId}
@@ -491,19 +512,10 @@ function AddSpaceMemberModal({
               </Select>
             )}
             {usersError && (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  <p>{t("spaceMembers.usersLoadError")}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void refetchUsers()}
-                  >
-                    {t("btn.retry", { ns: "common" })}
-                  </Button>
-                </AlertDescription>
-              </Alert>
+              <RetryAlert
+                message={t("spaceMembers.usersLoadError")}
+                onRetry={() => void refetchUsers()}
+              />
             )}
             {!usersLoading && !usersError && candidates.length === 0 && (
               <FieldDescription>{t("spaceMembers.noCandidates")}</FieldDescription>
@@ -527,9 +539,10 @@ function AddSpaceMemberModal({
               onChange={(event) => {
                 setEmail(event.target.value);
                 setFormError(null);
-                setPendingConflict(false);
               }}
-              onInvalid={() => setFormError(t("spaceMembers.emailInvalid"))}
+              onInvalid={() =>
+                setFormError({ message: t("spaceMembers.emailInvalid"), conflict: false })
+              }
               placeholder="email@example.com"
             />
             <FieldDescription id="space-member-email-hint">
@@ -567,8 +580,8 @@ function AddSpaceMemberModal({
         {formError && (
           <Alert variant="destructive">
             <AlertDescription>
-              <p>{formError}</p>
-              {pendingConflict && canManageInvitations && (
+              <p>{formError.message}</p>
+              {formError.conflict && canManageInvitations && (
                 <Link to="/org-settings/members" className="underline underline-offset-4">
                   {t("spaceMembers.manageInvitations")}
                 </Link>

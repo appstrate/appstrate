@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { FormModal } from "./form-modal";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useForkPackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
@@ -14,54 +15,45 @@ import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
   onClose: () => void;
-  /** Leaves the modal for the copy's page. */
-  onLeave: (to: string) => void;
   packageId: string;
   defaultName: string;
   type: string;
 }
 
-type FormData = { name: string };
-
 /** Mounted by the caller while open: closing abandons the name. */
-export function ForkPackageModal({ onClose, onLeave, packageId, defaultName, type }: Props) {
+export function ForkPackageModal({ onClose, packageId, defaultName, type }: Props) {
   const { t } = useTranslation(["agents", "common"]);
   const { currentOrg } = useOrg();
+  const navigate = useNavigate();
   const forkMutation = useForkPackage();
 
-  const {
-    register,
-    handleSubmit,
-    setError,
-    control,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { name: defaultName },
-  });
+  const [name, setName] = useState(defaultName.toLowerCase());
+  const [error, setError] = useState<string | null>(null);
+  const isValid = SLUG_REGEX.test(name);
 
-  const name = useWatch({ control, name: "name" });
-  const isValid = name.length > 0 && SLUG_REGEX.test(name);
-
-  const onSubmit = handleSubmit((data) => {
-    if (!isValid) return;
-
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
     forkMutation.mutate(
-      { packageId, name: data.name },
+      { packageId, name },
       {
-        onSuccess: (result) => onLeave(packageDetailPath(type, result.id)),
+        onSuccess: (result) => {
+          onClose();
+          navigate(packageDetailPath(type, result.id));
+        },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";
-          if (code === "already_owned") {
-            setError("root", { message: t("fork.errorOwned") });
-          } else if (code === "no_published_version") {
-            setError("root", { message: t("fork.errorNoPublishedVersion") });
-          } else {
-            setError("root", { message: errorMessage(err) });
-          }
+          setError(
+            code === "already_owned"
+              ? t("fork.errorOwned")
+              : code === "no_published_version"
+                ? t("fork.errorNoPublishedVersion")
+                : errorMessage(err),
+          );
         },
       },
     );
-  });
+  };
 
   const orgSlug = currentOrg?.slug ?? "";
 
@@ -71,22 +63,19 @@ export function ForkPackageModal({ onClose, onLeave, packageId, defaultName, typ
       title={t("fork.title")}
       onSubmit={onSubmit}
       isPending={forkMutation.isPending}
-      submitLabel={t("fork.submit")}
+      submitLabel={t("fork.button")}
       submitDisabled={!isValid}
-      error={errors.root?.message}
+      error={error}
     >
       <FormItem
         id="fork-name"
         label={t("fork.nameLabel")}
-        error={name.length > 0 && !SLUG_REGEX.test(name) ? t("fork.invalidName") : undefined}
+        error={name && !isValid ? t("fork.invalidName") : undefined}
       >
         <Input
           type="text"
-          {...register("name", {
-            required: true,
-            pattern: SLUG_REGEX,
-            setValueAs: (v: string) => v.toLowerCase(),
-          })}
+          value={name}
+          onChange={(e) => setName(e.target.value.toLowerCase())}
           placeholder={t("fork.namePlaceholder")}
           required
           autoFocus

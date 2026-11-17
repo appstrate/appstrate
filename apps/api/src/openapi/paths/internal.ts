@@ -3,6 +3,12 @@
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
+import { jsonRpcRequestBody } from "../responses.ts";
+import {
+  RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpMethodNotAllowed,
+  runToolsMcpResponses,
+} from "./run-tools-mcp.ts";
 
 /** A credential endpoint's `410`/`502`: a problem whose `cause` member says why. */
 function credentialFailure(description: string) {
@@ -105,141 +111,31 @@ const connectionSelector400 = {
 } as const;
 
 export const internalPaths = {
-  "/internal/run-history": {
-    get: {
-      operationId: "getRunHistory",
+  "/internal/mcp": {
+    post: {
+      operationId: "internalRunToolsMcpPost",
       tags: ["Internal"],
-      summary: "Fetch run history",
-      description: "Container-to-host only. Auth via Bearer run token.",
+      summary: "Run MCP server of a platform run",
+      description:
+        RUN_TOOLS_MCP_DESCRIPTION +
+        " Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
       security: [{ bearerExecToken: [] }],
-      parameters: [
-        {
-          name: "limit",
-          in: "query",
-          description: "Max number of runs to return (1-50, default 10)",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
-        },
-        {
-          name: "fields",
-          in: "query",
-          description:
-            'Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint")',
-          schema: { type: "string", default: "checkpoint" },
-        },
-      ],
+      requestBody: jsonRpcRequestBody,
       responses: {
-        "200": {
-          description: "Run history",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: { type: "object" } },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "run_cm9abc123",
-                    status: "success",
-                    checkpoint: { lastProcessedId: 42 },
-                    date: "2026-01-14T09:00:00Z",
-                    duration: 1234,
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry.",
-        },
+        ...runToolsMcpResponses,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
-  },
-  "/internal/memories": {
     get: {
-      operationId: "recallMemories",
+      operationId: "internalRunToolsMcpGet",
       tags: ["Internal"],
-      summary: "Recall archive memories",
+      summary: "Run MCP server of a platform run (GET)",
       description:
-        "Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.",
-      security: [{ bearerExecToken: [] }],
-      parameters: [
-        {
-          name: "q",
-          in: "query",
-          description:
-            "Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories.",
-          schema: { type: "string" },
-        },
-        {
-          name: "limit",
-          in: "query",
-          description: "Max number of memories to return (1-50, default 10).",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Recalled memories",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["memories"],
-                properties: {
-                  memories: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "content", "createdAt", "actor_type"],
-                      properties: {
-                        id: { type: "integer" },
-                        content: {},
-                        createdAt: { type: "string", format: "date-time" },
-                        actor_type: {
-                          type: "string",
-                          enum: ["user", "end_user", "shared"],
-                        },
-                        actor_id: { type: ["string", "null"] },
-                      },
-                    },
-                  },
-                },
-              },
-              example: {
-                memories: [
-                  {
-                    id: 42,
-                    content: "User prefers Python over JS for data tasks",
-                    createdAt: "2026-04-20T10:00:00Z",
-                    actor_type: "user",
-                    actor_id: "usr_abc",
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-      },
+        "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
+      security: [],
+      responses: { "405": runToolsMcpMethodNotAllowed },
     },
   },
   "/internal/oauth-token/{credentialId}": {
@@ -367,6 +263,14 @@ export const internalPaths = {
           description:
             "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential.",
         },
+        {
+          name: "rejected_request",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["handshake"] },
+          description:
+            "`handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way.",
+        },
       ],
       responses: {
         "200": {
@@ -379,7 +283,7 @@ export const internalPaths = {
         },
         "400": {
           ...connectionSelector400,
-          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) is an \`invalid_request\` too.`,
+          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) or a \`rejected_request\` other than \`handshake\` is an \`invalid_request\` too.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -389,7 +293,7 @@ export const internalPaths = {
           description: `${integrationCredentialsConflict409.description} A fourth cause is unique to this operation: \`connect_run_no_refresh\` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched.`,
         },
         "410": credentialFailure(
-          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
         ),
         "502": credentialFailure(
           "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",
@@ -435,13 +339,13 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/mcp-server-bundle/{scope}/{name}": {
+  "/internal/integration-bundle/{scope}/{name}": {
     get: {
-      operationId: "getMcpServerBundle",
+      operationId: "getIntegrationBundle",
       tags: ["Internal"],
-      summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
+      summary: "Fetch the archive of a local integration (manifest and server payload)",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).",
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise a local integration's MCP server before spawning a runner container. A local integration declares its server inline (`source.server`) and ships the payload in its own archive; `server.entry_point` is relative to the archive root. The route verifies that the run's agent declares this integration in `dependencies.integrations`, that it is ACTIVE in the run's space and that it is a local one with a server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single integration and concrete version its spawn spec names — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). Which bytes: the version the run froze (`runs.resolved_integration_versions`). The spawn spec names a published version in `server.version` and the sidecar forwards it as `?version=`, which must be exactly that version — never a fallback to the newest published one (that would skew the manifest from the bytes). A system integration is answered from the in-memory boot registry, and an integration the run froze on its draft (a `draft` dependency override) from the draft files, read at fetch time (a draft edited after launch is served as edited); neither spec carries a version, and `?version=` is refused for them.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -451,7 +355,7 @@ export const internalPaths = {
           in: "query",
           required: false,
           description:
-            "Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone.",
+            "Concrete published version to serve — exactly the one the run froze (the spawn spec's `server.version`). Omitted for a system integration (boot registry) and for a draft run (draft files); a version sent for those, or a different one, is a 404.",
           schema: { type: "string" },
         },
       ],
@@ -464,12 +368,11 @@ export const internalPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
-            "Agent does not reference this mcp-server through an active integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
+            "The run's agent does not declare this integration, it is not active in the space or not a local one, the run froze no version for it, or `?version=` is not the version the run froze. For a connect run: the request names an integration or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

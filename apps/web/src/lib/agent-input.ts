@@ -1,21 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Client-side view of the platform's input resolution.
- *
- * An AFPS agent declares ONE parameter schema (`input`). Whether a field is
- * asked at every launch or decided once by the editor is a platform fact, not
- * a manifest fact: it is carried by the per-space `values` (layer 2) and
- * `locked_fields` alongside the schema. The server resolves
- *
- *   author default (`schema.default`) → stored value → schedule value → caller input
- *
- * and refuses a caller that sets a locked field (400 `locked_input_field`).
- *
- * The launch surfaces derive their three display states from exactly those two
- * fields (`partitionInputFields`, `@appstrate/core/input-resolution` — shared
- * with the CLI), so the form can never offer to set something the run would
- * reject.
+ * Client view of input resolution. The server resolves
+ * `schema.default` → stored value (per-space `values`) → schedule value → caller input, and refuses
+ * a locked field (400 `locked_input_field`). Launch surfaces derive their display states from
+ * `values` + `locked_fields` via `partitionInputFields` (`@appstrate/core/input-resolution`).
  */
 
 import { jsonText } from "@appstrate/afps-shared/json-text";
@@ -26,15 +15,7 @@ import {
   type AgentInputSettings,
 } from "@appstrate/core/input-resolution";
 
-/**
- * Narrow a wrapper to `keys`, carrying every piece of per-field metadata the
- * renderer needs (file constraints, UI hints, order) and dropping `required`
- * entries for fields the subset does not contain — a `required` naming an
- * absent property makes the whole subset unsatisfiable.
- *
- * Returns `null` when the subset is empty, so a caller can skip the form
- * entirely instead of rendering an empty one.
- */
+/** Narrows a wrapper to `keys` with its per-field metadata; a `required` naming an absent property would make the subset unsatisfiable, so it is dropped. `null` when empty. */
 export function subsetWrapper(
   wrapper: SchemaWrapper | undefined,
   keys: string[],
@@ -78,20 +59,11 @@ function pickKeys<T>(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Whether the schema declares anything at all — lets a caller skip the section. */
 export function hasInputFields(wrapper: SchemaWrapper | undefined): boolean {
   return !!wrapper?.schema?.properties && Object.keys(wrapper.schema.properties).length > 0;
 }
 
-/**
- * Seed for a launch form's editable values.
- *
- * Pre-fills every field that already has a value behind it (author `default`
- * overlaid by the editor's stored value), then applies `seed` — a re-run's
- * previous input, or a schedule's frozen values. Locked keys are dropped in
- * both directions: the run route refuses them (400 `locked_input_field`), so
- * offering one for edit would build a request that cannot succeed.
- */
+/** Seed for a launch form: author `default` overlaid by the stored value, then `seed` (a re-run's input or a schedule's frozen values). Locked keys are dropped (the run route refuses them). */
 export function initialInputValues(
   wrapper: SchemaWrapper | undefined,
   settings: AgentInputSettings,
@@ -104,39 +76,21 @@ export function initialInputValues(
 }
 
 /**
- * Seed for a launch form whose SCHEMA can still change under it — the
- * run-with-options modal, where the version selector re-pins the wrapper after
- * the state has been created.
- *
- * The two layers behind a field have different lifetimes: the editor's stored
- * `values` live on the space row and are version-independent, while an
- * author `default` belongs to the schema of the version being launched. Seeding
- * a default would therefore freeze the version selected at open time onto every
- * later pick; the version-pinned wrapper supplies its own defaults through the
- * form's normal rendering path instead. Locked keys are dropped, as everywhere
- * else: the run route refuses them (400 `locked_input_field`).
+ * Seed for a form whose SCHEMA can change under it (the run-with-options version selector). Stored
+ * `values` are version-independent but an author `default` belongs to the launched version;
+ * seeding it would freeze the version selected at open time, so the wrapper supplies defaults itself.
  */
 export function storedInputValues(settings: AgentInputSettings): Record<string, unknown> {
   return withoutLockedFields(settings.values, settings.locked_fields);
 }
 
-/**
- * Compact, unambiguous rendering of a resolved value for a read-only display.
- * `undefined` means no layer supplies one.
- */
+/** Compact rendering of a resolved value for read-only display; `undefined` = no layer supplies one. */
 export function formatInputValue(value: unknown): string {
   if (value === undefined) return "—";
   return jsonText(value);
 }
 
-/**
- * Structural equality for two resolved input values.
- *
- * Input values are arbitrary JSON — objects, arrays, file-reference strings —
- * so `===` would report two structurally identical values as different and
- * freeze them onto the caller's layer. Small enough to keep local; a
- * dependency for it would cost more than it carries.
- */
+/** Structural equality: values are arbitrary JSON, so `===` would freeze identical values onto the caller's layer. */
 function sameInputValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
@@ -152,21 +106,9 @@ function sameInputValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * The subset of a launch form's values that THIS layer actually decides.
- *
- * A launch form is seeded with the value every field resolves to (author
- * `default` overlaid by the editor's stored value) so the user sees what a
- * launch will use. Submitting that seed back verbatim would claim every one of
- * those values as the caller's own — and on a layer that outranks the ones it
- * was copied from, that turns a display into a permanent freeze: the editor's
- * value could then change forever without the launch following it.
- *
- * So: keep only the keys whose value differs from what layers 1+2 already
- * resolve to. Dropping an unchanged key loses nothing — the same two layers
- * supply it at launch time, and they supply the CURRENT value rather than the
- * one that happened to be resolved when this form was saved. Locked keys are
- * dropped as everywhere else: the launch routes refuse them (400
- * `locked_input_field`).
+ * The values THIS layer actually decides. The form is seeded with each field's resolved value;
+ * submitting it verbatim would claim all of them on a layer that outranks their source, freezing
+ * them. Keeps only keys differing from layers 1+2, which still supply the CURRENT value at launch.
  */
 export function changedInputValues(
   wrapper: SchemaWrapper | undefined,

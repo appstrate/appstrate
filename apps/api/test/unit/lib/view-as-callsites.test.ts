@@ -43,10 +43,6 @@ describe("persona-sensitive call sites", () => {
           "resolves the REAL role the persona's eligibility is judged against",
         ],
         [
-          "apps/api/src/lib/package-access.ts",
-          "distinguishes an end-user (no org role at all) from a member",
-        ],
-        [
           "apps/api/src/lib/permission-audit.ts",
           "a denial trail must name the real role, persona or not",
         ],
@@ -89,10 +85,6 @@ describe("persona-sensitive call sites", () => {
           "`callerSpaceAccess` / `callerSpaceAccessById`, the persona-aware accessors",
         ],
         [
-          "apps/api/src/lib/package-access.ts",
-          "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",
-        ],
-        [
           "apps/api/src/routes/realtime.ts",
           "SSE runs outside the pipeline; it overlays explicitly",
         ],
@@ -121,6 +113,10 @@ describe("persona-sensitive call sites", () => {
         [
           "apps/api/src/modules/oidc/auth/claims.ts",
           "mints a token's scope CEILING from the subject's role; a preview narrows per request, under it",
+        ],
+        [
+          "apps/api/src/routes/org-roles.ts",
+          "describes each role's grants, not the caller: a persona has nothing to narrow",
         ],
         [
           "apps/api/src/services/model-providers/credentials.ts",

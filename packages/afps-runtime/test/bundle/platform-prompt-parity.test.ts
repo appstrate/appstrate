@@ -46,6 +46,7 @@ function makeFixtureBundle(): Bundle {
       type: "agent",
       schema_version: "0.1",
       timeout: 120,
+      dependencies: { integrations: { "@fixture/crm": "^1.0.0" } },
       input: {
         schema: {
           properties: {
@@ -67,15 +68,17 @@ function makeFixtureBundle(): Bundle {
   const mcp = pkg(
     "@fixture/search@1.0.0",
     {
-      manifest_version: "0.3",
       name: "@fixture/search",
       version: "1.0.0",
-      type: "mcp-server",
+      type: "integration",
       schema_version: "0.1",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
+      source: {
+        kind: "local",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
     },
     { "server/index.js": "//" },
@@ -86,8 +89,14 @@ function makeFixtureBundle(): Bundle {
     description: "Write clear prose",
   });
 
+  const integration = pkg(
+    "@fixture/crm@1.0.0",
+    { name: "@fixture/crm", type: "integration", description: "Customer records" },
+    { "INTEGRATION.md": "# CRM API" },
+  );
+
   const packages = new Map<PackageIdentity, BundlePackage>();
-  for (const p of [root, mcp, skill]) packages.set(p.identity, p);
+  for (const p of [root, mcp, skill, integration]) packages.set(p.identity, p);
   return {
     bundleFormatVersion: "1.0",
     root: root.identity,
@@ -130,14 +139,14 @@ function canonicalize(prompt: string): string {
 describe("cross-path prompt parity", () => {
   const bundle = makeFixtureBundle();
   const context = makeContext();
+  // Every host passes the ids it started (platform: spawned, CLI: wired).
+  const availableIntegrationIds = new Set(["@fixture/crm"]);
 
   const platformPrompt = renderPlatformPrompt(
     buildPlatformPromptInputs(bundle, context, {
       platformName: "Appstrate",
-      // Platform-specific: DB-backed uploads. Run history used to be
-      // rendered as a `## Run History` section here; it is now surfaced
-      // via the runtime-wired `run_history` tool instead so the prompt
-      // never mentions the sidecar URL.
+      availableIntegrationIds,
+      // Platform-specific: DB-backed uploads.
       uploads: [
         { name: "brief.pdf", path: "./files/brief.pdf", size: 12345, type: "application/pdf" },
       ],
@@ -145,11 +154,17 @@ describe("cross-path prompt parity", () => {
   );
 
   const externalRunPrompt = renderPlatformPrompt(
-    buildPlatformPromptInputs(bundle, context, { platformName: "External Runner" }),
+    buildPlatformPromptInputs(bundle, context, {
+      platformName: "External Runner",
+      availableIntegrationIds,
+    }),
   );
 
   const appstrateRunPrompt = renderPlatformPrompt(
-    buildPlatformPromptInputs(bundle, context, { platformName: "Appstrate CLI" }),
+    buildPlatformPromptInputs(bundle, context, {
+      platformName: "Appstrate CLI",
+      availableIntegrationIds,
+    }),
   );
 
   it("all three paths render every bundle-derived section", () => {
@@ -159,8 +174,12 @@ describe("cross-path prompt parity", () => {
       // Tools are advertised via MCP tools/list, never listed in the prompt.
       expect(prompt).not.toContain("### Tools");
       expect(prompt).not.toContain("**search**: Search the web");
-      expect(prompt).toContain("### Skills");
-      expect(prompt).toContain("**writing**: Write clear prose");
+      // Skills are announced by Pi from SKILL.md, never by this prompt.
+      expect(prompt).not.toContain("### Skills");
+      expect(prompt).not.toContain("Write clear prose");
+      expect(prompt).toContain("<name>@fixture/crm</name>");
+      expect(prompt).toContain("<location>.pi/integrations/@fixture/crm/INTEGRATION.md</location>");
+      expect(prompt).not.toContain("# CRM API");
       expect(prompt).toContain("## User Input");
       expect(prompt).toContain("**query**");
       expect(prompt).toContain("**verbose**");

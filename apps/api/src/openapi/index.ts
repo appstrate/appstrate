@@ -35,6 +35,7 @@ import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
 import { mePaths } from "./paths/me.ts";
 import { invitationsPaths } from "./paths/invitations.ts";
+import { oauthClientMetadataPaths } from "./paths/oauth-client-metadata.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
@@ -69,6 +70,7 @@ const corePaths = {
   ...profilePaths,
   ...mePaths,
   ...invitationsPaths,
+  ...oauthClientMetadataPaths,
   ...internalPaths,
   ...welcomePaths,
   ...metaPaths,

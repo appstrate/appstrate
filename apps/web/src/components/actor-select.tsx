@@ -28,7 +28,7 @@ import { endUserLabel, memberLabel } from "../lib/members";
 import { matchesSearch } from "../lib/strings";
 import { mayGovernScheduleActor } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
-import { useActorName } from "../hooks/use-actor-name";
+import { useActor } from "../hooks/use-actor-name";
 import { isQueryInFlight } from "../lib/query-state";
 
 interface ActorSelectProps {
@@ -104,8 +104,10 @@ export function ActorSelect({
     search: debouncedQuery || undefined,
   });
   const { data: endUserPage } = endUsersQuery;
-  // The search is debounced, then fetched: both are waiting, not "no result".
-  const endUsersPending = includeEndUsers && (endUsersQuery.isFetching || query !== debouncedQuery);
+  // The search is debounced, then fetched: both are waiting, not "no result". A refetch under
+  // results already drawn is not (they stay), so only a read with no data yet counts.
+  const endUsersPending =
+    includeEndUsers && (isQueryInFlight(endUsersQuery) || query !== debouncedQuery);
   const pending = membersPending || endUsersPending;
   const endUsers = useMemo(
     () =>
@@ -142,7 +144,7 @@ export function ActorSelect({
     [endUsers],
   );
 
-  const selectedLabel = useActorName(value, endUsers);
+  const { name: selectedLabel, resolving: labelResolving } = useActor(value, endUsers);
 
   const select = (actor: ActorValue) => {
     onChange(actor);
@@ -162,10 +164,14 @@ export function ActorSelect({
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
-          <span className="truncate">
-            {selectedLabel ?? placeholder ?? t("actorSelect.placeholder")}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {labelResolving ? (
+            <Skeleton className="h-4 w-32" />
+          ) : (
+            <span className="truncate">
+              {selectedLabel ?? placeholder ?? t("actorSelect.placeholder")}
+            </span>
+          )}
+          <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
@@ -188,10 +194,7 @@ export function ActorSelect({
                     onSelect={() => select(o.actor)}
                   >
                     <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isActive(o.actor) ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("mr-2", isActive(o.actor) ? "opacity-100" : "opacity-0")}
                     />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate">{o.name}</span>
@@ -215,10 +218,7 @@ export function ActorSelect({
                     onSelect={() => select(o.actor)}
                   >
                     <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isActive(o.actor) ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("mr-2", isActive(o.actor) ? "opacity-100" : "opacity-0")}
                     />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate">{o.name}</span>
@@ -234,7 +234,7 @@ export function ActorSelect({
               </CommandGroup>
             )}
             {pending && (
-              <div className="space-y-1 p-1" aria-hidden>
+              <div className="flex flex-col gap-1 p-1" aria-hidden>
                 <Skeleton className="h-7 w-full" />
                 <Skeleton className="h-7 w-full" />
                 <Skeleton className="h-7 w-full" />

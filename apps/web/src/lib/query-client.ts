@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The app's single React Query client, a module value rather than a local in
- * `main.tsx` because the role preview resets the cache from OUTSIDE React — the
- * store's actions and the API response middleware, which have no hooks.
- */
+// A module value, not a local in `main.tsx`: the role preview resets the cache from OUTSIDE React.
 
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { ApiError, isTransientError } from "../api/errors";
 import { onMutationError } from "./mutation-error";
+import { fileBlobKeys } from "./query-keys";
 
 declare module "@tanstack/react-query" {
   interface Register {
@@ -45,4 +42,12 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
     },
   },
+});
+
+// An object URL is not garbage collected with the cache entry that holds it: revoke it when the
+// entry is removed (gc, `clear()`), the one moment nobody can render it any more.
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type !== "removed" || event.query.queryKey[0] !== fileBlobKeys.root) return;
+  const url = event.query.state.data;
+  if (typeof url === "string") URL.revokeObjectURL(url);
 });

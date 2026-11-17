@@ -5,15 +5,9 @@ import i18n from "../i18n";
 type DateGranularity = "date" | "datetime";
 
 /**
- * Centralized date formatter for the dashboard. Always uses the active i18n
- * language so all surfaces share one locale source.
- *
- * @param dateStr  Date, ISO string, or unix-ms number. null/undefined → em-dash.
- * @param granularity  "datetime" (default) renders date + hour:minute;
- *                     "date" renders date only.
- * @param timeZone  An IANA zone the time is read in, then named next to it
- *                  (« 15/10/2026 03:00 UTC »): a schedule's times are its
- *                  zone's. Without it, the browser's zone, unnamed.
+ * Uses the active i18n language. null/undefined → em-dash.
+ * `timeZone`: an IANA zone, read in and named next to the time (« 15/10/2026 03:00 UTC »);
+ * without it, the browser's zone, unnamed.
  */
 export function formatDateField(
   dateStr: string | Date | number | null | undefined,

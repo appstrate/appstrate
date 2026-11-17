@@ -159,6 +159,7 @@ describe("runConnectLoginHook", () => {
       // Mirror the boot order: register the upstream with the agent-facing
       // allowlist (login excluded), THEN run the connect-login hook.
       const allocatedNs = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
         connection: CONN_A,
@@ -196,6 +197,7 @@ describe("runConnectLoginHook", () => {
     const source = makeSource();
     try {
       const allocatedNs = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
         connection: CONN_A,
@@ -230,6 +232,7 @@ describe("runConnectLoginHook", () => {
     const source = makeSource();
     try {
       const allocatedNs = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
         connection: CONN_A,
@@ -263,6 +266,7 @@ describe("runConnectLoginHook", () => {
     const source = makeSource();
     try {
       const allocatedNs = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
         connection: CONN_A,
@@ -303,6 +307,7 @@ describe("runConnectLoginHook", () => {
     const source = makeSource();
     try {
       const allocatedNs = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client,
         connection: CONN_A,
@@ -335,6 +340,7 @@ describe("runConnectLoginHook", () => {
     try {
       // Boot order: each connection registers, then logs in; B registers last.
       const nsA = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client: clientA,
         connection: CONN_A,
@@ -342,6 +348,7 @@ describe("runConnectLoginHook", () => {
       });
       await runConnectLoginHook(spec(), clientA, sourceA, nsA);
       const nsB = await host.register({
+        integrationId: "@orga/wajax",
         namespace: "@orga/wajax",
         client: clientB,
         connection: CONN_B,

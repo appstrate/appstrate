@@ -9,6 +9,7 @@ import {
   modalReturnTarget,
   orgSwitchLanding,
   overlayCloseStep,
+  overlayStateAfterOrgSwitch,
   pageLocation,
   withBackground,
 } from "../modal-route";
@@ -37,7 +38,7 @@ describe("page under an overlay", () => {
       "/org-settings/models",
       "/workspace-settings/webhooks/wh_1",
       "/preferences/general",
-      "/catalogue/discover/agent",
+      "/catalogue/agent",
     ]) {
       expect(pageLocation(at(path), runs)).toBe(runs);
     }
@@ -131,6 +132,25 @@ describe("organization switch", () => {
     expect(orgSwitchLanding("/chat")).toBe("/chat");
     expect(orgSwitchLanding("/chatroom")).toBe("/");
   });
+
+  // The switcher's gear of another organization: the previous organization's agent page
+  // would 404 under its settings.
+  it("opens the new organization's settings over the landing, not over the page it left", () => {
+    const held = backgroundOf(overlayStateAfterOrgSwitch("/agents/@acme/triage/runs/run_1"));
+    expect(held).toMatchObject({ location: { pathname: "/", search: "", hash: "" }, index: null });
+    const settings = at("/org-settings", { state: overlayStateAfterOrgSwitch("/agents/@acme/t") });
+    expect(pageLocation(settings, backgroundOf(settings.state)!.location).pathname).toBe("/");
+  });
+
+  it("keeps the chat under settings opened from it", () => {
+    expect(backgroundOf(overlayStateAfterOrgSwitch("/chat/c_1"))?.location.pathname).toBe("/chat");
+  });
+
+  it("closes them onto the landing, which has no entry of its own", () => {
+    const held = backgroundOf(overlayStateAfterOrgSwitch("/agents"))!;
+    expect(overlayCloseStep(held.index, 5)).toBeNull();
+    expect(modalReturnTarget(held.location).to).toEqual({ pathname: "/", search: "", hash: "" });
+  });
 });
 
 describe("the history index React Router keeps", () => {
@@ -182,9 +202,9 @@ describe("the history index React Router keeps", () => {
     const history = UNSAFE_createBrowserHistory({ window });
     expect(historyIndexOf(window.history.state)).toBe(0);
     history.push("/agents");
-    history.push("/catalogue/discover/agent");
+    history.push("/catalogue/agent");
     expect(historyIndexOf(window.history.state)).toBe(2);
-    history.replace("/catalogue/discover/skill");
+    history.replace("/catalogue/skill");
     expect(historyIndexOf(window.history.state)).toBe(2);
   });
 
@@ -206,7 +226,7 @@ describe("the background an overlay entry holds", () => {
     const held = backgroundOf(state);
     expect(held).toEqual({ location: agents, index: 3 });
     // The reloaded overlay floats over that page, and closing goes back to it.
-    expect(pageLocation(at("/catalogue/discover/agent"), held!.location)).toEqual(agents);
+    expect(pageLocation(at("/catalogue/agent"), held!.location)).toEqual(agents);
     expect(overlayCloseStep(held!.index, 4)).toBe(-1);
   });
 

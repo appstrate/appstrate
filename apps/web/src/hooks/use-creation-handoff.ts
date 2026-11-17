@@ -1,26 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { chatDraftNavigationState, type CreationResource } from "../lib/creation-handoff";
-import { useModalParam } from "./use-modal-param";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  CREATE_INTEGRATION_PARAM,
+  chatDraftNavigationState,
+  type CreationResource,
+} from "../lib/creation-handoff";
+import { useUrlModal } from "./use-url-modal";
 
+const COMPANIONS = [CREATE_INTEGRATION_PARAM];
+
+/**
+ * The creation chooser of a package type, at `?create=<type>`. `canCreate` is the WORKING space's
+ * grant: the chooser and its chat door open only there. `open` asks nothing itself: its callers
+ * offer it where creating is allowed, after entering the space it acts in (`useSpaceAction`).
+ */
 export function useCreationHandoff(resource: CreationResource, canCreate: boolean) {
-  const param = useModalParam("create");
+  const param = useUrlModal("create", COMPANIONS);
+  const [search] = useSearchParams();
+  const navigate = useNavigate();
 
-  const open = () => {
-    if (canCreate) param.open(resource);
-  };
+  const open = () => param.open(resource);
 
   const openChat = (prompt: string) => {
     if (!canCreate) return;
-    param.leave("/chat", chatDraftNavigationState(prompt));
+    navigate("/chat", { replace: true, state: chatDraftNavigationState(prompt) });
   };
 
   return {
+    /** The integration an agent creation starts with (`?integration=`); unverified, the creation resolves it. */
+    integrationId: resource === "agent" ? search.get(CREATE_INTEGRATION_PARAM) : null,
     isOpen: canCreate && param.value === resource,
     open,
     close: param.close,
-    /** Leaves the chooser for the manual creation page. */
-    leave: param.leave,
+    /** Leaves the chooser for the MCP URL wizard. */
+    leave: (to: string) => navigate(to, { replace: true }),
     openChat,
   };
 }

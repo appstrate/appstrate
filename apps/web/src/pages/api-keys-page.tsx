@@ -12,13 +12,19 @@ import {
   useRevokeApiKey,
   type ApiKeyInfo,
 } from "../hooks/use-api-keys";
-import { EmptyState, EmptyStateAction } from "../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { matchesSearch } from "../lib/strings";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import type { MenuAction } from "../lib/menu-action";
-import { useModalParam } from "../hooks/use-modal-param";
-import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../components/api-key-create-modal";
+import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { useApiKeyColumns } from "./api-key-columns";
+
+/** The search is this page's only list parameter. */
+const NO_FILTERS: readonly string[] = [];
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -27,15 +33,20 @@ export function ApiKeysPage() {
   const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
+  const list = useListParams(NO_FILTERS);
+  const searchPlaceholder = useSearchPlaceholder(t("settings:orgSettings.tabApiKeys"));
+  const shownKeys = (apiKeys ?? []).filter((key) =>
+    matchesSearch(list.search, [key.name, key.keyPrefix]),
+  );
   const revokeApiKeyMutation = useRevokeApiKey();
-  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
+  const [creating, setCreating] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("settings:apiKeys.createBtn"),
-    onSelect: () => newApiKey.open(),
+    onSelect: () => setCreating(true),
     hidden: !canCreate,
   };
 
@@ -58,39 +69,58 @@ export function ApiKeysPage() {
           {
             id: "api-docs",
             icon: ExternalLink,
-            label: t("settings:apiKeys.swaggerLink"),
+            label: t("common:userMenu.apiDocs"),
             href: "/api/docs",
           },
         ]}
+      />
+
+      <ListToolbar
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: searchPlaceholder,
+        }}
       />
 
       <DataTable
         tableId="api-keys"
         label={t("settings:orgSettings.tabApiKeys")}
         columns={columns}
-        rows={apiKeys ?? []}
+        rows={shownKeys}
         rowKey={(key) => key.id}
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState
-            message={t("settings:apiKeys.empty")}
-            hint={t("settings:apiKeys.emptyHint")}
-            icon={KeyRound}
-            compact
-          >
-            <EmptyStateAction action={create} />
-          </EmptyState>
+          list.search ? (
+            <NoMatchState message={t("settings:apiKeys.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState
+              message={t("settings:apiKeys.empty")}
+              hint={t("settings:apiKeys.emptyHint")}
+              icon={KeyRound}
+              compact
+            >
+              <EmptyStateAction action={create} />
+            </EmptyState>
+          )
+        }
+      />
+      <ListFooter
+        count={
+          isLoading || error
+            ? undefined
+            : t("list.count", { ns: "agents", count: shownKeys.length })
         }
       />
 
-      {canCreate && <ApiKeyCreateModal />}
+      {creating && canCreate && <ApiKeyCreateModal onClose={() => setCreating(false)} />}
 
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("settings:apiKeys.revokeTitle")}
-        confirmLabel={t("settings:apiKeys.revoke")}
+        confirmLabel={t("settings:devices.revoke")}
         description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {

@@ -4,10 +4,7 @@ import {
   applyFileTreeOperations,
   decodePackageFileText,
 } from "@appstrate/core/package-file-operations";
-import {
-  PACKAGE_CONTENT_ENTRY,
-  PACKAGE_FILE_INLINE_MAX_BYTES,
-} from "@appstrate/core/package-files";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 import {
   validateNewPath,
@@ -94,37 +91,6 @@ export function packageUpdateBody(state: {
   return {
     manifest: state.manifest,
     ...(state.operations?.length ? { operations: state.operations } : {}),
-  };
-}
-
-/** Read the new package's content from its only editor buffer: staged files. */
-export function newPackageContent(
-  type: PackageType,
-  operations: readonly PackageFileWriteOperation[],
-): string {
-  const entry = PACKAGE_CONTENT_ENTRY[type];
-  return entry
-    ? (projectDraftFiles([], operations, type).find((file) => file.path === entry.path)?.inline ??
-        "")
-    : "";
-}
-
-/** Keep the existing create contract without sending the primary file twice. */
-export function packageCreateBody(
-  state: { manifest: Record<string, unknown>; operations?: PackageFileWriteOperation[] },
-  type: PackageType,
-) {
-  const entry = PACKAGE_CONTENT_ENTRY[type];
-  const requiredPath = entry?.required ? entry.path : undefined;
-  const operations = (state.operations ?? []).filter(
-    (operation) => operation.op !== "write" || operation.path !== requiredPath,
-  );
-  return {
-    manifest: state.manifest,
-    content: requiredPath
-      ? newPackageContent(type, state.operations ?? [])
-      : JSON.stringify(state.manifest, null, 2),
-    ...(operations.length ? { operations } : {}),
   };
 }
 

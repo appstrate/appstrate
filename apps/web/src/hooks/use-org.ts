@@ -92,10 +92,9 @@ async function requestOrgs(viewAs?: string) {
 }
 
 /**
- * A refused role preview is ended by the response middleware while the read
- * that carried it fails: asked again, without the persona, it answers. In the
- * read rather than as a query retry, which waits a second and pauses for good
- * in an unfocused tab, leaving the org gate an empty list. Exported for its test.
+ * A refused role preview is ended by the response middleware while its read fails: asked again
+ * without the persona, it answers. Done in the read, not as a query retry (which pauses for good
+ * in an unfocused tab, leaving the org gate an empty list). Exported for its test.
  */
 export async function readPastRefusedPreview<T>(read: () => Promise<T>): Promise<T> {
   try {
@@ -114,35 +113,22 @@ function fetchOrgs() {
 type OrgList = Awaited<ReturnType<typeof requestOrgs>>;
 
 /**
- * The org listing as it would be answered FOR `persona` — the `permissions`
- * every `can()` gate reads. The header is passed explicitly because the store
- * does not hold the persona yet, which is the point: `enterViewAs` commits the
- * persona and this listing together, so nothing ever renders the previewer's
- * authority under the persona's banner.
+ * The org listing as answered FOR `persona` (the `permissions` every `can()` reads). The store
+ * does not hold the persona yet on purpose: `enterViewAs` commits both together, so nothing
+ * renders the previewer's authority under the persona's banner.
  */
 export function fetchOrgsAs(persona: ViewAsPersona) {
   return requestOrgs(serializeViewAs(persona));
 }
 
-/**
- * In-flight org list started by `primeOrgList()` at boot, waiting to be
- * adopted by the first `useOrg()` that mounts. One-shot: it is handed over
- * exactly once, and every later fetch goes through `fetchOrgs()` normally.
- */
+/** In-flight list from `primeOrgList()`, adopted once by the first `useOrg()` to mount. */
 let primedOrgs: ReturnType<typeof fetchOrgs> | null = null;
 
 /**
- * Start the org list immediately, without waiting for React to mount the org
- * gate. `GET /api/orgs` authenticates on the session cookie alone — it needs
- * nothing from the session or profile reads — so at boot it belongs beside
- * them rather than behind them (see `main.tsx`).
- *
- * The promise is handed to React Query as the query function's own result, so
- * the query still owns the whole state machine (pending → success/error,
- * retries, gate spinner). A failure is dropped instead of being cached: the
- * common failure is "no session yet", and a poisoned `["orgs"]` entry would
- * read as an *empty* org list to `OrgGate` and bounce a legitimate user into
- * onboarding after they log in.
+ * Start the org list at boot (see `main.tsx`) without waiting for the org gate: `GET /api/orgs`
+ * needs only the session cookie. The query adopts the promise as its own result. A failure is
+ * dropped, not cached: a poisoned `["orgs"]` entry would read as an empty list and bounce a
+ * legitimate user into onboarding after login.
  */
 export function primeOrgList(): Promise<OrgList> {
   const request = fetchOrgs();
@@ -164,9 +150,7 @@ export function useOrg() {
   const currentOrgId = useStore(orgStore, (s) => s.id);
 
   const { data: orgs = [], isLoading } = useQuery({
-    // The one query NOT wiped on org switch, and invalidated by name from
-    // several call sites — hence the literal key rather than the typed
-    // client's [method, path, init] one.
+    // The one query NOT wiped on org switch, invalidated by name: a literal key, not the typed one.
     queryKey: orgKeys.all,
     queryFn: orgListQueryFn,
   });
@@ -177,8 +161,7 @@ export function useOrg() {
 
   const selectOrg = useCallback(
     (orgId: string | null) => {
-      // A persona is validated in ONE organization; carrying it across is not
-      // a preview of anything. No-op unless one is active.
+      // A persona is validated in ONE organization; it must not carry across.
       exitViewAs();
       orgStore.getState().setId(orgId);
       spaceStore.getState().setId(null);
@@ -194,10 +177,7 @@ export function useOrg() {
     [selectOrg],
   );
 
-  /**
-   * Step out of an org the caller left or deleted. Dropping it from the cached
-   * list first keeps auto-select from re-picking it while the list refetches.
-   */
+  /** Step out of an org the caller left or deleted; dropped from the cache first so auto-select cannot re-pick it. */
   const forgetOrg = useCallback(
     (orgId: string) => {
       const remaining = (queryClient.getQueryData<OrgList>(orgKeys.all) ?? []).filter(

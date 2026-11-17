@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Manifest → view-model readers for the read-only manifest overview.
- *
- * A manifest is jsonb the platform stores verbatim: `unknown` at runtime and
- * AUTHOR-CONTROLLED, exactly like the package bytes the file explorer shows.
- * Every reader here narrows defensively and DROPS what it does not recognise,
- * so a hand-written manifest can never make the view render `[object Object]`,
- * an empty row, or — the one that matters — a `javascript:` href.
- *
- * The readers live here rather than in the components because that is what
- * makes the rules testable without a DOM: presence, ordering, URL safety and
- * de-duplication are all pure functions of the manifest.
+ * Manifest → view-model readers for the read-only overview. A manifest is AUTHOR-CONTROLLED jsonb,
+ * so every reader narrows defensively and DROPS what it does not recognise: never `[object Object]`,
+ * an empty row, or a `javascript:` href. Pure functions so the rules are testable without a DOM.
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { effectiveMcpServerType, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
 type ManifestObject = Record<string, unknown>;
@@ -27,13 +18,7 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-/**
- * The non-blank strings of an array, VERBATIM — order preserved, duplicates
- * kept. `server.mcp_config.args` is an argv, an ordered multiset
- * (`--with pkgA --with pkgB` needs both flags), so keyed renderers
- * (`manifest-overview.tsx`, `manifest-fact.tsx`) put the index in the key
- * rather than this reader deduplicating.
- */
+/** Non-blank strings VERBATIM, duplicates kept: `mcp_config.args` is an argv (`--with a --with b`), so renderers key by index. */
 function strArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
@@ -72,18 +57,12 @@ export interface ManifestLink extends ManifestFact {
   href?: string;
 }
 
-interface ManifestDependencyGroup {
-  labelKey: string;
-  entries: Array<{ id: string; range: string }>;
-}
-
 interface ManifestOverview {
   longDescription?: string;
   keywords: string[];
   /** license → author → schema_version → compatibility, in that order. */
   facts: ManifestFact[];
   links: ManifestLink[];
-  dependencies: ManifestDependencyGroup[];
   /** True when the manifest declares none of the above. */
   isEmpty: boolean;
 }
@@ -105,16 +84,10 @@ function readRepository(value: unknown): string | undefined {
 }
 
 /**
- * A displayable row, linked only when the value is an http(s) URL.
- *
- * `homepage` / `repository` / … are author-controlled strings that end up in an
- * `href`, and `javascript:`, `data:` and `vbscript:` all parse as valid URLs —
- * so the rule is a protocol allowlist, not a successful parse. That allowlist
- * is `@appstrate/core/url`, the same primitive the integration page uses:
- * two copies of this check is how one of them ends up the lenient one.
- *
- * A rejected value still renders, as plain text. Dropping the row would hide
- * exactly what someone auditing a package needs to see.
+ * A displayable row, linked only when the value is an http(s) URL. `javascript:`, `data:` and
+ * `vbscript:` parse as valid URLs, so the rule is the protocol allowlist of `@appstrate/core/url`
+ * (shared with the integration page), not a successful parse. A rejected value still renders as
+ * plain text: dropping it would hide what an auditor needs.
  */
 function link(labelKey: string, value: string | undefined): ManifestLink | undefined {
   if (!value) return undefined;
@@ -130,37 +103,11 @@ function present<T>(entries: Array<T | undefined>): T[] {
   return entries.filter((entry): entry is T => entry !== undefined);
 }
 
-function readDependencies(value: unknown): ManifestDependencyGroup[] {
-  const deps = obj(value);
-  if (!deps) return [];
-  const groups: Array<[field: string, labelKey: string]> = [
-    ["skills", "manifest.depSkills"],
-    ["mcp_servers", "manifest.depMcpServers"],
-    ["integrations", "manifest.depIntegrations"],
-  ];
-  return present(
-    groups.map(([field, labelKey]) => {
-      const entries = present(
-        Object.entries(obj(deps[field]) ?? {}).map(([id, raw]) => {
-          const range = str(raw);
-          return range ? { id, range } : undefined;
-        }),
-      );
-      return entries.length > 0 ? { labelKey, entries } : undefined;
-    }),
-  );
-}
-
 /**
- * The ~21 metadata fields every AFPS type shares.
- *
- * `name` / `type` / `display_name` / `description` / `version` are read by the
- * page header already, so re-rendering them here would be the same fact twice
- * on one screen. `icon` / `icons` / `screenshots` are references to images
- * inside the artifact: displaying author-controlled bytes as an image is the
- * sink the explorer's security scan exists to forbid, so they stay out.
- * `_meta` is an arbitrary extension bag with no renderable shape — it is
- * readable verbatim in the Contenu tab's `manifest.json`.
+ * The metadata fields every AFPS type shares. Left out on purpose: the header's fields
+ * (`name`/`type`/`display_name`/`description`/`version`); `icon`/`icons`/`screenshots`, because
+ * displaying author-controlled bytes as an image is the sink the explorer's security scan forbids;
+ * and `_meta`, an unrenderable extension bag readable in `manifest.json`.
  */
 export function readManifestOverview(manifest: unknown): ManifestOverview {
   const m = obj(manifest) ?? {};
@@ -186,27 +133,20 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
 
   const longDescription = str(m.long_description);
   const keywords = strArray(m.keywords);
-  const dependencies = readDependencies(m.dependencies);
 
   return {
     ...(longDescription ? { longDescription } : {}),
     keywords,
     facts,
     links,
-    dependencies,
-    isEmpty:
-      !longDescription &&
-      keywords.length === 0 &&
-      facts.length === 0 &&
-      links.length === 0 &&
-      dependencies.length === 0,
+    isEmpty: !longDescription && keywords.length === 0 && facts.length === 0 && links.length === 0,
   };
 }
 
 // ─── Integration source ───────────────────────────────────────────────
 
 type IntegrationSourceView =
-  | { kind: "local"; serverName: string; serverVersion: string }
+  | { kind: "local"; serverType: string; entryPoint: string }
   | { kind: "remote"; url: string; transport: string }
   | { kind: "none" };
 
@@ -216,10 +156,10 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
   const kind = str(source?.kind);
   if (kind === "local") {
     const server = obj(source?.server);
-    const serverName = str(server?.name);
-    const serverVersion = str(server?.version);
-    if (!serverName || !serverVersion) return undefined;
-    return { kind: "local", serverName, serverVersion };
+    const serverType = str(server?.type);
+    const entryPoint = str(server?.entry_point);
+    if (!serverType || !entryPoint) return undefined;
+    return { kind: "local", serverType, entryPoint };
   }
   if (kind === "remote") {
     const remote = obj(source?.remote);
@@ -230,118 +170,4 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
   }
   if (kind === "none") return { kind: "none" };
   return undefined;
-}
-
-// ─── MCP server tail ────────────────────────────────────────────────
-
-interface McpServerView {
-  /**
-   * The runtime the PLATFORM would run this server on — `_meta` override first,
-   * MCPB `server.type` second. See {@link readMcpServer}.
-   */
-  runtime?: string;
-  entryPoint?: string;
-  command?: string;
-  args: string[];
-}
-
-interface McpToolView {
-  name: string;
-  description?: string;
-}
-
-interface McpUserConfigView {
-  key: string;
-  title?: string;
-  description?: string;
-  type?: string;
-  required: boolean;
-  sensitive: boolean;
-}
-
-export interface McpServerManifestDetails {
-  manifestVersion?: string;
-  server?: McpServerView;
-  tools: McpToolView[];
-  userConfig: McpUserConfigView[];
-}
-
-/**
- * Takes the WHOLE manifest, not just `server`, because the runtime is not a
- * property of `server`.
- *
- * The platform resolves it with core's `effectiveMcpServerType`, which reads
- * `_meta["dev.appstrate/mcp-server"].runtime` at the manifest ROOT and falls
- * back to `server.type`. The two disagree by design: MCPB's `server.type` enum
- * has no `bun`, so a bun-native server keeps `server.type: "node"` and declares
- * `bun` in `_meta`. Reading `server.type` alone labelled that server "node" — a
- * fact about the manifest's vocabulary presented as a fact about how the
- * package runs.
- *
- * Core's reader is used rather than a local re-derivation: every spawn path
- * calls the same function, so the view cannot describe a runtime the runner
- * does not pick.
- */
-function readMcpServer(manifest: ManifestObject): McpServerView | undefined {
-  const server = obj(manifest.server);
-  if (!server) return undefined;
-  const config = obj(server.mcp_config);
-  // The override half narrows `_meta` itself and returns `undefined` for
-  // anything it does not recognise, so an author-controlled value cannot get
-  // past it — the `server.type` fallback is the MCPB value, verbatim, which is
-  // what a DRAFT being edited here needs: a typo must show as written.
-  const runtime = effectiveMcpServerType(manifest as unknown as McpServerManifest);
-  const view: McpServerView = {
-    ...(runtime ? { runtime } : {}),
-    ...(str(server.entry_point) ? { entryPoint: str(server.entry_point) } : {}),
-    ...(str(config?.command) ? { command: str(config?.command) } : {}),
-    args: strArray(config?.args),
-  };
-  const hasAnything =
-    view.runtime !== undefined ||
-    view.entryPoint !== undefined ||
-    view.command !== undefined ||
-    view.args.length > 0;
-  return hasAnything ? view : undefined;
-}
-
-export function readMcpServerDetails(manifest: unknown): McpServerManifestDetails {
-  const m = obj(manifest) ?? {};
-  const manifestVersion = str(m.manifest_version);
-  const server = readMcpServer(m);
-  // `tools` is a raw jsonb ARRAY, not a keyed map, so nothing upstream makes
-  // `name` unique: `[{"name":"a"},{"name":"a"}]` is legal MCPB input and the
-  // view keys its rows by name. First declaration wins.
-  const seenTools = new Set<string>();
-  const tools = present(
-    (Array.isArray(m.tools) ? m.tools : []).map((raw) => {
-      const tool = obj(raw);
-      const name = str(tool?.name);
-      if (!name || seenTools.has(name)) return undefined;
-      seenTools.add(name);
-      const description = str(tool?.description);
-      return { name, ...(description ? { description } : {}) };
-    }),
-  );
-  const userConfig = Object.entries(obj(m.user_config) ?? {}).map(([key, raw]) => {
-    const entry = obj(raw);
-    const title = str(entry?.title);
-    const description = str(entry?.description);
-    const type = str(entry?.type);
-    return {
-      key,
-      ...(title ? { title } : {}),
-      ...(description ? { description } : {}),
-      ...(type ? { type } : {}),
-      required: entry?.required === true,
-      sensitive: entry?.sensitive === true,
-    };
-  });
-
-  return {
-    ...(manifestVersion ? { manifestVersion } : {}),
-    ...(server ? { server } : {}),
-    tools,
-    userConfig,
-  };
 }

@@ -21,29 +21,26 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { buildPlatformSystemPrompt } from "../../../src/services/run-launcher/prompt-builder.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   envDelivery,
   twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/ssh";
-const SERVER = "@orga/ssh-server";
 
 function integManifest() {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    serverName: SERVER,
     auths: {
       key: {
         type: "custom",
@@ -72,7 +69,7 @@ function agentManifest(): Record<string, unknown> {
 describe("resolveIntegrationSpawns — one spec per bound connection", () => {
   let ctx: TestContext;
 
-  /** Seed the integration + its referenced mcp-server. */
+  /** Seed the integration. */
   async function seedIntegration() {
     await seedPackage({
       id: INTEG,
@@ -81,21 +78,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       source: "local",
       draftManifest: integManifest(),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    const serverManifest = mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "python",
-      entryPoint: "./server.py",
-    });
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   }
 
   /** One SSH connection = one host, as `@appstrate/ssh` models it. */
@@ -129,7 +112,6 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
 
   async function resolve(resolvedConnections: ResolvedConnectionMap) {
     return resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -173,7 +155,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     expect(byLabel.get("db")!.spawnEnv.SSH_PRIVATE_KEY).toBe("key-for-db.example.com");
   });
 
-  it("renders ONE prompt section for the integration, however many connections it spawns", async () => {
+  it("lists the integration ONCE in the prompt, however many connections it spawns", async () => {
     await seedConnection({ label: "web-1", host: "web-1.example.com" });
     await seedConnection({ label: "db", host: "db.example.com" });
     const { specs } = await resolve(await bindAllConnections(INTEG));
@@ -188,6 +170,13 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       files,
       integrity: "sha256-stub",
     });
+    const memberIdentity = `${INTEG}@0.1.0` as AppstrateRunPlan["bundle"]["root"];
+    packages.set(memberIdentity, {
+      identity: memberIdentity,
+      manifest: { name: INTEG, version: "0.1.0", type: "integration" },
+      files: new Map([["INTEGRATION.md", new TextEncoder().encode("# SSH")]]),
+      integrity: "sha256-stub",
+    });
     // The prompt builder reads only the bundle, timeout, resources and integrations.
     const plan = {
       bundle: { bundleFormatVersion: "1.0", root: identity, packages, integrity: "sha256-stub" },
@@ -196,8 +185,8 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       integrations: specs,
     } as Partial<AppstrateRunPlan> as AppstrateRunPlan;
 
-    const prompt = await buildPlatformSystemPrompt({ runId: "run_test", input: {} }, plan);
-    expect(prompt.split(`## Integration: ${INTEG}\n`)).toHaveLength(2);
+    const prompt = buildPlatformSystemPrompt({ runId: "run_test", input: {} }, plan);
+    expect(prompt.split(`<name>${INTEG}</name>`)).toHaveLength(2);
     expect(prompt).not.toContain("## Unavailable Integrations");
   });
 
@@ -312,7 +301,7 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, API);
+    await seedSpacePackage(ctx.defaultSpaceId, API);
   });
 
   async function seedOn(authKey: string, label: string): Promise<string> {
@@ -342,7 +331,6 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
     const onBackup = await seedOn("backup", "spare");
 
     const { specs, dropped } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: {

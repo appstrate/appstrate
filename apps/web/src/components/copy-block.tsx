@@ -33,7 +33,7 @@ export function CopyBlock({
 }) {
   return (
     <div
-      className="border-border bg-muted/50 relative rounded-md border"
+      className="border-border bg-muted/40 relative rounded-lg border"
       {...(testId ? { "data-testid": testId } : {})}
     >
       <code
@@ -45,7 +45,7 @@ export function CopyBlock({
       </code>
       <CopyButton
         value={value}
-        className={cn("absolute", dense ? "top-0.5 right-0.5 h-6 w-6" : "top-1 right-1")}
+        className={cn("absolute", dense ? "top-0.5 right-0.5 size-6" : "top-1 right-1")}
       />
     </div>
   );

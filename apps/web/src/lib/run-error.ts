@@ -1,43 +1,59 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TFunction } from "i18next";
+import type { ModelErrorReason } from "@appstrate/core/model-error";
+import type { components } from "../api/client";
 
-/** What the platform writes when a member stops a run; the only cancellation text it stores. */
-const CANCELLED_BY_USER = "Cancelled by user";
+type RunModelError = NonNullable<components["schemas"]["Run"]["model_error"]>;
 
-/** A model provider's refusal, stored as `<http status> <JSON body>`. */
-const PROVIDER_ERROR = /^(\d{3}) (\{[\s\S]*\})$/;
+/** The journal row the runner's terminal model refusal lands in (`appstrate.error`). */
+const ADAPTER_ERROR_EVENT = "adapter_error";
 
-function providerMessage(body: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const { error, message } = parsed as { error?: { message?: unknown }; message?: unknown };
-    const found = error?.message ?? message;
-    return typeof found === "string" && found.trim() ? found.trim() : null;
-  } catch {
-    return null;
+/** Sentences for the structured reasons a refusal can name, read before the category's own. */
+const RUN_ERROR_REASON_KEY: Record<ModelErrorReason, string> = {
+  // Only a platform release clears it: the sentence offers no retry nor reconnection.
+  runtime_version_too_old: "run.error.runtimeVersionTooOld",
+};
+
+/**
+ * The structured reason (`data.error_reason`) of a run's `adapter_error` row, or null.
+ * The column `model_error` keeps no reason: the journal is its only durable home. The
+ * value is unvalidated JSONB, so a reason with no sentence here reads as none.
+ */
+export function findRunErrorReason(
+  logs: ReadonlyArray<{ event?: string | null; data?: unknown }> | undefined,
+): ModelErrorReason | null {
+  for (const log of logs ?? []) {
+    if (log.event !== ADAPTER_ERROR_EVENT || !log.data || typeof log.data !== "object") continue;
+    const reason = (log.data as Record<string, unknown>).error_reason;
+    if (
+      typeof reason === "string" &&
+      Object.prototype.hasOwnProperty.call(RUN_ERROR_REASON_KEY, reason)
+    ) {
+      return reason as ModelErrorReason;
+    }
   }
+  return null;
 }
 
 /**
- * The sentence a run's stored `error` is shown as, in a list or on the run itself. The run
- * keeps whatever ended it verbatim (an English platform line, a provider's JSON body); the
- * screen says it in the reader's language.
+ * The sentence a run's failure is shown as, chosen from what the server classified
+ * (`status`, the journal's `errorReason`, `model_error`), never from the verbatim
+ * `error` text, which is shown as written only when nothing classified it.
  */
-export function runErrorText(run: { status: string; error?: string | null }, t: TFunction): string {
-  const raw = run.error ?? "";
-  if (run.status === "cancelled" && raw === CANCELLED_BY_USER) return t("run.cancelledByUser");
-  const provider = PROVIDER_ERROR.exec(raw);
-  if (!provider) return raw;
-  const status = Number(provider[1]);
-  if (status === 401 || status === 403) return t("run.error.modelRefused");
-  if (status === 429) return t("run.error.modelRateLimited");
-  const message = providerMessage(provider[2]!);
-  return message ? t("run.error.model", { status, message }) : raw;
-}
-
-/** A cancelled run's error is a member's choice, not a failure: muted, never red. */
-export function runErrorTone(run: { status: string }): string {
-  return run.status === "cancelled" ? "text-muted-foreground" : "text-destructive";
+export function runErrorText(
+  run: { status: string; error?: string | null; model_error?: RunModelError | null },
+  t: TFunction,
+  errorReason: ModelErrorReason | null = null,
+): string {
+  // A `cancelled` run is only ever a member's cancellation (`POST /api/runs/{id}/cancel`).
+  if (run.status === "cancelled") return t("run.cancelledByUser");
+  if (errorReason) return t(RUN_ERROR_REASON_KEY[errorReason]);
+  const failure = run.model_error;
+  if (failure?.category === "credential_unavailable") return t("run.error.modelRefused");
+  if (failure?.category === "rate_limited") return t("run.error.modelRateLimited");
+  if (failure?.status != null && failure.message) {
+    return t("run.error.model", { status: failure.status, message: failure.message });
+  }
+  return run.error ?? "";
 }

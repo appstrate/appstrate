@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as React from "react";
+import { Link, useNavigate, type To } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
+import { ShellHeaderTabs } from "@/components/shell-header-slots";
+import { INTEGRATED_TABLE_SURFACE } from "@/lib/table-surface";
 
 /** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
 const FADE_EDGE = {
@@ -40,26 +44,11 @@ function useScrollEdges() {
   return { ref, edge };
 }
 
-/** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
-function DetailTabsList(props: Omit<React.ComponentPropsWithoutRef<typeof TabsList>, "className">) {
-  const { ref, edge } = useScrollEdges();
-  return (
-    <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
-      <TabsList className="mt-6 mb-3 w-max justify-start" {...props} />
-    </div>
-  );
-}
-
-function DetailTabsTrigger({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
-  return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
-}
-
 export interface DetailTab<T extends string> {
   value: T;
   label: string;
+  /** Drawn by the header's tab bar only (`HeaderTabBar`). */
+  icon?: LucideIcon;
 }
 
 /** The tabs root of a detail page; the header, the tab bar and the panels all live inside it. */
@@ -79,35 +68,162 @@ export function DetailTabs<T extends string>({
   );
 }
 
-/** The tab bar of `tabs`. */
-export function DetailTabBar<T extends string>({ tabs }: { tabs: readonly DetailTab<T>[] }) {
+/**
+ * Underlined tabs, `end` at the far right (a search, a filter): the tab list of
+ * `HeaderTabBar`, and of a page with no shell header of its own (an overlay's)
+ * once it draws the band's rule under it. Needs a `<DetailTabs>` above.
+ */
+export function UnderlineTabList<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  const { ref, edge } = useScrollEdges();
   return (
-    <DetailTabsList>
-      {tabs.map((tab) => (
-        <DetailTabsTrigger key={tab.value} value={tab.value}>
-          {tab.label}
-        </DetailTabsTrigger>
-      ))}
-    </DetailTabsList>
+    <div className="flex items-center justify-between gap-4">
+      <div
+        ref={ref}
+        className={cn(
+          "min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
+          FADE_EDGE[edge],
+        )}
+      >
+        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:gap-2">
+          {tabs.map(({ value, label, icon: Icon }) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2 md:px-3"
+            >
+              {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      {end && <div className="flex shrink-0 items-center gap-2">{end}</div>}
+    </div>
   );
 }
 
-/** One tab's card; `flush` for content that draws its own padding. */
+/**
+ * The tab bar of a page whose title block is in the shell header (`DetailBar`):
+ * `UnderlineTabList`, portalled to the header, where the band's own rule runs
+ * under it. Must render inside the page's `DetailTabs`: the portal keeps the
+ * tabs' context.
+ */
+export function HeaderTabBar<T extends string>({
+  tabs,
+  end,
+}: {
+  tabs: readonly DetailTab<T>[];
+  end?: React.ReactNode;
+}) {
+  return (
+    <ShellHeaderTabs>
+      <UnderlineTabList tabs={tabs} end={end} />
+    </ShellHeaderTabs>
+  );
+}
+
+/**
+ * One tab's content, laid on the page: its blocks (tables, sections, notices) draw
+ * their own surfaces, so a wrapping card would only nest them. `framed` is for a
+ * two-pane surface (a settings rail beside its section) whose frame is the surface.
+ */
 export function DetailTabPanel({
   value,
-  flush,
+  framed,
   children,
 }: {
   value: string;
-  flush?: boolean;
+  framed?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <TabsContent
       value={value}
-      className={cn("bg-card mt-0 overflow-hidden rounded-lg border shadow-sm", !flush && "p-6")}
+      className={cn("mt-0", framed && "bg-card overflow-hidden rounded-lg border")}
+      {...(framed ? INTEGRATED_TABLE_SURFACE : {})}
     >
       {children}
     </TabsContent>
+  );
+}
+
+export interface CollectionTabOption<T extends string> {
+  value: T;
+  label: string;
+  /** How many the part holds, when the screen knows. */
+  count?: number;
+}
+
+/**
+ * Tabs that split ONE collection into parts (organization and space roles, remote and local
+ * integrations), unlike the tabs of a detail page, which move between views of one object.
+ * They sit at the head of a list's bar, on the line of its search and at its height.
+ */
+export function CollectionTabs<T extends string>({
+  value,
+  options,
+  label,
+  onChange,
+  hrefOf,
+  countsPending = false,
+}: {
+  value: T;
+  options: CollectionTabOption<T>[];
+  /** Names the tab list for screen readers. */
+  label: string;
+  /** Absent when `hrefOf` is given: the parts are then addresses. */
+  onChange?: (value: T) => void;
+  /** Draws each part as a link to its own address, for a split the router owns beyond one param. */
+  hrefOf?: (value: T) => To;
+  /** The counts are on their way: each tab holds a digit's room, so the bar does not widen when they land. */
+  countsPending?: boolean;
+}) {
+  const navigate = useNavigate();
+  return (
+    <Tabs
+      value={value}
+      // A link tab is activated by arrow keys as well: follow it like a click.
+      onValueChange={(next) => (hrefOf ? void navigate(hrefOf(next as T)) : onChange?.(next as T))}
+    >
+      <TabsList aria-label={label} className="h-8 shrink-0 p-0.5">
+        {options.map((option) => {
+          const content = (
+            <>
+              {option.label}
+              {option.count !== undefined ? (
+                <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
+                  {option.count}
+                </span>
+              ) : (
+                countsPending && (
+                  <span
+                    aria-hidden
+                    className="bg-muted ml-1.5 animate-pulse rounded-sm text-xs text-transparent tabular-nums"
+                  >
+                    0
+                  </span>
+                )
+              )}
+            </>
+          );
+          return (
+            <TabsTrigger
+              key={option.value}
+              value={option.value}
+              asChild={hrefOf !== undefined}
+              className="h-7 px-2.5 text-sm"
+            >
+              {hrefOf ? <Link to={hrefOf(option.value)}>{content}</Link> : content}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
   );
 }

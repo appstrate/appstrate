@@ -1,32 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
-import { $api } from "../api/client";
+import { useInfiniteQuery, useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
+import { $api, client } from "../api/client";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
-import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
 
 /**
- * Safety-net poll for the notification queries — a BACKSTOP, not the freshness
- * mechanism.
+ * The notification feed — the dashboard bell: a failed run, a share. A run's
+ * read state rides with the runs (`use-run-reads.ts`).
  *
- * Freshness comes from the realtime stream: `use-global-run-sync` invalidates
- * these caches on every terminal run it sees, and re-invalidates them on every
- * reconnect, which is what covers the frames lost while the stream was down
- * (the SSE protocol has no replay). With both of those in place the poll only
- * has to cover a client that is somehow neither streaming nor reconnecting, so
- * it runs at 5 minutes instead of 30 seconds — 10× fewer requests per open tab,
- * across three queries.
- *
- * Do NOT raise this without keeping the reconnect-side invalidation: on its own
- * the interval is the ONLY thing that would eventually correct a badge, and
- * "eventually" would become five minutes.
+ * A finished run re-reads the feed from the realtime stream
+ * (`use-global-run-sync`, on every terminal frame and every reconnect); nothing
+ * announces a share, so the poll is what brings one in.
  */
 const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
 export function useUnreadCount() {
   const scope = useOrgScope();
-  // Badge counters only need a space context.
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
@@ -40,81 +31,62 @@ export function useUnreadCount() {
   );
 }
 
-/** Recipient's notifications (newest first). `unread` filters to unread only. */
+/** Recipient's notifications (newest first), keyset-paged. `unread` filters to unread only. */
 export function useNotifications(opts: { unread?: boolean; limit?: number } = {}) {
   const scope = useOrgScope();
   const spaceId = useCurrentSpaceId();
   const { unread = true, limit = 50 } = opts;
-  return $api.useQuery(
-    "get",
-    "/api/notifications",
-    { params: { header: scope.header, query: { unread, limit } } },
-    {
-      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!spaceId,
-      select: (d) => d.data,
+  return useInfiniteQuery({
+    queryKey: pagedQueryKey("/api/notifications", {
+      params: { header: scope.header, query: { unread, limit } },
+    }),
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await client.GET("/api/notifications", {
+        params: { header: scope.header, query: { unread, limit, startingAfter: pageParam } },
+        signal,
+      });
+      if (!data) throw new Error("empty response");
+      return data;
     },
-  );
+    ...keysetPaging,
+    refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
+    enabled: !!spaceId,
+    select: (d) => d.pages.flatMap((page) => page.data),
+  });
 }
 
-export function useUnreadCountsByAgent() {
-  const scope = useOrgScope();
-  // Badge counters only need a space context.
-  const spaceId = useCurrentSpaceId();
-  return $api.useQuery(
-    "get",
-    "/api/notifications/unread-counts-by-agent",
-    { params: { header: scope.header } },
-    {
-      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!spaceId,
-      select: (d) => d.counts,
-    },
-  );
-}
-
-/** Notification list + badge counters — no run-list invalidation. */
+/** The feed and its badge. */
 export function invalidateNotificationQueries(
   qc: ReturnType<typeof useQueryClient>,
   options?: InvalidateOptions,
 ) {
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications"] }, options);
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] }, options);
-  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] }, options);
 }
 
-function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
-  invalidateNotificationQueries(qc);
-  // Legacy keys — the run hooks are not migrated to the typed client yet.
-  qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
-  qc.invalidateQueries({ queryKey: runKeys.all });
+/** One notification of the caller — the notification's page. */
+export function useNotification(id: string | undefined) {
+  const scope = useOrgScope();
+  const spaceId = useCurrentSpaceId();
+  return $api.useQuery(
+    "get",
+    "/api/notifications/{id}",
+    { params: { header: scope.header, path: { id: id ?? "" } } },
+    { enabled: !!spaceId && !!id },
+  );
 }
 
 export function useMarkRead() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/{id}/read", {
     meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateRunAndNotificationQueries(qc),
-  });
-}
-
-/**
- * Mark the caller's notification for a run read, keyed by run id — used by the
- * run-detail page, which holds the run id but not the notification id.
- * Backed by `PUT /api/notifications/read/{runId}`.
- */
-export function useMarkReadByRun() {
-  const qc = useQueryClient();
-  return $api.useMutation("put", "/api/notifications/read/{runId}", {
-    // Background writes: nothing for the user to act on.
-    meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateRunAndNotificationQueries(qc),
+    onSuccess: () => invalidateNotificationQueries(qc),
   });
 }
 
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/read-all", {
-    onSuccess: () => invalidateRunAndNotificationQueries(qc),
+    onSuccess: () => invalidateNotificationQueries(qc),
   });
 }

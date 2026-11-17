@@ -13,9 +13,7 @@ import type { OrgModelInfo } from "../hooks/use-models";
 export function ModelBillingHint({ billedTo }: { billedTo: OrgModelInfo["billed_to"] }) {
   const { t } = useTranslation("settings");
   if (billedTo === "user") {
-    return (
-      <span className="text-muted-foreground text-xs">{t("modelPicker.kind.personalKey")}</span>
-    );
+    return <span className="text-muted-foreground text-xs">{t("providers.type.personalKey")}</span>;
   }
   if (billedTo === null) {
     return (

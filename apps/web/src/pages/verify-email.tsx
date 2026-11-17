@@ -59,7 +59,7 @@ export function VerifyEmailPage() {
           )
         }
         backTo={user ? undefined : "/login"}
-        backLabel={t("verifyEmail.backToLogin")}
+        backLabel={t("magicLink.backToLogin")}
       >
         {email && (
           <Button variant="outline" onClick={handleResend} disabled={resendState !== "idle"}>

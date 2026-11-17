@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * OIDC callback page — receives the authorization code after login.
- *
- * Exchanges the code, syncs auth state from the now-active Better Auth
- * session, and redirects to the originally requested page.
- */
+/** OIDC callback page: exchanges the code, syncs auth state, redirects to the requested page. */
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -16,15 +11,7 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../../lib/mutation-error";
 import { FieldError } from "@appstrate/ui/components/field";
 
-/**
- * Server-rendered prefixes that live outside the SPA's router. Paths
- * starting with these need a full browser navigation rather than a
- * React Router client-side transition — otherwise the SPA matches its
- * own catch-all and the SSR page never renders.
- *
- * Keep this list tight — over-eager matching would force a full
- * reload on every navigation and ruin dashboard UX.
- */
+/** Server-rendered prefixes outside the SPA's router: they need a full navigation, or the SPA catch-all swallows them. Keep tight. */
 const SERVER_RENDERED_PREFIXES = ["/activate", "/api/oauth/"];
 
 function isServerRenderedPath(path: string): boolean {
@@ -44,20 +31,10 @@ export function AuthCallbackPage() {
     (async () => {
       try {
         const { redirectTo } = await handleOidcCallback();
-        // The boot read already saw the BA session cookie; resync only if not.
-        // `refreshAuth` throws `AuthRefreshError` if the resync did not
-        // establish a user (stale cookie, server-side session gone). The
-        // catch below turns that into an inline error rather than letting
-        // us navigate onto a protected page → catch-all → /login → OIDC
-        // re-redirect → back here in a tight loop with no error UI.
+        // `refreshAuth` throws if no user is established; the catch shows an
+        // inline error instead of looping protected page → /login → OIDC → here.
         if (!authStore.getState().user) await refreshAuth();
-        // Server-rendered pages outside the SPA (e.g. `/activate` for
-        // the CLI device-flow consent) need a real browser navigation
-        // — React Router's `navigate()` would push history but the SPA
-        // would match its own catch-all and render the dashboard
-        // shell instead of letting the server produce the page.
-        // `window.location.assign` triggers a full request so the
-        // browser ends up on the correct SSR output.
+        // Server-rendered pages (e.g. `/activate`) need a real navigation.
         if (isServerRenderedPath(redirectTo)) {
           window.location.assign(redirectTo);
           return;

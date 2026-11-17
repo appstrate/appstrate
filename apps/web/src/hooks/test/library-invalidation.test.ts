@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A write that changes what the library lists marks BOTH of its forms stale.
- * `useCatalogueLibrary` serves an administrator `/api/library` and everybody
- * else each space's `/api/spaces/{spaceId}/library`: refreshing the first alone
- * leaves a member's picker without the MCP server they just imported, and the
- * integration editor says « serveur introuvable » until the cache expires.
+ * A write that changes what the library lists marks BOTH of its forms stale:
+ * `/api/library` (the catalogue, the pickers) and the current space's
+ * `/api/spaces/{id}/library` (activation state). Refreshing one alone
+ * leaves the other's reader on a stale list — a picker without the MCP server
+ * just imported, and the integration editor saying « serveur introuvable »
+ * until the cache expires.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -20,11 +21,11 @@ describe("invalidateLibraries", () => {
     const qc = new QueryClient();
     const keys = [
       $api.queryOptions("get", "/api/library", { params: { header } }).queryKey,
-      $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-        params: { path: { spaceId: "spc_a" }, header },
+      $api.queryOptions("get", "/api/spaces/{id}/library", {
+        params: { path: { id: "spc_a" }, header },
       }).queryKey,
-      $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-        params: { path: { spaceId: "spc_b" }, header },
+      $api.queryOptions("get", "/api/spaces/{id}/library", {
+        params: { path: { id: "spc_b" }, header },
       }).queryKey,
     ];
     for (const key of keys) qc.setQueryData(key, { object: "library" });

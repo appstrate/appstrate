@@ -4,22 +4,23 @@
 /**
  * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface.
  *
- * One writer populates this store: the `api_call` tool when an
- * upstream response is too large to inline.
+ * Writers: the text-output budget (`./tool-output-spill.ts`) when an
+ * `api_call` body, platform tool result or third-party MCP tool result
+ * does not fit inline, and `api_call` for every binary body.
  *
  * One reader: the MCP `resources/read` handler (validated against the
  * session's `runId` before serving bytes — cross-run reads are a
  * security incident, not a feature).
  *
  * Design (V2 + V8 from the migration plan):
- *   - URI scheme: `appstrate://api-response/{runId}/{ulid}`. The
+ *   - URI scheme: `appstrate://tool-output/{runId}/{ulid}`. The
  *     ULID is unguessable per spec security guidance — sequential IDs
  *     are forbidden.
  *   - In-memory only. The agent run lives in a single container with a
  *     bounded lifetime; persistence buys nothing and complicates teardown.
  *   - Bounded by `maxTotalBytes` with LRU eviction on insert: when a new
  *     blob would push the store over its cap, the least-recently-used
- *     blobs are dropped until it fits. Blobs are written by `api_call`
+ *     blobs are dropped until it fits. Blobs are written by tool-output
  *     spillover and read via `resources/read` immediately after (the
  *     agent follows the `resource_link` from the same tool result), so
  *     the LRU victim is almost always a blob the agent already consumed.
@@ -83,7 +84,7 @@ export function generateUlid(now: number = Date.now()): string {
   return out.slice(0, 26);
 }
 
-const BLOB_URI_PREFIX_TEMPLATE = "appstrate://api-response/";
+const BLOB_URI_PREFIX_TEMPLATE = "appstrate://tool-output/";
 
 /**
  * Build the full URI for a blob in the given run. Exposed so callers

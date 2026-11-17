@@ -8,7 +8,7 @@ export function agentHasInput(agent: AgentDetail): boolean {
   return !!properties && Object.keys(properties).length > 0;
 }
 
-/** `?run=<agent>` opens the input form only where a click on the button would. */
+/** A requested run opens the input form only where a click on the button would. */
 export function runInputOpens({
   requested,
   disabled,

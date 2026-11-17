@@ -76,8 +76,7 @@ beforeEach(async () => {
     homeSpaceId: null,
     draftManifest: { name: SYSTEM_SKILL, version: "1.0.0", type: "skill" },
   });
-  // Offered here, never taken up: the "pending offer" state, which is a
-  // placement with no row.
+  // Placed here and never switched on: a row saying `false`.
   await seedPackage({ id: OFFERED, orgId: ctx.orgId, homeSpaceId: otherSpaceId });
   await seedPackageShare(ctx.defaultSpaceId, OFFERED);
 });
@@ -120,29 +119,26 @@ describe("a system package is switchable, and the row outranks the default", () 
   });
 });
 
-describe("a pending offer survives a DELETE — there is nothing to switch off", () => {
-  it("answers 404 and leaves the offer with no row at all", async () => {
-    // Writing `enabled: false` here would turn "nobody has taken this up" into
-    // "somebody switched this off" — a decision the recipient never made, and
-    // the one state the library renders as a pending offer.
+describe("a placement that is already off stays off on a DELETE", () => {
+  it("answers 204, keeps the row and audits nothing", async () => {
     const res = await deactivate(OFFERED);
-    expect(res.status, await res.clone().text()).toBe(404);
-    expect(await placementRow(OFFERED)).toBeNull();
+    expect(res.status, await res.clone().text()).toBe(204);
+    expect((await placementRow(OFFERED))?.enabled).toBe(false);
     expect(await auditCount("package.deactivated", OFFERED)).toHaveLength(0);
 
-    // Control: taking it up works, and THEN it can be switched off.
+    // Control: switched on, THEN off, is a real deactivation.
     expect((await activate(OFFERED)).status).toBe(201);
     expect((await deactivate(OFFERED)).status).toBe(204);
     expect((await placementRow(OFFERED))?.enabled).toBe(false);
+    expect(await auditCount("package.deactivated", OFFERED)).toHaveLength(1);
   });
 });
 
 describe("CONFIGURING never activates — the row is the activation's, not the setting's", () => {
-  // `requireAgent()` asks PLACEMENT, so a pending offer now reaches the agent
-  // configure routes. Those write through `updateSpacePackage`, whose default
-  // mode upserts — and a `space_packages` row means ACTIVE. Left ungated, a
-  // model picker would be a second activation door: no placement rule, no
-  // `<type>:share`, no `package.activated`.
+  // `requireAgent()` asks PLACEMENT, so a placement switched off reaches the
+  // agent configure routes. Those write through `updateSpacePackage`, which
+  // updates the row's settings and never its `enabled`: a model picker is not
+  // an activation door.
   const OFFERED_AGENT = "@doors/offered-agent";
 
   beforeEach(async () => {
@@ -163,17 +159,14 @@ describe("CONFIGURING never activates — the row is the activation's, not the s
       body: JSON.stringify({ modelId: null }),
     });
 
-  it("refuses to write a placement row for an offer nobody has taken up", async () => {
+  it("configures a placement switched off without switching it on", async () => {
     const res = await setModel();
-    expect(res.status, await res.clone().text()).toBe(404);
-    expect(((await res.json()) as { detail?: string }).detail).toContain(
-      "not active in this space",
-    );
-    expect(await placementRow(OFFERED_AGENT)).toBeNull();
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await placementRow(OFFERED_AGENT))?.enabled).toBe(false);
     expect(await auditCount("package.activated", OFFERED_AGENT)).toHaveLength(0);
   });
 
-  it("CONTROL: once the offer is taken up, the same call configures it — and switching it off does not undo that", async () => {
+  it("CONTROL: once switched on, the same call configures it — and switching it off does not undo that", async () => {
     expect((await activate(OFFERED_AGENT)).status).toBe(201);
     expect((await setModel()).status).toBe(200);
 

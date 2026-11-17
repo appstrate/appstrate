@@ -214,59 +214,77 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("hard container limits");
   });
 
-  it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableSkills: [{ id: "@x/skill", name: "x-skill" }],
-    });
-    expect(out).not.toContain("### Tools");
-    expect(out).toContain("### Skills");
-    expect(out).toContain("**x-skill**");
-  });
-
-  it("omits the API Documentation subsection when an integration has no INTEGRATION.md", () => {
+  it("renders the integrations catalog with name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
+          id: "@appstrate/vapi",
+          description: "Voice calls",
+          location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("GitHub integration");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain(
+      [
+        "### Integrations",
+        "The following integrations are available in this run. Their tools are listed with your other tools, prefixed by the integration's namespace.",
+        "When an integration lists a `<location>`, read that file with your file-read tool before your first call to that integration's tools. The path is relative to your working directory.",
+        "",
+        "<available_integrations>",
+        "  <integration>",
+        "    <name>@appstrate/vapi</name>",
+        "    <description>Voice calls</description>",
+        "    <location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",
+        "  </integration>",
+        "</available_integrations>",
+        "",
+      ].join("\n"),
+    );
   });
 
-  it("inlines INTEGRATION.md content under an API Documentation subsection when present", () => {
+  it("omits description and location when an entry carries neither", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp" }],
+    });
+    expect(out).toContain("  <integration>\n    <name>@org/github-mcp</name>\n  </integration>");
+    expect(out).not.toContain("    <description>");
+    expect(out).not.toContain("    <location>");
+  });
+
+  it("places the integrations catalog before the unavailable integrations", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp" }],
+      unavailableIntegrations: [{ id: "@org/gmail", reason: "it is switched off" }],
+    });
+    const integrations = out.indexOf("### Integrations");
+    expect(integrations).toBeGreaterThan(-1);
+    expect(out.indexOf("## Unavailable Integrations")).toBeGreaterThan(integrations);
+    expect(out).not.toContain("### Skills");
+  });
+
+  it("XML-escapes name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
-          doc: "## GitHub API\n\nCall `list_issues` to fetch issues.",
+          id: "@o/a&b",
+          description: `</description><x attr="1">'`,
+          location: ".pi/integrations/@o/<a>/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("### API Documentation");
-    expect(out).toContain("## GitHub API");
-    expect(out).toContain("Call `list_issues` to fetch issues.");
-  });
-
-  it("treats whitespace-only INTEGRATION.md as absent (no API Documentation subsection)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      integrations: [{ id: "@org/github-mcp", doc: "   \n\n  " }],
-    });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain("<name>@o/a&amp;b</name>");
+    expect(out).toContain(
+      "<description>&lt;/description&gt;&lt;x attr=&quot;1&quot;&gt;&apos;</description>",
+    );
+    expect(out).toContain("<location>.pi/integrations/@o/&lt;a&gt;/INTEGRATION.md</location>");
   });
 
   it("lists unavailable integrations with their reason and forbids claiming results from them", () => {
@@ -284,7 +302,7 @@ describe("renderPlatformPrompt", () => {
       "- **@org/drive**: connection 'work': its credentials cannot be delivered",
     );
     expect(out).toContain("Never present data or results as coming from these integrations.");
-    expect(out).not.toContain("## Integration: @org/gmail");
+    expect(out).not.toContain("<available_integrations>");
   });
 
   it("omits the Unavailable Integrations section when nothing is unavailable", () => {
@@ -296,10 +314,12 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Unavailable Integrations");
   });
 
-  it("omits every integration section when none are passed in", () => {
-    const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).not.toContain("## Integration:");
-    expect(out).not.toContain("### API Documentation");
+  it("omits the integrations catalog when the list is absent or empty", () => {
+    for (const integrations of [undefined, []]) {
+      const out = renderPlatformPrompt({ template: "T", context: ctx(), integrations });
+      expect(out).not.toContain("### Integrations");
+      expect(out).not.toContain("<available_integrations>");
+    }
   });
 
   it("never emits a Connected Providers section or provider_call instructions", () => {
@@ -526,17 +546,17 @@ describe("renderPlatformPrompt", () => {
     });
 
     it("omits the section entirely when there are no memories", () => {
-      // Post-#368: the platform prompt is data-driven. With no memories
-      // and no fallback prose, the `## Memory` header is suppressed —
-      // the LLM still discovers the archive via the runtime-injected
-      // `recall_memory` tool docs (surfaced in `### Tools` + toolDocs).
+      // The platform prompt is data-driven. With no memories and no
+      // fallback prose, the `## Memory` header is suppressed — the LLM
+      // discovers the archive through the `recall_memory` tool of
+      // `@appstrate/platform`, whose description `tools/list` surfaces.
       const out = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(out).not.toContain("## Memory");
       expect(out).not.toContain("No memories are currently pinned");
     });
 
     it("does NOT mention specific tool names — archive APIs live on the MCP descriptor", () => {
-      // Post-#368 contract: data block only. Instructions for `note`,
+      // Data block only. Instructions for `note`,
       // `recall_memory`, `pin` come from each tool's MCP descriptor
       // `description` (surfaced via `tools/list`) when the tool is wired.
       const out = renderPlatformPrompt({
@@ -585,12 +605,9 @@ describe("renderPlatformPrompt", () => {
   });
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
-    // Before the run_history tool migration, a `## Run History` section
-    // with a `curl $SIDECAR_URL/run-history` snippet was emitted when
-    // `runHistoryApi: true` was passed in. That surface is gone: the
-    // prompt must never mention $SIDECAR_URL, regardless of the options
-    // bag. Run history is wired via the `run_history` tool whose
-    // description is surfaced through `availableTools` instead.
+    // The prompt never mentions $SIDECAR_URL, regardless of the options
+    // bag. Run history is the `run_history` tool of `@appstrate/platform`,
+    // whose description `tools/list` surfaces.
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("## Run History");
     expect(out).not.toContain("$SIDECAR_URL");
@@ -680,15 +697,9 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("do not probe");
     });
 
-    it("omits the section when outputSchema is absent or empty", () => {
+    it("omits the section when outputSchema is absent", () => {
       const without = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(without).not.toContain("## Output Format");
-      const withEmpty = renderPlatformPrompt({
-        template: "T",
-        context: ctx(),
-        outputSchema: {},
-      });
-      expect(withEmpty).not.toContain("## Output Format");
     });
 
     it("lists each property with type, required flag, and description", () => {
@@ -699,6 +710,17 @@ describe("renderPlatformPrompt", () => {
       });
       expect(out).toContain("### Required shape");
       expect(out).toContain("- **random** (number, required): A random float between 0 and 1");
+    });
+
+    it("prints no shape heading for a schema without properties", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx(),
+        outputSchema: { type: "object", properties: {}, additionalProperties: true },
+      });
+      expect(out).toContain("## Output Format");
+      expect(out).not.toContain("### Required shape");
+      expect(out).toContain("### Full JSON Schema");
     });
 
     it("marks optional fields as optional", () => {

@@ -10,6 +10,8 @@ import {
   isMarkdownFile,
   isPublishedFileLogEvent,
   mimeIconFor,
+  mimeKind,
+  pinPreviewUrl,
   runFileDirection,
   type FileLike,
 } from "../files.ts";
@@ -315,5 +317,36 @@ describe("isPublishedFileLogEvent", () => {
     }
     expect(isPublishedFileLogEvent(null)).toBe(false);
     expect(isPublishedFileLogEvent(undefined)).toBe(false);
+  });
+});
+
+describe("pinPreviewUrl", () => {
+  it("keeps the first URL of a file when a refetch mints another token", () => {
+    const first = pinPreviewUrl({ fileId: "file_1", url: undefined }, "file_1", "/p?t=a");
+    expect(first).toEqual({ fileId: "file_1", url: "/p?t=a" });
+    expect(pinPreviewUrl(first, "file_1", "/p?t=b")).toBe(first);
+    expect(pinPreviewUrl(first, "file_1", null)).toBe(first);
+  });
+
+  it("starts over for another file", () => {
+    const first = { fileId: "file_1", url: "/p/1?t=a" };
+    expect(pinPreviewUrl(first, "file_2", "/p/2?t=b")).toEqual({
+      fileId: "file_2",
+      url: "/p/2?t=b",
+    });
+  });
+
+  it("stays put while no URL has arrived, so a render never loops on it", () => {
+    const empty = { fileId: "file_1", url: undefined };
+    expect(pinPreviewUrl(empty, "file_1", undefined)).toBe(empty);
+    expect(pinPreviewUrl(empty, "file_1", null)).toBe(empty);
+  });
+});
+
+describe("mimeKind", () => {
+  it("reads HTML as html, not text", () => {
+    expect(mimeKind("text/html; charset=utf-8")).toBe("html");
+    expect(mimeKind("application/xhtml+xml")).toBe("html");
+    expect(mimeKind("text/plain")).toBe("text");
   });
 });

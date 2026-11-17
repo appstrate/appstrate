@@ -69,6 +69,33 @@ function buildGroups(available: string[], selected: string[]): ResourceGroup[] {
   }));
 }
 
+/** The resources a set of scopes reaches, each with how many of its scopes are in. */
+export function ScopeSummaryBadges({
+  available,
+  selected,
+}: {
+  available: string[];
+  selected: string[];
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="flex flex-wrap gap-1">
+      {buildGroups(available, selected)
+        .filter((g) => g.selectedCount > 0)
+        .map((g) => (
+          <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
+            {permissionResourceLabel(g.resource, t)}
+            {g.selectedCount < g.scopes.length && (
+              <span className="ml-0.5 opacity-60">
+                {g.selectedCount}/{g.scopes.length}
+              </span>
+            )}
+          </Badge>
+        ))}
+    </div>
+  );
+}
+
 export function ScopeMultiSelect({
   available,
   selected,
@@ -111,7 +138,7 @@ export function ScopeMultiSelect({
   const label = allSelected ? text.all : noneSelected ? text.none : text.count(selected.length);
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -120,7 +147,7 @@ export function ScopeMultiSelect({
             disabled={disabled}
           >
             <span className="truncate">{label}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            <ChevronsUpDown className="ml-2 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="start">
@@ -130,10 +157,8 @@ export function ScopeMultiSelect({
               <CommandEmpty>{text.empty}</CommandEmpty>
               <CommandGroup>
                 <CommandItem onSelect={toggleAll}>
-                  <Check
-                    className={cn("mr-2 h-4 w-4", allSelected ? "opacity-100" : "opacity-0")}
-                  />
-                  {allSelected ? t("apiKeys.deselectAll") : t("apiKeys.selectAll")}
+                  <Check className={cn("mr-2", allSelected ? "opacity-100" : "opacity-0")} />
+                  {allSelected ? t("apiKeys.deselectAll") : t("models.form.discoverSelectAll")}
                 </CommandItem>
               </CommandGroup>
               <CommandSeparator />
@@ -152,9 +177,7 @@ export function ScopeMultiSelect({
                         title={scope}
                         onSelect={() => toggle(scope)}
                       >
-                        <Check
-                          className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
-                        />
+                        <Check className={cn("mr-2", isSelected ? "opacity-100" : "opacity-0")} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span>{label}</span>
                           {note && <span className="text-muted-foreground text-xs">{note}</span>}
@@ -178,27 +201,12 @@ export function ScopeMultiSelect({
         </PopoverContent>
       </Popover>
 
-      {/* Resource summary badges */}
-      {!noneSelected && (
-        <div className="flex flex-wrap gap-1">
-          {allSelected ? (
-            <span className="text-muted-foreground text-xs">{t("apiKeys.fullAccess")}</span>
-          ) : (
-            groups
-              .filter((g) => g.selectedCount > 0)
-              .map((g) => (
-                <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {permissionResourceLabel(g.resource, t)}
-                  {g.selectedCount < g.scopes.length && (
-                    <span className="ml-0.5 opacity-60">
-                      {g.selectedCount}/{g.scopes.length}
-                    </span>
-                  )}
-                </Badge>
-              ))
-          )}
-        </div>
-      )}
+      {!noneSelected &&
+        (allSelected ? (
+          <span className="text-muted-foreground text-xs">{t("apiKeys.fullAccess")}</span>
+        ) : (
+          <ScopeSummaryBadges available={available} selected={selected} />
+        ))}
     </div>
   );
 }

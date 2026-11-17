@@ -10,7 +10,7 @@
  * preserves the zero-footprint test invariant.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -24,13 +24,24 @@ import {
 import {
   seedApiKey,
   seedPackage,
-  seedPlacedPackage,
+  seedSpacePackage,
   seedSpace,
   seedSpaceMember,
-  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import {
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
+import {
+  __resetSystemIntegrationsForTest,
+  initSystemIntegrations,
+} from "../../../src/services/integration-client-registry.ts";
 import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import {
   auditEvents,
@@ -111,21 +122,32 @@ describe("Me API (/api/me)", () => {
       expect(found?.role).toBe("owner");
     });
 
-    it("carries each org's logo, as GET /api/orgs does", async () => {
-      const ctx = await createTestContext({ orgSlug: "logo-me-org" });
+    it("carries each org's icon and color, as GET /api/orgs does", async () => {
+      const ctx = await createTestContext({ orgSlug: "icon-me-org" });
       await db
         .update(organizations)
-        .set({ logo: "emoji:🧠" })
+        .set({ icon: "emoji:🧠", color: "violet" })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string; logo: unknown }> };
-      expect(body.data.find((o) => o.id === ctx.orgId)?.logo).toEqual({
-        kind: "emoji",
-        emoji: "🧠",
-      });
+      const body = (await res.json()) as {
+        data: Array<{ id: string; icon: unknown; color: unknown }>;
+      };
+      const found = body.data.find((o) => o.id === ctx.orgId);
+      expect(found?.icon).toBe("emoji:🧠");
+      expect(found?.color).toBe("violet");
+    });
+
+    it("carries a null icon and color when none is set", async () => {
+      const ctx = await createTestContext({ orgSlug: "plain-me-org" });
+
+      const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
+
+      const body = (await res.json()) as { data: Array<Record<string, unknown>> };
+      const found = body.data.find((o) => o.id === ctx.orgId);
+      expect(found).toMatchObject({ icon: null, color: null });
     });
 
     it("returns every org the user is a member of", async () => {
@@ -219,6 +241,9 @@ describe("Me API (/api/me)", () => {
         userId: ctx.user.id,
       });
 
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/gmail");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/clickup");
+
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -235,6 +260,132 @@ describe("Me API (/api/me)", () => {
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-space")).toBe(false);
+    });
+
+    it("flags needs_reconnection only when no usable connection of the integration is healthy", async () => {
+      const flag = (id: string) =>
+        db
+          .update(integrationConnections)
+          .set({ needsReconnection: true })
+          .where(eq(integrationConnections.id, id));
+      const broken = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/broken",
+        userId: ctx.user.id,
+      });
+      await flag(broken);
+      // Two connections of one integration, one broken: the integration stays healthy.
+      const mixedBroken = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/mixed",
+        userId: ctx.user.id,
+      });
+      await flag(mixedBroken);
+      await db.insert(integrationConnections).values({
+        integrationId: "@ctx/mixed",
+        authKey: "google",
+        accountId: "acct-second",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: ["openid"],
+        label: "Second",
+      });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/healthy",
+        userId: ctx.user.id,
+      });
+      for (const id of ["@ctx/broken", "@ctx/mixed", "@ctx/healthy"]) {
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      }
+
+      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as {
+        connections: { integration_package_id: string; needs_reconnection?: boolean }[];
+      };
+      const byId = new Map(body.connections.map((c) => [c.integration_package_id, c]));
+      expect(byId.get("@ctx/broken")?.needs_reconnection).toBe(true);
+      expect("needs_reconnection" in byId.get("@ctx/mixed")!).toBe(false);
+      expect("needs_reconnection" in byId.get("@ctx/healthy")!).toBe(false);
+    });
+
+    describe("connections lists only integrations active in the space", () => {
+      afterEach(() => {
+        __resetSystemIntegrationsForTest();
+      });
+
+      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
+        const res = await app.request("/api/me/context", {
+          headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { connections: { integration_package_id: string }[] };
+        return body.connections.map((c) => c.integration_package_id);
+      }
+
+      /** An org-scope connection (serving every space of the org) of the caller. */
+      const seedOrgConnection = (integrationId: string) =>
+        seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: ctx.defaultSpaceId,
+          integrationId,
+          userId: ctx.user.id,
+        });
+
+      it("omits an org-scope connection where its integration is not activated", async () => {
+        await seedOrgConnection("@ctx/twilio");
+        const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
+        await seedSpacePackage(team.id, "@ctx/twilio");
+
+        expect(await listedIntegrations()).toEqual([]);
+        expect(await listedIntegrations(team.id)).toEqual(["@ctx/twilio"]);
+      });
+
+      it("follows a system integration's activation: listed without a row, omitted when switched off", async () => {
+        initSystemIntegrations([{ id: "@ctx/system-mail" }]);
+        await seedOrgConnection("@ctx/system-mail");
+
+        expect(await listedIntegrations()).toEqual(["@ctx/system-mail"]);
+
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/system-mail", { enabled: false });
+        expect(await listedIntegrations()).toEqual([]);
+      });
+
+      it("lists the integrations GET /api/credential-proxy/connections lists", async () => {
+        const manifest = (name: string) =>
+          localIntegrationManifest({
+            name,
+            auths: {
+              api: {
+                type: "api_key",
+                authorizedUris: ["https://api.example.com/**"],
+                delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+              },
+            },
+          });
+        await seedProxyIntegration(ctx, manifest("@ctx/active-a"));
+        await seedProxyConnection(ctx, "@ctx/active-a", "api", { api_key: "k" });
+        await seedProxyIntegration(ctx, manifest("@ctx/active-b"));
+        await seedProxyConnection(ctx, "@ctx/active-b", "api", { api_key: "k" });
+        await seedOrgConnection("@ctx/inactive");
+
+        const res = await app.request("/api/credential-proxy/connections", {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const proxied = ((await res.json()) as { data: { integration_package_id: string }[] }).data
+          .map((c) => c.integration_package_id)
+          .sort();
+
+        expect(proxied).toEqual(["@ctx/active-a", "@ctx/active-b"]);
+        expect(await listedIntegrations()).toEqual(proxied);
+      });
     });
 
     it("names the space it resolved, following X-Space-Id rather than the default", async () => {
@@ -555,16 +706,16 @@ describe("Me API (/api/me)", () => {
         });
         await seedSpacePackage(ctx.defaultSpaceId, id, { enabled });
       }
-      // ORPHAN: a row here, homed elsewhere, offered to nobody.
+      // Homed elsewhere and placed there only: it runs nowhere this connection serves.
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
       await seedPackage({
-        id: "@reuse/orphan",
+        id: "@reuse/elsewhere",
         orgId: ctx.orgId,
         type: "agent",
         homeSpaceId: elsewhere.id,
-        draftManifest: declaring("@reuse/orphan"),
+        draftManifest: declaring("@reuse/elsewhere"),
       });
-      await seedSpacePackage(ctx.defaultSpaceId, "@reuse/orphan");
+      await seedSpacePackage(elsewhere.id, "@reuse/elsewhere");
 
       const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
       expect(res.status).toBe(200);
@@ -721,6 +872,33 @@ describe("Me API (/api/me)", () => {
         .where(eq(integrationConnectionShares.connectionId, connectionId));
       return rows.map((row) => row.spaceId).toSorted();
     }
+
+    it("lets the owner share with all spaces without an org header, preview still explicit", async () => {
+      const ctx = await createTestContext({ orgSlug: "meall-org" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId: "@meall/gmail",
+        userId: ctx.user.id,
+      });
+      const shareAll = (headers: Record<string, string>) =>
+        app.request(`/api/me/connections/${id}/shares`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ share_all_spaces: true }),
+        });
+
+      // A role preview cannot ride the missing org context: it must name its org.
+      const preview = await shareAll({ Cookie: ctx.cookie, "X-View-As": "org_role=member" });
+      expect(preview.status).toBe(400);
+      expect(((await preview.json()) as { code: string }).code).toBe("invalid_view_as");
+      expect(await sharesOf(id)).toEqual([]);
+
+      expect((await shareAll({ Cookie: ctx.cookie })).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId, spaceB.id].toSorted());
+    });
 
     it("lets the owner rename an org-scoped connection and share it, without a space header", async () => {
       const ctx = await createTestContext({ orgSlug: "mepatch-org" });
@@ -885,7 +1063,7 @@ describe("Me API (/api/me)", () => {
         integrationId,
         userId: member.id,
       });
-      await seedPlacedPackage(blocked.id, integrationId, { blockUserConnections: true });
+      await seedSpacePackage(blocked.id, integrationId, { blockUserConnections: true });
       const [governorRow] = await db
         .insert(integrationConnections)
         .values({

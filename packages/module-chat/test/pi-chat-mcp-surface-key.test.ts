@@ -33,6 +33,9 @@ import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { turnPermissions } from "../src/turn-permissions.ts";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { spaces } from "@appstrate/db/schema";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -51,6 +54,10 @@ interface Caller {
 
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
 async function handshake(caller: Caller, permissions: readonly string[]) {
+  const [space] = await db
+    .select({ credentialProxyOpen: spaces.credentialProxyOpen })
+    .from(spaces)
+    .where(eq(spaces.id, caller.spaceId));
   const url = platformMcpUrl(ORIGIN, caller.ctx.orgId, caller.spaceId);
   const token = mintMcpLoopbackToken({
     userId: caller.ctx.user.id,
@@ -82,7 +89,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     } as unknown as ExtensionAPI;
     for (const factory of built.extensionFactories) factory(pi);
     return {
-      key: platformMcpSurfaceKey(url, permissions),
+      key: platformMcpSurfaceKey(url, permissions, space!.credentialProxyOpen),
       instructions: built.instructions ?? "",
       tools: JSON.stringify(tools),
     };
@@ -153,5 +160,20 @@ describe("platform MCP surface key purity", () => {
     );
     expect(withoutAuthoring.key).not.toBe(withAuthoring.key);
     expect(withoutAuthoring.instructions).not.toBe(withAuthoring.instructions);
+  });
+
+  it("offers the integration tools, and withholds them under a different key where the space closes the proxy", async () => {
+    const open: Caller = { ctx: ownerA, orgRole: "owner", spaceId: ownerA.defaultSpaceId };
+    const closedSpace = await seedSpace({ orgId: ownerA.orgId, name: "Closed" });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, closedSpace.id));
+    const closed: Caller = { ctx: ownerA, orgRole: "owner", spaceId: closedSpace.id };
+    const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);
+    expect(opened.tools).toContain("search_integration_tools");
+    expect(opened.tools).toContain("call_integration_tool");
+    expect(shut.tools).not.toContain("call_integration_tool");
+    expect(shut.key).not.toBe(opened.key);
   });
 });

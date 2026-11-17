@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
 import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
@@ -14,12 +15,12 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
-import { PageHeader } from "../components/page-header";
+import { DetailBar } from "../components/detail-bar";
+import { PackageIcon } from "../components/package-icon";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
-import { useMarkReadByRun } from "../hooks/use-notifications";
+import { useMarkRunRead } from "../hooks/use-run-reads";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
@@ -36,23 +37,19 @@ import {
 } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
+import { RunHeaderActions } from "../components/run-detail/run-header-actions";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight } from "lucide-react";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
-import { Badge } from "../components/status-badge";
-import { RunProvenanceBadges } from "../components/run-cells";
+import { ArrowRight, LayoutGrid, FileText, ScrollText } from "lucide-react";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
+import { RunStatusBadge } from "../components/status-badge";
+import { RunProvenanceBadges } from "../components/run-provenance-badges";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
+import { findRunErrorReason } from "../lib/run-error";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -60,8 +57,15 @@ type RunLogEntry = components["schemas"]["RunLog"];
 const RUN_DETAIL_TABS = ["overview", "journal", "results"] as const;
 type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
+/** One body per run: a re-run leaves for another run, and the form it came from must not follow it. */
 export function RunDetailPage() {
+  const { runId } = useParams<{ runId: string }>();
+  return <RunDetailBody key={runId} />;
+}
+
+function RunDetailBody() {
   const { t } = useTranslation(["agents", "common"]);
+  const listCrumb = usePackageListCrumb("agent");
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
   // Skip the agent detail fetch for inline shadow packages — the shadow is
@@ -112,9 +116,9 @@ export function RunDetailPage() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkReadByRun();
+  const markRead = useMarkRunRead();
 
-  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // Mark the run read when viewing it terminal, and refetch the
   // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
   // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
   // the moment status flips terminal. Idempotent server-side (no-op for a
@@ -127,14 +131,14 @@ export function RunDetailPage() {
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
-      markRead.mutate({ params: { path: { runId } } });
+      markRead.mutate({ params: { path: { id: runId } } });
       void invalidateRunLogs(qc, orgId, spaceId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
-  const rerun = useModalParam("rerun");
+  const [rerunRequested, setRerunRequested] = useState(false);
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
@@ -156,6 +160,7 @@ export function RunDetailPage() {
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
+  const errorReason = useMemo(() => findRunErrorReason(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
   const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
@@ -241,31 +246,33 @@ export function RunDetailPage() {
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
-  const knownAgentName = qc
+  const knownAgent = qc
     .getQueryData<AgentListItem[]>(agentsKeys.list(orgId, spaceId))
-    ?.find((candidate) => candidate.id === packageId)?.display_name;
+    ?.find((candidate) => candidate.id === packageId);
+  const knownAgentName = knownAgent?.display_name;
+  // The agent's own tile, as its page and its cards draw it. An inline run has
+  // no agent to read it from and gets the default tile.
+  const identity = isInlinePath ? undefined : (agent ?? knownAgent);
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral;
   const canRerun = !isRunning && !isInline && !!agent && permissionsReady && can("agents:run");
-  // `?rerun=1` opens the form only where the Re-run button itself would.
-  const rerunOpen = rerun.value !== null && canRerun && !rerunRefusal;
-  const hasInlineName = !!enrichedRun.agent_name?.trim();
+  const rerunOpen = rerunRequested && canRerun && !rerunRefusal;
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
-  const agentCrumb = isInline
-    ? {
-        label: hasInlineName
-          ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
-          : inlineName,
-        href: location.pathname,
-      }
-    : {
-        // The name the agents list already holds stands in while the detail
-        // loads; the id is the fallback for an agent with no name, never a
-        // placeholder for one whose name is still on its way.
-        label: agent?.display_name || knownAgentName || packageId,
-        href: `/agents/${packageId}`,
-      };
+  // Where this run sits in the header trail: under its agent's runs, or under
+  // the runs list for an inline run, which has no agent page.
+  const trail = isInline
+    ? [{ label: t("runs.title"), href: "/runs" }]
+    : [
+        listCrumb,
+        {
+          // The name the agents list already holds stands in while the detail
+          // loads; the id is the fallback for an agent with no name, never a
+          // placeholder for one whose name is still on its way.
+          label: agent?.display_name || knownAgentName || packageId,
+          href: `/agents/${packageId}#runs`,
+        },
+      ];
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
@@ -276,74 +283,70 @@ export function RunDetailPage() {
     numberedTitle: runCrumbLabel,
   });
   const tabs: DetailTab<RunDetailTab>[] = [
-    { value: "overview", label: t("run.tabOverview") },
-    { value: "journal", label: t("run.tabJournal") },
-    { value: "results", label: t("run.tabResults") },
-  ];
-
-  const breadcrumbs = [
-    { label: t("detail.breadcrumb"), href: "/agents" },
-    agentCrumb,
-    ...(isInline
-      ? []
-      : [
-          { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
-          { label: runCrumbLabel, href: location.pathname },
-        ]),
-    { label: tabs.find((item) => item.value === tab)?.label ?? tab },
+    { value: "overview", label: t("run.tabOverview"), icon: LayoutGrid },
+    { value: "journal", label: t("run.tabJournal"), icon: ScrollText },
+    { value: "results", label: t("run.tabResults"), icon: FileText },
   ];
 
   return (
-    <div>
-      <PageHeader
+    <DetailTabs value={tab} onChange={setTab}>
+      <DetailBar
+        icon={
+          <PackageIcon
+            type="agent"
+            id={packageId}
+            name={identity?.display_name}
+            icon={identity?.icon}
+            color={identity?.color}
+          />
+        }
         title={title}
-        titleClassName="text-xl"
-        breadcrumbs={breadcrumbs}
-        wrapActions
-        actions={
+        trail={trail}
+        tabs={tabs}
+        badge={
           <>
             {/* No unread dot here: this page is the reading. */}
-            <Badge status={enrichedRun.status} />
+            <RunStatusBadge status={enrichedRun.status} />
             <RunProvenanceBadges run={enrichedRun} />
-            <RunHeaderActions
-              canRerun={canRerun}
-              rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
-              // Hidden for remote-origin runs: the process runs on the caller's
-              // host and the platform cannot signal it.
-              canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
-              rerunPending={launcher.isPending}
-              cancelPending={cancelRun.isPending}
-              onRerun={() => {
-                if (canReadAgent) rerun.open();
-                // The API conceals resolved input from runners: replay that
-                // snapshot server-side, keeping its parameters.
-                else
-                  launcher.launch({
-                    rerun_from: run.id,
-                    version: replayVersion(run.version_ref, agent?.home_writable),
-                  });
-              }}
-              onCancel={() => cancelRun.mutate(runId!)}
-            />
           </>
         }
-      >
-        <RunHeaderSummary run={enrichedRun} />
-      </PageHeader>
+        actions={
+          <RunHeaderActions
+            canRerun={canRerun}
+            rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
+            // Hidden for remote-origin runs: the process runs on the caller's
+            // host and the platform cannot signal it.
+            canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
+            rerunPending={launcher.isPending}
+            cancelPending={cancelRun.isPending}
+            onRerun={() => {
+              if (canReadAgent) setRerunRequested(true);
+              // The API conceals resolved input from runners: replay that
+              // snapshot server-side, keeping its parameters.
+              else
+                launcher.launch({
+                  rerun_from: run.id,
+                  version: replayVersion(run.version_ref, agent?.home_writable),
+                });
+            }}
+            onCancel={() => cancelRun.mutate(runId!)}
+          />
+        }
+      />
 
       {agent && canReadAgent && (
         <RunModal
           open={rerunOpen}
-          onClose={rerun.close}
+          onClose={() => setRerunRequested(false)}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            launcher.launch(
-              { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              { leave: rerun.leave },
-            );
+            launcher.launch({
+              input,
+              version: replayVersion(run.version_ref, agent.home_writable),
+            });
           }}
           isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}
@@ -356,55 +359,52 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      <DetailTabs value={tab} onChange={setTab}>
-        <div className="overflow-visible" data-run-detail-surface>
-          <DetailTabBar tabs={tabs} />
+      <div className="overflow-visible" data-run-detail-surface>
+        <DetailTabPanel value="overview">
+          <RunSnapshotInspector
+            run={enrichedRun}
+            turns={turnRows}
+            logs={allLogs}
+            structuredOutput={finalOutput}
+            memoryChangeCount={runMemoryCount}
+            logsLoading={logsQuery.isLoading}
+            memoryLoading={memoryLoading}
+            modelFallback={modelFallback}
+            errorReason={errorReason}
+            onOpenJournal={(filter) => openTab("#journal", filter)}
+            onOpenResults={() => openTab("#results")}
+          />
+        </DetailTabPanel>
 
-          <DetailTabPanel value="overview">
-            <RunSnapshotInspector
-              run={enrichedRun}
-              turns={turnRows}
-              logs={allLogs}
-              structuredOutput={finalOutput}
-              memoryChangeCount={runMemoryCount}
-              logsLoading={logsQuery.isLoading}
-              memoryLoading={memoryLoading}
-              modelFallback={modelFallback}
-              onOpenJournal={(filter) => openTab("#journal", filter)}
-              onOpenResults={() => openTab("#results")}
-            />
-          </DetailTabPanel>
+        <DetailTabPanel value="journal">
+          <RunExecutionView
+            run={enrichedRun}
+            logs={allLogs}
+            logsLoading={logsQuery.isLoading}
+            initialFilter={journalFilter}
+            headerActions={
+              run.status === "success" && hasDurableResults ? (
+                <Button variant="outline" size="sm" onClick={() => setTab("results")}>
+                  {t("run.viewResults")}
+                  <ArrowRight className="size-3.5" />
+                </Button>
+              ) : undefined
+            }
+          />
+        </DetailTabPanel>
 
-          <DetailTabPanel value="journal" flush>
-            <RunExecutionView
-              run={enrichedRun}
-              logs={allLogs}
-              logsLoading={logsQuery.isLoading}
-              initialFilter={journalFilter}
-              headerActions={
-                run.status === "success" && hasDurableResults ? (
-                  <Button variant="outline" size="sm" onClick={() => setTab("results")}>
-                    {t("run.viewResults")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                ) : undefined
-              }
-            />
-          </DetailTabPanel>
-
-          <DetailTabPanel value="results" flush>
-            <RunResultsView
-              run={enrichedRun}
-              packageId={packageId}
-              output={finalOutput}
-              hasRunMemory={hasRunMemory}
-              isRunning={isRunning}
-              outputLoading={logsQuery.isLoading}
-              memoryLoading={memoryLoading}
-            />
-          </DetailTabPanel>
-        </div>
-      </DetailTabs>
-    </div>
+        <DetailTabPanel value="results" framed>
+          <RunResultsView
+            run={enrichedRun}
+            packageId={packageId}
+            output={finalOutput}
+            hasRunMemory={hasRunMemory}
+            isRunning={isRunning}
+            outputLoading={logsQuery.isLoading}
+            memoryLoading={memoryLoading}
+          />
+        </DetailTabPanel>
+      </div>
+    </DetailTabs>
   );
 }

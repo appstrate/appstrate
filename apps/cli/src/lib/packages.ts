@@ -32,7 +32,7 @@ export type PackageFiles = Record<string, Uint8Array>;
 
 /**
  * Tooling residue by name, on top of every dot-named entry. `node_modules` is
- * NOT one: an MCP server bundle ships `server/node_modules` as package content.
+ * NOT one: a local integration ships `server/node_modules` as package content.
  */
 const IGNORED_NAMES: ReadonlySet<string> = new Set(["__pycache__"]);
 

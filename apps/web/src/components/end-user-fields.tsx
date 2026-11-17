@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { RowsEditor } from "./rows-editor";
 import type { MetadataEntry } from "../lib/end-user-metadata";
@@ -25,7 +25,7 @@ export function EndUserFields({
 
   return (
     <>
-      <FormItem id="eu-name" label={t("spaces.endUserName")}>
+      <FormItem id="eu-name" label={t("spaces.nameLabel")}>
         <Input
           type="text"
           value={values.name}
@@ -34,7 +34,7 @@ export function EndUserFields({
           autoFocus
         />
       </FormItem>
-      <FormItem id="eu-email" label={t("spaces.endUserEmail")}>
+      <FormItem id="eu-email" label={t("login.email")}>
         <Input
           type="email"
           value={values.email}

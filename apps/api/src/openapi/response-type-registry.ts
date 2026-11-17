@@ -134,7 +134,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   // shared-type was free to mark `generation` and `input` optional while the
   // spec required them, which is exactly the drift this step exists to catch.
   {
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config",
+    path: "/api/spaces/{id}/packages/{scope}/{name}/run-config",
     method: "get",
     status: "200",
     sharedTypeName: "ResolvedRunConfig",
@@ -214,6 +214,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     specSchemaName: "OrgMember",
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
+  },
+  {
+    specSchemaName: "OrgMemberSpace",
+    sharedTypeName: "OrganizationMemberSpace",
+    description: "OrgMemberSpace ↔ OrganizationMemberSpace (OrgMember.spaces entry)",
   },
   { specSchemaName: "OrgSettings", sharedTypeName: "OrgSettings", description: "OrgSettings" },
   // --- Module wire shapes (faithful shared-type twins; already aligned) ---

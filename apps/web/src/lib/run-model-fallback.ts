@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The marker a run leaves in its journal when the model chosen for it no longer
- * loaded and the organization default served instead
- * (`recordModelFallback`, `apps/api/src/services/run-context-builder.ts`).
- * The overview reads it off the logs the run page already holds: no extra call.
- */
+// The journal marker left when the chosen model no longer loaded and the org default
+// served instead (`recordModelFallback`, `apps/api/src/services/run-context-builder.ts`).
 
 const MODEL_FALLBACK_EVENT = "model_fallback";
 

@@ -2,8 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  pinnedVersionState,
   sheetChatEnforce,
-  sheetOffers,
   sheetSpaceMode,
   sheetSpaceRows,
 } from "../catalogue-sheet.ts";
@@ -15,8 +15,7 @@ function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacem
     here: null,
     activeIn: [],
     inactiveIn: [],
-    offeredIn: [],
-    offeredBy: {},
+    sharedBy: {},
     homeSpaceId: null,
     unplaced: false,
     ...overrides,
@@ -38,12 +37,12 @@ describe("sheetSpaceRows", () => {
     expect(rows).toHaveLength(spaces.length);
   });
 
-  it("reads each space's state, its home and who offered it", () => {
+  it("reads each space's state, its home and who shared it", () => {
     const rows = sheetSpaceRows(
       placement({
         activeIn: ["spc_a"],
-        offeredIn: ["spc_b"],
-        offeredBy: { spc_b: "Bob Martin" },
+        inactiveIn: ["spc_b"],
+        sharedBy: { spc_b: "Bob Martin" },
         homeSpaceId: "spc_a",
       }),
       spaces,
@@ -55,16 +54,18 @@ describe("sheetSpaceRows", () => {
         name: "Default",
         state: "active",
         home: true,
-        offeredBy: null,
+        shared: false,
+        sharedBy: null,
         mayToggle: true,
         refusal: null,
       },
       {
         id: "spc_b",
         name: "Bac à sable",
-        state: "offered",
+        state: "inactive",
         home: false,
-        offeredBy: "Bob Martin",
+        shared: true,
+        sharedBy: "Bob Martin",
         mayToggle: true,
         refusal: null,
       },
@@ -110,13 +111,6 @@ describe("sheetSpaceMode", () => {
   });
 });
 
-describe("sheetOffers", () => {
-  it("keeps the offers alone", () => {
-    const p = placement({ activeIn: ["spc_a"], offeredIn: ["spc_b"] });
-    expect(sheetOffers(sheetSpaceRows(p, spaces, ALLOW)).map((row) => row.id)).toEqual(["spc_b"]);
-  });
-});
-
 // The chat-enforce control lives in the sheet's Espaces table.
 describe("sheetChatEnforce", () => {
   const facts = { enforced: false, published: true, mayConfigure: true };
@@ -154,13 +148,33 @@ describe("sheetChatEnforce", () => {
   });
 
   it("draws no switch where there is no placement to configure", () => {
-    expect(sheetChatEnforce("skill", { state: "offered" }, facts)).toBeNull();
     expect(sheetChatEnforce("skill", { state: null }, facts)).toBeNull();
   });
 
   it("draws no switch for any other type", () => {
-    for (const type of ["agent", "integration", "mcp-server"] as const) {
+    for (const type of ["agent", "integration"] as const) {
       expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
     }
+  });
+});
+
+describe("pinnedVersionState", () => {
+  const read = { pinned: "1.0.0", missing: false, latestPublished: "2.0.0" };
+
+  it("has nothing to say about a sheet no version was pinned on", () => {
+    expect(pinnedVersionState({ ...read, pinned: undefined })).toBeNull();
+  });
+
+  it("names a version the server no longer has", () => {
+    expect(pinnedVersionState({ ...read, missing: true })).toBe("missing");
+  });
+
+  it("warns when the spaces run a newer version than the one read", () => {
+    expect(pinnedVersionState(read)).toBe("behind");
+  });
+
+  it("is current on the latest version, and while the latest is still unknown", () => {
+    expect(pinnedVersionState({ ...read, pinned: "2.0.0" })).toBe("current");
+    expect(pinnedVersionState({ ...read, latestPublished: undefined })).toBe("current");
   });
 });

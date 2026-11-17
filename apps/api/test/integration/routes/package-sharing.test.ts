@@ -24,7 +24,7 @@
 
 import { asRecord } from "@appstrate/core/safe-json";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import {
   auditEvents,
   notifications,
@@ -32,18 +32,16 @@ import {
   organizations,
   packageDistTags,
   packages,
-  packageShares,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { revokePackageShare, sharePackage } from "../../../src/services/package-shares.ts";
+import { sharePackage } from "../../../src/services/package-shares.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { grepFiles } from "../../helpers/source-grep.ts";
-import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -54,7 +52,9 @@ import {
   seedApiKey,
   seedSpacePackage,
   seedPackage,
+  seedPackageShare,
   seedPackageVersion,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpaceRole,
@@ -67,7 +67,6 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { runs } from "@appstrate/db/schema";
 import { seedSchedule } from "../../helpers/seed.ts";
@@ -180,7 +179,7 @@ const revokeShare = (headers: Headers, packageId: string, target: string) =>
 
 /**
  * Take up an offer — which is ACTIVATING it, through the one activation door
- * (`POST /api/spaces/{spaceId}/packages`). There is no accept route: in the
+ * (`POST /api/spaces/{id}/packages`). There is no accept route: in the
  * caller's own personal space ownership stands in for the activation grant, so
  * a guest reaches it with the `operator` preset alone.
  */
@@ -253,6 +252,13 @@ async function activeIn(spaceId: string, packageId: string): Promise<boolean> {
   return rows[0]?.enabled === true;
 }
 
+/** The `space_packages` rows placing `packageId` anywhere but `homeSpaceId`. */
+const placementsOutside = (packageId: string, homeSpaceId: string) =>
+  db
+    .select()
+    .from(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), ne(spacePackages.spaceId, homeSpaceId)));
+
 /** The placement this library row carries for `spaceId`, if any. */
 const placementIn = (
   row: { placements: LibraryPlacement[] } | undefined,
@@ -324,7 +330,7 @@ beforeEach(async () => {
 describe("authority — `<type>:share` in the home space", () => {
   it("lets the home's builder share", async () => {
     const res = await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(201);
     const body = (await res.json()) as { object: string; target: { kind: string; name: string } };
     expect(body.object).toBe("package_share");
     expect(body.target.kind).toBe("user");
@@ -332,7 +338,7 @@ describe("authority — `<type>:share` in the home space", () => {
 
   it("refuses the home's viewer with 403", async () => {
     await expectProblem(await shareWithUser(viewer.headers(homeId), AGENT, recipient.userId), 403);
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 
   it("refuses a caller who cannot reach the package with 404, not 403", async () => {
@@ -377,7 +383,7 @@ describe("authority — `<type>:share` in the home space", () => {
       await shareWithSpace(author.headers(homeId), AGENT, "app_legacy"),
       "target.spaceId",
     );
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 
   it("refuses a malformed `spc_` revoke target with 400, not a 404", async () => {
@@ -421,7 +427,31 @@ describe("authority — `<type>:share` in the home space", () => {
         409,
         { code: "package_has_no_version" },
       );
-      await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+      expect(await placementsOutside(AGENT, homeId)).toEqual([]);
+    });
+
+    it("provisions no personal space for a recipient when it refuses", async () => {
+      // A member who has never listed their spaces has none. The share would
+      // create it, but a refused share must leave nothing behind: the version
+      // is asked BEFORE the space is provisioned, through the same predicate
+      // `placePackage` re-asks inside its transaction.
+      const stranger = await createTestUser();
+      await addOrgMember(ctx.orgId, stranger.id, "member");
+      await unpublish(AGENT);
+
+      await expectProblem(await shareWithUser(author.headers(homeId), AGENT, stranger.id), 409, {
+        code: "package_has_no_version",
+      });
+      await assertDbMissing(spaces, eq(spaces.ownerUserId, stranger.id));
+
+      // Positive control: the same share, once something is published, does
+      // provision the space it places the package in.
+      await publish(AGENT, "0.2.0");
+      expect((await shareWithUser(author.headers(homeId), AGENT, stranger.id)).status).toBe(201);
+      const created = await getDbRow(spaces, eq(spaces.ownerUserId, stranger.id));
+      expect((await placementsOutside(AGENT, homeId)).map((row) => row.spaceId)).toEqual([
+        created.id,
+      ]);
     });
 
     it("takes the same offer once a version exists", async () => {
@@ -433,7 +463,7 @@ describe("authority — `<type>:share` in the home space", () => {
       );
       await publish(AGENT, "0.2.0");
       expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(
-        200,
+        201,
       );
     });
 
@@ -448,10 +478,10 @@ describe("authority — `<type>:share` in the home space", () => {
       await expectProblem(await shareWithSpace(owner(), AGENT, teamId), 409, {
         code: "package_has_no_version",
       });
-      await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+      expect(await placementsOutside(AGENT, homeId)).toEqual([]);
 
       await publish(AGENT, "0.2.0");
-      expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+      expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     });
 
     it("answers the AUTHORITY refusal first: a viewer gets 403, not 409", async () => {
@@ -470,10 +500,9 @@ describe("authority — `<type>:share` in the home space", () => {
   });
 
   it("is idempotent — the same pair twice is one row and one audit event", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
-    const rows = await db.select().from(packageShares).where(eq(packageShares.packageId, AGENT));
-    expect(rows).toHaveLength(1);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
+    expect(await placementsOutside(AGENT, homeId)).toHaveLength(1);
     const events = await db
       .select()
       .from(auditEvents)
@@ -495,6 +524,23 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(entry!.target.spaceId).toBeUndefined();
     expect(JSON.stringify(entry)).not.toContain(recipient.personalSpaceId);
     expect(entry!.shared_by?.user_id).toBe(author.userId);
+  });
+
+  it("reports whether each target has switched the package on", async () => {
+    await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
+    const enabledOf = async () =>
+      (
+        (await (await listShares(author.headers(homeId), AGENT)).json()) as {
+          data: { enabled: boolean }[];
+        }
+      ).data.map((entry) => entry.enabled);
+
+    // Offered, not taken up: no `space_packages` row yet.
+    expect(await enabledOf()).toEqual([false]);
+
+    const activated = await takeUpOffer(recipient.headers(), AGENT);
+    expect(activated.status, await activated.clone().text()).toBe(201);
+    expect(await enabledOf()).toEqual([true]);
   });
 
   it("stops naming a sharer who has LEFT the organization", async () => {
@@ -542,38 +588,13 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(unshared.after).toEqual({
       recipientUserId: recipient.userId,
       targetKind: "user",
-      // The offer was never TAKEN UP, so there was no placement row to remove.
-      // Its twin below revokes an ACTIVATED offer and reads `true` — the pair
-      // is what makes the field mean anything: asserted on one branch alone, a
-      // field hard-wired to `false` reads exactly the same.
-      placementRemoved: false,
-    });
-  });
-
-  it("reports `placementRemoved: true` when the revoke DID take a placement with it", async () => {
-    // The audit entry's job is to say WHICH of the two things the act removed —
-    // the offer alone, or the offer and the installation behind it. That is the
-    // only record of the second deletion: `spacePackages` is gone by the time
-    // anybody reads the trail, so a reader asking "did this revoke stop a
-    // package that was running here" has nothing else to ask.
-    await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
-    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
-
-    expect((await revokeShare(author.headers(homeId), AGENT, recipient.userId)).status).toBe(204);
-    const unshared = await getDbRow(auditEvents, eq(auditEvents.action, "package.unshared"));
-    // The WHOLE payload, not just the flag: the person is still what was
-    // audited, and their personal space still must not appear because the offer
-    // happened to be taken up.
-    expect(unshared.after).toEqual({
-      recipientUserId: recipient.userId,
-      targetKind: "user",
-      placementRemoved: true,
+      authority: "home",
     });
     expect(JSON.stringify(unshared.after)).not.toContain(recipient.personalSpaceId);
   });
 
   it("records the SPACE in the audit trail of a `space` share", async () => {
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     const shared = await getDbRow(auditEvents, eq(auditEvents.action, "package.shared"));
     expect(shared.after).toEqual({ spaceId: teamId, targetKind: "space" });
   });
@@ -599,7 +620,7 @@ describe("authority — `<type>:share` in the home space", () => {
 
 describe("offered is not activated", () => {
   beforeEach(async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
   });
 
   /**
@@ -615,14 +636,15 @@ describe("offered is not activated", () => {
     });
 
   it("shows the offer as an INACTIVE placement in the recipient's library", async () => {
-    // An untaken offer is not a section of its own: it is the package's own
-    // row, with a placement in the recipient's space saying `via: "shared"` and
-    // `state: "none"` — one row, one switch, one act.
+    // A placement the recipient has not switched on is not a section of its
+    // own: it is the package's own row, with a placement in the recipient's
+    // space saying `via: "shared"` and `state: "inactive"` — one row, one
+    // switch, one act.
     const lib = await library(recipient.headers());
     const row = lib.packages.agent?.find((entry) => entry.id === AGENT);
     expect(row).toBeDefined();
     const placement = placementIn(row, recipient.personalSpaceId);
-    expect(placement).toMatchObject({ via: "shared", state: "none" });
+    expect(placement).toMatchObject({ via: "shared", state: "inactive" });
     expect(placement!.shared_by?.user_id).toBe(author.userId);
 
     const detail = await app.request(`/api/packages/agents/${AGENT}`, {
@@ -634,8 +656,8 @@ describe("offered is not activated", () => {
   it("puts the offer in the recipient's LIBRARY, not on their agents index", async () => {
     // An offer is something the recipient HOLDS, not something they can launch,
     // so it belongs to the page that answers "what is placed here, and in what
-    // state" — the library, where `state: "none"` renders as a pending offer
-    // next to the button that takes it up. The index answers the other
+    // state" — the library, where `state: "inactive"` renders next to the
+    // switch that turns it on. The index answers the other
     // question and must not show a row whose launch control would 404.
     // `teamMember` reads neither the home nor the offer and must not learn the
     // id exists on either page.
@@ -645,7 +667,7 @@ describe("offered is not activated", () => {
         (await library(recipient.headers())).packages.agent?.find((row) => row.id === AGENT),
         recipient.personalSpaceId,
       ),
-    ).toMatchObject({ via: "shared", state: "none" });
+    ).toMatchObject({ via: "shared", state: "inactive" });
 
     expect(await agentIndexIds(teamMember.headers(teamId))).not.toContain(AGENT);
     expect((await library(teamMember.headers(teamId))).packages.agent ?? []).toHaveLength(0);
@@ -806,13 +828,13 @@ describe("offered is not activated", () => {
   });
 
   it("changes the placement's STATE when the offer is taken up, and keeps one row", async () => {
-    // The offer and the activation are the same row throughout: only `state`
-    // moves, `none` → `active`. Two rows with two buttons for one act is the
+    // The placement and the activation are the same row throughout: only
+    // `state` moves, `inactive` → `active`. Two rows with two buttons for one act is the
     // duplicate this pin exists to catch.
     const before = await library(recipient.headers());
     const beforeRows = before.packages.agent?.filter((entry) => entry.id === AGENT) ?? [];
     expect(beforeRows).toHaveLength(1);
-    expect(placementIn(beforeRows[0], recipient.personalSpaceId)?.state).toBe("none");
+    expect(placementIn(beforeRows[0], recipient.personalSpaceId)?.state).toBe("inactive");
 
     expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     const after = await library(recipient.headers());
@@ -823,7 +845,7 @@ describe("offered is not activated", () => {
   });
 
   it("has no `shared` section in either library shape", async () => {
-    // An offer is a placement with `state: "none"`, on the package's own row.
+    // A placement switched off is `state: "inactive"`, on the package's own row.
     // Neither shape carries a section of its own for it — ABSENT, not empty.
     const res = await app.request("/api/library", { headers: owner() });
     expect(res.status, await res.clone().text()).toBe(200);
@@ -841,11 +863,11 @@ describe("offered is not activated", () => {
     ]);
   });
 
-  it("revokes the offer AND the installation behind it", async () => {
+  it("revokes the placement, settings and all", async () => {
     expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     const revoked = await revokeShare(author.headers(homeId), AGENT, recipient.userId);
     expect(revoked.status, await revoked.clone().text()).toBe(204);
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
     await assertDbMissing(
       spacePackages,
       and(
@@ -855,65 +877,6 @@ describe("offered is not activated", () => {
     );
     // …and the recipient is back to not being able to run it.
     await expectProblem(await runAsRecipient(recipient), 404);
-  });
-
-  it("reverts BOTH deletes together when the revoke fails before committing", async () => {
-    // "In one transaction" is the claim, and the test above cannot check it:
-    // it reads the final state of a pass that succeeded, which is identical
-    // whether the two deletes shared a transaction or ran as two statements
-    // back to back. The same goes for every other revoke here — they assert the
-    // 204 and nothing more.
-    //
-    // What the transaction buys is the FAILURE case, and it is the expensive
-    // one: if the offer commits and the placement delete then fails, the space
-    // keeps an installed, runnable package that no offer backs any more — the
-    // orphan `services/package-activation.ts` reads as nothing at all, and that
-    // no route afterwards can clean up. So the seam throws INSIDE, after both
-    // deletes, and the assertion is that NEITHER landed.
-    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
-
-    await expect(
-      revokePackageShare(
-        {
-          packageId: AGENT,
-          spaceId: recipient.personalSpaceId,
-          orgId: ctx.orgId,
-          authorizeHome: () => true,
-        },
-        {
-          onBeforeCommit: async () => {
-            throw new Error("injected mid-transaction failure");
-          },
-        },
-      ),
-    ).rejects.toThrow("injected mid-transaction failure");
-
-    // BOTH, deliberately: either one on its own passes while the other has
-    // committed, which is exactly the split this test exists to refuse.
-    const offers = await db
-      .select()
-      .from(packageShares)
-      .where(
-        and(
-          eq(packageShares.packageId, AGENT),
-          eq(packageShares.spaceId, recipient.personalSpaceId),
-        ),
-      );
-    expect(offers, "the offer must survive a rolled-back revoke").toHaveLength(1);
-    const placements = await db
-      .select()
-      .from(spacePackages)
-      .where(
-        and(
-          eq(spacePackages.packageId, AGENT),
-          eq(spacePackages.spaceId, recipient.personalSpaceId),
-        ),
-      );
-    expect(placements, "the placement must survive a rolled-back revoke").toHaveLength(1);
-    // And the recipient can still run it — the state is intact, not merely the rows.
-    const launched = await runAsRecipient(recipient);
-    expect(launched.status, await launched.clone().text()).toBe(201);
-    await waitForRunPipelineSettled();
   });
 
   it("answers 404 on a revoke of a target that holds no share", async () => {
@@ -959,13 +922,13 @@ describe("offered is not activated", () => {
     // the package to `recipient`, so a bare package-id predicate would pass on
     // that row and prove nothing.
     await assertDbMissing(
-      packageShares,
-      and(eq(packageShares.packageId, AGENT), eq(packageShares.spaceId, teamId))!,
+      spacePackages,
+      and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, teamId))!,
     );
 
-    // Once a principal who DOES hold `share` has offered it, the same key
-    // installs it.
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    // Once a principal who DOES hold `share` has placed it there switched off,
+    // the same key switches it on.
+    await seedPackageShare(teamId, AGENT, ctx.user.id);
     const placed = await install();
     expect(placed.status, await placed.clone().text()).toBe(201);
   });
@@ -995,7 +958,7 @@ describe("offered is not activated", () => {
     // pass a row check just as well. The `operator` preset a guest holds in
     // their own space carries none of `agents:configure` / `<type>:write`; what
     // authorizes the activation is that the space is theirs.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
 
     const before = await library(guest.headers());
     // ONE row, one placement, offered and not yet switched on. Nothing else is
@@ -1004,7 +967,7 @@ describe("offered is not activated", () => {
     expect(before.packages.agent?.map((entry) => entry.id)).toEqual([AGENT]);
     expect(placementIn(before.packages.agent?.[0], guest.personalSpaceId)).toMatchObject({
       via: "shared",
-      state: "none",
+      state: "inactive",
     });
     expect(await activeIn(guest.personalSpaceId, AGENT)).toBe(false);
 
@@ -1026,7 +989,7 @@ describe("offered is not activated", () => {
     // Asking for a state the system is already in is not an error. Before the
     // two doors this was `409 already_installed`, which made "make sure it is
     // on" a call a client had to special-case.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
     const again = await takeUpOffer(guest.headers(), AGENT);
     expect(again.status, await again.clone().text()).toBe(200);
@@ -1039,7 +1002,7 @@ describe("offered is not activated", () => {
     // `configure` alone: it spends the organization's LLM budget, and ownership
     // does not waive it. Deactivating KEEPS the row and its settings, which is
     // what makes putting a package down cheap.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const off = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1110,7 +1073,7 @@ describe("a share whose version disappeared after the offer", () => {
   // The placement then names nothing to run, and the launch must say so rather
   // than fall back to the author's draft.
   it("activates, then answers 404 `no_published_version` at launch — never the draft", async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
     const activated = await takeUpOffer(recipient.headers(), AGENT);
     expect(activated.status, await activated.clone().text()).toBe(201);
 
@@ -1131,7 +1094,7 @@ describe("a share whose version disappeared after the offer", () => {
 });
 
 describe("activating is the fourth door closed: it needs `share`, or a placement", () => {
-  /** `POST /api/spaces/{spaceId}/packages` — the one activation door. */
+  /** `POST /api/spaces/{id}/packages` — the one activation door. */
   const activate = (headers: Headers, spaceId: string, packageId = AGENT) =>
     app.request(`/api/spaces/${spaceId}/packages`, {
       method: "POST",
@@ -1140,15 +1103,13 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     });
 
   const sharesOf = async (packageId: string) =>
-    (await db.select().from(packageShares).where(eq(packageShares.packageId, packageId))).map(
-      (row) => row.spaceId,
-    );
+    (await placementsOutside(packageId, homeId)).map((row) => row.spaceId);
 
   it("creates the share alongside the placement for a caller who holds `share`", async () => {
     // The organization owner holds `share` in every space, so activating a
     // package that is placed NOWHERE in Team is the act of offering it there
     // and taking it up at once — one call, both rows, one transaction.
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
     const res = await activate(owner(teamId), teamId);
     expect(res.status, await res.clone().text()).toBe(201);
 
@@ -1186,7 +1147,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // Reachable now — but reading is not sharing, and the home's `share` is
     // what this builder does not hold.
     expect((await shareWithUser(author.headers(homeId), AGENT, teamBuilder.userId)).status).toBe(
-      200,
+      201,
     );
     await expectProblem(await activate(teamBuilder.headers(teamId), teamId, AGENT), 403);
     await assertDbMissing(
@@ -1224,7 +1185,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // `operator` preset in their own space, which carries no
     // `integrations:uninstall` and no `<type>:write`. Ownership is the
     // authorization, both ways.
-    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const removed = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1245,7 +1206,6 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
   it("keeps the per-space settings across a deactivate / reactivate round trip", async () => {
     // The reason the row is kept rather than deleted: a space that switches a
     // package off for a week must not lose the model it chose for it.
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
     expect((await activate(owner(teamId), teamId)).status).toBe(201);
     await db
       .update(spacePackages)
@@ -1283,8 +1243,10 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
       orgRole: "member",
       space: { id: teamId, preset: "builder" },
     });
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
-    expect((await activate(teamBuilder.headers(teamId), teamId)).status).toBe(201);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
+    // The owner may activate there, so the placement landed switched on and
+    // the team's builder finds nothing left to do.
+    expect((await activate(teamBuilder.headers(teamId), teamId)).status).toBe(200);
     const readable = await app.request(`/api/packages/agents/${AGENT}`, {
       headers: teamMember.headers(teamId),
     });
@@ -1296,8 +1258,8 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
       await app.request(`/api/packages/agents/${AGENT}`, { headers: teamMember.headers(teamId) }),
       404,
     );
-    // The revoke is the ONE path that deletes a placement row: without the
-    // offer there is nothing placing the package here at all.
+    // The revoke deletes the placement row: nothing places the package here
+    // any more.
     await assertDbMissing(
       spacePackages,
       and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, teamId))!,
@@ -1311,7 +1273,7 @@ describe("sharing with a team space", () => {
   // offer the package to a closed space they are not in (404, tested below).
   // The organization owner reaches every team space, so they are the sharer here.
   it("shows the package to that space's members and to nobody else", async () => {
-    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
 
     const lib = await library(teamMember.headers(teamId));
     expect(
@@ -1320,8 +1282,9 @@ describe("sharing with a team space", () => {
         teamId,
       ),
     ).toMatchObject({
+      // The owner may activate in the team space, so the placement lands ON.
       via: "shared",
-      state: "none",
+      state: "active",
     });
     const detail = await app.request(`/api/packages/agents/${AGENT}`, {
       headers: teamMember.headers(teamId),
@@ -1337,8 +1300,8 @@ describe("sharing with a team space", () => {
     await expectProblem(await shareWithSpace(author.headers(homeId), AGENT, teamId), 404);
   });
 
-  it("reaches the space's per-type index page once the space takes it up", async () => {
-    await shareWithSpace(owner(), AGENT, teamId);
+  it("reaches the space's per-type index page at once when the sharer may activate there", async () => {
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
     const indexIds = async () => {
       const res = await app.request("/api/packages/agents", {
         headers: teamMember.headers(teamId),
@@ -1347,10 +1310,10 @@ describe("sharing with a team space", () => {
       return ((await res.json()) as { data: { id: string }[] }).data.map((entry) => entry.id);
     };
 
-    // The offer alone places the agent in the team space; it does not switch it
-    // on there, and the index is the set the space can launch.
+    // The index is the set the space can launch. The owner holds the
+    // activation grant in the team space, so the placement lands switched on.
     expect(await indexIds()).not.toContain(AGENT);
-    expect((await takeUpOffer(owner(), AGENT, teamId)).status).toBe(201);
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(201);
     expect(await indexIds()).toContain(AGENT);
   });
 });
@@ -1363,7 +1326,7 @@ describe("nothing leaks about a personal space", () => {
       await shareWithSpace(author.headers(homeId), AGENT, recipient.personalSpaceId),
       404,
     );
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    expect(await placementsOutside(AGENT, homeId)).toEqual([]);
   });
 
   it("lets an org admin READ a package homed in a personal space without reaching that space", async () => {
@@ -1388,7 +1351,7 @@ describe("nothing leaks about a personal space", () => {
     expect(
       (await shareWithUser(author.headers(author.personalSpaceId), PRIVATE_AGENT, admin.userId))
         .status,
-    ).toBe(200);
+    ).toBe(201);
 
     const res = await app.request(`/api/packages/agents/${PRIVATE_AGENT}`, {
       headers: admin.headers(),
@@ -1423,7 +1386,7 @@ describe("sharing a package does not displace its HOME", () => {
   beforeEach(async () => {
     // `SKILL` is homed in `homeId` and installed nowhere, so the share is the
     // only OTHER placement — the exact shape the regression needed.
-    expect((await shareWithUser(owner(), SKILL, recipient.userId)).status).toBe(200);
+    expect((await shareWithUser(owner(), SKILL, recipient.userId)).status).toBe(201);
   });
 
   it("keeps its version list readable from the home", async () => {
@@ -1644,7 +1607,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
-    expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(200);
+    expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(201);
     expect((await takeUpOffer(viewer.headers(), AGENT)).status).toBe(201);
     const launched = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",
@@ -1672,94 +1635,129 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
  * engine, so under `TEST_TIER=0` there is no interleaving to observe and this
  * block skips with that as its reason (`test/helpers/tier.ts`).
  */
-describeRequiresPostgres("a revoke racing an install (needs a real PostgreSQL)", () => {
-  beforeEach(async () => {
-    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
-    // NOT installed: the fixture must leave `space_packages` empty for this
-    // pair, so the revoke's second DELETE takes no row lock of its own and the
-    // install's INSERT has nothing to conflict on. Otherwise the install would
-    // block on the unique index rather than on the share row, and the test
-    // would pass with or without the lock under test.
-    await assertDbMissing(
-      spacePackages,
-      and(
-        eq(spacePackages.packageId, AGENT),
-        eq(spacePackages.spaceId, recipient.personalSpaceId),
-      )!,
-    );
-  });
-
-  it("makes the install wait, then refuse — never an installation with no offer", async () => {
-    let commitRevoke!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      commitRevoke = resolve;
+describe("who switches a placement on (R3)", () => {
+  /** `POST /api/spaces/{id}/packages` — the one activation door. */
+  const activate = (headers: Headers, spaceId: string) =>
+    app.request(`/api/spaces/${spaceId}/packages`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId: AGENT }),
     });
 
-    // T1 — the revoke, HELD OPEN between its deletes and its commit through the
-    // service's own `onBeforeCommit` seam. It used to be `revokePackageShare`'s
-    // body copied out here, which paused the transaction at the cost of the
-    // thing being tested: a copy takes the two row locks whatever the service
-    // does, so the lock ORDER this test pins was the copy's, and the service
-    // could stop taking `package_shares` first without a single test moving.
-    const revoking = revokePackageShare(
-      {
-        packageId: AGENT,
-        spaceId: recipient.personalSpaceId,
-        orgId: ctx.orgId,
-        authorizeHome: () => true,
-      },
-      { onBeforeCommit: () => gate },
-    );
-    await Bun.sleep(150);
+  /** The row placing `AGENT` in `spaceId`, or undefined. */
+  const rowIn = async (spaceId: string) =>
+    (
+      await db
+        .select()
+        .from(spacePackages)
+        .where(and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, spaceId)))
+    )[0];
 
-    // T2 — the install. `SELECT … FOR UPDATE` on the share row blocks on T1's
-    // uncommitted delete; without the lock this read sees the row (T1 has not
-    // committed) and the install commits a `space_packages` row nothing backs.
-    const activating = activatePackage(
-      { orgId: ctx.orgId, spaceId: recipient.personalSpaceId },
-      AGENT,
-    );
-    let settled = false;
-    void activating.then(
-      () => (settled = true),
-      () => (settled = true),
-    );
-    await Bun.sleep(300);
-    // Still waiting on the lock — the observable half of the fix.
-    expect(settled, "the install must block until the revoke commits").toBe(false);
+  /** Holds `<type>:share` in the home, and `preset` in the team space. */
+  const sharerWith = async (preset: "builder" | "operator") => {
+    const sharer = await principal({ orgRole: "member", space: { id: homeId, preset: "builder" } });
+    await seedSpaceMember({ spaceId: teamId, userId: sharer.userId, presetRole: preset });
+    return sharer;
+  };
 
-    commitRevoke();
-    await revoking;
+  it("leaves the activation door UPDATE-only for a caller without share authority", async () => {
+    // A builder of Team holds the activation grant there and no `share` in the
+    // home. No row in Team: the door would have to CREATE one, which only
+    // `placePackage` does, behind `share` — so 404, and nothing written.
+    const teamBuilder = await principal({
+      orgRole: "member",
+      space: { id: teamId, preset: "builder" },
+    });
+    await expectProblem(await activate(teamBuilder.headers(teamId), teamId), 404);
+    expect(await rowIn(teamId)).toBeUndefined();
 
-    // The lock released onto a deleted row: READ COMMITTED re-evaluates and the
-    // offer is gone, so the install refuses.
-    await expect(activating).rejects.toThrow();
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
-    await assertDbMissing(
-      spacePackages,
-      and(
-        eq(spacePackages.packageId, AGENT),
-        eq(spacePackages.spaceId, recipient.personalSpaceId),
-      )!,
-    );
+    // A row switched off — placed by a sharer who may not activate in Team —
+    // is the space's to switch on: the same call now updates it.
+    const sharer = await sharerWith("operator");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await rowIn(teamId)).toMatchObject({ enabled: false, sharedBy: sharer.userId });
+    const switched = await activate(teamBuilder.headers(teamId), teamId);
+    expect(switched.status, await switched.clone().text()).toBe(201);
+    expect((await rowIn(teamId))?.enabled).toBe(true);
+
+    // Withdrawn: back to no row, and the call cannot recreate it.
+    expect((await revokeShare(sharer.headers(homeId), AGENT, teamId)).status).toBe(204);
+    await expectProblem(await activate(teamBuilder.headers(teamId), teamId), 404);
+    expect(await rowIn(teamId)).toBeUndefined();
+  });
+
+  it("never creates a row outside the home without `placeAs`, even past the route", async () => {
+    // The service itself, so a caller that skipped the route's read still meets the rule.
+    await expect(
+      activatePackage({ orgId: ctx.orgId, spaceId: teamId }, AGENT),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(await rowIn(teamId)).toBeUndefined();
+  });
+
+  it("lands ON for a sharer who may activate in the target", async () => {
+    const sharer = await sharerWith("builder");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await rowIn(teamId)).toMatchObject({ enabled: true, sharedBy: sharer.userId });
+  });
+
+  it("lands OFF for a sharer who may not activate in the target", async () => {
+    const sharer = await sharerWith("operator");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await rowIn(teamId)).toMatchObject({ enabled: false, sharedBy: sharer.userId });
+  });
+
+  /** The `package.activated` events of `AGENT`. */
+  const activations = () =>
+    db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "package.activated"), eq(auditEvents.resourceId, AGENT))!);
+
+  it("audits a share landing ON as an activation, as the activation door does", async () => {
+    const sharer = await sharerWith("builder");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await activations()).toEqual([{ after: { spaceId: teamId } }]);
+    // A repeat creates nothing and records nothing.
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await activations()).toHaveLength(1);
+  });
+
+  it("records no activation for a share landing OFF", async () => {
+    const sharer = await sharerWith("operator");
+    expect((await shareWithSpace(sharer.headers(homeId), AGENT, teamId)).status).toBe(201);
+    expect(await activations()).toEqual([]);
+  });
+
+  it("lands ON in the sharer's own personal space", async () => {
+    expect((await shareWithUser(author.headers(homeId), AGENT, author.userId)).status).toBe(201);
+    expect(await rowIn(author.personalSpaceId)).toMatchObject({
+      enabled: true,
+      sharedBy: author.userId,
+    });
+  });
+
+  it("lands OFF in another member's personal space", async () => {
+    expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(201);
+    expect(await rowIn(recipient.personalSpaceId)).toMatchObject({
+      enabled: false,
+      sharedBy: author.userId,
+    });
   });
 });
 
-describe("the offer is judged against the LOCKED home", () => {
+describe("the placement is judged against the LOCKED home", () => {
   beforeEach(async () => {
     await truncateAll();
   });
 
   it("refuses when the caller holds no share authority in the home the insert is judged against", async () => {
-    // A CONTRACT test, not a race reproduction: it pins that `sharePackage`
-    // consults the predicate against the home it LOCKED, and refuses on a
-    // negative answer, before writing anything.
+    // A CONTRACT test, not a race reproduction: it pins that the placement
+    // door consults the predicate against the home it LOCKED, and refuses on
+    // a negative answer, before writing anything.
     //
     // Why it has to: the route authorizes with `assertPackageShareAccess`
     // against the home as it stood when the request arrived, and
-    // `PUT …/{scope}/{name}/home` can commit a new home in between. Judging the
-    // insert against the read row let an offer land carrying an authority
-    // nobody held in the home the package actually has.
+    // `PUT …/{scope}/{name}/home` can commit a new home in between.
     const ctx = await createTestContext({ orgSlug: "locked-home" });
     const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
     const AGENT_ID = "@locked-home/agent";
@@ -1770,39 +1768,33 @@ describe("the offer is judged against the LOCKED home", () => {
       draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
       draftContent: "prompt",
     });
-
-    await expect(
+    await seedPublishedVersion(AGENT_ID, "0.1.0");
+    const share = (authorizeHome: () => boolean) =>
       sharePackage({
         packageId: AGENT_ID,
         spaceId: other.id,
         orgId: ctx.orgId,
-        sharedBy: ctx.user.id,
-        authorizeHome: () => false,
-      }),
-    ).rejects.toThrow();
+        placeAs: { sharedBy: ctx.user.id, authorizeHome },
+        enabled: false,
+      });
+
+    await expect(share(() => false)).rejects.toThrow();
 
     // Nothing written: the refusal happens inside the transaction, before the
-    // insert, so a rejected offer leaves no row behind.
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT_ID));
+    // insert, so a rejected placement leaves no row behind.
+    await assertDbMissing(spacePackages, eq(spacePackages.spaceId, other.id));
 
     // The positive control — the same call with the authority granted writes it.
-    const { created } = await sharePackage({
-      packageId: AGENT_ID,
-      spaceId: other.id,
-      orgId: ctx.orgId,
-      sharedBy: ctx.user.id,
-      authorizeHome: () => true,
-    });
+    const { created } = await share(() => true);
     expect(created).toBe(true);
   });
 
   // The tenant boundary is the service's own, not the route's and not the
-  // `authorizeHome` callback's: neither `package_shares` nor the pair it is
-  // keyed on carries an `org_id`, so an offer naming another organization's
-  // space has to be refused here. `authorizeHome` is forced TRUE so the test
-  // cannot pass for the wrong reason — it is the org predicate under test,
-  // not the authority above it.
-  it("refuses an offer naming a space of another organization, even with the authority granted", async () => {
+  // `authorizeHome` callback's: `space_packages` carries no `org_id`, so a
+  // placement naming another organization's space has to be refused here.
+  // `authorizeHome` is forced TRUE so the test cannot pass for the wrong
+  // reason — it is the org predicate under test, not the authority above it.
+  it("refuses a placement naming a space of another organization, even with the authority granted", async () => {
     const ctx = await createTestContext({ orgSlug: "share-org-a" });
     const stranger = await createTestContext({ orgSlug: "share-org-b" });
     const AGENT_ID = "@share-org-a/agent";
@@ -1813,73 +1805,18 @@ describe("the offer is judged against the LOCKED home", () => {
       draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
       draftContent: "prompt",
     });
+    await seedPublishedVersion(AGENT_ID, "0.1.0");
 
     await expect(
       sharePackage({
         packageId: AGENT_ID,
         spaceId: stranger.defaultSpaceId,
         orgId: ctx.orgId,
-        sharedBy: ctx.user.id,
-        authorizeHome: () => true,
+        placeAs: { sharedBy: ctx.user.id, authorizeHome: () => true },
+        enabled: false,
       }),
     ).rejects.toThrow();
 
-    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT_ID));
-  });
-});
-
-describe("the table has no other reader", () => {
-  it("names `package_shares` only in the share service, the library and the readers of the placement rule", async () => {
-    // The two-table split is only worth anything while this stays true: a
-    // reader on an execution path would run a package nobody consented to.
-    // Roots are resolved against the helper's own file: the root suite does
-    // not own `process.cwd()`, and a relative root reads as "no file names it"
-    // from anywhere else — which is the shape of compliance.
-    const files = grepFiles("packageShares", ["apps/api/src", "packages/db/src"], {
-      expectMatch: ["apps/api/src/services/package-shares.ts"],
-    });
-    // The share ROUTES reach the table through `services/package-shares.ts`,
-    // and every rehome writes its offers through
-    // `services/package-placement.ts`; these are every file that names it. The
-    // ones that read it DIRECTLY read it as PLACEMENT, never as permission to
-    // run: `package-placement.ts` states the rule in SQL,
-    // `package-activation.ts` conjoins that rule so a row without a placement
-    // behind it counts for nothing, `package-library.ts` projects the share
-    // half per space (a listing), and the rest join it to ask the placement
-    // question of one package. `integration-service.ts` joins it for that
-    // reason and no other: the Integrations page's own two routes narrow on
-    // `placementReadFilter`, which needs this LEFT JOIN or an offered
-    // integration drops out of its own page. The three integration surfaces
-    // beside it ask the same rule rather than a bare `space_packages` row —
-    // `connection-reach.ts` conjoins `placementReadFilter` (the `block_user_connections` rule),
-    // `integration-pins-service.ts` and `me-connections.ts` conjoin
-    // `activeHereSql`, both of which need this join, so a row nothing places
-    // counts for nothing there either.
-    // `package-catalog.ts` is the newest entry and the one that had to be
-    // added rather than avoided: `resolveDeclaredSkills` judges an agent's
-    // declared closure from the DECLARING package's home, so it needs the
-    // same LEFT JOIN. Resolving it on `org_id` alone was the one reader that
-    // answered for a package no route will show — and since an unresolved
-    // skill is a blocking readiness error, that answer is what let a private
-    // skill's bytes into a run's bundle (§6.9). `chat-enforced-skills.ts` joins
-    // it for `activePackagesFilter` (`activeHereSql`) alone: a skill the space
-    // enforces in its chat only when it is placed and active here.
-    expect(files).toEqual([
-      "apps/api/src/lib/package-access.ts",
-      "apps/api/src/services/chat-enforced-skills.ts",
-      "apps/api/src/services/connection-reach.ts",
-      "apps/api/src/services/integration-connections.ts",
-      "apps/api/src/services/integration-pins-service.ts",
-      "apps/api/src/services/integration-service.ts",
-      "apps/api/src/services/me-connections.ts",
-      "apps/api/src/services/package-activation.ts",
-      "apps/api/src/services/package-catalog.ts",
-      "apps/api/src/services/package-items/crud.ts",
-      "apps/api/src/services/package-library.ts",
-      "apps/api/src/services/package-placement.ts",
-      "apps/api/src/services/package-shares.ts",
-      "apps/api/src/services/space-packages.ts",
-      "packages/db/src/schema/packages.ts",
-    ]);
+    await assertDbMissing(spacePackages, eq(spacePackages.spaceId, stranger.defaultSpaceId));
   });
 });

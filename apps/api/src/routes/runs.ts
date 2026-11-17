@@ -13,7 +13,6 @@ import {
   listGlobalRuns,
   listRunLogs,
   RUN_LOG_LEVELS,
-  GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
 import { resolveAgentRunVersion, versionRefOf } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -23,22 +22,11 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import {
-  invalidRequest,
-  notFound,
-  conflict,
-  internalError,
-  type ResolutionFieldError,
-} from "../lib/errors.ts";
-import {
-  runVisibilityFilter,
-  ownRunsFilter,
-  assertRunVisible,
-  requireRunsRead,
-} from "../lib/run-visibility.ts";
-import { listResponse } from "../lib/list-response.ts";
-import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { notFound, conflict, internalError, type ResolutionFieldError } from "../lib/errors.ts";
+import { runVisibilityFilter, assertRunVisible, requireRunsRead } from "../lib/run-visibility.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
+import { listResponse, parseListLimit } from "@appstrate/core/list-query";
+import { setCursorLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import {
   assertConnectionOverridesAllowed,
   connectionOverridesSchema,
@@ -53,6 +41,7 @@ import { toLaunchOverrides } from "../services/integration-connection-resolver.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
+import { markAllRunsRead, markRunRead } from "../services/state/run-reads.ts";
 import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
@@ -75,7 +64,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { parseRunListFilters } from "../lib/run-list-filters.ts";
+import { parseGlobalRunListQuery, parseRunListFilters } from "../lib/run-list-filters.ts";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -141,7 +130,7 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (cascade layer 3, the launch override).
+     * Per-integration connection picks for this run (the launch override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
@@ -185,40 +174,6 @@ export function runTraceparent(c: Context<AppEnv>): string | undefined {
   return telemetryTrustsIncomingTrace() ? c.get("traceparent") : currentTraceparent();
 }
 
-/** The closed set `GET /api/runs?user=` accepts. One member, for now. */
-const USER_FILTERS = ["me"] as const;
-
-/**
- * Read a query parameter whose accepted values are a closed set.
- *
- * **An unrecognised value is a 400, never `undefined`.** Every user of this
- * helper is a *filter*, and silently dropping a filter widens the result set:
- * `?kind=inlinee` would return every kind, `?status=succes` every status, to a
- * caller reading the response as narrowed. That is the failure mode worth
- * spending a 400 on — the caller gets a list that looks right and is wrong.
- *
- * **Present-but-empty (`?kind=`) reads as absent.** An empty value is how a
- * form, a URL builder, or a client that always emits its keys spells "no
- * filter"; rejecting it would break those callers without protecting anyone.
- * That is not the silent-widening case: nothing was requested, so nothing is
- * dropped.
- *
- * The `allowed` tuple is also what the OpenAPI operation declares as the
- * parameter's `enum`, so the spec and the runtime check state the same set.
- */
-function closedSetQuery<T extends string>(
-  c: Context<AppEnv>,
-  name: string,
-  allowed: readonly T[],
-): T | undefined {
-  const raw = c.req.query(name);
-  if (raw === undefined || raw === "") return undefined;
-  if (!(allowed as readonly string[]).includes(raw)) {
-    throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
-  }
-  return raw as T;
-}
-
 // --- Router ---
 
 /** A launch body as the idempotency cache keeps it: no connect link on `warnings`. */
@@ -245,6 +200,14 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
     throw notFound("Run not found");
   }
   return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
+}
+
+/** The global run list over `grants`: `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. */
+export async function respondRunList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  const filters = parseGlobalRunListQuery(c);
+  const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
+  setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
+  return c.json(result);
 }
 
 export function createRunsRouter() {
@@ -473,21 +436,21 @@ export function createRunsRouter() {
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const limit = parseListLimit(c, { defaultLimit: 20 });
     const { status, search } = parseRunListFilters({
       status: c.req.query("status"),
       q: c.req.query("q"),
     });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
-      offset,
+      startingAfter: c.req.query("startingAfter") || undefined,
       actor: getActor(c),
       status,
       search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
     return c.json(result);
   });
 
@@ -508,64 +471,25 @@ export function createRunsRouter() {
     },
   );
 
-  // GET /api/runs — global paginated run list across the space.
-  // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?q, ?start_date/?end_date, and
-  // ?chat_session_id for the conversation context sidebar.
-  //
-  // `user`, `kind` and `status` are all closed sets: an unrecognised value is
-  // a 400, not a dropped filter.
-  // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
-  // size returns the first page, which narrows rather than widens, and callers
-  // paging by `Link` headers never construct them by hand.
-  router.get("/runs", requireRunsRead, async (c) => {
-    const actor = getActor(c);
-    const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
-    // `user` is a closed set of one: `me`. The param means the same thing for
-    // every caller, so a typo is a 400 rather than something that survives in
-    // an end-user integration until it runs under an org session.
-    const userFilter = closedSetQuery(c, "user", USER_FILTERS);
-    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
-    // would have widened the list; without it the caller reads whatever their
-    // permission allows. An end-user needs no branch of its own: `read-all` is
-    // not grantable to them, so `runVisibilityFilter` already yields exactly
-    // their own runs — and either way the list composes with every filter
-    // below, instead of a self-view that quietly drops them.
-    const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
+  // GET /api/runs — global run list across the space, keyset-paged on `startingAfter` (a run
+  // id) + `limit`.
+  router.get("/runs", requireRunsRead, (c) =>
+    respondRunList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
-    const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    const { status, search } = parseRunListFilters({
-      status: c.req.query("status"),
-      q: c.req.query("q"),
-    });
-    const startDateRaw = c.req.query("start_date");
-    const endDateRaw = c.req.query("end_date");
-    const chatSessionId = c.req.query("chat_session_id") || undefined;
-    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
-    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
-      throw invalidRequest("start_date is not a valid ISO date", "start_date");
-    }
-    if (endDate && Number.isNaN(endDate.getTime())) {
-      throw invalidRequest("end_date is not a valid ISO date", "end_date");
-    }
+  // PUT /api/runs/read-all — the caller reads every run of the space. Bulk
+  // mutation: returns a documented operation result ({ updated_count }).
+  router.put("/runs/read-all", requireRunsRead, async (c) => {
+    const updated = await markAllRunsRead(getSpaceScope(c), getActor(c));
+    return c.json({ updated_count: updated });
+  });
 
-    const result = await listGlobalRuns(scope, {
-      limit,
-      offset,
-      kind,
-      status,
-      startDate,
-      endDate,
-      chatSessionId,
-      search,
-      actor,
-      visibility,
-      canReadAgentInput: !agentReadIsSummary(c),
-    });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
-    return c.json(result);
+  // PUT /api/runs/:id/read — the caller reads one run (the run-detail page
+  // calls it on open). Idempotent 204: a missing run or one the caller holds no
+  // read state for is a no-op, not a 404.
+  router.put("/runs/:id/read", requireRunsRead, async (c) => {
+    await markRunRead(getSpaceScope(c), c.req.param("id")!, getActor(c));
+    return c.body(null, 204);
   });
 
   // GET /api/runs/:id — get a single run
@@ -664,11 +588,8 @@ export function createRunsRouter() {
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
 
-    // Log pages are limit-only (`since` is the cursor), so the helper's
-    // `offset` is dropped. The old inline form also carried a `.default(1000)`
-    // ahead of `.catch(1000)`: dead, because `.catch` already absorbs the
-    // `undefined` an absent `?limit=` produces.
-    const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
+    // Log pages are limit-only (`since` is the cursor), so the helper's `offset` is unused.
+    const limit = parseListLimit(c, { defaultLimit: 1000, maxLimit: 1000 });
 
     // Visibility was just verified via `assertRunVisible` above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so

@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Modal } from "./modal";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@appstrate/ui/components/alert-dialog";
 import { Button } from "@appstrate/ui/components/button";
+import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { createConfirmer } from "../lib/confirm-settle";
+import { useDialogFocus } from "../hooks/use-dialog-focus";
 
 interface ConfirmModalProps {
   /** Extra content under the description, for a decision that needs more than a sentence. */
@@ -37,6 +47,7 @@ export function ConfirmModal({
   keepOpenOnRefusal,
   children,
 }: ConfirmModalProps) {
+  const focus = useDialogFocus();
   const { t } = useTranslation("common");
   const mutationCache = useQueryClient().getMutationCache();
   const [runConfirm] = useState(() => createConfirmer(mutationCache));
@@ -53,29 +64,27 @@ export function ConfirmModal({
     });
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      preventClose={isPending}
-      title={title}
-      actions={
-        <>
+    <AlertDialog open={open} onOpenChange={(v) => !v && !isPending && onClose()}>
+      <AlertDialogContent {...focus} onEscapeKeyDown={keepOpenWhileRenaming}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        {children}
+        <AlertDialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             variant={variant}
             onClick={confirm}
             pending={isPending}
             disabled={confirmDisabled}
           >
             {confirmLabel ?? t("btn.confirm")}
-          </Button>
-        </>
-      }
-    >
-      <p className="text-muted-foreground text-sm">{description}</p>
-      {children}
-    </Modal>
+          </PendingButton>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

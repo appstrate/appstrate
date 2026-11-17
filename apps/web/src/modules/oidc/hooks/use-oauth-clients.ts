@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * React Query hooks for the OIDC module's OAuth client admin API.
- * Mirrors the backend `/api/oauth/clients*` routes shipped in Stage 4.
- */
+/** React Query hooks for the OIDC module's OAuth client admin API (`/api/oauth/clients*`). */
 
 import { useMutation, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components, type paths } from "@/api/client";
@@ -32,20 +29,14 @@ export function useOAuthClients(level?: "org" | "space") {
       select: (e) => {
         if (!level) return e.data;
         const byLevel = e.data.filter((c) => c.level === level);
-        // Space-level clients are org-wide on the wire — scope them to
-        // the currently-selected space so the tab never shows clients
-        // that belong to a sibling space in the same org.
+        // Space-level clients are org-wide on the wire: keep the current space's only.
         return level === "space" ? byLevel.filter((c) => c.referencedSpaceId === spaceId) : byLevel;
       },
     },
   );
 }
 
-/**
- * Canonical scope vocabulary served by `GET /api/oauth/scopes`. Used by
- * the create-client modal checkbox group so the frontend never hardcodes
- * scope strings.
- */
+/** Scope vocabulary from `GET /api/oauth/scopes`, so the frontend never hardcodes scope strings. */
 export function useOAuthScopes() {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
@@ -80,8 +71,6 @@ export function useCreateOAuthClient(level?: "org" | "space") {
       signupRole?: AssignableOrgRole;
       signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
     }) => {
-      // The level discriminator and pinned reference come from the current
-      // org/space context — call sites only provide the client fields.
       const body: CreateOAuthClientBody = isOrg
         ? { level: "org", referencedOrgId: orgId!, ...data }
         : { level: "space", referencedSpaceId: spaceId!, ...data };

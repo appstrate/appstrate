@@ -7,7 +7,7 @@ import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "./db.ts";
 import type { TestContext } from "./auth.ts";
-import { seedPackage, seedPackageShare, seedPublishedVersion } from "./seed.ts";
+import { seedPackage, seedPublishedVersion } from "./seed.ts";
 
 /**
  * Seed a local integration, publish its manifest as `latest` (the version the proxy reads), and
@@ -26,8 +26,9 @@ export async function seedProxyIntegration(
     draftManifest: manifest,
   });
   await seedPublishedVersion(manifest.name, manifest.version);
-  await seedPackageShare(ctx.defaultSpaceId, manifest.name);
-  await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: manifest.name });
+  await db
+    .insert(spacePackages)
+    .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: manifest.name });
 }
 
 /** Add a connection owned by the context user on `authKey`, labelled `accountId`; returns its id. */
@@ -53,4 +54,40 @@ export async function seedProxyConnection(
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
+}
+
+/** An oauth2 auth with a consent screen, its access token sent as a Bearer to `authorizedUris`. */
+export function bearerOauthAuth(authorizedUris: string[]): Record<string, unknown> {
+  return {
+    type: "oauth2",
+    authorization_endpoint: "https://idp.example.com/authorize",
+    token_endpoint: "https://idp.example.com/token",
+    authorized_uris: authorizedUris,
+    delivery: {
+      http: {
+        in: "header",
+        name: "Authorization",
+        prefix: "Bearer ",
+        value: "{$credential.access_token}",
+      },
+    },
+  };
+}
+
+/** An api_key auth whose `token` field is sent as a Bearer to `authorizedUris`. */
+export function bearerApiKeyAuth(authorizedUris: string[]) {
+  return {
+    type: "api_key" as const,
+    authorizedUris,
+    credentialFields: ["token"],
+    requiredCredentialFields: ["token"],
+    delivery: {
+      http: {
+        in: "header" as const,
+        name: "Authorization",
+        prefix: "Bearer ",
+        value: "{$credential.token}",
+      },
+    },
+  };
 }

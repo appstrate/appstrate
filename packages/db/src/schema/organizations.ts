@@ -28,11 +28,14 @@ export const organizations = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").unique().notNull(),
-    // Small presentation asset for the shell and organization switcher:
-    // `emoji:<grapheme>`, or `image:<version>` for a WebP image kept in object
-    // storage (`services/org-logo.ts`, which also gives its wire form). Null
-    // renders the organization's initial.
-    logo: text("logo"),
+    // Visual identity, shared with agents and spaces: `lucide:<name>`,
+    // `emoji:<one emoji>`, or an uploaded image inline as `data:image/webp;base64,<…>`
+    // or `data:image/png;base64,<…>` (at most 16 KiB — `organizations_icon_length`).
+    // Null renders the organization's initial.
+    icon: text("icon"),
+    // A palette key (`blue`, `emerald`, …), validated by the application so a new
+    // colour needs no migration. Null derives the colour from the id.
+    color: text("color"),
     orgSettings: jsonb("org_settings").notNull().default({}),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
@@ -82,6 +85,10 @@ export const organizations = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_organizations_created_by").on(table.createdBy),
+    // Backstop behind the application's icon validation: the largest image icon
+    // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
+    // twin one byte shorter.
+    check("organizations_icon_length", sql`octet_length(icon) <= 16384`),
   ],
 );
 

@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
-import { useModalParam } from "@/hooks/use-modal-param";
 import { FormModal } from "@/components/form-modal";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
+import { useAppForm } from "@/hooks/use-app-form";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
@@ -18,54 +17,39 @@ import type { WebhookInfo } from "../hooks/use-webhooks";
 
 type Level = WebhookInfo["level"];
 
-/** The URL parameter that opens the modal. The secret step has no URL of its own. */
-export const NEW_WEBHOOK_PARAM = "newWebhook";
-
 interface Props {
   /** Levels the caller may create at — never empty (the page gates the button). */
   levels: readonly Level[];
+  onClose: () => void;
 }
 
 type FormData = {
   url: string;
 };
 
-export function WebhookCreateModal({ levels }: Props) {
+export function WebhookCreateModal({ levels, onClose }: Props) {
   const { t } = useTranslation(["settings"]);
-  const param = useModalParam(NEW_WEBHOOK_PARAM);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
 
-  // Step 2: the secret, shown once. It has no address: the creation's one goes away as it appears.
+  // Step 2: the secret, shown once.
   if (createdSecret) {
     return (
       <SecretRevealModal
-        onClose={() => setCreatedSecret(null)}
+        onClose={onClose}
         title={t("settings:webhooks.created")}
         secret={createdSecret}
         warning={t("settings:webhooks.secretWarning")}
       />
     );
   }
-  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
-  // outside, Escape, Back) abandons what was typed.
-  if (param.value === null) return null;
-  return (
-    <WebhookCreateForm
-      levels={levels}
-      onClose={param.close}
-      onCreated={(secret) => {
-        setCreatedSecret(secret);
-        param.close();
-      }}
-    />
-  );
+  return <WebhookCreateForm levels={levels} onClose={onClose} onCreated={setCreatedSecret} />;
 }
 
 function WebhookCreateForm({
   levels,
   onClose,
   onCreated,
-}: Props & { onClose: () => void; onCreated: (secret: string) => void }) {
+}: Props & { onCreated: (secret: string) => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
@@ -83,8 +67,9 @@ function WebhookCreateForm({
     register,
     handleSubmit,
     setError,
+    showError,
     formState: { errors },
-  } = useForm<FormData>({
+  } = useAppForm<FormData>({
     defaultValues: { url: "" },
   });
 
@@ -122,8 +107,8 @@ function WebhookCreateForm({
       <FormItem
         id="webhook-url"
         label={t("settings:webhooks.urlLabel")}
-        hint={errors.url ? undefined : t("settings:webhooks.urlHint")}
-        error={errors.url ? t("settings:webhooks.urlHint") : undefined}
+        hint={showError("url") ? undefined : t("settings:webhooks.urlHint")}
+        error={showError("url") ? t("settings:webhooks.urlHint") : undefined}
       >
         <Input
           type="url"
@@ -138,15 +123,15 @@ function WebhookCreateForm({
 
       {/* Never create an organization-wide webhook without saying so. */}
       {levels.length === 1 && level === "org" && (
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.levelLabel")}</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("settings:webhooks.levelLabel")}</Label>
           <p className="text-sm">{levelLabels.org}</p>
         </div>
       )}
 
       {levels.length > 1 && (
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.levelLabel")}</Label>
+        <div className="flex flex-col gap-2">
+          <Label className="mb-0">{t("settings:webhooks.levelLabel")}</Label>
           <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
             {levels.map((l) => (
               <div key={l} className="flex items-center gap-2">

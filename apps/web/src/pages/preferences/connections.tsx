@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -8,8 +9,9 @@ import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
-import { useConnectionShare } from "../../hooks/use-integrations";
+import { useConnectionShareAllSpaces, useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
@@ -33,12 +35,14 @@ function ConnectionRow({
   conn,
   onRename,
   onShare,
+  onShareAllSpacesChange,
   onUnshare,
   sharing,
 }: {
   conn: MeConnectionEntry;
   onRename: (label: string) => Promise<unknown>;
   onShare: (spaceId: string) => void;
+  onShareAllSpacesChange: (enabled: boolean) => void;
   onUnshare: (spaceId: string) => void;
   sharing: boolean;
 }) {
@@ -51,6 +55,7 @@ function ConnectionRow({
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
   const canShare = conn.allowed_actions.includes("share");
+  const canShareAllSpaces = conn.allowed_actions.includes("share_all_spaces");
   // Shareable spaces and the ones it is already shared into, one entry each.
   const shareTargets = [
     ...conn.shareable_spaces,
@@ -62,14 +67,14 @@ function ConnectionRow({
   // Identity (account email / profile name)
   if (conn.identity) {
     rows.push({
-      label: t("connections.account"),
+      label: t("preferences.sectionAccount"),
       value: conn.identity,
     });
   }
 
   // Org, and the one space a space-scoped row lives in
   rows.push({
-    label: t("connections.orgLabel"),
+    label: t("source.org"),
     value: (
       <>
         <span>{conn.org.name}</span>
@@ -87,7 +92,7 @@ function ConnectionRow({
     value:
       conn.shared_spaces.length > 0
         ? conn.shared_spaces.map((s) => s.name).join(", ")
-        : t("connections.sharedSpacesNone"),
+        : t("viewAs.noSpace"),
   });
 
   // Reuse hint — the agents of its spaces that declare the integration, killing the
@@ -111,7 +116,7 @@ function ConnectionRow({
   // Scopes
   if (conn.scopes_granted.length > 0) {
     rows.push({
-      label: t("connections.scopesLabel"),
+      label: t("roles.permissionsLabel"),
       value: conn.scopes_granted.join(", "),
     });
   }
@@ -162,6 +167,9 @@ function ConnectionRow({
             lockHint={null}
             pending={sharing}
             onShare={onShare}
+            canShareAllSpaces={canShareAllSpaces}
+            shareAllSpaces={conn.share_all_spaces ?? false}
+            onShareAllSpacesChange={onShareAllSpacesChange}
             onUnshare={onUnshare}
           />
           {lockHint && <span className="text-muted-foreground text-[0.65rem]">{lockHint}</span>}
@@ -169,7 +177,7 @@ function ConnectionRow({
       </div>
 
       <TableRowActions
-        menuLabel={t("integration.connection.moreActions", { name: conn.label })}
+        menuLabel={t("providers.moreActions", { name: conn.label })}
         renaming={renaming}
         actions={[
           {
@@ -223,7 +231,7 @@ function SourceGroupCard({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   return (
-    <div className="border-border bg-card rounded-lg border p-5">
+    <Card className="p-5">
       <div className="flex cursor-pointer items-center justify-between" onClick={onToggle}>
         <div className="flex items-center gap-3">
           <PackageIcon type="integration" icon={group.logo} size="sm" />
@@ -256,7 +264,28 @@ function SourceGroupCard({
           ))}
         </div>
       )}
-    </div>
+    </Card>
+  );
+}
+
+/** `SourceGroupCard`, folded, while the connections load. */
+function SourceGroupCardSkeleton() {
+  return (
+    <Card className="p-5">
+      <div className="flex items-center gap-3">
+        <Skeleton className="size-7 shrink-0 rounded-md" />
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <SkeletonLine className="w-32 text-[0.95rem] font-semibold" />
+            <span className="bg-muted w-20 animate-pulse rounded-full border border-transparent px-2 py-px text-[0.65rem] text-transparent uppercase">
+              {"\u00a0"}
+            </span>
+          </div>
+          {/* An inline span on the card's own line, as the count is. */}
+          <SkeletonLine className="w-28" inline="text-sm" />
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -271,6 +300,7 @@ export function PreferencesConnectionsPage() {
 
   const renameIntegration = useRenameMeConnection();
   const shareIntegration = useConnectionShare("share");
+  const allSpacesSharing = useConnectionShareAllSpaces();
   const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -295,7 +325,7 @@ export function PreferencesConnectionsPage() {
           {t("connections.myConnections")}
         </div>
         {isLoading ? (
-          <Skeleton className="h-3 w-20" />
+          <SkeletonLine className="w-20 text-xs" />
         ) : (
           <span className="text-muted-foreground text-xs">
             {t("connections.totalConnections", { count: totalConnections })}
@@ -303,7 +333,7 @@ export function PreferencesConnectionsPage() {
         )}
       </div>
 
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
+      <Card className="mb-4 p-5">
         <p className="text-muted-foreground text-sm">
           {t("connections.descriptionUnified")}
           {canBrowseIntegrations && (
@@ -318,12 +348,13 @@ export function PreferencesConnectionsPage() {
             </>
           )}
         </p>
-      </div>
+      </Card>
 
       <ItemList
         items={groups ?? []}
         itemKey={(group) => `${group.kind}:${group.source_id}`}
         isLoading={isLoading}
+        placeholder={<SourceGroupCardSkeleton />}
         failure={error}
         empty={
           <EmptyState
@@ -348,7 +379,11 @@ export function PreferencesConnectionsPage() {
               renderRow={(conn) => (
                 <ConnectionRow
                   conn={conn}
-                  sharing={shareIntegration.isPending || unshareIntegration.isPending}
+                  sharing={
+                    shareIntegration.isPending ||
+                    unshareIntegration.isPending ||
+                    allSpacesSharing.isPending
+                  }
                   onRename={(label) =>
                     renameIntegration.mutateAsync({
                       connectionId: conn.connection_id,
@@ -357,6 +392,9 @@ export function PreferencesConnectionsPage() {
                   }
                   onShare={(spaceId) =>
                     shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
+                  }
+                  onShareAllSpacesChange={(enabled) =>
+                    allSpacesSharing.mutate({ connectionId: conn.connection_id, enabled })
                   }
                   onUnshare={(spaceId) =>
                     unshareIntegration.mutate({ connectionId: conn.connection_id, spaceId })

@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
@@ -26,7 +27,7 @@ export function ForgotPasswordPage() {
       await requestPasswordReset(email.trim());
       setState("sent");
     } catch {
-      setError(t("forgotPassword.error"));
+      setError(t("magicLink.error"));
       setState("form");
     }
   };
@@ -36,10 +37,10 @@ export function ForgotPasswordPage() {
       <AuthLayout>
         <AuthMessage
           icon={Mail}
-          title={t("forgotPassword.sentTitle")}
+          title={t("magicLink.sentTitle")}
           description={t("forgotPassword.sentDescription")}
           backTo="/login"
-          backLabel={t("forgotPassword.backToLogin")}
+          backLabel={t("magicLink.backToLogin")}
         />
       </AuthLayout>
     );
@@ -71,7 +72,7 @@ export function ForgotPasswordPage() {
           </Button>
         </form>
         <AuthLink to="/login" className="text-center">
-          {t("forgotPassword.backToLogin")}
+          {t("magicLink.backToLogin")}
         </AuthLink>
       </div>
     </AuthLayout>

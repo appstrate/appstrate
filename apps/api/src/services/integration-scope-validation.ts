@@ -43,13 +43,12 @@ import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
-  findUnexposedDefaultTools,
+  getLocalServerTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
 } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { McpServerManifest } from "@appstrate/core/mcp-server";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
 import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
@@ -57,13 +56,13 @@ import { and, eq, isNull, or } from "drizzle-orm";
 
 import {
   getOrgWideIntegrationManifest,
-  fetchMcpServerManifest,
-  readMcpServerTools,
-  resolveMcpServerForSpawn,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
-import { authKeyServingNoSelectedTool, getLocalServerRef } from "./integration-manifest-helpers.ts";
+import {
+  authKeyOnUnauthenticatedIntegration,
+  authKeyServingNoSelectedTool,
+} from "./integration-manifest-helpers.ts";
 
 /** One version of one package carried inside an incoming bundle. */
 export interface CarriedVersion {
@@ -181,8 +180,7 @@ interface ValidateAgentIntegrationSelectionsInput {
   /**
    * Manifests travelling WITH the agent — the packages of an incoming
    * `.afps-bundle`, keyed by package id, each carrying EVERY version the bundle
-   * holds for that id. Consulted before the DB, for integrations AND for the
-   * mcp-servers a local integration references.
+   * holds for that id. Consulted before the DB.
    *
    * Without it a self-contained bundle bypassed the gate entirely: its
    * integration is not in the registry yet, the DB lookup misses, and
@@ -222,7 +220,7 @@ interface ValidateAgentIntegrationSelectionsInput {
  * A NON-EMPTY selection is not the same thing as a callable one, which is why
  * this intersects the effective selection with the resolved catalog instead of
  * measuring its length. `default_tools: ["foo"]` where `foo` is listed in
- * `hidden_tools`, or absent from the resolved mcp-server, is a non-empty
+ * `hidden_tools`, or absent from the local server's `tools`, is a non-empty
  * selection that registers nothing — the boot gate's exact failure condition.
  *
  * `catalog` MUST be the same `resolveIntegrationToolCatalog` result the subset
@@ -355,10 +353,13 @@ export async function validateAgentIntegrationSelections(
   );
 
   // The declared-but-empty gate is precisely about the entries the subset
-  // filter above DROPS, so it needs the full declared list.
-  const inspected = requireCallableTools ? integrations : configuredEntries;
-  if (inspected.length === 0) return [];
+  // filter above DROPS, so it needs the full declared list. An `auth_key` alone
+  // is a configuration too (AFPS §4.4), judged on every path.
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
+  const inspected = requireCallableTools
+    ? integrations
+    : integrations.filter((e) => configuredIds.has(e.id) || e.auth_key !== undefined);
+  if (inspected.length === 0) return [];
 
   // Two ways to reach the pinned versions: a freeze point resolves them itself,
   // and a run kickoff hands over the memo it already seeded. Either way the
@@ -370,7 +371,6 @@ export async function validateAgentIntegrationSelections(
     : requireCallableTools
       ? await resolvePinnedIntegrationManifests(manifest, orgId, dependencyOverrides)
       : undefined;
-  const judgesPinnedVersions = pinnedManifests !== undefined;
 
   // Sequential DB lookups keep the implementation simple and the
   // typical agent declares ≤ 3 integrations; trade a little latency
@@ -416,42 +416,28 @@ export async function validateAgentIntegrationSelections(
       : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? catalogManifest;
 
-    // For local-source integrations the catalog comes from the referenced
-    // mcp-server's MCPB tools. Fetched BEFORE both checks: the emptiness gate
-    // needs it too, because "non-empty selection" and "callable selection" are
-    // different properties and only the second one is the boot contract.
-    let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-    const localRef = getLocalServerRef(judgedManifest);
-    if (localRef) {
-      // Same rule as the integration manifest above, one level deeper: at a
-      // freeze point read the mcp-server AT the version `source.server.version`
-      // resolves to — `resolveMcpServerForSpawn`, the resolver the spawn path
-      // itself calls (`integration-spawn-resolver.ts`). `fetchMcpServerManifest`
-      // reads `packages.draft_manifest`, which the runtime never does, so a tool
-      // present only in the mcp-server author's draft used to pass publish and
-      // then register nothing at boot.
-      const mcpServer =
-        (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
-        (judgesPinnedVersions
-          ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
-              r.ok ? r.manifest : null,
-            )
-          : await fetchMcpServerManifest(localRef.name));
-      if (mcpServer) mcpServerTools = readMcpServerTools(mcpServer);
+    if (authKeyOnUnauthenticatedIntegration(judgedManifest, entry.auth_key)) {
+      errors.push({
+        field: `integrations_configuration.${entry.id}.auth_key`,
+        code: "auth_key_on_unauthenticated_integration",
+        title: "Integration declares no auth method",
+        message: `integrations_configuration.${entry.id}.auth_key names auth '${entry.auth_key}', but ${entry.id} declares no auth method (AFPS §4.4). Remove auth_key.`,
+      });
     }
+    if (!requireCallableTools && !configuredIds.has(entry.id)) continue;
+
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
     // entries, so this is the set the sidecar will actually register.
     const catalog = resolveIntegrationToolCatalog({
       integration: judgedManifest,
-      ...(mcpServerTools ? { mcpServerTools } : {}),
     });
 
     // The integration told us its tool surface when it declares `tools_policy`,
-    // or when the referenced mcp-server resolved and enumerated tools. Absent
-    // both, the surface is discovered at runtime and must not be second-guessed.
+    // or when its local server enumerates `tools`. Absent both, the surface is
+    // discovered at runtime and must not be second-guessed.
     const surfaceIsKnown =
-      mcpServerTools !== undefined ||
+      getLocalServerTools(judgedManifest) !== undefined ||
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
@@ -487,7 +473,6 @@ export async function validateAgentIntegrationSelections(
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
       judgedManifest,
-      mcpServerTools,
     );
     for (const issue of issues) {
       errors.push({
@@ -506,37 +491,4 @@ export async function validateAgentIntegrationSelections(
     }
   }
   return errors;
-}
-
-/** {@link resolvePostImportManifest} for `source.server`; `null` when the bundle carries none. */
-async function resolvePostImportServer(
-  localRef: { name: string; version: string },
-  orgId: string,
-  extraManifests: ValidateAgentIntegrationSelectionsInput["extraManifests"],
-): Promise<McpServerManifest | null> {
-  const carried = extraManifests?.get(localRef.name);
-  if (!carried) return null;
-  const server = await resolvePostImportManifest(localRef.name, localRef.version, orgId, carried);
-  return server as unknown as McpServerManifest | null;
-}
-
-/**
- * {@link findUnexposedDefaultTools} for a `local` integration, against the `tools[]` of the
- * mcp-server a run spawns, once the bundle carrying `extraManifests` is imported when given.
- */
-export async function findUnexposedLocalDefaultTools(
-  manifest: Record<string, unknown>,
-  orgId: string,
-  extraManifests?: ValidateAgentIntegrationSelectionsInput["extraManifests"],
-): Promise<{ path: (string | number)[]; message: string }[]> {
-  if (manifest.type !== "integration" || !Array.isArray(manifest.default_tools)) return [];
-  const localRef = getLocalServerRef(manifest as unknown as IntegrationManifest);
-  if (!localRef) return [];
-  const server =
-    (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
-    (await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
-      r.ok ? r.manifest : null,
-    ));
-  const tools = server ? readMcpServerTools(server) : undefined;
-  return tools ? findUnexposedDefaultTools(manifest, tools) : [];
 }

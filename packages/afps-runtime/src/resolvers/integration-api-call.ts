@@ -166,6 +166,28 @@ export function readApiCallIntegrationMetas(
 }
 
 /**
+ * The api_call surfaces of `refs`, in order, each under its run-unique namespace: one per tool a
+ * resolver yields, named {@link apiCallToolName}.
+ */
+export function readApiCallSurfaces(
+  bundle: Bundle,
+  refs: readonly IntegrationRef[],
+): ApiCallIntegrationMeta[] {
+  const surfaces: ApiCallIntegrationMeta[] = [];
+  const usedNamespaces = new Set<string>();
+  for (const ref of refs) {
+    const metas = readApiCallIntegrationMetas(bundle, ref);
+    if (metas.length === 0) continue;
+    const namespace = allocateMcpToolNamespace(metas[0]!.namespace, usedNamespaces);
+    usedNamespaces.add(namespace);
+    for (const meta of metas) {
+      surfaces.push(meta.namespace === namespace ? meta : { ...meta, namespace });
+    }
+  }
+  return surfaces;
+}
+
+/**
  * The integration manifest `ref` resolves to in the bundle, unvalidated: its
  * `integration.json` (else `manifest.json`) file, else the package's parsed
  * manifest; `undefined` when the bundle does not carry the package.
@@ -239,11 +261,21 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
 /**
  * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
  *
- * Package-internal: exported only so `test/resolvers/integration-api-call.test.ts`
- * can pin the 56-character tool name cap.
+ * Also the key the CLI's api_call bridge pairs each resolved tool with its surface by.
  */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
+}
+
+/** The tool a resolver yields for one api_call surface. */
+function resolvedApiCallTool(meta: ApiCallIntegrationMeta, call: ApiCallFn): Tool {
+  return makeApiCallTool(meta, call, {
+    toolName: apiCallToolName(meta),
+    description:
+      `Make an authenticated request through the "${meta.name}" integration's ` +
+      "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
+      "and responseMode. The target must match the integration auth's authorized_uris.",
+  });
 }
 
 /**
@@ -391,34 +423,15 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
 
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
     const creds = await this.loadCreds();
-    const tools: Tool[] = [];
-    const usedNamespaces = new Set<string>();
-    for (const ref of refs) {
-      const metas = readApiCallIntegrationMetas(bundle, ref);
-      if (metas.length === 0) continue; // not an apiCall integration — skip
-      const namespace = allocateMcpToolNamespace(metas[0]!.namespace, usedNamespaces);
-      usedNamespaces.add(namespace);
-      const entry = creds.integrations[ref.name];
+    return readApiCallSurfaces(bundle, refs).map((meta) => {
+      const entry = creds.integrations[meta.name];
       if (!entry) {
         throw new Error(
-          `LocalIntegrationResolver: no credentials found for ${ref.name} in the local creds file`,
+          `LocalIntegrationResolver: no credentials found for ${meta.name} in the local creds file`,
         );
       }
-      for (const projectedMeta of metas) {
-        const meta =
-          projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        tools.push(
-          makeApiCallTool(meta, this.buildCall(meta, entry), {
-            toolName: apiCallToolName(meta),
-            description:
-              `Make an authenticated request through the "${meta.name}" integration's ` +
-              "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-              "and responseMode. The target must match the integration auth's authorized_uris.",
-          }),
-        );
-      }
-    }
-    return tools;
+      return resolvedApiCallTool(meta, this.buildCall(meta, entry));
+    });
   }
 
   private async loadCreds(): Promise<LocalIntegrationCredentialsFile> {
@@ -709,28 +722,9 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   }
 
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
-    const tools: Tool[] = [];
-    const usedNamespaces = new Set<string>();
-    for (const ref of refs) {
-      const metas = readApiCallIntegrationMetas(bundle, ref);
-      if (metas.length === 0) continue;
-      const namespace = allocateMcpToolNamespace(metas[0]!.namespace, usedNamespaces);
-      usedNamespaces.add(namespace);
-      for (const projectedMeta of metas) {
-        const meta =
-          projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        tools.push(
-          makeApiCallTool(meta, this.buildCall(meta), {
-            toolName: apiCallToolName(meta),
-            description:
-              `Make an authenticated request through the "${meta.name}" integration's ` +
-              "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-              "and responseMode. The target must match the integration auth's authorized_uris.",
-          }),
-        );
-      }
-    }
-    return tools;
+    return readApiCallSurfaces(bundle, refs).map((meta) =>
+      resolvedApiCallTool(meta, this.buildCall(meta)),
+    );
   }
 
   private buildCall(meta: ApiCallIntegrationMeta): ApiCallFn {
@@ -780,6 +774,10 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
           headers,
           signal: ctx.signal,
           body: isStreamingBody ? resolved.stream : resolved.bytes,
+          // The route relays an upstream 3xx whose `Location` is off `authorized_uris`
+          // unfollowed (#2154): following it here would send the platform request's headers
+          // (and a 307/308 body) to that host and diverge from the other api_call paths.
+          redirect: "manual",
         };
         if (isStreamingBody) init.duplex = "half";
         return this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, init);

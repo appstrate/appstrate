@@ -27,6 +27,7 @@ import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts
 
 // --- Model schemas (routes/models.ts) ---
 import {
+  applyModelChoiceSchema,
   createModelSchema,
   seedModelsSchema,
   updateModelSchema,
@@ -36,6 +37,7 @@ import {
 
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
+import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -130,9 +132,12 @@ import {
   oauthClientCreateSchema,
   oauthClientUpdateSchema,
   updateConnectionSchema,
+  connectionShareAllSpacesSchema,
   connectSessionSchema,
   connectSubmitSchema,
   setDefaultClientSchema,
+  discoverIntegrationSchema,
+  syncFromServerSchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -184,6 +189,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Update model",
   },
   {
+    method: "POST",
+    path: "/api/models/apply",
+    jsonSchema: toJsonSchema(applyModelChoiceSchema),
+    description: "Apply a model-provider choice",
+  },
+  {
     method: "PUT",
     path: "/api/models/default",
     jsonSchema: toJsonSchema(modelsSetDefaultSchema),
@@ -226,14 +237,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "PATCH",
-    path: "/api/runs/{runId}/sink/extend",
+    path: "/api/runs/{id}/sink/extend",
     jsonSchema: toJsonSchema(ExtendSinkBodySchema),
     description: "Extend a remote run's event-sink lease",
   },
 
   {
     method: "POST",
-    path: "/api/runs/{runId}/events",
+    path: "/api/runs/{id}/events",
     jsonSchema: toJsonSchema(CloudEventEnvelopeSchema),
     description: "Ingest a run CloudEvent",
   },
@@ -444,13 +455,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Space Packages ────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/spaces/{spaceId}/packages",
+    path: "/api/spaces/{id}/packages",
     jsonSchema: toJsonSchema(activatePackageSchema),
     description: "Activate a package in a space",
   },
   {
     method: "PATCH",
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
+    path: "/api/spaces/{id}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Configure a space package",
   },
@@ -498,12 +509,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "PATCH",
-    path: "/api/packages/mcp-servers/{scope}/{name}",
-    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
-    description: "Update a draft mcp-server package",
-  },
-  {
-    method: "PATCH",
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
@@ -537,12 +542,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "POST",
-    path: "/api/packages/mcp-servers/{scope}/{name}/versions",
-    jsonSchema: toJsonSchema(createVersionBodySchema),
-    description: "Publish a version from the mcp-servers draft",
-  },
-  {
-    method: "POST",
     path: "/api/packages/skills/{scope}/{name}/versions",
     jsonSchema: toJsonSchema(createVersionBodySchema),
     description: "Publish a version from the skills draft",
@@ -564,7 +563,27 @@ const coreSchemas: OpenApiSchemaEntry[] = [
 
   // ─── Package draft file tree ────────────────────────────────────────────
 
+  // ─── Credential proxy ───────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/credential-proxy/tools/call",
+    jsonSchema: toJsonSchema(callRemoteToolSchema),
+    description: "Call a typed tool of a remote MCP integration",
+  },
+
   // ─── Integrations ───────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/integrations/discover",
+    jsonSchema: toJsonSchema(discoverIntegrationSchema),
+    description: "Propose an integration manifest from a remote MCP server URL",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/discover",
+    jsonSchema: toJsonSchema(syncFromServerSchema),
+    description: "Propose manifest fields from the integration's connected MCP server",
+  },
   {
     method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
@@ -618,6 +637,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/me/connections/{connectionId}",
     jsonSchema: toJsonSchema(updateConnectionSchema),
     description: "Rename one of the caller's connections",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share with current and future team spaces",
+  },
+  {
+    method: "PUT",
+    path: "/api/me/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share an owned connection with current and future team spaces",
   },
   {
     method: "POST",
@@ -714,11 +745,11 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
   // The finalize body (conditional `usage`, `.catch`-degrading fields) is not a
   // comparable Zod object. See routes/runs-events.ts.
-  "POST /api/runs/{runId}/events/finalize":
+  "POST /api/runs/{id}/events/finalize":
     "strict outcome fields (status; usage required on success) plus cosmetic fields that degrade to absent — conditional requirement, not field-comparable",
 
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
-  "POST /api/runs/{runId}/events/heartbeat":
+  "POST /api/runs/{id}/events/heartbeat":
     "empty body — the HMAC covers the zero-length payload; the handler reads nothing",
 
   // ─── Not ours to validate: framework- or provider-owned wire ────────────
@@ -753,6 +784,10 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   "POST /api/mcp/o/{org}":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
   "POST /api/mcp/o/{org}/s/{space}":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /api/runs/{id}/mcp":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /internal/mcp":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
 
   // ─── Module-owned surfaces with no single comparable body ───────────────

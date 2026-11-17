@@ -19,7 +19,7 @@ import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FormModal } from "../form-modal";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import {
   validateNewPath,
   NEW_PATH_ERROR_KEYS,

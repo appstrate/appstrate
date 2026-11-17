@@ -4,19 +4,12 @@
 /**
  * RunEvent → RunResult reducer.
  *
- * Consumes {@link RunEvent}s whose `type` is one of the reserved core
- * domains (`memory.added` / `pinned.set` / `output.emitted` /
- * `log.written`). Events with any other `type` are
- * passed through silently — the sink still sees them, but they do not
- * contribute to the aggregated result.
- *
- * `foldEvent` is the single switch that knows how each canonical event
- * contributes to the aggregate; the batch reducer `reduceEvents` folds the
- * whole event list through it.
+ * Aggregates `output.emitted` into the {@link RunResult}.
+ * Every other event is passed through silently: the sink still sees it, but
+ * it does not contribute to the aggregated result.
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import { isCanonicalRunEvent } from "../types/canonical-events.ts";
 import type { RunError, RunResult, TokenUsage } from "../types/run-result.ts";
 
 export interface ReduceOptions {
@@ -26,9 +19,7 @@ export interface ReduceOptions {
 
 export function emptyRunResult(): RunResult {
   return {
-    memories: [],
     output: null,
-    logs: [],
   };
 }
 
@@ -44,60 +35,11 @@ export function zeroTokenUsage(): TokenUsage {
 }
 
 /**
- * Fold a single event into a mutable result accumulator. Consumers that
- * want an immutable pipeline can seed a fresh accumulator per call.
- *
- * Open-envelope `RunEvent`s flow in; `isCanonicalRunEvent` narrows the
- * four reserved namespaces (memory / pinned / output / log) + the
- * runner-internal `appstrate.*` namespace to a discriminated union, so the
- * switch is exhaustively typed. Third-party / unknown events are silently
- * passed through — the sink still sees them, they just do not contribute
- * to the aggregated result.
+ * Fold a single event into a mutable result accumulator: an `output.emitted`
+ * carrying `data` replaces `result.output` (replace-on-emit).
  */
 export function foldEvent(result: RunResult, event: RunEvent): void {
-  if (!isCanonicalRunEvent(event)) return;
-  const canonical = event;
-
-  switch (canonical.type) {
-    case "memory.added":
-      result.memories.push({
-        content: canonical.content,
-        ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
-      });
-      return;
-    case "pinned.set": {
-      if (result.pinned === undefined) result.pinned = {};
-      const slot: { content: unknown; scope?: "actor" | "shared" } = {
-        content: canonical.content ?? null,
-      };
-      if (canonical.scope !== undefined) slot.scope = canonical.scope;
-      result.pinned[canonical.key] = slot;
-      return;
-    }
-    case "output.emitted":
-      result.output = canonical.data ?? null;
-      return;
-    case "log.written":
-      result.logs.push({
-        level: canonical.level,
-        message: canonical.message,
-        timestamp: canonical.timestamp,
-      });
-      return;
-    case "appstrate.progress":
-    case "appstrate.error":
-    case "appstrate.metric":
-      // Runner-internal lifecycle events — do not contribute to the
-      // aggregated result. Terminal status comes from `RunResult.status`
-      // set on `EventSink.finalize`. Listed here so adding a new variant
-      // is caught by the exhaustiveness check below.
-      return;
-    default: {
-      const _exhaustive: never = canonical;
-      void _exhaustive;
-      return;
-    }
-  }
+  if (event.type === "output.emitted" && event.data !== undefined) result.output = event.data;
 }
 
 export function reduceEvents(events: Iterable<RunEvent>, opts: ReduceOptions = {}): RunResult {

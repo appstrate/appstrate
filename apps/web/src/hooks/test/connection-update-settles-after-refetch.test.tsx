@@ -19,7 +19,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
-const { useConnectionShare, useRenameIntegrationConnection } =
+const { useConnectionShare, useConnectionShareAllSpaces, useRenameIntegrationConnection } =
   await import("../use-integrations.ts");
 const { useRenameMeConnection } = await import("../use-me-connections.ts");
 
@@ -112,6 +112,41 @@ describe("connection update — settles after the list refetch", () => {
         }),
     },
   ];
+
+  for (const policy of [
+    { packageId: undefined, key: ME_LIST_KEY, route: "/api/me/connections/{connectionId}/shares" },
+    {
+      packageId: "@acme/gmail",
+      key: SPACE_LIST_KEY,
+      route: "/api/integrations/{packageId}/connections/{connectionId}/shares",
+    },
+  ]) {
+    it("saves all-spaces sharing through " + policy.route + " and awaits its refetch", async () => {
+      const qc = new QueryClient();
+      const list = slowList(qc, policy.key);
+      const put = spyOn(client, "PUT");
+      put.mockClear();
+      const done = capture(() => useConnectionShareAllSpaces(policy.packageId), qc).mutateAsync({
+        connectionId: "conn_1",
+        enabled: true,
+      });
+      await Bun.sleep(5);
+      expect(status(qc)).toBe("pending");
+      expect(put).toHaveBeenCalledWith(policy.route, {
+        params: {
+          path: {
+            ...(policy.packageId ? { packageId: policy.packageId } : {}),
+            connectionId: "conn_1",
+          },
+        },
+        body: { share_all_spaces: true },
+      });
+      list.release();
+      await done;
+      expect(status(qc)).toBe("success");
+      list.unsubscribe();
+    });
+  }
 
   for (const c of cases) {
     it(`${c.name}: pending while the list GET is outstanding`, async () => {

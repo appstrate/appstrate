@@ -405,7 +405,6 @@ describe("mcp tool round-trip", () => {
       "invoke_operation",
       "list_files",
       "read_file",
-      "read_skill",
       "run_and_wait",
       "search_operations",
       "validate_package_file",
@@ -623,7 +622,7 @@ describe("mcp tool round-trip", () => {
     // Package authoring guidance also lives only at the MCP seam. The chat
     // engine appends these instructions, and external MCP clients receive the
     // same safe validate-before-import workflow.
-    expect(instructions).toContain("MCP package authoring");
+    expect(instructions).toContain("Local MCP integration authoring");
     expect(instructions).toContain("BOTH `valid: true` AND `importable: true`");
     expect(instructions).toContain("report them instead of attempting a doomed mutation");
     // The generated operation index is appended under this exact heading; the

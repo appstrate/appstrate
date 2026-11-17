@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { SettingsHeading } from "../settings/settings-heading";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
@@ -21,7 +21,7 @@ export function AccessRulesSection({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="space-y-8" data-testid="access-rules-section">
+    <div className="flex flex-col gap-8" data-testid="access-rules-section">
       <section>
         <SettingsHeading level="group" title={t("integration.admin.accounts.title")} />
         <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />

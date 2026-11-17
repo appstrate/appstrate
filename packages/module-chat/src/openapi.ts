@@ -111,6 +111,13 @@ export const chatPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
         },
         {
+          name: "q",
+          in: "query",
+          description:
+            "Case-insensitive substring search on the session title (`%`, `_` and `\\` match literally). Surrounding whitespace is ignored; blank means no filter. Untitled sessions never match. Combines with `startingAfter` and `limit`. Longer than 200 characters is a 400.",
+          schema: { type: "string", maxLength: 200 },
+        },
+        {
           name: "startingAfter",
           in: "query",
           description:
@@ -400,10 +407,10 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
-                agent_authoring: {
+                package_authoring: {
                   type: "boolean",
                   description:
-                    "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                    "Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them.",
                 },
                 skill_mode: {
                   type: "string",

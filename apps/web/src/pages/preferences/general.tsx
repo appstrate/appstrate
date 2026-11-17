@@ -58,7 +58,7 @@ function EmailVerificationBadge() {
         className="text-primary text-xs underline underline-offset-2 hover:no-underline disabled:no-underline disabled:opacity-50"
       >
         {resendState === "sending"
-          ? t("preferences.resendingVerification")
+          ? t("verifyEmail.resending")
           : resendState === "sent"
             ? t("preferences.verificationResent")
             : t("preferences.resendVerification")}
@@ -93,7 +93,7 @@ export function EmailChangeField({
   const invalid = dirty && !EMAIL_FORMAT.test(next);
 
   return (
-    <div className="w-full space-y-1.5">
+    <div className="flex w-full flex-col gap-1.5">
       <form
         className="flex w-full items-center gap-2"
         onSubmit={(e) => {
@@ -105,7 +105,7 @@ export function EmailChangeField({
           type="email"
           value={draft ?? email}
           disabled={pending}
-          aria-label={t("preferences.email")}
+          aria-label={t("common:claim.emailLabel")}
           aria-invalid={invalid}
           onChange={(e) => onDraftChange(e.target.value)}
         />
@@ -143,8 +143,6 @@ function EmailRow() {
             components={{ strong: <strong /> }}
           />,
         );
-      } else {
-        toast.success(t("preferences.emailChanged"));
       }
       // SMTP keeps the account's current address until the change is approved.
       setDraft(null);
@@ -162,7 +160,7 @@ function EmailRow() {
   return (
     <SettingRow
       variant="field"
-      label={t("preferences.email")}
+      label={t("common:claim.emailLabel")}
       description={
         <>
           <EmailVerificationBadge />
@@ -197,11 +195,8 @@ function EmailRow() {
 }
 
 /**
- * The display name, as a setting rather than a form.
- *
- * "The control IS the setting": a name is a one-word change, and a Save button
- * put two clicks and a mode change in front of it. It commits on blur or Enter
- * and reverts on Escape, like the organization's name and the workspace's.
+ * The display name, as a setting rather than a form: saved by Save or Enter, cancelled by
+ * Cancel or Escape, never on blur (`InlineTextSetting`), like the organization's name.
  */
 function DisplayNameRow() {
   const { t } = useTranslation(["settings", "common"]);
@@ -209,23 +204,12 @@ function DisplayNameRow() {
   const updateDisplayName = useUpdateDisplayName();
 
   return (
-    <SettingRow
-      variant="field"
-      label={t("preferences.displayName")}
-      status={
-        <SaveFeedback
-          pending={updateDisplayName.isPending}
-          success={updateDisplayName.isSuccess}
-          error={updateDisplayName.isError}
-        />
-      }
-    >
+    <SettingRow variant="field" label={t("preferences.displayName")}>
       <InlineTextSetting
         value={profile?.displayName ?? ""}
-        disabled={updateDisplayName.isPending}
         maxLength={100}
         aria-label={t("preferences.displayName")}
-        onCommit={(displayName) => updateDisplayName.mutate({ body: { displayName } })}
+        onCommit={(displayName) => updateDisplayName.mutateAsync({ body: { displayName } })}
       />
     </SettingRow>
   );
@@ -235,7 +219,7 @@ export function PreferencesGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <SettingsGroup title={t("preferences.account")}>
+    <SettingsGroup title={t("preferences.sectionAccount")}>
       <DisplayNameRow />
       <EmailRow />
     </SettingsGroup>

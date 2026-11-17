@@ -14,7 +14,10 @@ they start with `packages/` or `e2e/`.
 - **Primitives are shadcn**, in `packages/ui/src/components/` (`button`, `input`,
   `select`, `popover`, `command`, `dialog`, `sheet`, `tabs`, `toggle-group`,
   `switch`, `checkbox`, `radio-group`, `field`, `alert`, `badge`, `table`,
-  `tooltip`, `dropdown-menu`, `collapsible`, `skeleton`, `sidebar`…). Native
+  `tooltip`, `dropdown-menu`, `collapsible`, `skeleton`, `sidebar`, `card`, `empty`,
+  `progress`, `alert-dialog`…) plus one local `combobox` (Popover + Command; the
+  registry has none for this style). `shadcn add` overwrites `button.tsx` for this
+  style: write a new primitive from `shadcn view` instead, in the local conventions. Native
   before custom: compose these, and read the shadcn source or block before
   drawing a filter, a table or a toolbar of your own.
 - **Tokens** are CSS variables in `styles.css` (`@theme`). No hard-coded colour,
@@ -24,10 +27,26 @@ they start with `packages/` or `e2e/`.
 - **Surfaces**: the page is `bg-canvas` (off-white), cards and dialogs are
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
+- **One frame per block**: a card (`Card`, `DetailSectionCard`, a `DataTable`) is
+  `bg-card rounded-lg border`, with no shadow (shadows are for what floats:
+  popovers, menus, dialogs). A table draws its own card on a page, a detail tab
+  included; inside a surface that is already framed (every overlay: settings and
+  the catalogue, every `Modal`, a `framed` `DetailTabPanel`) it draws none,
+  because that surface spreads `INTEGRATED_TABLE_SURFACE`. Never choose a
+  table's frame at the call site. A detail tab lays its content on the page:
+  a list tab (runs, memory, connections, usage, a run's journal) is its
+  `ListToolbar` over the list's own card, at the panel's edge; only a rail split
+  (settings, a run's results) is a `framed` panel. A toolbar's buttons are its
+  32px (`lib/toolbar-button.ts`), never a stock `size="sm"` beside them.
+- **Grey has two values**: a static muted surface (inset, notice, header band,
+  read-only field, code block) is `bg-muted/40` (insets add `rounded-lg border`);
+  hovering a row, a list item or a card is `hover:bg-muted/50`, the table row's
+  hover. A tinted surface that is itself clickable hovers to `bg-muted`. Buttons,
+  menus and the org switcher keep the primitives' `accent`.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
-  `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+  `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
-  the bundle) or an image URL. Always render it with `PackageIcon`
+  the bundle), an image URL, or `emoji:<one emoji>`. Always render it with `PackageIcon`
   (`components/package-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
   placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
@@ -46,13 +65,22 @@ they start with `packages/` or `e2e/`.
   control (a button, a row being saved), never content on its way; no centred
   spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
   the shell exists there is no page to draw.
+- **A structure change updates its skeletons in the same change**: any change to
+  a screen's structure (frames, sections, toolbar or footer, header lines, tabs,
+  cards, row heights, a surface turning integrated) updates, in that same change,
+  every skeleton that stands for it — the page skeletons of
+  `loading-skeletons.tsx`, the per-component `*Skeleton`s, the `placeholder`
+  props of `DataColumn`/`CardGrid`/`ItemList`, the `skeletonOf` fallbacks and
+  tables of `app.tsx` — so the skeleton and the loaded page keep one shape.
+  Review checks both; a skeleton that keeps an old frame, shadow, tint, radius
+  or line is a defect of the change that left it. A detail page's skeleton draws the
+  tab the address opens on (`#runs`, `#settings`…), not always the first one.
 
 ## 2. The shell
 
-- **`ShellSidebar` and `ShellHeader`** (`components/shell-frame.tsx`) are the one
-  frame of both products (Studio: `components/app-sidebar.tsx`, chat:
-  `modules/chat/chat-shell.tsx`). A product passes only its own navigation;
-  never copy the frame.
+- **`AppSidebar` and `ShellHeader`** (`components/app-shell.tsx`) are the one
+  frame of both products (`AppSidebar` picks Studio's or the chat's navigation);
+  the header's slots are `components/shell-header-slots.tsx`. Never copy the frame.
 - The sidebar head is the organisation and workspace switcher
   (`components/org-switcher.tsx`: organisations left, the workspaces of the one
   being explored right; a pick always ends on a workspace). Products are tabs
@@ -69,30 +97,66 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
-- Settings and the catalogue are **routed overlays**: `PanelDialog`
-  (`components/panel-dialog.tsx`, a rail on the left, one scroll per pane) opened
-  by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
+- Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
+  (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
+  `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll
+  per pane), opened by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
   `App` remembers the last page shown and keeps it rendered underneath (the
   dashboard when the app opened on the overlay); closing returns to it
-  (`lib/modal-route.ts`). Nothing rides in the history state. Rail pieces:
+  (`lib/modal-route.ts`). The background location and its history index are kept in
+  the overlay entry's history state, so reloading restores the background and closing
+  steps back over the overlay's entries. **The dialog opens once.** Everything an overlay goes through on a cold address — the skeleton while
+  its chunk or the permissions load (`OverlayPanelSkeleton`), a refusal
+  (`PanelMessage`), then the page — happens inside that one box; a skeleton or a
+  page that drew a `Dialog` of its own would be unmounted and mounted in turn,
+  and the backdrop and the zoom would play twice (#2008). Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
   (`components/settings/`). Settings are ONE shell (`pages/settings/layout.tsx`)
   whose rail lists three sections — Organisation, Espace de travail, Compte
   (`/preferences`) — built in `pages/settings/navigation.ts` from what each
   route lets the caller reach.
-- The header's right end stays personal (notification bell, profile); page
-  controls never move into it.
+- A detail page that draws its title in the header (the agent, run, schedule and
+  integration pages, and the skill and tool pages, through `DetailBar`,
+  `components/detail-bar.tsx`) fills three slots the header
+  exposes (`components/shell-header-slots.tsx`): the **lead** (identity tile,
+  title, version pill, then the id), the **actions** (the right end of the lead's
+  row) and the **tabs** (`HeaderTabBar`, underlined, on the band's rule).
+  The slots are portals: the page keeps its context, so the tab bar still answers
+  the page's own `<DetailTabs>`, which therefore wraps the whole page, header
+  included. The header's first row is the same on every page, a detail page
+  included: burger, trail, bell. `DetailBar` publishes the trail (its `trail`
+  ancestors, then its title) like any page, and the lead, its actions and the
+  tabs are rows under it.
+- Outside that, the header's right end stays personal (notification bell, profile).
+  A page's controls reach it only through a slot, never by drawing in it.
 
 ## 3. Page anatomy (detail pages)
 
 Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
-1. **`PageHeader`** (`components/page-header.tsx`): title with its identity tile
-   in `icon` (`PackageIcon`), a one-line summary and the object's id as `children`, and in
-   `actions` the status and version badges (`components/status-badge.tsx`, see
-   section 8) then the **Actions** menu. `variant="collection"` is for level-one
-   list pages only. One primary button at most (Lancer, Relancer, Annuler) next
-   to Actions.
+0. **A detail page has no `PageHeader`**: its title, pills, actions and tabs are
+   in the shell header (section 2). What the old header said under the title
+   opens the overview tab: an agent's description, home space and origin
+   (`AgentIdentity`), a package's description, a run's trigger, start, cost and
+   duration (`RunHeaderSummary`). A settings overlay's sub-page (a webhook) has no shell header behind its panel: it keeps the section heading and draws its tabs with `UnderlineTabList`.
+1. **`DetailBar`** (`components/detail-bar.tsx`): the identity tile in `icon`
+   (`PackageIcon`), the `title`, the status and version pills in `badge`, the
+   object's id in `meta`, the page's ancestors in `trail`, the `tabs`, and in
+   `actions` the page's controls. `DetailBar` lays `actions` out (one row, `gap-2`),
+   so a caller passes siblings and never wraps them. They come in one order: the
+   page's deed (Lancer, Relancer, Annuler, Activer), then the Actions menu (which
+   holds « Voir dans le catalogue », `useCatalogueEntry`). Every one is
+   `TOOLBAR_ACTION` (`lib/toolbar-button.ts`: outline, 32 px, `bg-card`) — a
+   `HeaderActionButton` (`components/header-action-button.tsx`), `RunAgentButton`
+   given that class, or the menu's own trigger.
+   Never a bare `<Button size="sm">`, which is 36 px. The bar's one filled button
+   (Activer) is `<HeaderActionButton primary>`; a deed's icon takes its colour from its own
+   `className` (`text-primary`, `text-destructive`). A link that loses its label
+   under `lg` becomes a square icon (`max-lg:w-8 max-lg:px-0`).
+   `PageHeader` with `variant="collection"` is for level-one pages only (lists and the
+   dashboard): title and actions, followed by the toolbar at the same spacing on every list.
+   `description` is a status line (the dashboard's date and running count), never an
+   explanation: those belong in the content or empty state.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
    List, settings and detail pages use `PageActionsMenu`
@@ -105,14 +169,16 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
-   (`packages/ui`; variants `destructive`, `warning`, `info`, `success`), its
-   icon on the first line of text; a button inside it sits on that first line
-   (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
+   (`packages/ui`) — see § 8 « Notice »; its button goes in `action`. What _happened_ (a run's failure, an integration that lost its
    connection mid-run, files not saved) is never a band: it opens the run's
    overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
-4. **Tabs**: `DetailTabsList` / `DetailTabsTrigger`
-   (`components/agent-detail/agent-local-tabs.tsx`), the tab kept in the URL hash
-   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
+4. **Tabs**: `HeaderTabBar` (`components/detail-tabs.tsx`, passed to `DetailBar`
+   as `tabs`), underlined, an icon each, the tab kept in the URL hash
+   (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string and pushes, so Back
+   undoes a switch). The summary tab is `overview`, the settings one `settings`. A tab that splits
+   a COLLECTION (`CollectionTabs`) is `useQueryTab(name, options)` (`hooks/use-query-tab.ts`, the
+   first option leaves the URL, also pushed); `CollectionTabs` with `hrefOf` draws links when the
+   router owns more than one param (the catalogue's views).
    When the list is wider than its container (a phone) it scrolls sideways and a
    fade marks each edge that hides tabs, nothing when they all fit. **The same
    tabs for every role** (a package's « Utilisé par » included): what a role may
@@ -152,39 +218,52 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   beside the label) or `action` (button opposite its explanation). Groups:
   `SettingsGroup` (same file); headings: `SettingsHeading`
   (`components/settings/settings-heading.tsx`, `level` `page` or `group`).
-- **No Edit button, no edit mode, no Save button.** A control saves itself: a
-  select, switch or toggle on change; a text on blur or Enter, Escape reverts
-  (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
-  a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
-  (`components/inline-editable-label.tsx`), the one rename affordance, and it is
-  **opened by the row's menu only**: a click on the name does nothing and no pencil
-  appears on hover (both are noise next to the « … »). The row's « Edit » never
-  renames, it edits what the name does not (a provider's key), in a modal with no
-  name field; « Rename » is its own menu entry that puts the name in edit. A name
-  outside a table (a page title) is renamed in its own settings, as a text
-  setting (`InlineTextSetting`, « Général »), never in the header.
-- **Several values valid only together** are assembled in a modal that commits
-  once (model, proxy, OAuth client, webhook). **A list of independently valid
-  values** commits each entry on its own.
-- **One return of a write, everywhere** (agent, schedule, organisation,
-  workspace, preferences, integration rules): `SaveFeedback`
+- **One rule decides whether a change waits for Save.** Text, and values that only
+  make sense together, are a draft with Save / Cancel; a single choice (a select, a
+  switch, a radio, a file or an emoji picked) and a named action apply at once.
+  Typing, leaving a field, waiting, hiding the page or unmounting never persists a
+  draft.
+  - Drafts: `useSettingDraft` + `ManualSave` (its `SaveBar`), one form and one write
+    per group of related values (a space's name and domains, input values and locks,
+    model and generation, schedule and connections, an integration's default set and
+    mode). A single text field uses `InlineTextSetting` (Save or Enter, Cancel or
+    Escape). Keep API and permission boundaries explicit.
+  - At once: theme, language, cards/table choice, column widths and visibility, the
+    chat's model/generation/authoring choices, an agent's proxy, a space's visibility
+    and default role, the icon and colour of an organization or a space, activating a
+    package in a space, a space member's role, sharing a connection, an organization
+    policy switch, and the deeds (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
+    `ConfirmModal`: imposing a skill on a space's chat, an organization member's
+    owner or access-revoking role, closing an open space.
+  - Operational state and navigation history (auth, selected org/space, sidebar,
+    pairing recovery, sent messages, runs and logs) are not drafts.
+- Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
+  and failure; a refusal is the mutation's toast. Save accepts the sent values only
+  after success; Cancel restores the latest stored values. Disable editing during a
+  write. A change of organization or space drops a draft once the guard has asked:
+  the switch drops the scope's caches, and a form renders only from its loaded
+  data, so it unmounts. Keep it that way (no placeholder data across scopes).
+- `useUnsavedChanges` guards navigation, reload and scope changes
+  (`requestScopeChange`). Leaving asks once for every dirty form; "save and leave"
+  is offered only when a single form is dirty, and waits for its success.
+- An inline rename (`InlineEditableLabel`, a chat title) is a named action opened
+  from a menu: Save or Enter saves, Escape cancels, and leaving cancels it without
+  asking; blur never writes.
+- **Every write has one return, never two.** A draft's return is its save bar: Save
+  shows pending, the bar leaves on success, a refusal is the mutation's toast and
+  the draft stays. A change applied at once returns with `SaveFeedback`
   (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
-  d'enregistrement). It sits with the control: in the `status` of its
-  `SettingRow` (under a field, beside a switch), or at the foot of a section
-  whose controls share one write. When one mutation writes several rows, each
+  d'enregistrement) in the `status` of its `SettingRow` (beside a switch, under a
+  select), never next to a save bar. When one mutation writes several rows, each
   row reports only the write that carried its own key. A spinner or silence is
-  not a return; a failure is also a toast, and the field keeps what was typed.
+  not a return; a failure is also a toast.
   The one exception is a write whose answer is not « saved » (an email change
   that sends a confirmation): its toast says so and the row shows only the
   pending line.
-- Two writes are exceptions to the no-Save rule, each with one explicit button.
-  A write the server cannot take in parts (a schedule's new actor that must name
-  its connections in the same write): the extra fields appear under the control.
-  The account's login email (`EmailChangeField`, `pages/preferences/general.tsx`):
-  without SMTP it changes at once, so a half-typed address never commits on blur;
-  the button waits for another valid address, and an invalid one is said under
-  the field. A package's files and definition are drafts with an explicit save
-  (`useUnsavedChanges`, section 12).
+- Package files and definitions keep their existing draft saves; publication is
+  a separate action. The account's login email keeps its explicit submission
+  and verification flow. Several settings backed by different endpoints are not
+  silently combined into a partial global save.
 - **Under a field: a note on the left, a control on the right.** A note is text
   (where the value comes from, why it is locked, with its `Lock` icon); a
   control acts (Verrouiller). `InputFieldRow`
@@ -200,48 +279,77 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   reason (section 11), not for a setting the object cannot have.
 - "Inherit" is always an explicit option and names what it inherits
   (« Hériter (Mistral Medium) »).
-- **Choosing connections: one component, everywhere** (`ConnectionChoiceMenu`,
-  `components/integration-connect/connection-choice-menu.tsx`). A trigger that reads the
-  current choice like a select (« Hériter (12****oken) », the same form as the model and proxy
-  « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune connexion »; never a « + »,
-  which means add and belongs to the « Ajouter une connexion » entry), and a menu in **three
-  exclusive modes, first-level radios** so that « Hériter » reads as an alternative to the
-  choice below it, not a row of it: ( ) **Hériter** / « Utilise 12****oken, la connexion par
-  défaut de l'espace » (the layer in the server's words, `run.connSource.*`), ( ) **Choisir des
-  connexions** / « Cochez celles à utiliser », with the connections indented under it as
-  **checkboxes** (one connection is still a box; capped at `MAX_CONNECTIONS_PER_INTEGRATION`;
-  ticking one moves the mode to « Choisir »), ( ) **Aucune connexion** / « L'agent s'exécute
-  sans cette intégration » (absent for a required integration); then « Ajouter une
-  connexion » and « Gérer les connexions ». Each connection row is a name and one line of the
-  same form (« Clé API · connectée depuis Default »), listed in the order the SERVER ranked them (`scope_fit`
-  then least privilege: the client never sorts them again). What is ticked is what is CHOSEN, never a
-  second tick for what the cascade would give. A mode a usage cannot answer is left out; with
-  the list alone the menu shows the boxes without a radio. Where it serves, and how it writes:
-  - the **agent's** and a **schedule's** Connexions (`PickerMenu`, fed by the readiness verdict):
-    all three modes, « Valider » writes the ticked set, « Hériter » and « Aucune connexion »
-    write at once, a lone connection writes when ticked (unticking it goes back to « Hériter »);
-  - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
-    (an empty set is « no default », which its own select says), each tick commits alone;
-  - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
-    « Hériter » (a pin is the exception, its absence is the delete button), a form value;
+- **Choosing connections: text plus a modal, two lists of boxes.** No menu of modes.
+  - the **agent's** and a **schedule's** Connexions (`IntegrationConnectionPicker`, fed by the
+    readiness verdict, rules in `use-connection-picker.ts`): the cell reads what binds as text
+    (« web · db », « Hériter (web) », « Aucune connexion », imposed connections first behind a
+    padlock), one amber line per problem, and « Modifier » opens `ConnectionPickerModal`
+    (`integration-connect/connection-picker-modal.tsx`, a `FormModal`): the candidates as
+    `CheckboxField`s in the order the SERVER ranked them (`scope_fit` then least privilege; the
+    client never sorts them again), imposed ones ticked and disabled (« Imposée par un admin »),
+    the cap (`MAX_CONNECTIONS_PER_INTEGRATION`), one line per problem with its way out (renew,
+    upgrade behind a `ConfirmModal`, connect a new account). « Enregistrer » writes the ticks,
+    « Revenir au choix par défaut » writes `null`, « Aucune connexion » writes `[]` (optional
+    integration, no lock). A closed imposed set (specific connections in « Exactement ces
+    connexions », an enforced space default) is read-only with its reason, no « Modifier ». Under
+    « Ces connexions, plus celles de l’utilisateur » (`additional_connections_allowed`) the UI
+    writes the additions only: an imposed id is never part of an override or a member pin, and
+    unticking every addition means « no addition » (`null` for the member's pin, `[]` in an
+    override), never « no connection »;
+  - the sets an admin imposes on an integration page (the space default and the agents' specific
+    connections): `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the
+    shared connections, capped, a stored member no longer shared listed as « Connexion
+    indisponible »: ticked it can be unticked, never ticked again). The space default
+    (`OrgDefaultSection`) lists it beside its usage select (an empty set is « no default », which
+    the select says), the set and its enforcement mode saved together by the section's save bar.
+    The **specific connections per agent** (`PinManagementSection`) are a read-only `DataTable`
+    (Agent, Connexions, Mode in words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter »
+    and « Modifier » open one `FormModal`: Agent (an `OptionSelect` of the agents without any,
+    fixed when editing), the boxes (none ticked: « Aucune connexion »), Mode (an `OptionSelect`,
+    « Exactement ces connexions » by default, « Ces connexions, plus celles de l’utilisateur »
+    disabled with its reason under the field), then the one sentence saying whom saving affects.
+    « Supprimer » only opens its `ConfirmModal`, which says what the members and the schedules
+    lose. **The same connections are edited from the agent's Connexions**: for a caller holding
+    `integrations:configure`, the « … » of a row whose integration is active in the space holds
+    « Définir des connexions spécifiques » (none yet, and only for an agent active in the space) or
+    « Modifier les connexions spécifiques » and « Retirer les connexions spécifiques », which open
+    that same form, its Agent fixed to the agent, and that same confirmation. Both screens go
+    through one hook (`usePinEditor`, `integration-detail/use-pin-editor.tsx`: the specific
+    connections, the shared connections, the agents using the integration, the default's
+    enforcement, the two dialogs), so a write on either refreshes both and the readiness the
+    connections cell reads; a read it needs that fails is shown as an error where « Ajouter »
+    would be, never as an empty list. A member sees no menu, and the cell stays their view
+    (padlock, « Épinglée par un admin »), never a link to the specific connections; a schedule's
+    rows have no menu (they bind the agent);
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
-    the creation modal): after a 409 the candidates and « Aucune connexion » when optional, no
-    « Hériter » (the server just said the actor's own resolution cannot decide); an optional
-    integration nothing refused keeps « Hériter » (the absence of a pick) and « Aucune connexion ».
-  - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
-    `null` no choice, `[]` none, each tick handed to `onChange`).
+    the creation modal): after a 409 the refused candidates as boxes and « Aucune connexion » as a
+    box of its own when optional; where nothing was refused, a line says the identity's usual
+    resolution applies.
 
-  What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
+  What turns the cell amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
   while nothing is chosen (an unset override included, which inherits the cascade), the pick itself
   once a set is chosen (an under-scoped, dead or unavailable member, or « Aucune connexion » for a
-  required integration). An override reaching outside an admin lock says so under the locked
-  picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
-  whose connections nobody named, even when the actor holds a single connection. So the creation
-  modal, and every write from a schedule's Paramètres while it runs as the viewer, name the
-  connection the viewer's fallback binds (`savedScheduleOverrides`, from the readiness verdict of
-  the version the schedule fires, never for another actor); a launch that is refused is replayed
+  required integration). An override reaching outside a closed imposed set says so under the
+  read-only cell (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
+  whose connections nobody named. When the caller arms a schedule that runs as themself and holds
+  a single connection for an integration, the server names that connection on the write
+  (`withScheduleFallback`); the SPA sends only the user's picks (`savedScheduleOverrides`) and
+  shows the 409 `must_choose_connection` panel when the actor holds several; a launch that is refused is replayed
   without its own pick for the refused integrations, and « Relancer » waits for the live verdict
   of each of them (`retryDecision`).
+
+- **Connection use and sharing** occupy separate table columns: Use is a read-only scope badge
+  naming multi-space or single-space use by the owner; Sharing holds the access picker ("Only you",
+  "N spaces" or "All spaces"). The sharing control stays visible on narrow tables;
+  the usage column waits for room. The member-access explanation is visible in the popover.
+  Sharing with all team spaces uses an "All spaces" checkbox that includes future team spaces.
+  While checked, it hides the individual-space list; unchecking reveals the current selection
+  for editing and stops all-spaces sharing. Any effective withdrawal switches the backend to
+  specific-space sharing in the same transaction;
+  there is no intermediate mode or client-side comparison of space lists. Only an organization
+  administrator owning an org-scoped connection may consent; personal spaces stay private.
+  Sharing targets only team spaces; personal spaces are excluded from the picker and refused by
+  the backend. Stopping all-spaces sharing keeps existing shares.
 
 ## 5. Choosing a value
 
@@ -250,16 +358,23 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | A handful of options                                                 | `Select`                                                                                                                                                                                                                                                                                                                                                                                    |
 | Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                                                                                                                                                                                             |
 | Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                                                                                                                                                                                                      |
+| One value, alternative editors (an icon: Lucide, emoji, image)       | `Tabs`, one editor per tab (`AppearancePicker`); never a `ToggleGroup type="single"`, which does not switch panels                                                                                                                                                                                                                                                                          |
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
-| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                                                                                                                                                                                                      |
+| Which connections of one integration                                 | The connections cell and `ConnectionPickerModal` (`integration-connect/`), or `ConnectionCheckboxList` for a set an admin imposes: section 4. Never a menu of modes                                                                                                                                                                                                                         |
 | A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
 | A secret shown once                                                  | `SecretRevealModal`                                                                                                                                                                                                                                                                                                                                                                         |
 
 A `Select` never holds hundreds of entries.
+
+Temperature and reasoning use the same `ModelGenerationControls` (`packages/ui`):
+two labelled `Field` + `Select` controls in agent settings, schedules, launches and chat.
+Temperature offers 0–1 in steps of 0.1 and preserves an existing value between steps;
+zero is not inheritance. Reasoning offers the model's supported levels. An inherited
+value removes the override rather than writing a client sentinel.
 
 **The model picker** shows only what the PERSON can use, grouped by who pays, in this
 order: « <key> · Clé org » (the organization's keys, named after the key or, for someone who
@@ -288,6 +403,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `LazySchemaForm` (`components/lazy-schema-form.tsx`) so RJSF and AJV stay out of
   the entry chunk. Labels come from `useSchemaFormLabels`, file fields from
   `useUploadClient`; an agent's input form is `components/agent-input-form.tsx`.
+- Lists of text tokens use `app-ui/string-list-input.tsx`: auth/scopes commit on
+  blur; metadata keywords keep their Enter/comma-only commit and normal typography.
+- Local advanced disclosures use shadcn `Collapsible`; the fields keep their own draft.
 - Field error text is never `err.message` (section 10).
 
 ## 7. Collections
@@ -298,58 +416,62 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   `DataTable` (aligned columns, needs width), `CardGrid` (`components/card-grid.tsx`,
   `auto-fill`, no breakpoints) and `ItemList` (`components/item-list.tsx`, stacked
   self-contained blocks, asks nothing of its container: use it in a panel, a modal
-  or a narrow tab). A settings list is a table, not cards. A matrix (packages by
+  or a narrow tab). A settings list is a table, not cards, except a list that never exceeds a handful of rows and
+  whose rows hold a control that needs the width: an agent's and a schedule's Connexions are an
+  `ItemList` (`package-detail/agent-integrations-block.tsx`: one block per integration, with name,
+  id and access on the left, status and the admin's « … » on the right, and the connections cell
+  under them at full width), so a phone keeps every part without scrolling. A matrix (packages by
   workspace) is the one raw shadcn `Table`.
-- `DataTable` (`components/data-table.tsx`) under a `ListToolbar`
-  (`components/list-toolbar.tsx`: search, filters behind one button, column menu,
-  view toggle; `ListFooter` for the count). Grid tracks are
-  `minmax(<floor>px,1fr)`, never `minmax(0,…)`. A header that truncates at 1440
-  px is a column too narrow, fix the width. Text a cell truncates carries its
-  full value in `title` (a name, an email, a list); a column that holds a name
-  has a floor that fits a usual one. `columnMode="scroll"` makes the
-  reader's selected columns authoritative and scrolls them sideways instead of
-  dropping tiers.
-- **Two rules for every table** (both live in `DataTable`, no caller opts in):
-  1. **A column that can be acted on never disappears.** A column declares what it
-     is in its definition: a READ column (text, badge, date) may carry a `tier`
-     and wait for room on a narrow screen (tier `2` for a 36rem table, `3` for a
-     56rem one; `column-tiers.test.tsx` checks the arithmetic of every set); a CONTROL column (`control: true`: a
-     select, a switch, a tick, a button, a link that does something) has no tier
-     and is always drawn. The type forbids a `tier` on a control, and
-     `components/test/column-tiers.test.tsx` fails on one in any real column
-     set (add your set to it, and mark every column that holds a control). When a
-     table does not fit, it scrolls sideways and holds its name column (the
-     first read column, with the ticks before it) and its row's end (the
-     headerless « … » column) in place (`sticky`), so a row is always named and
-     its actions are always in reach. When the held columns would take more than
-     half the table's width (a phone, a side panel), they let go and the whole
-     table scrolls as one: a strip of a few pixels between them reads nothing.
-     A scroll is better than a lost control, and
-     a « … » menu is not the place for a dropdown: a control that is the setting
-     (role, share, default) stays in its own column.
-  2. **Columns resize.** Every column with a head has a handle on its right edge
-     (cursor `col-resize`): drag it, double-click it to fit the column to its
-     longest content (one click to see the full names), or focus it and use the
-     arrows (Shift for a bigger step, Enter to fit). A column never goes below
-     its track's floor. The width is kept per table (its `label`) in
-     `localStorage`, like the hidden columns: no account identifier is written
-     to storage (`stores/column-widths-store.ts`, a phone keeps its own), and the table
-     works without it. The row's end and fixed-size ticks have no handle.
+- `DataTable` (`components/data-table.tsx`, the shadcn `Table`) under a `ListToolbar`
+  (`components/list-toolbar.tsx`: search, filters behind one button, column menu;
+  `ListFooter` for the count). A column's `width` is a number of pixels: fixed,
+  or with `elastic` the floor of a column that shares what is left. A header that
+  truncates at 1440 px is a column too narrow, fix the width. Text a cell truncates
+  carries its full value in `title` (a name, an email, a list); a column that holds
+  a name has a floor that fits a usual one. A column whose cells say what they are
+  (a status badge) sets `hideHeader`: its head is read by screen readers and named
+  in the column menu, but not drawn. Every column the reader keeps is drawn,
+  at every width, and a table too wide for its container scrolls sideways: the
+  width never hides a column, the column menu does.
+  Its required `tableId` is the stable key for column widths, independent of its
+  translated accessible `label`; occurrences of the same table share that key.
+  `PackageCollection` callers compose their columns and visibility menu directly,
+  sharing `usePackageNameColumn` for the identity column (its second line is the
+  description, else the package id in mono, so every row keeps one height).
+- **Three rules for every table** (both live in `DataTable`, no caller opts in):
+  1. **No column disappears on its own.** A column declares what it is in its
+     definition: a READ column (text, badge, date) or a CONTROL column
+     (`control: true`: a select, a switch, a tick, a button, a link that does
+     something). The row's name is the read column marked `identity`, else the first
+     read column; the column menu cannot hide it. When a table does not fit, it
+     scrolls sideways and holds its name column (with the fixed-width columns before
+     it) and its row's end (the headerless « … » column) in place (`sticky`), so a
+     row is always named and its actions are always in reach. A scroll is better than
+     a lost control, and a « … » menu is not the place for a dropdown: a control
+     that is the setting (role, share, default) stays in its own column.
+  2. **A row is a link.** The cover link stretches over the row; the named link
+     lives in the name cell.
+  3. **Columns resize.** Drag the right edge of a head; a double-click gives the
+     column back its declared width. The width is kept per table (its `label`) in
+     `localStorage`, never goes under the declared one, and the table works without
+     it (`stores/column-widths-store.ts`). Fixed-size ticks and the row's end have
+     no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
-  pushed, the search is replaced, a reset is one update. Table or cards is a
-  preference, not a location (`ViewToggle`, `stores/list-view-store.ts`, one
-  store per family of list); hidden columns are in
-  `stores/column-visibility-store.ts`.
+  pushed, the search is replaced, a reset is one update. Runs and schedules are
+  tables; files, integrations and the package indexes (agents, skills, MCP) let
+  the reader choose cards or table (`ListViewTabs`, `stores/list-view-store.ts`,
+  one preference per screen: a preference, not a location). Files and integrations
+  default to cards, the other indexes to tables; a saved choice wins. Hidden
+  columns are in `stores/column-visibility-store.ts`.
 - Toolbar buttons have two treatments (`lib/toolbar-button.ts`): `TOOLBAR_UTILITY`
-  adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data.
+  adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data (outline,
+  32 px, on a `bg-card` surface — the same in a detail page's header).
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
   not a detail page's tabs.
-- **Runs** (`components/runs-table.tsx`): the Résultat column is what ended the run
-  (`runErrorText`), else one readable line of its structured output
-  (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
-  truncated with a tooltip. Déclencheur names who or what launched it, and a dash
-  when nothing is recorded: no column is left blank.
+- **Runs** (`components/run-columns.tsx`): identity and timing columns only; the outcome (error,
+  output, files) lives on the run's own page. Déclencheur names who or what launched it, and a
+  dash when nothing is recorded: no column is left blank.
 - **The keys tables** (Settings › Models, two tabs; Preferences › Mes clés). The rule that reads
   the whole page: **a connected key makes its provider's models available.** A row is a key or a
   provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,
@@ -424,8 +546,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     list: unticking withdraws access. A refusal the server names (`model_disabled`,
     `model_scheduled`, said by `refusalMessage`) is shown under the list or in the form. A saved
     model's finer settings (name, capabilities, prices, the key it is bound to) are the
-    « Réglages avancés » link on its line: the model form, `?editModel=<id>`, which replaces the
-    list, and opens only on a model a list offers (never one the instance ships). A model's own
+    « Réglages avancés » link on its line: the model form, which replaces the
+    list (it is a state of the page, not an address), and opens only on a model a list offers (never one the instance ships). A model's own
     deeds sit at the start of that form's footer (`components/model-form/saved-model-actions.tsx`):
     « Supprimer » for a caller with `models:delete`, behind a `ConfirmModal` (« Supprimer le
     modèle ? »), and « Tester » for a model bound to an organization key (a model left to each
@@ -452,9 +574,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
     no model uses is deleted. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
-- **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
+- **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
+- **An integration's source** (API · MCP distant · MCP local) is worded in one place,
+  `IntegrationSourceLabel` (`components/integration-source-label.tsx`): the table column, the
+  card line, the catalogue sheet and the detail all draw it, and a local one says « indisponible ici »
+  (a focusable hint with its explanation) when this instance cannot run local servers.
 - **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
   the « … » menu holds EVERY action of the row, and nothing else sits at the
   row's end. No pencil, download, reconnect or gear icon beside it, in any
@@ -473,21 +599,21 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (no `menuLabel`), and a row whose only deed is the click (an integration that
   opens its page) has none either: no empty menu for one deed. A control that
   IS the setting (role select, switch, tick, share editor, default) stays in its
-  own column; it is not an action of the row. `row-actions-one-way.test.ts`
+  own column; it is not an action of the row. The `ROW_ACTION_BANS` lint rules (`eslint.config.mjs`)
   fails on a direct action beside the menu. A row is a link through the first
   cell (`rowHref`), a titled element inside it needs `relative z-10`. Whatever is raised and is not a
-  control (a name, a held first column's wrapper) hands its click to the row (`handOver` in
+  control (a name, a held cell) hands its click to the row (`handOver` in
   `data-table.tsx`: a plain click, on anything that is not a link, button, field or tab stop), so a click
   on a name opens the row like a click anywhere else. A menu deed that opens the page's own modal pre-filled
-  on the row says so in the modal's URL value (`?view-as=space:viewer`, the
-  roles page's « Prévisualiser »), the same modal as the page's Actions menu.
+  on the row says so in the modal's initial value (the roles page's « Prévisualiser »
+  opens the preview on that role), the same modal as the page's Actions menu.
 - States: a skeleton (section 1), `EmptyState`, `ErrorState error=…`, and
   for an unreadable resource `ResourceErrorState`
   (`components/page-states.tsx`). Never a silent redirect.
 - **An empty collection you can add to always offers the add button**
   (`EmptyStateAction`, `components/page-states.tsx`, a white outline button with a
   `+`, as `children` of the `EmptyState`), and only to someone who may add: the same
-  condition, label and handler (`useModalParam(...).open`, `creation.open`) as the entry
+  condition, label and handler (`setOpen(true)`, `creation.open`) as the entry
   in the page's Actions menu (`SettingsPageActions`, `PageActionsMenu`), written once and
   reused, never a second implementation. The Actions entry stays: the empty button
   repeats it, it does not replace it. The button repeats a MENU entry, which is
@@ -507,102 +633,101 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 8. Cards, badges, atoms
 
-- **Status badge**: `Badge` from `components/status-badge.tsx` maps a run status
+- **Status badge**: `RunStatusBadge` from `components/status-badge.tsx` maps a run status
   (success, failed, running, pending, timeout, cancelled) to the `packages/ui`
   `Badge` variant, icon and translated label; `compact` is a bare icon on a phone,
   `unread` adds the dot. Other statuses have their own small component, same
   `packages/ui` `Badge`: `ScheduleStatusBadge`, `ModelUnavailableBadge`,
-  `HealthIssueBadge`. `MetaBadge` (same file) is the outline badge that says WHAT
+  `HealthIssueBadge`. The status tones (`success`, `warning`, `running`, `pending`, `failed`…) are variants
+  of the `packages/ui` `Badge`, and `info` / `warning` / `success` of `Alert`: no wrapper.
+- **Notice**: every inline notice is the `packages/ui` `Alert` — never a hand-built
+  tinted `div`. One anatomy: the tone's icon (drawn by `Alert`; `icon` swaps it,
+  `icon={false}` drops it), the text (`AlertTitle` over `AlertDescription`, or a
+  description alone, which then reads in the foreground colour), and at most one
+  control in `action`, centred at the end of the row. Tones: `default` (neutral:
+  a role limit, a fact), `info`, `warning`, `destructive`, `success`; the tone
+  tints the surface, border and icon, never the text. `size="sm"` inside a form
+  or a dialog. A static fact passes `role="note"` (`RoleLimitNotice`).
+  `MetaBadge` (same file) is the outline badge that says WHAT
   a row is (Inline, Supprimé), not how it ended. A version is a `secondary` badge
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
-- **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as). An end-user's initials sit in one of
-  eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
-  never a raw Tailwind colour.
+- **Identity**: one tile draws every identity — an agent, an organization, a
+  space, a member, an end-user: `IdentityTile`
+  (`packages/ui/src/components/identity-tile.tsx`), sized by one `size-*`, an
+  image covering it, a glyph or the initials on its colour; `shape="round"` for a
+  person. `PackageIcon` (`components/package-icon.tsx`), `EndUserAvatar` and the
+  user menu's avatar are callers of it, `ActorLabel` names the member or end-user
+  a schedule runs as. An organization is drawn through `orgTile`, a space through
+  `spaceTile` (both `lib/identity-tile-props.ts`): a team space by its own icon and
+  colour, the viewer's own personal space as the viewer, an orphaned one as a
+  departed person. Its colours are the `APPEARANCE_COLORS` palette
+  (`--identity-<key>` for the tint and `--identity-<key>-foreground` for the glyph,
+  4.5:1 in both themes, in `styles.css`; tile classes in
+  `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
+  no colour chosen means one hashed from the id (an end-user's and a person's
+  always is). `AppearancePicker` (`components/appearance-picker.tsx`) is every
+  identity editor — an agent's, an organization's, a team space's: the icon forms
+  the entity allows, a palette colour or « Automatique ».
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
   not a collection. Entity cards in lists: `PackageCard` (every package
-  type, the dashboard's agents included), `ScheduleCard`, `RunCard`; a run as
+  type, the dashboard's agents included), a run as
   a dense list row is `RunRow` (the dashboard, the chat's context panel).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
 
 ## 9. Dialogs and creation
 
-- Always `<Modal>` (`components/modal.tsx`), never `Dialog` directly; the
-  two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
+- Always `<Modal>` (`components/modal.tsx`, open while mounted: render it
+  conditionally; give it a `description` when the title is not enough), never
+  `Dialog` directly; a confirmation is `ConfirmModal`, an `AlertDialog` (an outside
+  click does not dismiss it); the
+  two-pane overlay is `PanelLayout` inside `OverlayFrame`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
-- **A real modal has a URL; only the confirmations, the secrets shown once and
-  the chat have none** (`useModalParam`, `hooks/use-modal-param.ts`). A
-  creation, an edition, a detail, a setting, a choice of an element, a form, an
-  explanation, a full-screen view, a pairing: all of them. It can be linked,
-  reloads onto the same modal on the same object, Back closes it, the hash and
-  the router state ride along. Opening pushes, closing replaces. Never
-  `useState` for it, and no exception of convenience (« it is only a help
-  text », « there are many of them on the page », « it is a display mode »): the
-  value names what is open (a card's stable key, `<integrationId>:<tool>`), and
-  never a position.
-  - **Naming**: the param is named by the act and the object, in camelCase.
-    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows, `?models=<credentialId>` chooses the models of a key. A
-    value is `1` when there is no object, the object's id otherwise (a composite
-    value when a page holds several of them: `?editOauthClient=<authKey>:<ref>`).
-    A param read by several components of one page must differ per component.
-    Export the name when several entry points open the same modal
-    (`NEW_SCHEDULE_PARAM`, `NEW_API_KEY_PARAM`, `SHARE_PARAM`).
-  - **An object that may not exist**: `useModalTarget(name, items)` resolves the
-    id against the loaded list and drops the param for an unknown id, so a stale
-    link never leaves a modal on nothing. Pass `undefined` while the list loads,
-    never `[]`, or a deep link is dropped before it resolves. Never `find` the
-    object by `param.value` by hand.
-  - **One mechanism**: a modal's address is read and written by `useModalParam`
-    only, never by hand from `location.search`: it alone closes by going back
-    over the entry its opening pushed. A table row opens it with
-    `rowAction={(row) => param.open(row.id)}`, not with a `rowHref` to its URL. Create and edit are two params
-    (`newProxy`, `editProxy`) sharing one form component; the host closes only
-    the one that is open.
-  - **Handing over** to another modal (`share` to `moveHome`): one navigation,
-    `open(value, closing)`, never two modals stacked.
-  - **After a creation** that shows a secret once, the creation's param goes
-    away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
-    `OAuthClientFormModal`): the secret has no address and does not survive a
-    reload.
-  - **A modal repeated on a page** is named by what the repeated thing already
-    has that is stable: a tool of a catalog by
-    `?inspectTool=<integrationId>:<tool name>` (the catalog answers only for its
-    own integration).
-  - **A pairing in progress** (`?connectProvider=<providerId>` in the
-    onboarding) is a place too: its token lives in memory, so a reload reopens
-    the modal and mints a new pairing instead of resuming the old one (which
-    expires on its own). A link to the pairing of a provider that is already
-    connected has nothing to pair: the modal closes. This is judged once, when it
-    opens; a connection that arrives during the pairing is `onConnected`'s to finish.
-  - **Without a URL, and only these**: (1) the confirmation of an act
-    (`ConfirmModal`, the re-authentication that confirms one, the activation
-    closure, the deletion of a chat thread): reopening « Supprimer X » from a
-    link would be a trap; (2) what exists only in memory after an act: the
-    single display of a secret (`SecretRevealModal`, the key
-    just created), the connections a refused launch asks for
-    (`RunLaunchRecovery`), the models step of a provider whose key was just
-    typed (`ProviderAddFlow`): none of it is there after a reload; (3) the chat (`packages/module-chat`), whose message cards have no
-    stable address; (4) what is not a modal, such as the notification bell, a
-    popover that becomes a sheet on a phone. Each one is listed.
-  - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
-    and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open`,
-    `onClose` or guarding `cond &&` reads a `useState` of its file, directly or
-    through a component-level `const` derived from it (`const closure =
-closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
-    its case, one of the four above (`confirmation`, `secret`, `chat` — only in
-    `packages/module-chat` — or `not-a-modal`), and one line of reason. The list
-    also fails when an entry matches no code. A modal mounted only while its
-    `useModalParam` is set has its address, whatever local condition narrows it.
-    Port the modal to `useModalParam` first; add an exception only for the four
-    cases above. The same test fails on a parameter name that is not camelCase.
+- **An action that needs a space it does not name** in « Tous les espaces » never asks in a
+  dialog: with several eligible spaces its trigger is their menu (`SpaceChoiceDropdown`, or
+  `MenuAction.inSpaces`; the catalogue's « Ajouter à… » is the same menu), with one it acts there
+  (`useSpaceAction`). Its dialog passes `inSpace` to `Modal`/`FormModal`.
+- **Two kinds of modal, nothing in between.**
+  - **State** (the default): a `useState` in the component that offers it, mounted
+    while open (`{open && <FooModal onClose={() => setOpen(false)} />}`). Creations,
+    confirmations, one-off gestures, a secret shown once, pairings, the chat: none
+    has an address, none survives a reload, Back does not close it. A creation
+    modal that several pages offer is mounted by each of them.
+  - **URL** (`useUrlModal` / `useUrlModalTarget`, `hooks/use-url-modal.ts`): only what is
+    worth a link: the detail or the edition of an object a list or a table row opens
+    (`?endUser=<id>`, `?editProxy=<id>`), a share, a view, or a creation another page
+    sends the user to (`?newSpace=1` from the organization switcher, `?newProxy=1`
+    from an agent's configuration, the `?create` hand-off). Such a modal can be
+    linked, reloads onto the same modal and Back closes it: opening pushes an entry,
+    closing goes back over it (or replaces it when the address opened it). An edition
+    reached from another modal's button (`editModel`, `editEndUser`) is a state of
+    the page instead.
+  - **Naming** of a URL param: the act and the object, camelCase (`?editProxy=<id>`,
+    `?endUser=<id>`, `?models=<credentialId>`); `1` when there is no object, the
+    object's id otherwise. Export the name when several entry points open the same
+    modal (`SHARE_PARAM`).
+  - **A modal repeated on a page** is named by what the repeated thing already has that
+    is stable: a tool of a catalog by `?inspectTool=<integrationId>:<tool name>` (the
+    catalog answers only for its own integration).
+  - **An object that may not exist**: `useUrlModalTarget(name, items)` resolves the
+    id against the loaded list and drops the param for an id it does not hold: with
+    the « Élément introuvable ou inaccessible » toast when the id never resolved (a
+    link to a deleted, mistyped or out-of-reach object), silently when its object
+    left the list (deleted from its modal, renamed). Pass `undefined` while the list
+    loads, never `[]`. Never `find` by `param.value` by hand.
+  - **Handing over** from a URL modal to another modal: close the first, open the
+    second (`share.close(); setMovingHome(true)`). Closing a URL modal goes back one
+    entry, which lands a frame later: the two overlap for that frame.
+  - **Leaving** for another page: `navigate(to)` from a state modal, `navigate(to,
+{ replace: true })` from a URL modal. A state modal belongs to its component: when
+    the destination keeps that component mounted (a detail page reused for another id),
+    key the page on the id (`PackageDetailBody`, `RunDetailBody`) or close the modal first.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
-  Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
-  or the host returns `null`), so it reopens empty on a creation and on the stored values on an
+  Escape, Back): the form is mounted only while the modal is open (`{open && <Form />}`), so it reopens empty on a creation and on the stored values on an
   edition. Never keep a draft in a component that stays mounted while the modal is closed.
 - Destructive acts: `ConfirmModal` (`components/confirm-modal.tsx`). Its title
   names the act (« Supprimer la planification ? »), its body says what changes,
@@ -611,12 +736,18 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   the refusal inline. A delete hook never refetches the page being left (a 404
   GET): it invalidates the list, and the item's detail with `refetchType: "none"`.
 - **Creating a small object** (schedule, model, webhook, key): a modal asking
-  only what it needs to exist, opened by a URL param from every entry point
+  only what it needs to exist, opened from every entry point
   with the context preselected, then the object's page takes the rest
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
-  (agent, skill, integration, MCP server): the creation hand-off modal
+  (agent, skill, integration): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then the editor page.
+  url (when offered) / manual / chat / import), then, for the manual way, `components/create-package-modal.tsx`
+  (name, identifier, description, plus an agent's prompt or an integration's server URL), after
+  which the new package's page takes the rest, its files included. A local integration (one that ships its own MCP server) is written in the editor or imported (`.afps`). An integration is also added
+  from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
+  `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
+  in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the
+  package exists, and the step is read from the package (`integrationWizardStep`).
 
 ## 10. Feedback
 
@@ -635,13 +766,14 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   field already shows the change.
 - An expected refusal that asks for a choice (a 409 naming candidates) is a
   form state with the choice, not « Erreur d'enregistrement » and not a fault: an
-  `info` alert per integration, said by `ScheduleConnectionRefusals` wherever the
-  write can be refused (Connexions and Identité of a schedule). It names whose
+  `info` alert per integration, said by `ScheduleConnectionRefusals`. A schedule's
+  Save refused that way is toasted with a link to its Connexions, where the answer
+  is (`ScheduleConnectionAnswer`). It names whose
   connection and which integration by its display name, and says why the server
   cannot decide (« Choisissez la connexion Telegram pour e2e-C Membre » / « e2e-C
   Membre a plusieurs connexions Telegram. Une planification se lance seule : elle ne peut pas
   demander laquelle utiliser au moment de l'exécution. »); the choice is the
-  `ConnectionChoiceMenu` under it. A refusal that is a fault (a connection the
+  connections cell under it. A refusal that is a fault (a connection the
   identity no longer reaches) is the one destructive list. Any other refusal puts
   the control back on the stored value and is toasted, with no inline error under
   it (`ActorSelect` in a schedule's identity).
@@ -693,17 +825,16 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   `packages/ui/src/components/artifact.tsx`) around `FileViewer`
   (`components/file-viewer.tsx`, by the server's `preview_kind`; its HTML sandbox
   is `allow-scripts` only, never loosen it). A file list is `DocumentListPanel`
-  (table or `FileTile` grid), a preview is addressable as `?preview=<id>`.
+  (table, cards or compact list), a preview is addressable as `?preview=<id>`.
 - **A package's files** are one explorer in Paramètres › Explorer
   (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
 - **An agent's input and output schemas** are edited one way: `SchemaFieldList`
   (`components/agent-editor/schema-field-list.tsx`, a table and a modal at
-  `?field-input=` / `?field-output=`), in Paramètres › Schémas and on the creation
-  page.
+  `?field-input=` / `?field-output=`), in Paramètres › Schémas.
 - **Code and JSON editors** are Monaco, only through the lazy facade
-  `components/monaco/index.tsx` (`MonacoEditor`, `MonacoDiffEditor`; self-hosted,
+  `components/monaco/index.tsx` (`CodeEditor`, `CodeDiff`: the one theme and base options; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,
   `package-editor/content-editor.tsx` for typed text (it owns its text from mount,
   push new text by remounting with a `key`), `DraftDiffView` for a diff.
@@ -713,7 +844,9 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
 ## 13. Chat
 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
-on assistant-ui) inside the shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
+on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
+is shared by the route fallback and the history wait. The chat sits inside the
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
@@ -762,9 +895,8 @@ Every screen at 390 px: no horizontal page scroll, a grid has a single-column
 variant (`max-md:grid-cols-1`, `lg:grid-cols-…`; a card grid is `CardGrid`),
 header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
 wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
-becomes a select (`PanelDialog mobileNav`). A surface that covers the page on a
-phone (`PanelDialog mobileAsSurface`) sits at `z-30`, above the `z-10` / `z-20`
-stretched links and action clusters of the cards under it. Tabs tighten to `px-2`
+becomes a menu sheet (`PhoneNavigation`), and a panel overlay covers the page
+(`OverlayFrame` goes full screen below `sm`). Tabs tighten to `px-2`
 below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
 ## Checklist before handing UI work over

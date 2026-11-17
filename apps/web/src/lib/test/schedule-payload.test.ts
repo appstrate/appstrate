@@ -1,24 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The body of every schedule write. The connection the fallback binds is named for a schedule
- * running as the viewer, never for another actor, and only the fired version's integrations are
- * kept. A move of the actor or the version writes the connections of the state it moves to.
+ * The body of every schedule write. It carries the picks the user made, kept to the fired
+ * version's integrations, and never the connection a fallback binds: the server names that one
+ * (`withScheduleFallback`). A save that moves the actor or the version writes the connections of
+ * the state it moves to.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  armedScheduleWrite,
-  dueScheduleMove,
+  type ScheduleDraft,
   sameActor,
   savedScheduleOverrides,
-  scheduleConnectionPickPayload,
   scheduleCreatePayload,
   scheduleExecutionPayload,
-  scheduleMovePayload,
-  scheduleRefusalAnswerPayload,
+  scheduleUpdatePayload,
 } from "../schedule-payload.ts";
-import type { FallbackBindingEntry } from "../connection-set.ts";
 
 const ALICE = { userId: "usr_alice" };
 const BOB = { userId: "usr_bob" };
@@ -26,14 +23,6 @@ const GMAIL = "@acme/gmail";
 const SLACK = "@acme/slack";
 const PICKS = { [GMAIL]: ["conn_1"] };
 
-/** The viewer's own Gmail connection, bound by the fallback. */
-const viewerReadiness: FallbackBindingEntry[] = [
-  {
-    integration_package_id: GMAIL,
-    inert: false,
-    resolution: { source: "fallback_auto", resolved_connection_ids: ["conn_own"] },
-  },
-];
 const declared = [GMAIL, SLACK];
 
 type CreateState = Parameters<typeof scheduleCreatePayload>[0];
@@ -46,8 +35,6 @@ function create(state: Partial<CreateState>) {
     timezone: "UTC",
     input: {},
     overrides: {},
-    runsAsViewer: false,
-    viewerReadiness: undefined,
     declared: undefined,
     versionOverride: undefined,
     actor: undefined,
@@ -85,98 +72,92 @@ describe("scheduleCreatePayload", () => {
     });
   });
 
-  it("names the connection the viewer's fallback binds", () => {
-    expect(create({ runsAsViewer: true, viewerReadiness, declared }).connection_overrides).toEqual({
-      [GMAIL]: ["conn_own"],
-    });
-  });
-
-  it("never names the viewer's connection on a schedule running as someone else", () => {
-    const other = { runsAsViewer: false, viewerReadiness, declared, actor: BOB };
-    expect("connection_overrides" in create(other)).toBe(false);
+  it("names no connection the user did not pick", () => {
+    expect("connection_overrides" in create({ declared })).toBe(false);
   });
 });
 
-describe("scheduleMovePayload", () => {
+describe("scheduleUpdatePayload", () => {
   const stored = { actor: ALICE, versionOverride: null, picks: PICKS };
-  const move = (args: Partial<Parameters<typeof scheduleMovePayload>[0]>) =>
-    scheduleMovePayload({
-      stored,
-      next: {},
-      runsAsViewer: false,
-      viewerReadiness: undefined,
-      declared,
-      ...args,
-    });
+  const update = (
+    draft: ScheduleDraft,
+    over: Partial<Parameters<typeof scheduleUpdatePayload>[0]> = {},
+  ) => scheduleUpdatePayload({ stored, draft, declared, ...over });
 
-  it("actor changed without picks: an explicit null, never an absent key", () => {
-    const payload = move({ next: { actor: BOB } });
+  it("sends nothing for an untouched draft", () => {
+    expect(update({})).toEqual({});
+  });
+
+  it("sends the changed keys only, the name trimmed", () => {
+    expect(update({ name: " Weekly ", cron: "0 8 * * 1", timezone: "Europe/Paris" })).toEqual({
+      name: "Weekly",
+      cron_expression: "0 8 * * 1",
+      timezone: "Europe/Paris",
+    });
+    expect(update({ name: "   " })).toEqual({});
+  });
+
+  it("actor moved without picks: an explicit null, never an absent key", () => {
+    const payload = update({ actor: BOB });
     expect(payload.actor).toEqual(BOB);
     expect("connection_overrides" in payload).toBe(true);
     expect(payload.connection_overrides).toBeNull();
   });
 
-  it("drops the previous identity's picks, and never names the viewer's for another actor", () => {
-    expect(move({ next: { actor: BOB }, viewerReadiness }).connection_overrides).toBeNull();
+  it("an actor equal to the stored one moves nothing", () => {
+    expect(update({ actor: ALICE })).toEqual({});
   });
 
-  it("switching to the viewer names their fallback's set in the same write", () => {
-    const payload = move({
-      stored: { ...stored, actor: BOB },
-      next: { actor: ALICE },
-      runsAsViewer: true,
-      viewerReadiness,
-    });
-    expect(payload).toEqual({ actor: ALICE, connection_overrides: { [GMAIL]: ["conn_own"] } });
+  it("switching to the viewer sends no picks: the server names their fallback", () => {
+    const payload = update({ actor: ALICE }, { stored: { ...stored, actor: BOB } });
+    expect(payload).toEqual({ actor: ALICE, connection_overrides: null });
   });
 
   it("sends version_override only on a change, null when cleared", () => {
-    expect("version_override" in move({ next: { versionOverride: null } })).toBe(false);
-    expect(move({ next: { versionOverride: "1.2.0" } }).version_override).toBe("1.2.0");
+    expect("version_override" in update({ versionOverride: null })).toBe(false);
+    expect(update({ versionOverride: "1.2.0" }).version_override).toBe("1.2.0");
     const frozen = { ...stored, versionOverride: "1.2.0" };
-    expect(move({ stored: frozen, next: { versionOverride: null } }).version_override).toBeNull();
-    expect("actor" in move({ next: { actor: ALICE } })).toBe(false);
+    expect(update({ versionOverride: null }, { stored: frozen }).version_override).toBeNull();
   });
 
-  it("keeps the picks the NEW version declares, and names its fallback for the viewer", () => {
+  it("keeps the picks the NEW version declares", () => {
     const picks = { [GMAIL]: ["conn_1"], [SLACK]: ["conn_2"] };
-    const payload = move({
-      stored: { ...stored, picks },
-      next: { versionOverride: "2.0.0" },
-      declared: [SLACK],
-    });
-    expect(payload).toEqual({
-      version_override: "2.0.0",
-      connection_overrides: { [SLACK]: ["conn_2"] },
-    });
-    const viewer = move({
-      stored: { ...stored, picks: null },
-      next: { versionOverride: "2.0.0" },
-      runsAsViewer: true,
-      viewerReadiness,
-    });
-    expect(viewer.connection_overrides).toEqual({ [GMAIL]: ["conn_own"] });
-  });
-});
-
-describe("dueScheduleMove", () => {
-  const args = {
-    stored: { actor: BOB, versionOverride: null, picks: null },
-    next: { actor: ALICE },
-    runsAsViewer: true,
-  };
-
-  it("holds the move while the next state's facts load", () => {
     expect(
-      dueScheduleMove({ ...args, ready: false, viewerReadiness: undefined, declared: undefined }),
-    ).toBeNull();
+      update({ versionOverride: "2.0.0" }, { stored: { ...stored, picks }, declared: [SLACK] }),
+    ).toEqual({ version_override: "2.0.0", connection_overrides: { [SLACK]: ["conn_2"] } });
   });
 
-  it("once they settle, sends it with the connections of the state it moves to", () => {
-    expect(dueScheduleMove({ ...args, ready: true, viewerReadiness, declared })).toEqual({
-      actor: ALICE,
-      connection_overrides: { [GMAIL]: ["conn_own"] },
+  it("with no declared integrations yet every pick is kept", () => {
+    expect(update({ versionOverride: "2.0.0" }, { declared: undefined })).toEqual({
+      version_override: "2.0.0",
+      connection_overrides: PICKS,
     });
+  });
+
+  it("a pick replaces the whole map; none left is an explicit null", () => {
+    expect(update({ picks: { [SLACK]: ["conn_2"] } }).connection_overrides).toEqual({
+      [SLACK]: ["conn_2"],
+    });
+    expect(update({ picks: {} }).connection_overrides).toBeNull();
+  });
+
+  it("picks made for the new actor are the ones sent, the stored ones are dropped", () => {
+    expect(update({ actor: BOB, picks: { [SLACK]: ["conn_9"] } })).toEqual({
+      actor: BOB,
+      connection_overrides: { [SLACK]: ["conn_9"] },
+    });
+  });
+
+  it("an execution override clears with null, never an absent key", () => {
+    expect(update({ overrides: { model_id_override: "m1" } })).toEqual({
+      model_id_override: "m1",
+      generation_config_override: null,
+      proxy_id_override: null,
+    });
+  });
+
+  it("sends the input body as given", () => {
+    expect(update({ input: { topic: "ai" } })).toEqual({ input: { topic: "ai" } });
   });
 });
 
@@ -202,100 +183,6 @@ describe("scheduleExecutionPayload", () => {
   });
 });
 
-describe("scheduleRefusalAnswerPayload", () => {
-  const sent = { id: "sch_1", version_override: "2.0.0", connection_overrides: PICKS };
-
-  it("re-sends the refused write whole, its picks replaced", () => {
-    expect<unknown>(scheduleRefusalAnswerPayload(sent, { [SLACK]: ["conn_2"] })).toEqual({
-      id: "sch_1",
-      version_override: "2.0.0",
-      connection_overrides: { [SLACK]: ["conn_2"] },
-    });
-  });
-
-  it("clears the map when nothing is picked", () => {
-    expect<unknown>(scheduleRefusalAnswerPayload({ id: "sch_1", actor: BOB }, {})).toEqual({
-      id: "sch_1",
-      actor: BOB,
-      connection_overrides: null,
-    });
-  });
-});
-
-describe("scheduleConnectionPickPayload", () => {
-  it("names the viewer's fallback for the integrations the pick leaves unpicked", () => {
-    // Running as the viewer, Gmail required and bound only by the fallback: picking Slack
-    // alone would be re-checked without Gmail and refused over it.
-    expect(
-      scheduleConnectionPickPayload({
-        picks: null,
-        integrationId: SLACK,
-        connectionIds: ["conn_slack"],
-        runsAsViewer: true,
-        viewerReadiness,
-        declared,
-      }),
-    ).toEqual({ connection_overrides: { [GMAIL]: ["conn_own"], [SLACK]: ["conn_slack"] } });
-  });
-
-  it("names nothing for another actor, and keeps only the declared integrations", () => {
-    expect(
-      scheduleConnectionPickPayload({
-        picks: { ...PICKS, "@acme/gone": ["conn_x"] },
-        integrationId: SLACK,
-        connectionIds: ["conn_slack"],
-        runsAsViewer: false,
-        viewerReadiness,
-        declared,
-      }),
-    ).toEqual({ connection_overrides: { ...PICKS, [SLACK]: ["conn_slack"] } });
-  });
-
-  it("sends null once the last pick is removed and nothing is named", () => {
-    expect(
-      scheduleConnectionPickPayload({
-        picks: PICKS,
-        integrationId: GMAIL,
-        connectionIds: null,
-        runsAsViewer: false,
-        viewerReadiness,
-        declared,
-      }),
-    ).toEqual({ connection_overrides: null });
-  });
-});
-
-describe("armedScheduleWrite", () => {
-  const named = { [GMAIL]: ["conn_own"] };
-  const write = { cron_expression: "0 8 * * *" };
-
-  it("re-sends the named set on a write to an armed schedule", () => {
-    expect(armedScheduleWrite(write, { enabled: true, named })).toEqual({
-      ...write,
-      connection_overrides: named,
-    });
-  });
-
-  it("re-sends it on the write that arms the schedule, not on the one that disarms it", () => {
-    const enable = { enabled: true };
-    expect(armedScheduleWrite(enable, { enabled: false, named })).toEqual({
-      ...enable,
-      connection_overrides: named,
-    });
-    const disable = { enabled: false };
-    expect(armedScheduleWrite(disable, { enabled: true, named })).toBe(disable);
-  });
-
-  it("leaves the write alone when disarmed, nothing is named, or it decides the set itself", () => {
-    expect(armedScheduleWrite(write, { enabled: false, named })).toBe(write);
-    expect(armedScheduleWrite(write, { enabled: true, named: undefined })).toBe(write);
-    const own = { connection_overrides: null };
-    expect(armedScheduleWrite(own, { enabled: true, named })).toBe(own);
-    const moved = { actor: BOB, connection_overrides: null };
-    expect(armedScheduleWrite(moved, { enabled: true, named })).toBe(moved);
-  });
-});
-
 describe("sameActor", () => {
   it("compares the identity, not the object", () => {
     expect(sameActor({ userId: "u" }, { userId: "u" })).toBe(true);
@@ -306,36 +193,23 @@ describe("sameActor", () => {
 });
 
 describe("savedScheduleOverrides", () => {
-  const viewer = { runsAsViewer: true, viewerReadiness, declared };
-
-  it("names the connection the viewer's fallback binds, beside the declared picks", () => {
-    const overrides = { connection_overrides: { [SLACK]: ["conn_2"] }, model_id_override: "m1" };
-    expect(savedScheduleOverrides({ overrides, ...viewer })).toEqual({
-      connection_overrides: { [SLACK]: ["conn_2"], [GMAIL]: ["conn_own"] },
+  it("keeps only the integrations the fired version declares", () => {
+    const overrides = {
+      connection_overrides: { [SLACK]: ["conn_2"], "@acme/gone": ["conn_3"] },
+      model_id_override: "m1",
+    };
+    expect(savedScheduleOverrides({ overrides, declared })).toEqual({
+      connection_overrides: { [SLACK]: ["conn_2"] },
+      model_id_override: "m1",
+    });
+    expect(savedScheduleOverrides({ overrides, declared: [] })).toEqual({
       model_id_override: "m1",
     });
   });
 
-  it("never names the viewer's connection on a schedule running as someone else", () => {
-    const other = { runsAsViewer: false, viewerReadiness, declared };
-    expect(savedScheduleOverrides({ overrides: {}, ...other })).toEqual({});
-    const picks = { connection_overrides: { [SLACK]: ["conn_2"] } };
-    expect(savedScheduleOverrides({ overrides: picks, ...other })).toEqual(picks);
-  });
-
-  it("keeps only the integrations the fired version declares", () => {
-    const overrides = { connection_overrides: { [SLACK]: ["conn_2"], "@acme/gone": ["conn_3"] } };
-    expect(savedScheduleOverrides({ overrides, ...viewer }).connection_overrides).toEqual({
-      [SLACK]: ["conn_2"],
-      [GMAIL]: ["conn_own"],
-    });
-    expect(savedScheduleOverrides({ overrides, ...viewer, declared: [] })).toEqual({});
-  });
-
-  it("leaves a pick the user made, even to none, in place of the fallback", () => {
+  it("keeps every pick while the declared integrations load, and a pick to none", () => {
     const overrides = { connection_overrides: { [GMAIL]: [] } };
-    expect(savedScheduleOverrides({ overrides, ...viewer }).connection_overrides).toEqual({
-      [GMAIL]: [],
-    });
+    expect(savedScheduleOverrides({ overrides, declared: undefined })).toEqual(overrides);
+    expect(savedScheduleOverrides({ overrides, declared })).toEqual(overrides);
   });
 });

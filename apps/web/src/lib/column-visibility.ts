@@ -3,24 +3,26 @@
 import type { DataColumn } from "../components/data-table";
 
 /**
- * The column that says WHICH row this is: the first one read and always drawn.
- * A tick or a select before it is not the row's name.
+ * The column that says WHICH row this is: the one marked `identity`, or else the first read
+ * column. A tick or select before it is not the row's name. -1 when there is none.
  */
-export function isIdentityColumn<T>(column: DataColumn<T>): boolean {
-  return !column.tier && !column.control;
+export function identityColumnIndex<T>(columns: DataColumn<T>[]): number {
+  const marked = columns.findIndex((column) => column.identity && !column.control);
+  return marked >= 0 ? marked : columns.findIndex((column) => !column.control);
 }
 
-/**
- * The columns a reader may hide, and the menu spec that goes with them.
- *
- * A column with no header cannot be named in a menu (the actions column), so it
- * is never offered — and never hidden either.
- */
+/** The column the reader cannot hide: the row's name, when it has a head the menu can name. */
+function requiredColumnId<T>(columns: DataColumn<T>[]): string | undefined {
+  const column = columns[identityColumnIndex(columns)];
+  return column?.header ? column.id : undefined;
+}
+
+/** A column with no header (the actions column) cannot be named in a menu: never offered, never hidden. */
 export function columnMenu<T>(
   columns: DataColumn<T>[],
   visibility: { hidden: string[]; toggle: (id: string) => void },
 ) {
-  const requiredId = columns.find((column) => isIdentityColumn(column) && column.header)?.id;
+  const requiredId = requiredColumnId(columns);
   return {
     options: columns
       .filter((column) => column.header)
@@ -34,9 +36,8 @@ export function columnMenu<T>(
   };
 }
 
-/** What is left once the reader's hidden columns are taken out. */
 export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): DataColumn<T>[] {
-  const requiredId = columns.find((column) => isIdentityColumn(column) && column.header)?.id;
+  const requiredId = requiredColumnId(columns);
   return columns.filter(
     (column) => column.id === requiredId || !column.header || !hidden.includes(column.id),
   );

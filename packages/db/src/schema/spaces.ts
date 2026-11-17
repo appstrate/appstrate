@@ -25,7 +25,25 @@ export const spaces = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /**
+     * Visual identity, shared with agents and organizations: `lucide:<name>` or
+     * `emoji:<one emoji>` — a space takes no uploaded image (`PATCH /api/spaces/{id}`
+     * refuses one). Null renders the space's initial.
+     */
+    icon: text("icon"),
+    /**
+     * A palette key (`blue`, `emerald`, …), validated by the application so a new
+     * colour needs no migration. Null derives the colour from the id.
+     */
+    color: text("color"),
     isDefault: boolean("is_default").notNull().default(false),
+    /**
+     * Whether members may use the space's connections through the credential proxy outside a
+     * run (`/api/credential-proxy/*` without `X-Run-Id`, the MCP
+     * `search_integration_tools` and `call_integration_tool` tools). A column, not a `settings` key: `PATCH /api/spaces/{id}` replaces
+     * `settings` whole, and a client sending only another setting must not reopen the space.
+     */
+    credentialProxyOpen: boolean("credential_proxy_open").notNull().default(true),
     settings: jsonb("settings").notNull().default({}),
     createdBy: text("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -88,6 +106,10 @@ export const spaces = pgTable(
     check("spaces_personal_is_private", sql`owner_user_id IS NULL OR visibility = 'private'`),
     check("spaces_personal_not_default", sql`owner_user_id IS NULL OR NOT is_default`),
     check("spaces_orphaned_is_personal", sql`orphaned_at IS NULL OR owner_user_id IS NOT NULL`),
+    // Backstop behind the application's icon validation, the same bound as
+    // `organizations_icon_length`: one ceiling for the one icon grammar, though a
+    // space's own forms stay far below it.
+    check("spaces_icon_length", sql`octet_length(icon) <= 16384`),
   ],
 );
 

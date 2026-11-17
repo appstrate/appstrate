@@ -13,7 +13,7 @@ import type {
   ReadinessErrorCode,
 } from "@appstrate/core/integration";
 import type { AgentDiagnostic, AgentDiagnostics } from "../hooks/use-agent-diagnostics";
-import { primaryDisplayFile } from "./package-files";
+import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import { agentSettingsHref, type AgentSettingsSection } from "./settings-section-href";
 
 /** Every code the diagnostics carry: readiness, connection and model verdicts, and warnings. */
@@ -69,6 +69,10 @@ const DIAGNOSTIC_TEXT_KEYS = {
     title: "detail.diagnostics.overrideOutranked.title",
     explanation: "detail.diagnostics.overrideOutranked.explanation",
   },
+  connection_set_too_large: {
+    title: "detail.diagnostics.connectionSetTooLarge.title",
+    explanation: "detail.diagnostics.connectionSetTooLarge.explanation",
+  },
   must_choose_connection: {
     title: "detail.diagnostics.mustChooseConnection.title",
     explanation: "detail.diagnostics.mustChooseConnection.explanation",
@@ -88,6 +92,10 @@ const DIAGNOSTIC_TEXT_KEYS = {
   auth_key_serves_no_selected_tool: {
     title: "detail.diagnostics.authKeyServesNoSelectedTool.title",
     explanation: "detail.diagnostics.authKeyServesNoSelectedTool.explanation",
+  },
+  auth_key_on_unauthenticated_integration: {
+    title: "detail.diagnostics.authKeyOnUnauthenticatedIntegration.title",
+    explanation: "detail.diagnostics.authKeyOnUnauthenticatedIntegration.explanation",
   },
   required_integration_unbound: {
     title: "detail.diagnostics.requiredIntegrationUnbound.title",
@@ -187,7 +195,7 @@ export function agentDiagnosticCorrectionTarget(
   }
   // The prompt is a file of the bundle, opened in Explorer.
   if (section === "prompt") {
-    return agentSettingsHref(pathname, "files", { file: primaryDisplayFile("agent").name });
+    return agentSettingsHref(pathname, "files", { file: PACKAGE_CONTENT_FILE.agent });
   }
   const named = section ? CORRECTION_SECTIONS[section] : undefined;
   return agentSettingsHref(pathname, named ?? (destination === "bundle" ? "general" : "model"));

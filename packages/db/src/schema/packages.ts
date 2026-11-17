@@ -22,28 +22,28 @@ import { spaces } from "./spaces.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
- * Package ACTIVATION, per space — one row per (space, package) saying this
- * space runs it, plus everything the space chose about how: the model, the
- * proxy, the generation settings, the agent's stored input values.
+ * Package PLACEMENT, per space — one row per (space, package) saying the
+ * package is placed in that space, with `enabled` as its state there, plus
+ * everything the space chose about how it runs: the model, the proxy, the
+ * generation settings, the agent's stored input values.
  *
- * A row is not a placement. WHERE a package is, is decided by `packages.
- * home_space_id` and by {@link packageShares}; a row here is what a space does
- * with a package already placed in it, and the platform reads the two together
- * (`services/package-activation.ts`). A row that outlives its placement — the
- * home moved away, the offer was revoked — decides nothing anywhere: not on the
- * run gate, not in the listings, not in the caller context handed to the model.
+ * A package is placed in a space when it is a system package, when the space
+ * HOMES it (`packages.home_space_id`), or when a row here exists
+ * (`services/package-placement.ts`). Outside the home, a row is the only way
+ * in: `shared_by` names the person who placed it (`NULL` once they are gone,
+ * or when a home move left the row behind).
  *
- * `enabled` is sticky in both directions and the ROW always wins over the
- * deployment's default, which is what makes a system package switchable off
- * per space. Deactivating never deletes the row: it holds the configuration,
- * so switching a package off for a week costs nothing to undo.
+ * `enabled` has no default: every writer states whether the row it creates is
+ * on. The ROW always wins over the deployment's default, which is what makes a
+ * system package switchable off per space. Deactivating never deletes the row:
+ * it holds the configuration, so switching a package off for a week costs
+ * nothing to undo.
  *
- * A row is CREATED by the three activation doors (`services/space-packages.ts`)
- * and by nothing else. It is DELETED by two acts, both of which withdraw the
- * placement behind it in the same transaction: revoking the share
- * (`revokePackageShare`) and moving the home out with `keep_in_previous_home:
- * false` (`reconcilePlacementsAfterRehome`). A third writer only ever UPDATES a
- * column in place on a row already placed (`setBlockUserConnections`).
+ * Outside the home, a row is CREATED by one door (`placePackage`,
+ * `services/space-packages.ts`), which asks for a published version and the
+ * share authority in the home. It is DELETED by withdrawing the placement
+ * (`revokePackageShare`) and by moving the home out with
+ * `keep_in_previous_home: false` (`reconcilePlacementsAfterRehome`).
  */
 export const spacePackages = pgTable(
   "space_packages",
@@ -94,33 +94,25 @@ export const spacePackages = pgTable(
     // published SKILL.md, whatever the skill mode and the member's `skills:*`
     // grants. Like every setting here, it survives deactivation.
     chatEnforced: boolean("chat_enforced").notNull().default(false),
-    enabled: boolean("enabled").notNull().default(true),
+    enabled: boolean("enabled").notNull(),
+    sharedBy: text("shared_by").references(() => user.id, { onDelete: "set null" }),
     installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.spaceId, table.packageId] }),
     index("idx_space_packages_package_id").on(table.packageId),
+    // Referencing-side index for the `user` SET NULL action.
+    index("idx_space_packages_shared_by").on(table.sharedBy),
   ],
 );
 
 /**
- * Package sharing — AUDIENCE, one of the two PLACEMENTS (RBAC spec §6.10).
- *
- * A row here says "this package is OFFERED to that space". It grants READ (the
- * metadata a recipient needs to decide, and the "add to my space" affordance)
- * and NOTHING else: running a package, resolving its pins and resolving its
- * credentials all ask {@link spacePackages} as well, and the recipient writes
- * that row themselves by ACTIVATING the package
- * (`POST /api/spaces/{spaceId}/packages`). RBAC spec §6.10 carries why the two
- * acts are two tables.
- *
- * Revoking a share deletes the activation row it backs, in the same
- * transaction: the offer was the placement, so nothing survives it.
- *
- * `shared_by` is `SET NULL` rather than `RESTRICT`: the sharer leaving the
- * organization must not keep the audience alive as a foreign-key obstacle, and
- * the audit event records who shared it anyway.
+ * RETIRED — folded into {@link spacePackages} (#2045). Read only by
+ * `scripts/migration/0048-fold-package-shares.ts`, which copies every row into
+ * a `space_packages` row, and by the boot guard that refuses to start until it
+ * has (`assertPackageSharesFolded`, `apps/api/src/lib/boot.ts`). The follow-up
+ * migration drops it.
  */
 export const packageShares = pgTable(
   "package_shares",
@@ -165,9 +157,8 @@ export const packages = pgTable(
     // rather than housing in one, and an inline run's shadow row
     // (`ephemeral`).
     //
-    // Moving it moves a placement: every space still holding a
-    // `space_packages` row needs the offer that now places it, written in the
-    // same transaction (`reconcilePlacementsAfterRehome`).
+    // Moving it moves a placement: the space left keeps the package only if it
+    // keeps a `space_packages` row (`reconcilePlacementsAfterRehome`).
     //
     // `ON DELETE RESTRICT`: a space that homes packages cannot be dropped out
     // from under them. `deleteSpace` therefore refuses with 409

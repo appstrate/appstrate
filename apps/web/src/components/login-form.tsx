@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { FieldError } from "@appstrate/ui/components/field";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
@@ -119,7 +120,7 @@ export function LoginForm({
           <PasswordField
             register={register}
             name="password"
-            label={t("login.password")}
+            label={t("common:claim.passwordLabel")}
             invalid={showError("password")}
             error={errors.password?.message}
             autoComplete="current-password"
@@ -136,9 +137,9 @@ export function LoginForm({
           />
           {errors.root && <FieldError>{errors.root.message}</FieldError>}
         </div>
-        <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? t("loading") : t("login.login")}
-        </Button>
+        <PendingButton size="lg" className="w-full" type="submit" pending={isSubmitting}>
+          {t("login.login")}
+        </PendingButton>
         {hasSocialAuth && (
           <>
             <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
@@ -160,7 +161,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => navigate("/magic-link", { state: { email: getValues("email") } })}
                 >
-                  <Mail className="h-4 w-4" />
+                  <Mail />
                   {t("login.magicLink")}
                 </Button>
               )}

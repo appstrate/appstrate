@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization roles, in the roles page's first tab.
- *
- * Four fixed roles, the same in every organization: code, not rows, so there
- * is nothing to edit and the rows open nothing. The list says what each one is
- * and how far it reaches into spaces; the matrix crosses them with the
- * capabilities they hold.
- *
- * The facts behind both views live in `org-role-columns.tsx`, which mirrors the
- * server's matrix.
+ * The four fixed organization roles (code, not rows: nothing to edit). Which
+ * role holds which capability is the server's matrix (`GET /api/org-roles`);
+ * the rows only group its permissions (`lib/org-role-capabilities.ts`).
  */
 import { useTranslation } from "react-i18next";
 import { ORG_ROLES, type OrgRole, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { DataTable } from "../../components/data-table";
+import { ErrorState } from "../../components/page-states";
 import { PermissionMark } from "../../components/permission-mark";
 import { PermissionMatrix } from "../../components/permission-matrix";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { ORG_ROLE_CAPABILITIES } from "../../lib/org-role-capabilities";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { useOrgRoleGrants } from "../../hooks/use-roles";
+import { holdsCapability, ORG_ROLE_CAPABILITIES } from "../../lib/org-role-capabilities";
 import { ORG_ROLE_SPACE_ACCESS, useOrgRoleColumns } from "./org-role-columns";
 
 export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) => void }) {
@@ -37,6 +34,8 @@ export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) 
 
 export function OrgRolesMatrix() {
   const { t } = useTranslation(["settings", "common"]);
+  const { grants, error } = useOrgRoleGrants();
+  if (error) return <ErrorState error={error} />;
   return (
     <PermissionMatrix<OrgRole>
       ariaLabel={t("orgRolesGuide.matrixLabel")}
@@ -47,7 +46,14 @@ export function OrgRolesMatrix() {
           rows: ORG_ROLE_CAPABILITIES.map((capability) => ({
             key: capability.key,
             label: t(`orgRolesGuide.can.${capability.key}`),
-            cell: (role) => <PermissionMark granted={capability.roles.includes(role)} />,
+            cell: (role) => {
+              const granted = grants?.get(role);
+              return granted ? (
+                <PermissionMark granted={holdsCapability(capability, granted)} />
+              ) : (
+                <Skeleton className="mx-auto size-4" />
+              );
+            },
           })),
         },
         {

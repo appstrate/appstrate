@@ -36,16 +36,22 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
   McpError,
   ErrorCode,
   type CallToolResult,
+  type GetPromptResult,
   type Implementation,
+  type ListPromptsResult,
   type ListResourcesResult,
+  type Prompt,
   type ReadResourceResult,
   type Resource,
   type ServerNotification,
@@ -151,9 +157,50 @@ export interface AppstrateResourceProvider {
   ) => Promise<ReadResourceResult> | ReadResourceResult;
 }
 
+/**
+ * Prompt provider hooks. Pass `prompts` to `createMcpServer` to expose
+ * `prompts/list` and `prompts/get`.
+ *
+ * - `list(extra)` returns the prompts the caller may use right now.
+ * - `get(name, args, extra)` renders one. Throw an `McpError` with
+ *   `ErrorCode.InvalidParams` (-32602) for a name `list` would not return
+ *   (MCP 2025-11-25, "Invalid prompt name").
+ */
+export interface AppstratePromptProvider {
+  list: (extra: AppstrateRequestExtra) => Promise<Prompt[]> | Prompt[];
+  get: (
+    name: string,
+    args: Record<string, string>,
+    extra: AppstrateRequestExtra,
+  ) => Promise<GetPromptResult> | GetPromptResult;
+}
+
+/** The MCP Skills extension identifier (SEP-2640). */
+const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
+
+/**
+ * Skill provider hooks (SEP-2640). Pass `skills` with `resources` to
+ * `createMcpServer` to declare the `io.modelcontextprotocol/skills`
+ * extension and answer `skills/list` / `skills/get`; the skill files
+ * themselves are read through the resource provider.
+ *
+ * - `list(extra)` returns the skills the caller may read.
+ * - `get(uri, extra)` returns the entry whose `SKILL.md` is `uri`, listed or
+ *   not. Throw an `McpError` with `ErrorCode.InvalidParams` (-32602) for a URI
+ *   that names no skill the caller may read.
+ */
+export interface AppstrateSkillProvider {
+  list: (extra: AppstrateRequestExtra) => Promise<SkillEntry[]> | SkillEntry[];
+  get: (uri: string, extra: AppstrateRequestExtra) => Promise<SkillEntry> | SkillEntry;
+}
+
 export interface CreateMcpServerOptions {
   /** Resource provider — when omitted, no `resources/*` capability is advertised. */
   resources?: AppstrateResourceProvider;
+  /** Skill provider — requires `resources`; when omitted, the skills extension is not declared. */
+  skills?: AppstrateSkillProvider;
+  /** Prompt provider — when omitted, no `prompts/*` capability is advertised. */
+  prompts?: AppstratePromptProvider;
   /**
    * Server `instructions` returned in the `initialize` result. MCP clients
    * (Claude Code, Cursor, VSCode, Goose) inject this into the system prompt
@@ -218,9 +265,19 @@ export function createMcpServer(
     registry.set(tool.descriptor.name, tool);
   }
 
+  if (options.skills && !options.resources) {
+    throw new Error("createMcpServer: the skills extension requires a resource provider");
+  }
+
   const capabilities: Record<string, unknown> = { tools: { listChanged: false } };
   if (options.resources) {
     capabilities.resources = { listChanged: false, subscribe: false };
+  }
+  if (options.skills) {
+    capabilities.extensions = { [SKILLS_EXTENSION_ID]: {} };
+  }
+  if (options.prompts) {
+    capabilities.prompts = { listChanged: false };
   }
 
   const server = new Server(serverInfo, { capabilities, instructions: options.instructions });
@@ -252,6 +309,36 @@ export function createMcpServer(
     });
     server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
       return provider.read(req.params.uri, extra);
+    });
+  }
+
+  if (options.skills) {
+    const provider = options.skills;
+    // `skills/*` are extension methods the SDK has no request schema for.
+    server.fallbackRequestHandler = async (request, extra) => {
+      if (request.method === "skills/list") {
+        const skills = await provider.list(extra);
+        return { skills };
+      }
+      if (request.method === "skills/get") {
+        const uri = request.params?.uri;
+        if (typeof uri !== "string" || uri === "") {
+          throw new McpError(ErrorCode.InvalidParams, "skills/get requires a `uri`");
+        }
+        const skill = await provider.get(uri, extra);
+        return { skill };
+      }
+      throw new McpError(ErrorCode.MethodNotFound, "Method not found");
+    };
+  }
+
+  if (options.prompts) {
+    const provider = options.prompts;
+    server.setRequestHandler(ListPromptsRequestSchema, async (_req, extra) => {
+      return { prompts: await provider.list(extra) } satisfies ListPromptsResult;
+    });
+    server.setRequestHandler(GetPromptRequestSchema, async (req, extra) => {
+      return provider.get(req.params.name, req.params.arguments ?? {}, extra);
     });
   }
 
@@ -288,10 +375,16 @@ export async function createInProcessPair(
      * to {@link createMcpServer}.
      */
     resources?: AppstrateResourceProvider;
+    /** Optional prompt provider, forwarded verbatim to {@link createMcpServer}. */
+    prompts?: AppstratePromptProvider;
+    /** Optional skill provider, forwarded verbatim to {@link createMcpServer}. */
+    skills?: AppstrateSkillProvider;
   } = {},
 ): Promise<InProcessMcpPair> {
   const server = createMcpServer(tools, options.serverInfo, {
     ...(options.resources ? { resources: options.resources } : {}),
+    ...(options.prompts ? { prompts: options.prompts } : {}),
+    ...(options.skills ? { skills: options.skills } : {}),
   });
   const client = new Client(
     options.clientInfo ?? { name: "appstrate-mcp-client", version: "0.0.0" },
@@ -328,17 +421,41 @@ export function notifyDetached(
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export type {
   CallToolResult,
+  GetPromptResult,
+  Prompt,
   ReadResourceResult,
   Resource,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
-// MCP client factories. The agent connects to the sidecar's `/mcp`
-// over Streamable HTTP; the CLI uses the in-process pair already
-// exported above.
-export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
+// MCP client factories. Every HTTP client speaks both protocol eras
+// (2026-07-28 stateless, and the 2025 `initialize` handshake); the
+// in-process pair above stays on the v1 SDK.
+export {
+  createMcpHttpClient,
+  httpStatusOf,
+  isRequestTimeout,
+  jsonRpcErrorOf,
+  wrapClient,
+  type AppstrateMcpClient,
+  type ListedSkillEntry,
+} from "./client.ts";
 
-export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
+export {
+  createStatelessTransport,
+  parseMcpPost,
+  serveAuthenticatedStatelessPost,
+  serveStatelessPost,
+  type McpPost,
+} from "./streamable-post.ts";
+
+// Inline bounds of a resource's bytes in a tool or `resources/read` result,
+// shared by the platform's file reads and the chat's `read_resource` tool.
+export {
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+} from "./resource-limits.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible
@@ -353,10 +470,19 @@ export {
   isHiddenCodePoint,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  stripReservedResultMeta,
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
+
+// Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor
+// the model sees under the exposed name, stamped with the integration tool it exposes. Shared by
+// the sidecar's McpHost and the CLI.
+export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
+
+// The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
+export { mcpFetch } from "./mcp-fetch.ts";
 
 // Upstream-response metadata wire format — `_meta` key, header
 // allowlist, and `UpstreamMeta` type shared by the sidecar serializer
@@ -365,6 +491,8 @@ export {
 export {
   API_CALL_ERROR_META_KEY,
   apiCallStatusLine,
+  isRelayedResult,
+  markRelayedResult,
   UPSTREAM_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
   type ApiCallErrorMeta,
@@ -382,6 +510,8 @@ export {
   isApiUploadTool,
   readApiCallToolKey,
   readApiUploadSiblingKey,
+  readToolIntegration,
+  TOOL_INTEGRATION_META_KEY,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
 } from "./tool-meta.ts";

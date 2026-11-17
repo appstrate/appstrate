@@ -56,18 +56,10 @@ let privateId: string;
 const activateIn = (spaceId: string) => seedSpacePackage(spaceId, ID);
 
 /**
- * PLACE the skill in a space and activate it there — the only shape a non-home
- * placement can have (RBAC spec §6.9): a package is present in a space through
- * its home or a `package_shares` row, and a `space_packages` row outside the
- * home is always backed by one (the activation door writes it, and
- * `scripts/migration/0016` wrote it for every row that predates the rule).
- * `activateIn` alone is kept for the cases that assert the refusal an UNPLACED
- * row gets.
+ * PLACE the skill in a space and activate it there (RBAC spec §6.9): a package
+ * is present in a space through its home or a `space_packages` row.
  */
-const placeIn = async (spaceId: string) => {
-  await seedPackageShare(spaceId, ID);
-  await seedSpacePackage(spaceId, ID);
-};
+const placeIn = activateIn;
 
 /**
  * MOVE the seeded skill's home — the ONE authority over its draft
@@ -240,7 +232,7 @@ describe("organization detail privacy", () => {
 });
 
 describe("organization library administration", () => {
-  it("reserves the organization library to owners and admins", async () => {
+  it("opens the organization library to every member's own credential, never to an API key", async () => {
     expect((await app.request("/api/library", { headers: authHeaders(ctx) })).status).toBe(200);
     for (const role of ["admin", "member", "guest"] as const) {
       const user = await createTestUser();
@@ -248,7 +240,7 @@ describe("organization library administration", () => {
       const res = await app.request("/api/library", {
         headers: { ...authHeaders(ctx), Cookie: user.cookie },
       });
-      expect(res.status).toBe(role === "admin" ? 200 : 403);
+      expect(res.status).toBe(200);
     }
     expect(
       (
@@ -259,11 +251,16 @@ describe("organization library administration", () => {
     ).toBe(403);
   });
 
-  it("does not let an owner previewing a member regain organization administration", async () => {
-    const res = await app.request("/api/library", {
-      headers: { ...authHeaders(ctx), "X-View-As": "org_role=member" },
-    });
-    expect(res.status).toBe(403);
+  it("grades an owner previewing a member as that member", async () => {
+    // A closed space nobody but owners and admins reaches: the preview must not see it.
+    const closed = await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "closed" });
+    const spacesOf = async (extra: Record<string, string>) => {
+      const res = await app.request("/api/library", { headers: { ...authHeaders(ctx), ...extra } });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { spaces: { id: string }[] }).spaces.map((space) => space.id);
+    };
+    expect(await spacesOf({})).toContain(closed.id);
+    expect(await spacesOf({ "X-View-As": "org_role=member" })).not.toContain(closed.id);
   });
 
   it("discovers readable candidates without revealing other spaces' installation state", async () => {
@@ -275,14 +272,14 @@ describe("organization library administration", () => {
     await seedPackageShare(ctx.defaultSpaceId, ID);
     const body = await library(headers);
     expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
-    // An untaken offer is a PLACEMENT with `state: "none"` on the package's own
-    // row — one row, one switch. Nothing about the SOURCE space leaks with it:
+    // A placement not switched on is a PLACEMENT with `state: "inactive"` on the
+    // package's own row — one row, one switch. Nothing about the SOURCE space leaks with it:
     // the only space id named is the caller's own.
     expect(body.packages.skill[0]?.placements).toEqual([
       {
         space_id: ctx.defaultSpaceId,
         via: "shared",
-        state: "none",
+        state: "inactive",
         chat_enforced: false,
         shared_by: null,
       },

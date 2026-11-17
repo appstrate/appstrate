@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What a refusal says about the caller's own standing: its session, and the listings its permissions derive from. */
-
 import { queryClient } from "./query-client";
 import { orgKeys } from "./query-keys";
 import { authStore } from "../stores/auth-store";
 
 const SPACE_LIST_KEY = ["get", "/api/spaces"] as const;
-/** The member list, which displays the roles. */
 const ORG_DETAIL_KEY = ["get", "/api/orgs/{orgId}"] as const;
 /** The re-read requests: their own refusal re-reading them would never settle. */
 const AUTHORITY_READ = /^\/api\/(orgs(\/[^/]+)?|spaces)$/;
@@ -37,10 +34,7 @@ function rereadAuthority(): void {
 
 let onSessionRefused: (() => void) | null = null;
 
-/**
- * What a 401 does, registered by the auth seam (the client cannot import it
- * back). `hasSession`: `false` when there is none, `null` when it could not be asked.
- */
+/** What a 401 does, registered by the auth seam (the client cannot import it back). `hasSession`: `false` = none, `null` = could not be asked. */
 export function registerSessionCheck(deps: {
   hasSession: () => Promise<boolean | null>;
   /** Signs out and clears what the session loaded: the next user must not see it. */

@@ -9,8 +9,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
-import { FormItem } from "@appstrate/ui/components/field";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -43,7 +43,7 @@ export function CapabilitiesSection({
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <div className="mt-2 space-y-4 border-t pt-4">
+    <div className="flex flex-col gap-4 border-t pt-4">
       <CheckboxField
         id="mdl-capabilities-explicit"
         label={t("models.form.capabilitiesExplicit")}
@@ -53,8 +53,8 @@ export function CapabilitiesSection({
 
       {explicit ? (
         <>
-          <div className="space-y-2">
-            <Label className="text-muted-foreground text-sm font-medium">
+          <div className="flex flex-col gap-2">
+            <Label className="text-muted-foreground mb-0 text-sm font-medium">
               {t("models.form.capabilitiesLimits")}
             </Label>
             <div className="grid grid-cols-2 gap-4">
@@ -67,8 +67,8 @@ export function CapabilitiesSection({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-muted-foreground text-sm font-medium">
+          <div className="flex flex-col gap-2">
+            <Label className="text-muted-foreground mb-0 text-sm font-medium">
               {t("models.form.capabilitiesAccepts")}
             </Label>
             <div className="flex flex-wrap gap-4">

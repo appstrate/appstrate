@@ -217,6 +217,10 @@ try {
     // clients. Scoped to GET /api/mcp/o/{org} and its space-pinned form.
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}/get/responses",
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}~1s~1{space}/get/responses",
+    // The run MCP server's GET channel, on its two mounts: stateless as well,
+    // so GET only ever returns 405.
+    "operation-2xx-response@#/paths/~1api~1runs~1{id}~1mcp/get/responses",
+    "operation-2xx-response@#/paths/~1internal~1mcp/get/responses",
     // GET /api/integrations/connect/start is the public entry the hosted
     // connect URL points at. It is a dispatcher, not a resource: a valid token
     // 302s to the provider OAuth screen or the hosted form, and every failure
@@ -458,7 +462,7 @@ function compareShapeToSchema(
  * to match the first exactly and dismiss the rest as having "no JSON schema to
  * compare a Zod object against" — true for the multipart, form-encoded and
  * octet-stream bodies, and false for exactly one endpoint:
- * `POST /api/runs/{runId}/events` declares `application/cloudevents+json` with
+ * `POST /api/runs/{id}/events` declares `application/cloudevents+json` with
  * a hand-written 8-key schema, validated by a `.strict()` Zod object with the
  * same 8 keys. It is the most skew-exposed body on the surface — the envelope
  * is strict, so a spec/Zod divergence 400s the whole event, and it is the
@@ -1841,6 +1845,15 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "PUT /api/mcp/o/{org}/s/{space}",
   "PATCH /api/mcp/o/{org}/s/{space}",
   "DELETE /api/mcp/o/{org}/s/{space}",
+  // The run MCP server's catch-all, on its two mounts: the spec documents POST
+  // and GET (whose only answer is 405), and `router.all(…)` throws 405 for
+  // every verb but POST.
+  "PUT /api/runs/{id}/mcp",
+  "PATCH /api/runs/{id}/mcp",
+  "DELETE /api/runs/{id}/mcp",
+  "PUT /internal/mcp",
+  "PATCH /internal/mcp",
+  "DELETE /internal/mcp",
 ]);
 
 const orphans = [...codeEndpoints]
@@ -2125,10 +2138,15 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
   "GET /api/integrations/callback/{tag} 200",
+  "GET /api/integrations/callback/cimd/{tag} 200",
   // The three `/api/llm-proxy/*` 200s are NOT here: `openapi/paths/llm-proxy.ts`
   // declares a permissive `{ type: "object", additionalProperties: true }`
   // passthrough schema for them, so an exemption would contradict it and win by
   // short-circuiting.
+  // The MCP SDK transport's answer to a body of notifications or responses only:
+  // 202 Accepted with no body (Streamable HTTP), not a 204 the platform chose.
+  "POST /api/runs/{id}/mcp 202",
+  "POST /internal/mcp 202",
 ]);
 
 const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
@@ -2248,6 +2266,10 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "POST /api/mcp/o/{org} 415": "application/json",
   "POST /api/mcp/o/{org}/s/{space} 406": "application/json",
   "POST /api/mcp/o/{org}/s/{space} 415": "application/json",
+  "POST /api/runs/{id}/mcp 406": "application/json",
+  "POST /api/runs/{id}/mcp 415": "application/json",
+  "POST /internal/mcp 406": "application/json",
+  "POST /internal/mcp 415": "application/json",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
   // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.

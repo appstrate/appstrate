@@ -17,22 +17,25 @@
  * so there a row that exists is shown only to be deleted.
  */
 
-import { useState, type ReactNode } from "react";
-import { useModalParam } from "@/hooks/use-modal-param";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Mail, Trash2, Send } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { SettingsSkeleton } from "@/components/loading-skeletons";
+import { SkeletonBadge } from "@/components/skeleton-line";
+import { FormSkeleton } from "@/components/form-skeleton";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { Modal } from "@/components/modal";
+import { ErrorState } from "@/components/page-states";
+import { FormModal } from "@/components/form-modal";
 import { GitHubIcon, GoogleIcon } from "@/components/icons";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useSettingDraft } from "@/hooks/use-setting-draft";
+import { useSaveAction } from "@/hooks/use-save-action";
+import { SaveControls } from "@/components/settings/manual-save";
 import {
   useSmtpConfig,
   useUpsertSmtpConfig,
@@ -51,7 +54,7 @@ export function SpaceAuthTab() {
   const { inPersonalSpace: personal } = usePermissions();
 
   return (
-    <div className="max-w-2xl space-y-10">
+    <div className="flex max-w-2xl flex-col gap-10">
       {personal && (
         <p className="text-muted-foreground text-sm">{t("settings:spaceAuth.personalSpace")}</p>
       )}
@@ -76,51 +79,53 @@ export function SpaceAuthTab() {
 
 function SmtpSection({ personal }: { personal: boolean }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: config, isLoading } = useSmtpConfig();
+  const { data: config, error } = useSmtpConfig();
   const upsert = useUpsertSmtpConfig();
   const del = useDeleteSmtpConfig();
   const test = useTestSmtp();
-  const smtpTest = useModalParam("smtpTest");
-  const [form, setForm] = useSeededForm(config, isLoading, emptySmtp, fromSmtp);
+  const [testing, setTesting] = useState(false);
+  // A read still in flight or failed seeds nothing: the form shows no savable empty row.
+  const draft = useSettingDraft(config ? fromSmtp(config) : emptySmtp());
+  const form = draft.value;
+  const setForm = draft.set;
+  const formRef = useRef<HTMLFormElement>(null);
   const initial = config ?? null;
 
-  function handleSubmit(e: React.FormEvent) {
+  const action = useSaveAction(async () => {
+    if (!formRef.current?.reportValidity()) throw new Error("invalid form");
+    const sent = draft.value;
+    await upsert.mutateAsync({
+      host: sent.host.trim(),
+      port: Number(sent.port),
+      username: sent.username,
+      pass: sent.pass,
+      from_address: sent.fromAddress.trim(),
+      from_name: sent.fromName.trim() || null,
+      secure_mode: sent.secureMode,
+    });
+    // The secret never comes back: the stored baseline holds it empty.
+    draft.accept(sent, { ...sent, pass: "" });
+  });
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        host: form.host.trim(),
-        port: Number(form.port),
-        username: form.username,
-        pass: form.pass,
-        from_address: form.fromAddress.trim(),
-        from_name: form.fromName.trim() || null,
-        secure_mode: form.secureMode,
-      },
-      {
-        onSuccess: () => {
-          toast.success(t("settings:spaceAuth.smtpSaved"));
-          setForm((f) => ({ ...f, pass: "" }));
-        },
-      },
-    );
-  }
+    void action.save().catch(() => {});
+  };
 
   return (
     <>
       <ProviderConfigSection
-        icon={<Mail className="h-5 w-5" />}
+        icon={<Mail className="size-5" />}
         title={t("settings:spaceAuth.smtpTitle")}
         hint={t("settings:spaceAuth.smtpHint")}
-        loading={isLoading}
-        configured={!!initial}
+        config={config}
+        error={error}
         personal={personal}
         del={del}
         deleteTitle={t("settings:spaceAuth.smtpDeleteTitle")}
         deleteDescription={t("settings:spaceAuth.smtpDeleteConfirm")}
-        deletedMessage={t("settings:spaceAuth.smtpDeleted")}
       >
         {(deleteButton) => (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4">
               <FormItem id="smtp-host" label={requiredLabel(t("settings:spaceAuth.smtpHost"))}>
                 <Input
@@ -152,7 +157,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </FormItem>
               <FormItem
                 id="smtp-pass"
-                label={requiredLabel(t("settings:spaceAuth.smtpPass"))}
+                label={requiredLabel(t("common:claim.passwordLabel"))}
                 hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
               >
                 <Input
@@ -197,13 +202,11 @@ function SmtpSection({ personal }: { personal: boolean }) {
               </FormItem>
             </div>
 
+            <SaveControls dirty={draft.dirty} onDiscard={draft.reset} action={action} />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" pending={upsert.isPending}>
-                {t("common:btn.save")}
-              </Button>
               {initial && (
-                <Button type="button" variant="outline" onClick={() => smtpTest.open()}>
-                  <Send className="h-4 w-4" />
+                <Button type="button" variant="outline" onClick={() => setTesting(true)}>
+                  <Send />
                   {t("settings:spaceAuth.smtpTest")}
                 </Button>
               )}
@@ -213,32 +216,31 @@ function SmtpSection({ personal }: { personal: boolean }) {
         )}
       </ProviderConfigSection>
 
-      <SmtpTestModal
-        open={!personal && !!initial && smtpTest.value !== null}
-        onClose={smtpTest.close}
-        isPending={test.isPending}
-        onSend={(to) =>
-          test.mutate(to, {
-            // A failed SMTP send is a non-2xx response (the server surfaces
-            // the SMTP error verbatim), which the mutation cache toasts.
-            onSuccess: () => {
-              toast.success(t("settings:spaceAuth.smtpTestOk"));
-              smtpTest.close();
-            },
-          })
-        }
-      />
+      {!personal && !!initial && testing && (
+        <SmtpTestModal
+          onClose={() => setTesting(false)}
+          isPending={test.isPending}
+          onSend={(to) =>
+            test.mutate(to, {
+              // A failed SMTP send is a non-2xx response (the server surfaces
+              // the SMTP error verbatim), which the mutation cache toasts.
+              onSuccess: () => {
+                toast.success(t("settings:spaceAuth.smtpTestOk"));
+                setTesting(false);
+              },
+            })
+          }
+        />
+      )}
     </>
   );
 }
 
 function SmtpTestModal({
-  open,
   onClose,
   isPending,
   onSend,
 }: {
-  open: boolean;
   onClose: () => void;
   isPending: boolean;
   onSend: (to: string) => void;
@@ -246,20 +248,16 @@ function SmtpTestModal({
   const { t } = useTranslation(["settings", "common"]);
   const [to, setTo] = useState("");
   return (
-    <Modal
-      open={open}
+    <FormModal
       onClose={onClose}
       title={t("settings:spaceAuth.smtpTestTitle")}
-      actions={
-        <>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button onClick={() => onSend(to)} pending={isPending} disabled={!to}>
-            {t("settings:spaceAuth.smtpTest")}
-          </Button>
-        </>
-      }
+      isPending={isPending}
+      submitLabel={t("settings:spaceAuth.smtpTest")}
+      submitDisabled={!to}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSend(to);
+      }}
     >
       <FormItem id="smtp-test-to" label={t("settings:spaceAuth.smtpTestTo")}>
         <Input
@@ -269,7 +267,7 @@ function SmtpTestModal({
           placeholder="you@example.com"
         />
       </FormItem>
-    </Modal>
+    </FormModal>
   );
 }
 
@@ -287,44 +285,44 @@ function SocialSection({
   personal: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: config, isLoading } = useSocialProvider(provider);
+  const { data: config, error } = useSocialProvider(provider);
   const upsert = useUpsertSocialProvider(provider);
   const del = useDeleteSocialProvider(provider);
-  const [form, setForm] = useSeededForm(config, isLoading, emptySocial, fromSocial);
+  const draft = useSettingDraft(config ? fromSocial(config) : emptySocial());
+  const form = draft.value;
+  const setForm = draft.set;
+  const formRef = useRef<HTMLFormElement>(null);
   const Icon = icon === "github" ? GitHubIcon : GoogleIcon;
 
-  function handleSubmit(e: React.FormEvent) {
+  const action = useSaveAction(async () => {
+    if (!formRef.current?.reportValidity()) throw new Error("invalid form");
+    const sent = draft.value;
+    await upsert.mutateAsync({
+      client_id: sent.clientId.trim(),
+      client_secret: sent.clientSecret,
+      scopes: sent.scopes.trim() ? sent.scopes.split(/[\s,]+/).filter(Boolean) : null,
+    });
+    draft.accept(sent, { ...sent, clientSecret: "" });
+  });
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    upsert.mutate(
-      {
-        client_id: form.clientId.trim(),
-        client_secret: form.clientSecret,
-        scopes: form.scopes.trim() ? form.scopes.split(/[\s,]+/).filter(Boolean) : null,
-      },
-      {
-        onSuccess: () => {
-          toast.success(t("settings:spaceAuth.socialSaved"));
-          setForm((f) => ({ ...f, clientSecret: "" }));
-        },
-      },
-    );
-  }
+    void action.save().catch(() => {});
+  };
 
   return (
     <ProviderConfigSection
-      icon={<Icon className="h-5 w-5" aria-hidden />}
+      icon={<Icon className="size-5" aria-hidden />}
       title={title}
       hint={t("settings:spaceAuth.socialHint", { provider: title })}
-      loading={isLoading}
-      configured={!!config}
+      config={config}
+      error={error}
       personal={personal}
       del={del}
       deleteTitle={t("settings:spaceAuth.socialDeleteTitle")}
       deleteDescription={t("settings:spaceAuth.socialDeleteConfirm", { provider: title })}
-      deletedMessage={t("settings:spaceAuth.socialDeleted")}
     >
       {(deleteButton) => (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-4">
           <FormItem id={`${provider}-client-id`} label={requiredLabel("Client ID")}>
             <Input
               value={form.clientId}
@@ -356,12 +354,8 @@ function SocialSection({
             />
           </FormItem>
 
-          <div className="flex gap-2">
-            <Button type="submit" pending={upsert.isPending}>
-              {t("common:btn.save")}
-            </Button>
-            {deleteButton}
-          </div>
+          <SaveControls dirty={draft.dirty} onDiscard={draft.reset} action={action} />
+          {deleteButton && <div className="flex gap-2">{deleteButton}</div>}
         </form>
       )}
     </ProviderConfigSection>
@@ -371,75 +365,59 @@ function SocialSection({
 // ─── bits ────────────────────────────────────────────────────────────────────
 
 /**
- * Re-seeds the form from the loaded row on first load and whenever the row's
- * `updatedAt` changes; waits for the fetch so an empty form is never seeded
- * over a row that is still loading.
- */
-function useSeededForm<C extends { updatedAt: string }, F>(
-  config: C | null | undefined,
-  isLoading: boolean,
-  empty: () => F,
-  from: (c: C) => F,
-) {
-  const [form, setForm] = useState(empty);
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  const seedKey = config ? config.updatedAt : "none";
-  if (!isLoading && seededFor !== seedKey) {
-    setForm(config ? from(config) : empty());
-    setSeededFor(seedKey);
-  }
-  return [form, setForm] as const;
-}
-
-/**
  * Shared skeleton of a per-space provider config: title, configured badge,
  * hint, the form (hidden in a personal space, where an existing row is only
  * deletable) and the delete confirmation. `children` receives the delete
  * button, or null when there is no row to delete.
+ *
+ * Until the read answers, the badge and the form hold their place; a failed
+ * read shows the error and neither: « Non configuré » and a savable empty form
+ * would invite overwriting a row that may exist.
  */
 function ProviderConfigSection({
   icon,
   title,
   hint,
-  loading,
-  configured,
+  config,
+  error,
   personal,
   del,
   deleteTitle,
   deleteDescription,
-  deletedMessage,
   children,
 }: {
   icon: ReactNode;
   title: string;
   hint: string;
-  /** The stored row is still being read: the badge and the form hold their place. */
-  loading: boolean;
-  configured: boolean;
+  /** The stored row: `null` when there is none, `undefined` until the read answers. */
+  config: unknown;
+  error: unknown;
   personal: boolean;
   del: { isPending: boolean; mutate: (v: undefined, o: { onSuccess: () => void }) => void };
   deleteTitle: string;
   deleteDescription: string;
-  deletedMessage: string;
   children: (deleteButton: ReactNode) => ReactNode;
 }) {
   const { t } = useTranslation("settings");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const failed = config === undefined && error != null;
+  const loading = config === undefined && !failed;
+  const configured = config != null;
 
-  if (!loading && personal && !configured) return null;
+  if (config === null && personal) return null;
 
   const deleteButton = configured ? (
     <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
   ) : null;
 
   return (
-    <section className="space-y-4">
-      <header className="space-y-1">
+    <section className="flex flex-col gap-4">
+      <header className="flex flex-col gap-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon}
           {title}
-          {loading ? (
-            <Skeleton className="h-5 w-20" />
+          {failed ? null : loading ? (
+            <SkeletonBadge className="w-24" />
           ) : configured ? (
             <Badge variant="running">{t("spaceAuth.configured")}</Badge>
           ) : (
@@ -449,20 +427,29 @@ function ProviderConfigSection({
         <p className="text-muted-foreground text-sm">{hint}</p>
       </header>
 
-      {loading ? <SettingsSkeleton /> : personal ? deleteButton : children(deleteButton)}
+      {failed ? (
+        <ErrorState error={error} compact />
+      ) : loading ? (
+        // The form itself, empty and inert — the shape it keeps when nothing is configured.
+        personal ? null : (
+          <FormSkeleton>{children(null)}</FormSkeleton>
+        )
+      ) : personal ? (
+        <div>{deleteButton}</div>
+      ) : (
+        children(deleteButton)
+      )}
 
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
         title={deleteTitle}
         description={deleteDescription}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={del.isPending}
         onConfirm={() =>
           del.mutate(undefined, {
-            onSuccess: () => {
-              setConfirmDelete(false);
-              toast.success(deletedMessage);
-            },
+            onSuccess: () => setConfirmDelete(false),
           })
         }
       />
@@ -474,7 +461,7 @@ function DeleteConfigButton({ disabled, onClick }: { disabled: boolean; onClick:
   const { t } = useTranslation("common");
   return (
     <Button type="button" variant="destructive" onClick={onClick} disabled={disabled}>
-      <Trash2 className="h-4 w-4" />
+      <Trash2 />
       {t("btn.delete")}
     </Button>
   );

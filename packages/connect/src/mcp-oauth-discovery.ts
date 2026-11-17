@@ -41,6 +41,12 @@ export interface ProtectedResourceMetadata {
   authorizationServers: string[];
   /** `scopes_supported`, when advertised. */
   scopesSupported?: string[];
+  /** RFC 9728 §2 human-readable `resource_name`, when advertised. */
+  resourceName?: string;
+  /** `resource_documentation`, when an http(s) URL. */
+  resourceDocumentation?: string;
+  /** `resource_policy_uri`, when an http(s) URL. */
+  resourcePolicyUri?: string;
 }
 
 export interface DiscoverProtectedResourceInput {
@@ -115,11 +121,28 @@ export function parseResourceMetadataChallenge(wwwAuthenticate: string): string 
   return match?.[1];
 }
 
+/**
+ * The scopes a `WWW-Authenticate` challenge asks for (RFC 6750 §3 `scope`, space-delimited), or
+ * `undefined` when it names none.
+ */
+export function parseScopeChallenge(wwwAuthenticate: string): string[] | undefined {
+  const match = /(?:^|[\s,])scope\s*=\s*"([^"]*)"/i.exec(wwwAuthenticate);
+  const scopes = match?.[1]?.split(/\s+/).filter(Boolean) ?? [];
+  return scopes.length > 0 ? scopes : undefined;
+}
+
 interface RawResourceMetadata {
   resource?: unknown;
   authorization_servers?: unknown;
   scopes_supported?: unknown;
+  resource_name?: unknown;
+  resource_documentation?: unknown;
+  resource_policy_uri?: unknown;
 }
+
+/** An http(s) URL string, else `undefined`: these end up as links shown to a user. */
+const httpUrlOrUndefined = (value: unknown): string | undefined =>
+  typeof value === "string" && isHttpUrl(value) ? value : undefined;
 
 /** Coerce a raw JSON document into a validated {@link ProtectedResourceMetadata} or `null`. */
 function validateResourceMetadata(
@@ -138,10 +161,19 @@ function validateResourceMetadata(
     doc.scopes_supported.every((s): s is string => typeof s === "string")
       ? doc.scopes_supported
       : undefined;
+  const resourceName =
+    typeof doc.resource_name === "string" && doc.resource_name.trim() !== ""
+      ? doc.resource_name.trim()
+      : undefined;
+  const resourceDocumentation = httpUrlOrUndefined(doc.resource_documentation);
+  const resourcePolicyUri = httpUrlOrUndefined(doc.resource_policy_uri);
   return {
     resource: doc.resource,
     authorizationServers: doc.authorization_servers,
     ...(scopesSupported ? { scopesSupported } : {}),
+    ...(resourceName ? { resourceName } : {}),
+    ...(resourceDocumentation ? { resourceDocumentation } : {}),
+    ...(resourcePolicyUri ? { resourcePolicyUri } : {}),
   };
 }
 

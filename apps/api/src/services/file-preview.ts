@@ -182,7 +182,7 @@ export function buildInertPreviewCsp(appOrigin: string): string {
 interface PreviewCsp {
   /** For the `Content-Security-Policy` response header. Carries `sandbox`. */
   header: string;
-  /** For {@link injectMetaCsp}. Same policy MINUS the `sandbox` directive. */
+  /** For {@link injectMetaCsp}. Same policy MINUS the header-only `frame-ancestors` and `sandbox`. */
   meta: string;
 }
 
@@ -260,22 +260,16 @@ interface PreviewCsp {
  * origin frame the preview, so the header is what still applies if a future
  * embedder forgets the attribute.
  *
- * The `<meta>` copy omits `sandbox`, because the directive is IGNORED in a meta
- * context (per spec — a document cannot sandbox itself after parsing has begun).
- * Leaving it there would be dead text that READS like a live control, and the
- * next reader "fixing" the divergence by collapsing the two strings into one
- * would silently disable the header's sandbox. The divergence therefore lives in
- * the return TYPE ({@link PreviewCsp}), not in a comment: the header copy is the
- * meta copy plus the sandbox directive, and every OTHER directive is added to
- * both by construction.
- *
- * `frame-ancestors` is ignored in a meta context just the same and is kept there
- * anyway — not an inconsistency, a different case: it is still ENFORCED by the
- * header copy, so its presence in the meta copy is redundant-but-true, while
- * `sandbox` there would be the only place the policy is stated at all in the
- * direction that matters (collapsing the two strings into one to remove the
- * divergence is precisely what would drop `sandbox` from the HEADER, where it
- * is the control).
+ * The `<meta>` copy omits `frame-ancestors` and `sandbox`, the two directives a
+ * meta context IGNORES (per spec — a document can neither restrict its embedders
+ * nor sandbox itself after parsing has begun; browsers also log every ignored
+ * one as a console error). Leaving them there would be dead text that READS
+ * like a live control, and the next reader "fixing" the divergence by collapsing
+ * the two strings into one would silently drop both from the header, where they
+ * are the controls. The divergence therefore lives in the return TYPE
+ * ({@link PreviewCsp}), not in a comment: the header copy is the meta copy plus
+ * the header-only directives, and every OTHER directive is added to both by
+ * construction.
  */
 export function buildPreviewCsp(appOrigin: string): PreviewCsp {
   const meta = [
@@ -287,10 +281,9 @@ export function buildPreviewCsp(appOrigin: string): PreviewCsp {
     "font-src data:",
     "connect-src 'none'",
     "form-action 'none'",
-    `frame-ancestors ${appOrigin}`,
     "base-uri 'none'",
   ].join("; ");
-  return { header: `${meta}; sandbox allow-scripts`, meta };
+  return { header: `${meta}; frame-ancestors ${appOrigin}; sandbox allow-scripts`, meta };
 }
 
 /**
@@ -346,9 +339,7 @@ export function mayServeActiveHtml(secFetchDest: string | null): boolean {
  * Inject a `<meta http-equiv="Content-Security-Policy">` duplicating the CSP as
  * the FIRST child of `<head>`. A header alone can be bypassed on some
  * relative-URL / `srcdoc` paths; a parse-time meta CSP binds the policy to the
- * document itself, immovable by script. `frame-ancestors` is silently ignored in
- * a meta context (per spec) — harmless, and the response header still enforces
- * it. Creates a `<head>` (or the whole element) when the document lacks one.
+ * document itself, immovable by script. Creates a `<head>` (or the whole element) when the document lacks one.
  *
  * Buffer-and-transform (the caller reads the whole body first, bounded by
  * {@link PREVIEW_MAX_BYTES}) — correct and simple, versus fragile regex

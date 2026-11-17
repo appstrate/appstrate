@@ -889,7 +889,7 @@ describe("organizations service", () => {
 
   // ── The org keeps an owner under concurrency ─────────────
   //
-  // Without `lockOrgOwnership` both writers read the other owner as present and
+  // Without `lockOrganizationRow` both writers read the other owner as present and
   // both commit, leaving zero owners — these can fail without the lock. PGlite
   // serialises on one connection, which would make them vacuous: Postgres only.
   describeRequiresPostgres("owner invariant under concurrent exits", () => {

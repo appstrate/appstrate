@@ -5,8 +5,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
@@ -116,7 +117,7 @@ export function RegisterForm({
         <div className="flex flex-col gap-4">
           <FormItem
             id="displayName"
-            label={t("login.name")}
+            label={t("spaces.nameLabel")}
             error={showError("displayName") ? errors.displayName?.message : undefined}
           >
             <Input
@@ -139,16 +140,16 @@ export function RegisterForm({
           <PasswordField
             register={register}
             name="password"
-            label={t("login.password")}
+            label={t("common:claim.passwordLabel")}
             invalid={showError("password")}
             error={errors.password?.message}
             autoComplete="new-password"
           />
           <FieldError>{errors.root?.message}</FieldError>
         </div>
-        <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? t("loading") : t("login.signup")}
-        </Button>
+        <PendingButton size="lg" className="w-full" type="submit" pending={isSubmitting}>
+          {t("login.signup")}
+        </PendingButton>
         {hasSocialAuth && (
           <>
             <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">

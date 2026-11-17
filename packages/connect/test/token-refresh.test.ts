@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { performRefreshTokenExchange, RefreshError } from "../src/token-refresh.ts";
+import {
+  performRefreshTokenExchange,
+  performTokenRequest,
+  RefreshError,
+} from "../src/token-refresh.ts";
 import type { RefreshContext } from "../src/token-refresh.ts";
 
 // The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
@@ -369,5 +373,129 @@ describe("performRefreshTokenExchange — a 2xx without access_token is a failur
     );
     expect(parsed.accessToken).toBe("at_new");
     expect(parsed.refreshToken).toBe("rt_abc");
+  });
+});
+
+describe("performTokenRequest — a general token request", () => {
+  const CUSTOM = { grant_type: "urn:example:grant", subject_token: "s&t=1" };
+
+  /** Send `grant` and return the request the stub received. */
+  async function sent(
+    base: RefreshContext,
+    grant: Record<string, string>,
+  ): Promise<{ url: string; headers: Headers; body: URLSearchParams }> {
+    let captured: { url: string; headers: Headers; body: URLSearchParams } | undefined;
+    const stub = (async (url: string | URL | Request, init?: RequestInit) => {
+      captured = {
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: new URLSearchParams(init?.body as string),
+      };
+      return Response.json({ access_token: "at_new" });
+    }) as unknown as typeof fetch;
+    await performTokenRequest({ ...base, fetchImpl: stub }, grant, { label: "login" });
+    return captured!;
+  }
+
+  it("client_secret_basic: the grant alone in the body, credentials in the Basic header", async () => {
+    const req = await sent({ ...ctx, tokenEndpointAuthMethod: "client_secret_basic" }, CUSTOM);
+    expect(req.url).toBe("https://idp.example.com/token");
+    expect(req.headers.get("Authorization")).toBe(`Basic ${btoa("client-id:client-secret")}`);
+    expect(req.headers.get("Content-Type")).toBe("application/x-www-form-urlencoded");
+    expect([...req.body]).toEqual(Object.entries(CUSTOM));
+  });
+
+  it("client_secret_post: client_id and client_secret appended to the grant", async () => {
+    const req = await sent(ctx, CUSTOM);
+    expect(req.headers.get("Authorization")).toBeNull();
+    expect([...req.body]).toEqual([
+      ...Object.entries(CUSTOM),
+      ["client_id", "client-id"],
+      ["client_secret", "client-secret"],
+    ]);
+  });
+
+  it("none: client_id alone appended to the grant", async () => {
+    const req = await sent(
+      { ...ctx, clientSecret: "", tokenEndpointAuthMethod: "none" },
+      { grant_type: "refresh_token", refresh_token: "rt_x" },
+    );
+    expect(req.headers.get("Authorization")).toBeNull();
+    expect([...req.body]).toEqual([
+      ["grant_type", "refresh_token"],
+      ["refresh_token", "rt_x"],
+      ["client_id", "client-id"],
+    ]);
+  });
+
+  it("adds the resource the token is requested for", async () => {
+    const req = await sent({ ...ctx, resource: "https://api.example.com" }, CUSTOM);
+    expect(req.body.get("resource")).toBe("https://api.example.com");
+  });
+
+  for (const owned of [
+    "client_id",
+    "client_secret",
+    "client_assertion",
+    "client_assertion_type",
+    "resource",
+  ]) {
+    it(`refuses a grant carrying ${owned} without sending anything`, async () => {
+      let calls = 0;
+      const stub = (async () => {
+        calls++;
+        return Response.json({ access_token: "at_new" });
+      }) as unknown as typeof fetch;
+      const err = await performTokenRequest(
+        { ...ctx, fetchImpl: stub },
+        { ...CUSTOM, [owned]: "x" },
+        { label: "login" },
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(RefreshError);
+      expect((err as Error).message).toContain(owned);
+      expect(calls).toBe(0);
+    });
+  }
+
+  it("refuses a grant without grant_type without sending anything", async () => {
+    let calls = 0;
+    const stub = (async () => {
+      calls++;
+      return Response.json({ access_token: "at_new" });
+    }) as unknown as typeof fetch;
+    const err = await performTokenRequest(
+      { ...ctx, fetchImpl: stub },
+      { refresh_token: "rt" },
+      { label: "login" },
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toContain("grant_type");
+    expect(err).not.toBeInstanceOf(RefreshError);
+    expect(calls).toBe(0);
+  });
+
+  it("keeps keepRefreshToken only when the response omits refresh_token", async () => {
+    const run = (body: Record<string, unknown>, keepRefreshToken?: string) =>
+      performTokenRequest({ ...ctx, fetchImpl: responding(() => Response.json(body)) }, CUSTOM, {
+        label: "login",
+        keepRefreshToken,
+      });
+    expect((await run({ access_token: "at" }, "rt_kept")).parsed.refreshToken).toBe("rt_kept");
+    expect(
+      (await run({ access_token: "at", refresh_token: "rt_new" }, "rt_kept")).parsed.refreshToken,
+    ).toBe("rt_new");
+    expect((await run({ access_token: "at" })).parsed.refreshToken).toBeUndefined();
+  });
+
+  it("classifies failures as a refresh does", async () => {
+    const kind = (status: number, body: unknown) =>
+      performTokenRequest(
+        { ...ctx, fetchImpl: responding(() => Response.json(body, { status })) },
+        CUSTOM,
+        { label: "login" },
+      ).catch((e: unknown) => (e as RefreshError).kind);
+    expect(await kind(400, { error: "invalid_grant" })).toBe("revoked");
+    expect(await kind(401, { error: "invalid_client" })).toBe("client_rejected");
+    expect(await kind(503, { error: "temporarily_unavailable" })).toBe("transient");
   });
 });

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
-import { knownModels, planModelChoice } from "../model-choice.ts";
+import { planModelChoice } from "../model-choice.ts";
 import type { ModelPickRow } from "../model-source.ts";
 
 function row(id: string): ModelPickRow {
@@ -75,42 +75,5 @@ describe("planModelChoice", () => {
     expect(planModelChoice({ ...base, starred: "b" }).defaultModelId).toBe("b");
     expect(planModelChoice({ ...base, starred: "c" }).defaultModelId).toBeNull();
     expect(planModelChoice({ ...base, starred: null }).defaultModelId).toBeNull();
-  });
-});
-
-describe("the retry of a partly refused batch", () => {
-  // « Ajouter une clé org »: the dialog was given no models (the key did not exist), the first
-  // attempt created `a` and the server refused `b`. The retry asks only for `b`.
-  it("creates only what the first attempt did not", () => {
-    const created = existing("a");
-    const plan = planModelChoice({
-      picked: picked("a", "b"),
-      existing: knownModels([], [created]),
-      starred: null,
-    });
-    expect(plan.add.map((r) => r.id)).toEqual(["b"]);
-    expect(plan.grant).toEqual([]);
-    expect(plan.withdraw).toEqual([]);
-  });
-
-  it("without the created rows the retry would post `a` again (409 model_already_added)", () => {
-    const plan = planModelChoice({ picked: picked("a", "b"), existing: [], starred: null });
-    expect(plan.add.map((r) => r.id)).toEqual(["a", "b"]);
-  });
-
-  it("counts a row once when the dialog's own list has caught up with it", () => {
-    const created = existing("a");
-    const known = knownModels([created], [{ ...created }]);
-    expect(known).toHaveLength(1);
-  });
-
-  it("keeps the default the first attempt starred, so it stays locked and is not set twice", () => {
-    const created = existing("a", true);
-    const plan = planModelChoice({
-      picked: picked("a", "b"),
-      existing: knownModels([], [created]),
-      starred: "a",
-    });
-    expect(plan.defaultModelId).toBeNull();
   });
 });

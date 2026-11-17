@@ -2,22 +2,31 @@
 
 import { describe, expect, it } from "bun:test";
 import type { DataColumn } from "../../components/data-table.tsx";
-import { columnMenu, isIdentityColumn, visibleColumns } from "../column-visibility.ts";
+import { columnMenu, identityColumnIndex, visibleColumns } from "../column-visibility.ts";
 
 type Row = { id: string };
 const cell = () => null;
 const columns: DataColumn<Row>[] = [
-  { id: "select", header: "", width: "40px", control: true, cell },
-  { id: "name", header: "Nom", width: "minmax(120px,1fr)", cell },
-  { id: "status", header: "Statut", width: "96px", tier: 2, cell },
-  { id: "role", header: "Rôle", width: "120px", control: true, cell },
-  { id: "actions", header: "", width: "80px", align: "end", cell },
+  { id: "select", header: "", width: 40, control: true, cell },
+  { id: "name", header: "Nom", width: 120, elastic: true, cell },
+  { id: "status", header: "Statut", width: 96, cell },
+  { id: "role", header: "Rôle", width: 120, control: true, cell },
+  { id: "actions", header: "", width: 80, align: "end", cell },
 ];
 const ids = (list: DataColumn<Row>[]) => list.map((column) => column.id);
 
-describe("isIdentityColumn", () => {
-  it("is a read column without a tier: neither a control nor a column that waits for room", () => {
-    expect(columns.filter(isIdentityColumn).map((c) => c.id)).toEqual(["name", "actions"]);
+describe("identityColumnIndex", () => {
+  it("is the first read column: a tick or select before it is not the row's name", () => {
+    expect(identityColumnIndex(columns)).toBe(1);
+  });
+
+  it("is the column marked as the identity, wherever it sits", () => {
+    const marked: DataColumn<Row>[] = [
+      ...columns.slice(0, 2),
+      { id: "status", header: "Statut", width: 96, identity: true, cell },
+      ...columns.slice(3),
+    ];
+    expect(identityColumnIndex(marked)).toBe(2);
   });
 });
 

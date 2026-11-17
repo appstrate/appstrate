@@ -34,6 +34,7 @@ variables also references them as `{$variable.<name>}` ([Connection variables](#
 | `auth.type` | `connect` | `connect.tool` `run_at` | Strategy     | Flow                                                |
 | ----------- | --------- | ----------------------- | ------------ | --------------------------------------------------- |
 | `oauth2`    | —         | —                       | OAuth2       | OAuth 2.0 + PKCE, discovery + auto-refresh          |
+| `oauth2`    | `login`   | —                       | OAuth2       | first token from a submitted grant, auto-refresh    |
 | `api_key`   | —         | —                       | Fields       | paste-the-bag (user submits the credential)         |
 | `basic`     | —         | —                       | Fields       | paste-the-bag (username + password)                 |
 | `mtls`      | —         | —                       | Fields       | paste-the-bag (client cert + key, mounted as files) |
@@ -54,15 +55,23 @@ needed.
 Every integration declares `source.kind` to tell the platform how the upstream is
 reached. The authentication layer (`auths`) is applied on top, regardless of source.
 
-| `source.kind` | Sub-object                                                                         | When to use                                                                                   |
-| ------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `local`       | `source.server: { name, version, vendored? }` — references an `mcp-server` package | Local stdio MCP server (Node, Python, binary) bundled separately                              |
-| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`                    | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …)                  |
-| `none`        | _(no sub-object)_                                                                  | Serverless integration — no MCP server; reaches upstream via the `api_call` vendor capability |
+| `source.kind` | Sub-object                                                                   | When to use                                                                                   |
+| ------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `local`       | `source.server: { type, entry_point, mcp_config, tools? }` — declared inline | Local stdio MCP server (Node, Python, binary) shipped inside the integration archive          |
+| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`              | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …)                  |
+| `none`        | _(no sub-object)_                                                            | Serverless integration — no MCP server; reaches upstream via the `api_call` vendor capability |
 
 ```jsonc
-// local — references a separate mcp-server package by AFPS identity + semver range
-"source": { "kind": "local", "server": { "name": "@example/gmail-server", "version": "^1.2.0" } }
+// local — the server is declared inline; its payload (server/index.ts, …) ships in the integration archive
+"source": {
+  "kind": "local",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": { "command": "node", "args": ["server/index.ts"], "env": { "LOG_LEVEL": "info" } },
+    "tools": [{ "name": "list_messages", "description": "List recent messages" }]
+  }
+}
 
 // remote — hosted MCP endpoint
 "source": { "kind": "remote", "remote": { "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "streamable-http" } }
@@ -124,7 +133,7 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | Mode    | Vocabulary                                                          | Maps to                                                  | Use when                                                                                      |
 | ------- | ------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `http`  | `{ in, name, prefix?, value, encoding?, allow_server_override? }`   | OpenAPI Security Scheme location + AFPS `value` template | Server never sees the secret — sidecar injects it on outbound requests (MITM proxy injection) |
-| `env`   | Map of `ENV_NAME → { value, sensitive?, user_config_key? }`         | Kubernetes-style + MCPB `user_config`                    | `source.kind: "local"` — the MCP server reads the credential from its own env                 |
+| `env`   | Map of `ENV_NAME → { value, sensitive? }`                           | Kubernetes-style env                                     | `source.kind: "local"` — the MCP server reads the credential from its own env                 |
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
@@ -161,8 +170,7 @@ imported, since the platform does not evaluate it.
   "env": {
     "GMAIL_TOKEN": {
       "value": "{$credential.access_token}",
-      "sensitive": true,
-      "user_config_key": "GMAIL_TOKEN"
+      "sensitive": true
     }
   }
 }
@@ -232,6 +240,77 @@ provider's `.well-known/openid-configuration` can be copy-pasted.
 > Note: the field is `resource` (RFC 8707 — the protected-resource indicator), **not**
 > `audience`. Send it for forward compatibility even when the AS is known to ignore
 > it; the resource server validates the token audience independently.
+
+### First token by `connect.login`
+
+For a provider whose sign-in no redirect flow can drive (a mobile-app SSO), the user
+obtains a grant outside Appstrate — typically a refresh token — and submits it. The auth
+declares `connect.login` as a token request to its own `token_endpoint` (AFPS §7.7, _On
+an `oauth2` auth method_):
+
+```jsonc
+"oauth": {
+  "type": "oauth2",
+  "token_endpoint": "https://idp.example.com/oauth/token",
+  "token_endpoint_auth_method": "none",
+  "userinfo_endpoint": "https://idp.example.com/userinfo",
+  "credentials": {
+    "schema": {
+      "type": "object",
+      "properties": { "refresh_token": { "type": "string", "title": "Refresh token" } },
+      "required": ["refresh_token"]
+    }
+  },
+  "connect": {
+    "login": {
+      "request": {
+        "method": "POST",
+        "url": "https://idp.example.com/oauth/token",
+        "content_type": "application/x-www-form-urlencoded",
+        "body": "grant_type=refresh_token&refresh_token={{refresh_token}}"
+      }
+    }
+  },
+  "authorized_uris": ["https://api.example.com/**"],
+  "delivery": { "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.access_token}" } }
+}
+```
+
+- The request is a `POST` of `application/x-www-form-urlencoded` to exactly
+  `token_endpoint`, without `headers`; its `body` holds only the grant parameters
+  (`grant_type` and its own). `authorization_endpoint` and `issuer` are not required.
+  When an `issuer` is declared, its metadata is read before anything is sent: a
+  `token_endpoint` it contradicts is a `400 invalid_request` (the client is presented
+  only to its issuer's own token endpoint), and metadata that cannot be read a
+  `502 login_upstream_unavailable`.
+- The platform adds the client authentication itself, with the auth's default client —
+  the one later refreshes use: a Basic header for `client_secret_basic`, `client_id` and
+  `client_secret` in the body for `client_secret_post`, `client_id` alone for a public
+  client (`none`). Another method (`private_key_jwt`, `client_secret_jwt`,
+  `tls_client_auth`, …) is refused with a `409 connection_not_ready` before anything is
+  sent. The body never carries `client_id`, `client_secret`, `client_assertion*` or
+  `resource`.
+- No `outputs`, `success_criteria`, `expires_in_output` or `identity_outputs`: the answer
+  is read as a token response, which must carry `token_type` `Bearer` (any case; absent
+  or another type is a `502 login_upstream_unavailable`). Identity comes from
+  `identity_claims` over the token response and `userinfo_endpoint` — never an
+  `id_token`, which the platform does not validate on this path (OIDC Core §3.1.3.7).
+  A response without `scope` is granted the grant's `scope` parameter, if any. A
+  `refresh_token` grant answered without `refresh_token` keeps the one it presented,
+  whatever the field it was typed in.
+- No `scope_catalog`, no templated `issuer`, no `remote` source.
+
+The user submits the fields through the hosted form or `connect/fields`;
+`connect/oauth2` refuses the auth. Nothing is stored unless the token request succeeds:
+a grant the server refuses is a `400 login_rejected`, a refused OAuth client a
+`502 oauth_client_rejected`. Once the token request may have redeemed the grant (a
+timeout, a 5xx, an unusable 2xx, or a failure after a successful request), the problem
+carries `grant_may_be_redeemed: true` and the hosted form says the grant may need
+replacing. A hosted form submits its grant once: a second submission is a `404`, unless
+the first was refused before the grant left the platform (an invalid field, no usable
+client, an issuer or egress refusal), in which case it can be fixed and submitted again.
+Once connected, it is an ordinary `oauth2` connection.
+Reference package: `@appstrate/garmin-connect`.
 
 ### `identity_claims` — naming the connected account
 
@@ -787,8 +866,8 @@ name. It carries per-tool authorization metadata for `local` and `remote` source
 Whether its keys also bound the names an agent can select, and the names
 `default_tools` may hold, depends on the source:
 
-- `source.kind: "local"` — the catalog is the `tools[]` array of the referenced
-  `mcp-server` package. `tools_policy` is a **sparse policy overlay** on it: it need
+- `source.kind: "local"` — the catalog is the inline `source.server.tools` array
+  (advisory; absent means the server's own `tools/list` is the catalog at run time). `tools_policy` is a **sparse policy overlay** on it: it need
   not name every tool, and a key adds no tool.
 - `source.kind: "remote"` — the catalog is the endpoint's, read at run time. Once
   `tools_policy` declares any tool, its keys ARE what an agent can select by name
@@ -862,8 +941,8 @@ OPTIONAL tool selection an agent inherits when it declares the integration witho
   `connect.tool` name or the upload companion of a hidden `api_call`; for a `none`
   source declaring no `_meta` key outside `dev.appstrate/`, a name outside its
   catalog; for a `remote` source that declares a `tools_policy`, a name outside its
-  catalog; for a `local` source, a name outside the catalog of the referenced
-  `mcp-server`, on create, save, import and publish, when that package resolves. A
+  catalog; for a `local` source that declares `source.server.tools`, a name outside it, on create,
+  save, import and publish. A
   `remote` source with no `tools_policy` is judged no further: a name its endpoint
   does not serve selects nothing at run time.
 - `"*"` is accepted only with `allow_undeclared_tools: true`, and grants whatever the
@@ -1119,15 +1198,17 @@ the entry of `authorization_servers` equal to the rendered `issuer` when you dec
 — a template over the remote URL's variables — and otherwise one with the rendered URL's
 origin, and refuses the connection when there is none. Endpoints come from RFC 8414
 discovery of that server alone, and the RFC 8707 `resource` is always sent for a remote
-source. The client is registered by RFC 7591 Dynamic Client Registration as a public
-client, one per authorization server and integration (and space), and the redirect URI
-is distinct per server.
+source. The client is this instance's OAuth Client ID Metadata Document for that server
+when the server advertises `client_id_metadata_document_supported` and the instance is
+served from a public https `APP_URL` (nothing is registered), else one registered by
+RFC 7591 Dynamic Client Registration as a public client, one per authorization server and
+integration (and space); either way the redirect URI is distinct per server.
 
 Declare `issuer` when the product may be served under a path prefix: its authorization
 server is then `https://host/prefix`, which does not have the origin of the rendered URL.
 `@appstrate/gitlab-mcp` declares `"issuer": "{$variable.base_url}"` for that reason.
 
-A server without dynamic client registration cannot be connected: an admin cannot
+A server offering neither (or only CIMD, to an instance on localhost) cannot be connected: an admin cannot
 register a client by hand for an auth whose server each connection names. Declare
 `token_endpoint_auth_method: "none"` and the scopes the server expects in
 `default_scopes`.
@@ -1260,8 +1341,9 @@ rejects it.
 - The login secret travels in the run's `inputs` plane and is substituted
   **proxy-side** by the sidecar's MITM — the integration's tool code never reads it,
   and it is never logged.
-- `connect` is only valid on `type: "custom"`; declare **exactly one** of `login` or
-  `tool`.
+- `connect` is valid on `type: "custom"`, and its `login` mode on `type: "oauth2"`
+  too ([First token by `connect.login`](#first-token-by-connectlogin)); declare
+  **exactly one** of `login` or `tool`.
 - The declarative `login` request is bounded by `limits` (`request_timeout_ms`,
   `max_response_bytes`); the orchestrated `tool` runs in the sandboxed runner with
   the per-run CA and MITM envelope.

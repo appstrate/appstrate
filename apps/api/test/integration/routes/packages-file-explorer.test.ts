@@ -200,7 +200,7 @@ describe("package file explorer", () => {
   //
   // `draft_content` is populated by `parsePackageZip` (packages/core/src/zip.ts)
   // and holds a DIFFERENT file per type — prompt.md, SKILL.md, INTEGRATION.md,
-  // or (mcp-server) a redundant copy of the manifest. Overlaying it onto the
+  // or, for an integration without that file, a redundant copy of the manifest. Overlaying it onto the
   // wrong entry would either erase the manifest or invent a file.
 
   describe("draft_content overlay targets", () => {
@@ -253,48 +253,6 @@ describe("package file explorer", () => {
 
       const { entries } = await listFiles(ctx, intId);
       expect(entries.map((e) => e.path)).toEqual(["manifest.json", "server/index.js"]);
-    });
-
-    it("never materializes an mcp-server's draft_content (it is a manifest copy)", async () => {
-      const mcpId = "@fexp/an-mcp-server";
-      const manifest = { ...manifestFor(mcpId), type: "mcp-server" };
-      await seedPackage({
-        id: mcpId,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        draftManifest: manifest,
-        draftContent: JSON.stringify(manifest),
-      });
-      await seedSpacePackage(ctx.defaultSpaceId, mcpId);
-      await uploadPackageFiles("mcp-servers", ctx.orgId, mcpId, {
-        "manifest.json": encoder.encode("{}"),
-        "server/index.js": encoder.encode("export default 1;"),
-      });
-
-      const { entries } = await listFiles(ctx, mcpId);
-      expect(entries.map((e) => e.path)).toEqual(["manifest.json", "server/index.js"]);
-      expect(JSON.parse(entries.find((e) => e.path === "manifest.json")!.inline!)).toMatchObject({
-        type: "mcp-server",
-      });
-    });
-
-    it("keeps an mcp-server's manifest intact with no stored ZIP at all", async () => {
-      const mcpId = "@fexp/bare-mcp-server";
-      const manifest = { ...manifestFor(mcpId), type: "mcp-server" };
-      await seedPackage({
-        id: mcpId,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        draftManifest: manifest,
-        draftContent: "",
-      });
-      await seedSpacePackage(ctx.defaultSpaceId, mcpId);
-
-      const { entries } = await listFiles(ctx, mcpId);
-      expect(entries.map((e) => e.path)).toEqual(["manifest.json"]);
-      expect(JSON.parse(entries[0]!.inline!)).toMatchObject({ type: "mcp-server" });
     });
   });
 

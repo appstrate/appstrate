@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
   Braces,
   BrainCircuit,
   CalendarClock,
-  FileArchive,
   FolderTree,
   Globe,
   History,
@@ -16,7 +14,6 @@ import {
   Plug,
   SlidersHorizontal,
   Sparkles,
-  Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -33,7 +30,7 @@ import {
 } from "../../lib/settings-section-href";
 import { SettingsRailView } from "../settings/settings-rail-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
-import { SettingsSkeleton } from "../loading-skeletons";
+import { EditorPanelSkeleton } from "../loading-skeletons";
 import {
   PackageCommonSection,
   type PackageVersionsProps,
@@ -74,10 +71,8 @@ const SETTINGS_GROUPS = [
     items: [
       { id: "general", icon: IdCard, labelKey: "editor.tabGeneral" },
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
-      { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
-      { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
-      { id: "tools", icon: Wrench, labelKey: "editor.tabTools" },
-      { id: "bundle", icon: FileArchive, labelKey: "editor.tabPackageFiles" },
+      { id: "skills", icon: Sparkles, labelKey: "common:nav.skills" },
+      { id: "integrations", icon: Boxes, labelKey: "common:nav.integrations" },
     ],
   },
 ] satisfies Array<{
@@ -111,7 +106,6 @@ export function AgentSettingsView({
   inputWrapperOverride?: SchemaWrapper;
 }) {
   const { t } = useTranslation("agents");
-  const navigate = useNavigate();
   const { can } = usePermissions();
   // Write authority is the package's HOME space (`home_writable`), never the
   // space being browsed; nobody writes a system agent or a pinned version.
@@ -129,9 +123,7 @@ export function AgentSettingsView({
     }
     if (section === "schedules") return can("schedules:read");
     if (section === "connections") return agentConnectionsTabVisible(can);
-    if (section === "files" || section === "bundle") {
-      return can("agents:read");
-    }
+    if (section === "files") return can("agents:read");
     // A system agent has no history of its own to browse.
     if (section === "versions") return can("agents:read") && detail.source !== "system";
     // The definition is edited where it is read, by whoever may write it, on
@@ -186,7 +178,6 @@ export function AgentSettingsView({
             section={active}
             type="agent"
             packageId={packageId}
-            manifest={detail.manifest ?? {}}
             file={file}
             href={href}
             version={version}
@@ -195,12 +186,8 @@ export function AgentSettingsView({
             versions={versions}
           />
         ) : isDefinitionSection(active) ? (
-          <Suspense fallback={<SettingsSkeleton />}>
-            <AgentDefinitionEditor
-              detail={detail}
-              section={active as AgentDefinitionSection}
-              onSection={(next) => void navigate(href(next))}
-            />
+          <Suspense fallback={<EditorPanelSkeleton />}>
+            <AgentDefinitionEditor detail={detail} section={active as AgentDefinitionSection} />
           </Suspense>
         ) : (
           <AgentConfigurationView

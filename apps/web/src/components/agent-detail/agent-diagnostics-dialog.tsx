@@ -32,27 +32,20 @@ export function AgentDiagnosticsIssueBadge({
 
 export function AgentDiagnosticsDialog({
   result,
-  open,
   onClose,
   onLeave,
 }: {
   result: AgentDiagnostics | undefined;
-  open: boolean;
   onClose: () => void;
   /** Leaves the dialog for the section that corrects a diagnostic, in one navigation. */
   onLeave: (to: string) => void;
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
-  if (!open || !result) return null;
+  if (!result) return null;
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title={t("detail.diagnostics.sectionTitle")}
-      className="sm:max-w-2xl"
-    >
+    <Modal onClose={onClose} title={t("detail.diagnostics.sectionTitle")} className="sm:max-w-2xl">
       <div className="flex max-h-[60vh] flex-col overflow-y-auto">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <AgentDiagnosticsIssueBadge result={result} />

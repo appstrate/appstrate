@@ -14,10 +14,11 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatConversationList } from "../src/ui/thread-list.tsx";
-import { ChatHeadersProvider } from "../src/ui/runtime-context.ts";
+import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache } from "../src/ui/sessions.ts";
+import { transportOf } from "./fake-request.ts";
 
-const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
+const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
 // The list is the shell's navigation, mounted outside `ChatPage`: `t` and `can`
 // arrive as props, and it renders into the host's sidebar.
@@ -33,19 +34,19 @@ function render(granted: string[], hasMore = false): string {
         hasMore,
       },
     ],
-    pageParams: [null],
+    pageParams: [undefined],
   });
   return renderToString(
     <QueryClientProvider client={qc}>
       <TooltipProvider>
         <SidebarProvider>
-          <ChatHeadersProvider value={getHeaders}>
+          <ChatTransportProvider value={transport}>
             <ChatConversationList
               activeId={null}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
             />
-          </ChatHeadersProvider>
+          </ChatTransportProvider>
         </SidebarProvider>
       </TooltipProvider>
     </QueryClientProvider>,
@@ -56,14 +57,14 @@ describe("the conversation list", () => {
   it("offers a new conversation to a caller who can write", () => {
     const html = render(["chat:read", "chat:write"]);
     expect(html).toContain("<span>threads.new</span>");
-    expect(html).toContain('aria-label="threads.actions.delete"');
+    expect(html).toContain('aria-label="common:btn.delete"');
   });
 
   it("offers a reader no new conversation, and no row action", () => {
     const html = render(["chat:read"]);
     expect(html).toContain("Budget");
     expect(html).not.toContain("<span>threads.new</span>");
-    expect(html).not.toContain('aria-label="threads.actions.delete"');
+    expect(html).not.toContain('aria-label="common:btn.delete"');
   });
 
   it("loads more with a plain button, which leaves the phone's drawer open", () => {

@@ -2,12 +2,8 @@
 
 import { ApiError } from "../api/errors";
 
-/**
- * The one refusal of `PATCH …/packages/{scope}/{name}` with `chat_enforced` whose sentence
- * depends on WHERE it is met: `no_published_version` is also a run-launch refusal, and here the
- * remedy is to publish before enforcing. Every other refusal (the limit, the budget, a
- * non-skill) is named by its code like anywhere else — `errorMessage`.
- */
+// `no_published_version` is also a run-launch refusal; here the remedy is to publish before
+// enforcing. Every other refusal is named by its code via `errorMessage`.
 const CHAT_ENFORCE_ERROR_KEYS: Readonly<Record<string, string>> = {
   no_published_version: "library.chatEnforce.error.noPublishedVersion",
 };

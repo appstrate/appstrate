@@ -16,6 +16,7 @@ import {
   AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
+  useAui,
   useAuiEvent,
   useAuiState,
   unstable_useComposerInput,
@@ -25,14 +26,18 @@ import {
   ArrowDownIcon,
   CheckIcon,
   CopyIcon,
-  PaperclipIcon,
+  ListPlusIcon,
+  PencilIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
   SquareIcon,
+  UploadIcon,
   XIcon,
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -40,6 +45,7 @@ import {
   InvokeOperationToolUI,
   SearchOperationsToolUI,
   DescribeOperationToolUI,
+  ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
@@ -53,124 +59,143 @@ import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 import { takesDraft } from "./composer-draft.ts";
+import {
+  flushDecision,
+  joinQueued,
+  type MessageQueue,
+  type QueueSnapshot,
+} from "./message-queue.ts";
 
 export function Thread({
+  composerTools,
   composerSlot,
   initialComposerDraft,
+  messageQueue,
 }: {
+  /** Left of the composer's bottom row: the "+" menu and the active-setting chips. */
+  composerTools?: React.ReactNode;
+  /** Right of it, before send: the model picker. */
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
+  /** Messages typed while the agent answers; created by the conversation, which also marks Stop on it. */
+  messageQueue: MessageQueue;
 }) {
+  useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
+  const { can, t } = useChatHost();
   return (
-    <ThreadPrimitive.Root
-      // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
-      // this shell are grey with white cards on top (the composer, the tool
-      // cards). `background` is shadcn's component surface, which would make
-      // the chat the one flat white screen in the product.
-      className="bg-canvas flex h-full flex-col"
-      style={{ ["--thread-max-width" as string]: "42rem" }}
+    // The whole thread is the drop target, welcome screen and transcript alike;
+    // dropped files take the same adapter path as the picker. A reader gets no
+    // drop target (and no overlay: `data-dragging` is only set when enabled).
+    <ComposerPrimitive.AttachmentDropzone
+      disabled={!can("chat:write")}
+      className="group/drop relative h-full min-h-0"
     >
-      {/* Register the rich tool cards (these render nothing themselves). */}
-      <InvokeOperationToolUI />
-      <RunAndWaitToolUI />
-      <SearchOperationsToolUI />
-      <DescribeOperationToolUI />
+      <ThreadPrimitive.Root
+        // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+        // this shell are grey with white cards on top (the composer, the tool
+        // cards). `background` is shadcn's component surface, which would make
+        // the chat the one flat white screen in the product.
+        className="bg-canvas flex h-full flex-col"
+        style={{ ["--thread-max-width" as string]: "42rem" }}
+      >
+        {/* Register the rich tool cards (these render nothing themselves). */}
+        <InvokeOperationToolUI />
+        <RunAndWaitToolUI />
+        <SearchOperationsToolUI />
+        <DescribeOperationToolUI />
+        <ImportPackageFileToolUI />
 
-      {/* Empty: composer centered mid-screen for a strong first impression.
+        {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
-      <AuiIf condition={(s) => s.thread.isEmpty}>
-        <ThreadWelcome
-          composerSlot={composerSlot}
-          initialComposerDraft={initialComposerDraft}
-          draftSeededRef={draftSeededRef}
-        />
-      </AuiIf>
+        <AuiIf condition={(s) => s.thread.isEmpty}>
+          <ThreadWelcome
+            composerTools={composerTools}
+            composerSlot={composerSlot}
+            initialComposerDraft={initialComposerDraft}
+            draftSeededRef={draftSeededRef}
+            queue={messageQueue}
+          />
+        </AuiIf>
 
-      <AuiIf condition={(s) => !s.thread.isEmpty}>
-        {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+        <AuiIf condition={(s) => !s.thread.isEmpty}>
+          {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
             and amplifies any residual layout shift. `relative` makes the
             viewport the containing block of its absolutely positioned
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-        <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
-          <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+          <ThreadPrimitive.Viewport className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pt-6">
+            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
-          <div className="min-h-6 flex-grow" />
+            <div className="min-h-6 flex-grow" />
 
-          <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
-            <ScrollToBottom />
-            <Composer
-              slot={composerSlot}
-              initialDraft={initialComposerDraft}
-              draftSeededRef={draftSeededRef}
-            />
-            <Disclaimer />
-          </ThreadPrimitive.ViewportFooter>
-        </ThreadPrimitive.Viewport>
-      </AuiIf>
-    </ThreadPrimitive.Root>
+            <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+              <ScrollToBottom />
+              <Composer
+                tools={composerTools}
+                slot={composerSlot}
+                initialDraft={initialComposerDraft}
+                draftSeededRef={draftSeededRef}
+                queue={messageQueue}
+              />
+              <Disclaimer />
+            </ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
+        </AuiIf>
+      </ThreadPrimitive.Root>
+      {/* The app's dropzone in its drag-over state (the form file field, the
+          import dialog): dashed border, primary tint. Over the thread it needs
+          a veil so the transcript does not show through. */}
+      <div
+        aria-hidden="true"
+        className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+      >
+        <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
+          <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+        </div>
+      </div>
+    </ComposerPrimitive.AttachmentDropzone>
   );
 }
 
-// Generic, instance-agnostic prompts — must not reference any specific
-// agent/package or org data (this UI ships to every Appstrate user).
-const WELCOME_SUGGESTION_KEYS = [
-  "welcome.suggestion.capabilities",
-  "welcome.suggestion.agents",
-  "welcome.suggestion.runs",
-  "welcome.suggestion.files",
-];
-
 function ThreadWelcome({
+  composerTools,
   composerSlot,
   initialComposerDraft,
   draftSeededRef,
+  queue,
 }: {
+  composerTools?: React.ReactNode;
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
+  queue: MessageQueue;
 }) {
-  const { can, t } = useChatHost();
+  const { can, t, firstName: name } = useChatHost();
   const canWrite = can("chat:write");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
-      <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
+      <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
-          <p className="text-lg font-medium">Appstrate Chat</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {name ? t("welcome.greeting", { name }) : t("welcome.greetingAnonymous")}
+          </h1>
           <p className="text-muted-foreground mt-1 text-sm">
             {/* A reader asks nothing: what there is to do is reread. */}
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
         </div>
         <Composer
+          tools={composerTools}
           slot={composerSlot}
           initialDraft={initialComposerDraft}
           draftSeededRef={draftSeededRef}
+          queue={queue}
         />
-        {canWrite && (
-          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-            {WELCOME_SUGGESTION_KEYS.map((key) => (
-              <ThreadPrimitive.Suggestion
-                key={key}
-                prompt={t(key)}
-                method="replace"
-                autoSend
-                asChild
-              >
-                <button
-                  type="button"
-                  className="bg-card hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
-                >
-                  {t(key)}
-                </button>
-              </ThreadPrimitive.Suggestion>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -205,11 +230,61 @@ function ScrollToBottom() {
   );
 }
 
-/** A pending composer attachment chip: file icon, name, size, remove button. */
+/**
+ * A pending image's thumbnail. The object URL lives exactly as long as the
+ * element (React 19 ref cleanup), with no state round-trip. Not the staged
+ * cache of `upload.ts`: that one is filled at send time, after the chip is gone.
+ */
+function PendingImage({ file, name }: { file: File; name: string }) {
+  const attach = React.useCallback(
+    (img: HTMLImageElement | null) => {
+      if (!img) return;
+      const url = URL.createObjectURL(file);
+      img.src = url;
+      return () => URL.revokeObjectURL(url);
+    },
+    [file],
+  );
+  return (
+    <img
+      ref={attach}
+      alt={name || "image"}
+      title={name}
+      className="size-12 shrink-0 rounded-md border object-cover"
+    />
+  );
+}
+
+/** A pending composer attachment: an image thumbnail, else a chip (file icon, name, size); both removable. */
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
-  const size = useAuiState((s) => s.attachment.file?.size ?? 0);
+  const file = useAuiState((s) => s.attachment.file);
+  const size = file?.size ?? 0;
   const { formatBytes, t } = useChatHost();
+  const previewFile = file && isImageMime(file.type) ? file : undefined;
+  const remove = (
+    <AttachmentPrimitive.Remove asChild>
+      <button
+        type="button"
+        aria-label={t("composer.removeAttachment")}
+        className={
+          previewFile
+            ? "bg-foreground/70 text-background hover:bg-foreground absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full"
+            : "text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
+        }
+      >
+        <XIcon className={previewFile ? "size-3" : "size-3.5"} />
+      </button>
+    </AttachmentPrimitive.Remove>
+  );
+  if (previewFile) {
+    return (
+      <AttachmentPrimitive.Root className="relative inline-flex">
+        <PendingImage file={previewFile} name={name} />
+        {remove}
+      </AttachmentPrimitive.Root>
+    );
+  }
   return (
     <AttachmentPrimitive.Root className="inline-flex">
       <InertAttachmentChip
@@ -219,15 +294,7 @@ function ComposerAttachmentChip() {
             {size > 0 && (
               <span className="text-muted-foreground shrink-0">{formatBytes(size)}</span>
             )}
-            <AttachmentPrimitive.Remove asChild>
-              <button
-                type="button"
-                aria-label={t("composer.removeAttachment")}
-                className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </AttachmentPrimitive.Remove>
+            {remove}
           </>
         }
       />
@@ -301,17 +368,128 @@ function ComposerAttachmentError() {
   );
 }
 
+/** Sends everything queued as ONE user message, then empties the queue. */
+function sendQueued(aui: ReturnType<typeof useAui>, queue: MessageQueue) {
+  const text = joinQueued(queue.getSnapshot().items);
+  queue.clear();
+  aui.thread().append({ content: [{ type: "text", text }] });
+}
+
+/**
+ * Sends the queue when a turn ends (error included). A turn the user stopped
+ * keeps its queue: the composer offers a manual send instead. Lives in `Thread`,
+ * which outlives both composers (welcome and footer).
+ */
+function useQueueFlush(queue: MessageQueue) {
+  const aui = useAui();
+  const running = useAuiState((s) => s.thread.isRunning);
+  const wasRunning = React.useRef(false);
+  React.useEffect(() => {
+    const decision = flushDecision({
+      wasRunning: wasRunning.current,
+      running,
+      snapshot: queue.getSnapshot(),
+    });
+    const ended = wasRunning.current && !running;
+    wasRunning.current = running;
+    if (decision === "send") sendQueued(aui, queue);
+    // A Stop only holds the queue for the turn it stopped.
+    else if (ended) queue.releaseStop();
+  }, [running, aui, queue]);
+}
+
+/** The queued messages, as a compact list at the top of the composer card. */
+function QueuedMessages({
+  queue,
+  running,
+  composerEmpty,
+  onEdit,
+}: {
+  queue: MessageQueue;
+  running: boolean;
+  composerEmpty: boolean;
+  onEdit: (text: string) => void;
+}) {
+  const { t } = useChatHost();
+  const aui = useAui();
+  const { items }: QueueSnapshot = React.useSyncExternalStore(
+    queue.subscribe,
+    queue.getSnapshot,
+    queue.getSnapshot,
+  );
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-1 flex flex-col gap-1 border-b pb-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground text-xs font-medium">
+          {t(running ? "composer.queue.title" : "composer.queue.titleHeld")}
+        </p>
+        {!running && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => sendQueued(aui, queue)}
+          >
+            {t("composer.queue.sendNow")}
+          </Button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-0.5">
+        {items.map((text, index) => (
+          // Texts may repeat and the list only ever shrinks or appends: the index is the identity.
+          <li key={index} className="text-muted-foreground flex items-center gap-1 text-xs">
+            <span className="min-w-0 flex-1 truncate" title={text}>
+              {text}
+            </span>
+            <IconButton
+              label={t("composer.queue.edit")}
+              className="size-6"
+              disabled={!composerEmpty}
+              onClick={() => {
+                queue.remove(index);
+                onEdit(text);
+              }}
+            >
+              <PencilIcon />
+            </IconButton>
+            <IconButton
+              label={t("composer.queue.remove")}
+              className="size-6"
+              onClick={() => queue.remove(index)}
+            >
+              <XIcon />
+            </IconButton>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Composer({
+  tools,
   slot,
   initialDraft,
   draftSeededRef,
+  queue,
 }: {
+  tools?: React.ReactNode;
   slot?: React.ReactNode;
   initialDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
+  queue: MessageQueue;
 }) {
   const { can, t } = useChatHost();
   const composer = unstable_useComposerInput();
+  const running = useAuiState((s) => s.thread.isRunning);
+  const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // Only text is queued: attachments stay in the composer until the next real send.
+  const canQueue = running && !hasAttachments && composer.value.trim() !== "";
+  const enqueue = () => {
+    if (canQueue && queue.add(composer.value)) composer.setText("");
+  };
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
       return;
@@ -333,6 +511,12 @@ function Composer({
     <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
       {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
+      <QueuedMessages
+        queue={queue}
+        running={running}
+        composerEmpty={composer.value.trim() === ""}
+        onEdit={composer.setText}
+      />
       <div className="flex flex-wrap gap-1.5 empty:hidden">
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
@@ -340,49 +524,59 @@ function Composer({
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
+        addAttachmentOnPaste
         placeholder={t("composer.placeholder")}
+        onKeyDown={(e) => {
+          // While the agent answers the primitive ignores Enter; it queues instead.
+          if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
+          if (e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          enqueue();
+        }}
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <ComposerPrimitive.AddAttachment multiple asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.attach")}
-            >
-              <PaperclipIcon />
-            </Button>
-          </ComposerPrimitive.AddAttachment>
+        <div className="min-w-0">{tools}</div>
+        <div className="flex shrink-0 items-center gap-2">
           <div className="min-w-0">{slot}</div>
+          <ThreadPrimitive.If running={false}>
+            <ComposerPrimitive.Send asChild>
+              <Button
+                type="button"
+                size="icon"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label={t("composer.send")}
+              >
+                <SendHorizontalIcon />
+              </Button>
+            </ComposerPrimitive.Send>
+          </ThreadPrimitive.If>
+          <ThreadPrimitive.If running>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="size-8 shrink-0 rounded-lg"
+              aria-label={t("composer.queue.add")}
+              title={t("composer.queue.add")}
+              disabled={!canQueue}
+              onClick={enqueue}
+            >
+              <ListPlusIcon />
+            </Button>
+            <ComposerPrimitive.Cancel asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label={t("composer.stop")}
+              >
+                <SquareIcon className="fill-current" />
+              </Button>
+            </ComposerPrimitive.Cancel>
+          </ThreadPrimitive.If>
         </div>
-        <ThreadPrimitive.If running={false}>
-          <ComposerPrimitive.Send asChild>
-            <Button
-              type="button"
-              size="icon"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.send")}
-            >
-              <SendHorizontalIcon />
-            </Button>
-          </ComposerPrimitive.Send>
-        </ThreadPrimitive.If>
-        <ThreadPrimitive.If running>
-          <ComposerPrimitive.Cancel asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label={t("composer.stop")}
-            >
-              <SquareIcon className="size-3 fill-current" />
-            </Button>
-          </ComposerPrimitive.Cancel>
-        </ThreadPrimitive.If>
       </div>
     </ComposerPrimitive.Root>
   );
@@ -414,7 +608,7 @@ function UserMessage() {
   if (resume) {
     return (
       <MessagePrimitive.Root className="flex w-full max-w-(--thread-max-width) justify-center py-1.5">
-        <span className="bg-muted/50 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+        <span className="bg-muted/40 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
           <IntegrationIcon src={resume.icon} className="size-3.5" />
           <span>
             {sentenceWithName(
@@ -513,39 +707,45 @@ export function MessageError() {
   );
   if (!errorState) return null;
   return (
-    <div
-      role="alert"
-      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm break-words"
+    <Alert
+      variant="destructive"
+      className="mt-2 break-words"
+      action={
+        errorState.action || errorState.retryable ? (
+          <div className="flex gap-2">
+            {errorState.action ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={errorState.action.href}>{errorState.action.label}</a>
+              </Button>
+            ) : null}
+            {errorState.retryable ? (
+              <ThreadPrimitive.If running={false}>
+                <ThreadPrimitive.Suggestion
+                  prompt={t("turn.retryPrompt")}
+                  method="replace"
+                  autoSend
+                  asChild
+                >
+                  <Button type="button" variant="outline" size="sm">
+                    <RotateCcwIcon />
+                    {t("common:btn.retry")}
+                  </Button>
+                </ThreadPrimitive.Suggestion>
+              </ThreadPrimitive.If>
+            ) : null}
+          </div>
+        ) : null
+      }
     >
-      <span>
+      <AlertDescription>
         {errorState.text}
         {errorState.requestId ? (
-          <span className="mt-1 block text-xs opacity-80">
+          <span className="text-muted-foreground mt-1 block text-xs">
             {t("turn.error.requestId", { id: errorState.requestId })}
           </span>
         ) : null}
-      </span>
-      {errorState.action ? (
-        <Button asChild variant="outline" size="sm" className="shrink-0">
-          <a href={errorState.action.href}>{errorState.action.label}</a>
-        </Button>
-      ) : null}
-      {errorState.retryable ? (
-        <ThreadPrimitive.If running={false}>
-          <ThreadPrimitive.Suggestion
-            prompt={t("turn.retryPrompt")}
-            method="replace"
-            autoSend
-            asChild
-          >
-            <Button type="button" variant="outline" size="sm" className="shrink-0">
-              <RotateCcwIcon className="size-3.5" />
-              {t("turn.retry")}
-            </Button>
-          </ThreadPrimitive.Suggestion>
-        </ThreadPrimitive.If>
-      ) : null}
-    </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -577,7 +777,7 @@ function AssistantMessage() {
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("action.copy")}>
+            <IconButton label={t("common:btn.copy")}>
               <MessagePrimitive.If copied>
                 <CheckIcon />
               </MessagePrimitive.If>
@@ -605,10 +805,10 @@ const IconButton = React.forwardRef<
     type="button"
     variant="ghost"
     size="icon"
-    className="text-muted-foreground size-7 [&_svg]:size-3.5"
     aria-label={label}
     title={label}
     {...props}
+    className={cn("text-muted-foreground size-7 [&_svg]:size-3.5", props.className)}
   >
     {children}
   </Button>

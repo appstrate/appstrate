@@ -12,9 +12,6 @@
  * footer strip: one column, and it holds the CONTROL when the actor may change
  * the role, falling back to plain text when they may not — "the control IS the setting",
  * which a value with a picker beside it is not.
- *
- * Out of the page for the same reason as `model-columns.tsx`: a column set is
- * data, and it has to be reachable by `column-tiers.test.tsx`.
  */
 
 import { useTranslation } from "react-i18next";
@@ -28,7 +25,6 @@ import { OrgRoleSelect } from "../../components/org-role-select";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellDate, CellEmpty, CellList, CellText } from "../../components/table-cells";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -40,7 +36,6 @@ export function useMemberColumns({
   onChangeRole,
   onRemove,
   spaces,
-  spacesLoading = false,
 }: {
   /** Which roles this actor may move that member to. Empty = not theirs to change. */
   assignableRoles: (member: OrgMember) => readonly OrgRole[];
@@ -51,16 +46,15 @@ export function useMemberColumns({
   onRemove: (member: OrgMember) => void;
   /** The spaces this person reaches, when the caller may see every one. */
   spaces?: (member: OrgMember) => string[];
-  /** The memberships are still being read: the column holds its place. */
-  spacesLoading?: boolean;
 }): DataColumn<OrgMember>[] {
   const { t } = useTranslation(["settings", "common"]);
 
   return [
     {
       id: "member",
-      header: t("orgSettings.memberColumn"),
-      width: "minmax(130px,1.4fr)",
+      header: t("spaceMembers.colMember"),
+      width: 130,
+      elastic: true,
       cell: (member) => {
         const name = memberLabel(member);
         return (
@@ -73,15 +67,16 @@ export function useMemberColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(150px,1.3fr)",
-      tier: 2,
+      width: 150,
+      elastic: true,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "minmax(140px,1fr)",
+      width: 140,
+      elastic: true,
       // A select: it scrolls into reach rather than waiting for room.
       control: true,
       cell: (member) => {
@@ -109,30 +104,24 @@ export function useMemberColumns({
       ? [
           {
             id: "spaces",
-            header: t("orgSettings.spacesColumn"),
-            width: "minmax(100px,1.2fr)" as const,
-            tier: 3 as const,
-            cell: (member: OrgMember) =>
-              spacesLoading ? (
-                <Skeleton className="h-4 w-24" />
-              ) : (
-                <CellList items={spaces(member)} />
-              ),
+            header: t("orgSettings.inviteSpacesLabel"),
+            width: 100,
+            elastic: true,
+            cell: (member: OrgMember) => <CellList items={spaces(member)} />,
           },
         ]
       : []),
     {
       id: "joined",
       header: t("orgSettings.joinedColumn"),
-      width: "92px",
+      width: 92,
       align: "end",
-      tier: 3,
       cell: (member) => <CellDate value={member.joinedAt} granularity="date" />,
     },
     rowActionsColumn((member: OrgMember) =>
       canRemove(member) ? (
         <TableRowActions
-          menuLabel={t("orgSettings.moreMemberActions", {
+          menuLabel={t("providers.moreActions", {
             name: memberLabel(member),
           })}
           isPending={isRemoving}

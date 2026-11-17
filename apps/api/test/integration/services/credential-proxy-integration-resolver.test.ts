@@ -91,7 +91,14 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
     name: INTEGRATION_ID,
     version: "1.0.0",
     display_name: "Gmail",
-    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       primary: {
         type: "oauth2",
@@ -233,7 +240,14 @@ describe("credential-proxy integration-resolver", () => {
         name: NO_AUTH,
         version: "1.0.0",
         display_name: "NoAuth",
-        source: { kind: "local", server: { name: "@official/noauth-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "api_key",
@@ -270,7 +284,14 @@ describe("credential-proxy integration-resolver", () => {
         name: TENANT,
         version: "1.0.0",
         display_name: "Tenant",
-        source: { kind: "local", server: { name: "@official/tenant-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         auths: {
           primary: {
             type: "api_key",
@@ -330,7 +351,14 @@ describe("credential-proxy integration-resolver", () => {
         name: FORGE,
         version: "1.0.0",
         display_name: "Forge",
-        source: { kind: "local", server: { name: "@official/forge-server", version: "^1.0.0" } },
+        source: {
+          kind: "local",
+          server: {
+            type: "node",
+            entry_point: "server/index.js",
+            mcp_config: { command: "node", args: ["server/index.js"] },
+          },
+        },
         variables: {
           schema: {
             type: "object",
@@ -380,14 +408,16 @@ describe("credential-proxy integration-resolver", () => {
     expect(JSON.stringify(resolved.payload)).toContain("acme:k");
   });
 
-  it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
+  it("returns a needs_reconnection verdict and flags the row on a revoked refresh token (force-refresh path)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
 
-    // Not-refreshed, like the other terminal shape: the caller (inside
-    // `catch {}` either way) relays the upstream 401, and the persisted flag
-    // is what makes the failure legible.
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+    // Not-refreshed, like the other terminal shape: the caller relays the
+    // upstream 401 annotated with the verdict, and the row is flagged.
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "needs_reconnection", cause: "refresh_token_revoked" },
+    });
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -395,7 +425,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(true);
   });
 
-  it("returns null (never the dead token) when the connection has no refresh_token", async () => {
+  it("returns a needs_reconnection verdict (never the dead token) when the connection has no refresh_token", async () => {
     // The row is already flagged in this shape — what was wrong is that the
     // refresh reported SUCCESS carrying the very access_token that just 401'd,
     // so the proxy rebuilt a payload from it and retried with an identical
@@ -405,7 +435,10 @@ describe("credential-proxy integration-resolver", () => {
     // refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "needs_reconnection", cause: "refresh_token_missing" },
+    });
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -413,10 +446,10 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(true);
   });
 
-  it("returns null (keeps the original 401) on a transient token-endpoint discovery failure", async () => {
+  it("returns an in_use verdict (keeps the original 401) on a transient token-endpoint discovery failure", async () => {
     // Issuer-only manifest (Drive/OneDrive shape) whose discovery fails (the
     // server returns a non-matching doc on every well-known probe). The forced
-    // path must NOT throw — it returns null so the route keeps the original 401
+    // path must NOT throw — it returns a verdict so the route keeps the original 401
     // and the connection row is untouched (mirrors the main resolver's 502, but
     // this surface degrades to not-refreshed rather than erroring).
     const origin = token.url.replace(/\/token$/, "");
@@ -441,10 +474,11 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
-    // `null` alone no longer discriminates transient from terminal: both
-    // shapes return it since `IntegrationCredentialRevokedError` was removed,
-    // so the PERSISTED flag is the only thing left that tells them apart. The
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "in_use", cause: "discovery_transient" },
+    });
+    // The verdict says `in_use`; the PERSISTED flag must agree. The
     // comment above claims "the connection row is untouched" — assert it, or a
     // regression that flags a healthy connection on a transient discovery
     // outage (forcing a needless user reconnect) passes silently.
@@ -473,10 +507,16 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+        kind: "verdict",
+        credential: { status: "in_use", cause: "unrefreshable", failures: i, maxFailures: max },
+      });
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "needs_reconnection", cause: "unrefreshable" },
+    });
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -503,10 +543,16 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+        kind: "verdict",
+        credential: { status: "in_use", cause: "unrefreshable", failures: i, maxFailures: max },
+      });
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "needs_reconnection", cause: "unrefreshable" },
+    });
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -536,7 +582,10 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toEqual({
+      kind: "verdict",
+      credential: { status: "in_use", cause: "discovery_transient" },
+    });
 
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
@@ -599,6 +648,7 @@ describe("credential-proxy integration-resolver", () => {
       token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read send" });
 
       const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
+      expect(refreshed?.kind).toBe("replay");
       expect(JSON.stringify(refreshed)).toContain("narrowed-access");
       const [row] = await db
         .select({

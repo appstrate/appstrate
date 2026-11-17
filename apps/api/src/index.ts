@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono, type Context } from "hono";
-import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
@@ -27,6 +26,7 @@ import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.
 import { createInternalRouter } from "./routes/internal.ts";
 import { createSpacesRouter } from "./routes/spaces.ts";
 import { createRolesRouter } from "./routes/roles.ts";
+import { createOrgRolesRouter } from "./routes/org-roles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -35,10 +35,11 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import { createFilesRouter, createFilePreviewRouter } from "./routes/files.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
-import { staticCacheControl } from "./lib/static-cache.ts";
+import { serveSpaBuild } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
+import { createCrossSpaceReadsRouter } from "./routes/cross-space-reads.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
@@ -49,6 +50,7 @@ import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "./routes/oauth-client-metadata.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
@@ -341,6 +343,7 @@ app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
+app.route("/api/orgs", createCrossSpaceReadsRouter());
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
 // (it is the prerequisite to setting `X-Org-Id`); the other routes run
@@ -350,7 +353,7 @@ app.route("/api/me", meRouter);
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.
-// Mounted BEFORE runsRouter so the more-specific `/runs/:runId/events` path
+// Mounted BEFORE runsRouter so the more-specific `/runs/:id/events` path
 // matches without falling through to `GET /runs/:id`. Path-pattern `skipAuth`
 // bypass is declared in `lib/auth-pipeline.ts` so these never pass through
 // the cookie/API-key auth layer.
@@ -373,6 +376,7 @@ app.route("/api/model-provider-credentials", createModelProviderCredentialsRoute
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/spaces", createSpacesRouter());
 app.route("/api/roles", createRolesRouter());
+app.route("/api/org-roles", createOrgRolesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
@@ -383,6 +387,9 @@ app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
+
+// Public OAuth Client ID Metadata Documents, fetched by integration authorization servers.
+app.route("/oauth", createOAuthClientMetadataRouter());
 
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);
@@ -411,21 +418,10 @@ app.all(
   }),
 );
 
-// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below).
-// `onFound` attaches the caching policy: Hono's static middleware emits no
-// `Cache-Control` and no validator of its own, so without it every asset is
-// re-downloaded in full on every visit (there is nothing to revalidate against,
-// so no `304` either). Policy + rationale: `lib/static-cache.ts`.
-app.use(
-  "/*",
-  serveStatic({
-    root: "./apps/web/dist",
-    rewriteRequestPath: (path) => (path === "/" || path === "/index.html" ? "/.noop" : path),
-    onFound: (path, c) => {
-      c.header("Cache-Control", staticCacheControl(path));
-    },
-  }),
-);
+// Static files for UI (JS, CSS, images, fonts, the emoji dataset — skip index.html, served with
+// config below), each with its caching policy: Hono's static middleware emits no `Cache-Control`
+// and no validator of its own. Policy + rationale: `lib/static-cache.ts`.
+serveSpaBuild(app, "./apps/web/dist");
 
 // SPA fallback — serve index.html with injected app config for all non-asset
 // routes. This is the ONLY response that carries the SPA document, and so the

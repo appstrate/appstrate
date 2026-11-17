@@ -23,6 +23,7 @@ await i18n.changeLanguage("fr");
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
+const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "blue" });
 
 /**
  * The column set is a hook — the toolbar's column menu and the table have
@@ -31,13 +32,13 @@ const agentName = () => "Rapport trimestriel";
  */
 function Harness({
   runs,
-  hideAgentName,
+  oneAgent,
   ...props
 }: {
   runs: EnrichedRun[];
-  hideAgentName?: boolean;
+  oneAgent?: boolean;
 } & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
-  const columns = useRunColumns({ agentName, hideAgentName });
+  const columns = useRunColumns({ agentName, agentIdentity, oneAgent });
   return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
@@ -54,52 +55,37 @@ describe("the runs column set", () => {
     const heads = Object.entries(agentsFr)
       .filter(([key]) => key.startsWith("runs.column."))
       .map(([, label]) => label);
-    expect(heads).toHaveLength(8);
     for (const head of heads) expect(html).toContain(head);
   });
 
   it("renders the run's facts in their columns", () => {
-    expect(html).toContain("#42");
+    expect(html).toContain(`#42 · ${STARTED_AT_LABEL}`); // under the agent, in « Run »
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("Alice"); // trigger
     expect(html).toContain('aria-label="eu-proxy"'); // the egress it went through
-    expect(html).toContain("4,2\u202fs"); // duration
-    expect(html).toContain(STARTED_AT_LABEL);
+    expect(html).toContain("4,2\u202fs"); // duration, at the end of « Run »
+  });
+
+  it("draws the agent's tile before its name", () => {
+    // The tile wears the agent's chosen colour.
+    expect(html).toContain("bg-identity-blue-tile");
   });
 
   it("leads to the run, under a name that says which run", () => {
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
-    // Not "#42": the link sits in the agent column, and a row has to be
-    // identifiable out of context.
+    // Not just the agent: a row has to be identifiable out of context.
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
-});
 
-describe("the result column", () => {
-  it("shows what broke on a failed run", () => {
-    const message = "Connexion refusée : le code 2FA a expiré.";
-    const html = table([makeRun({ status: "failed", error: message })]);
-    expect(html).toContain(message);
-    // Truncated in place, so the full text stays reachable on hover — which
-    // costs a `relative z-10`: the row's link overlay paints over the cells,
-    // and an unraised `title` never fires. The tooltip IS the column's point.
-    expect(html).toMatch(/class="[^"]*relative z-10[^"]*"[^>]*title="Connexion refusée/);
-  });
-
-  it("says nothing rather than inventing a result on a run that worked", () => {
-    expect(table()).toContain("—");
-  });
-
-  it("reads a structured output as a line, never as JSON", () => {
-    const html = table([makeRun({ result: { output: { resume: "Trois points", n: 3 } } })]);
-    expect(html).toContain("Trois points");
-    expect(html).toContain('title="Trois points"');
-    expect(html).not.toContain('{"');
-  });
-
-  it("counts the fields of an output that holds no text", () => {
-    const html = table([makeRun({ result: { output: { a: 1, b: 2 } } })]);
-    expect(html).toContain("2 champs");
+  it("holds which run, how it ended, its timing and its launch — not its outcome", () => {
+    // The outcome (error, output, files) lives on the run's own page: a list
+    // cell can only truncate it.
+    function Probe() {
+      return useRunColumns({ agentName, agentIdentity })
+        .map((column) => column.id)
+        .join(",");
+    }
+    expect(render(<Probe />)).toBe("status,run,trigger");
   });
 });
 
@@ -116,23 +102,35 @@ describe("the trigger column", () => {
   });
 });
 
-describe("what a surface subtracts", () => {
-  it("drops the agent column inside an agent, head and cells together", () => {
-    const html = table([makeRun()], { hideAgentName: true });
-    expect(html).not.toContain(agentsFr["runs.column.agent"]);
+describe("the status column", () => {
+  it("draws no head: the badge says what it is", () => {
+    const html = table();
+    expect(html).toMatch(/<th[^>]*data-column="status"[^>]*>\s*<span class="sr-only">/);
+  });
+});
+
+describe("the row's link", () => {
+  it("sits on « Run », though the status comes first", () => {
+    const html = table();
+    expect(html).toMatch(
+      /<a aria-label="Run #42 \(Rapport trimestriel\)"[^>]*>\s*<div[^>]*>[\s\S]*?Rapport trimestriel/,
+    );
+    const status = html.match(/<td[^>]*data-column="status"[^>]*>[\s\S]*?<\/td>/)?.[0] ?? "";
+    expect(status).not.toContain('aria-label="Run #42');
+  });
+});
+
+describe("inside one agent", () => {
+  const html = table([makeRun()], { oneAgent: true });
+
+  it("leads « Run » with the number, without repeating the agent", () => {
+    expect(html).toContain(">#42<");
     expect(html).not.toContain(">Rapport trimestriel<");
-    // The row's accessible NAME keeps it, though: a link has to say which run
-    // it leads to even when the column that showed it is gone.
-    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
-    // The row still leads somewhere: the link moves to the next surviving column.
-    expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
+    expect(html).not.toContain("bg-identity-");
   });
 
-  it("keeps the badges that explain a missing Cancel or Re-run", () => {
-    const html = table([makeRun({ package_ephemeral: false, runOrigin: "remote" })], {
-      hideAgentName: true,
-    });
-    expect(html).toContain(agentsFr["runs.remoteBadge"]);
+  it("still names the row's link after the agent", () => {
+    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
 });
 

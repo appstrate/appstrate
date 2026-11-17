@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { eq, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
+import type { RunStatus } from "@appstrate/core/run-status";
 import {
-  runs,
   notifications,
-  organizationMembers,
-  packages,
+  runAlertStatusValues,
+  type RunAlertStatus,
   type NotificationPayloads,
   type NotificationType,
   type PackageType,
 } from "@appstrate/db/schema";
-import { scopedWhere } from "../../lib/db-helpers.ts";
+import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { listResponse } from "../../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
@@ -45,101 +46,107 @@ interface NotificationDto {
   createdAt: string;
 }
 
+function needsAttention(status: RunStatus): status is RunAlertStatus {
+  return (runAlertStatusValues as readonly RunStatus[]).includes(status);
+}
+
 /**
- * Fan out notifications for a freshly finalized run. Called exactly once
- * per run from the `finalizeRun` CAS winner, so no dedupe is needed.
- *
- * Recipients:
- *  - run triggered by a dashboard user → that user
- *  - run triggered by an end-user      → that end-user
- *  - actor-less run (owner-less org / system schedule, where the scheduler
- *    copied a null userId+endUserId onto the run) → org admins/owners only.
- *    Owned schedules carry the owner's userId onto the run, so they hit the
- *    first branch (one notification, no fan-out). An actor-less row is readable
- *    only with `runs:read-all` (RBAC spec §3.4) — nobody else would find the
- *    run behind the bell — which is why the fan-out targets org admins, and it
- *    bounds row growth at the same time.
- *
- * Best-effort by contract: the caller wraps this in try/catch — the run is
- * already terminal, a notification write must never fail the run.
+ * Notify a finished run's recipients when it needs attention — the bell
+ * decides here, when the notification is written, never when it is read.
+ * Called by `recordRunFinished` (`run-reads.ts`) with the run's recipients;
+ * the `(run, recipient, type)` unique index makes a re-fire a no-op.
  */
-export async function createRunNotifications(scope: SpaceScope, runId: string): Promise<number> {
-  const [run] = await db
-    .select({
-      userId: runs.userId,
-      endUserId: runs.endUserId,
-      packageId: runs.packageId,
-      status: runs.status,
-      packageEphemeral: packages.ephemeral,
-    })
-    .from(runs)
-    .leftJoin(packages, eq(packages.id, runs.packageId))
-    .where(
-      scopedWhere(runs, {
+export async function notifyRunFinished(
+  scope: SpaceScope,
+  run: { id: string; packageId: string | null; agentName: string | null; status: RunStatus },
+  recipients: Actor[],
+  executor: DbOrTx,
+): Promise<void> {
+  const { status } = run;
+  if (!needsAttention(status) || recipients.length === 0) return;
+  const payload: NotificationPayloads["run_failed"] = {
+    packageId: run.packageId,
+    agent_name: run.agentName,
+    status,
+  };
+  await executor
+    .insert(notifications)
+    .values(
+      recipients.map((r) => ({
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [eq(runs.id, runId)],
-      }),
+        recipientType: r.type,
+        recipientId: r.id,
+        type: "run_failed" as const,
+        runId: run.id,
+        payload,
+      })),
     )
-    .limit(1);
-  if (!run) return 0;
+    .onConflictDoNothing();
+}
 
-  // Ephemeral runs are foreground and relayed straight to their trigger (chat,
-  // editor playground, direct inline API) — the result is already in front of
-  // the caller, so a persistent bell notification would only duplicate it. Key
-  // on the semantic `packages.ephemeral` flag rather than the `@inline/` scope
-  // string: any ephemeral shadow package, whatever its scope, is foreground. A
-  // null join (shadow package already compacted/deleted) defaults to notifying.
-  // The run row + result still persist (recoverable in run history); only the
-  // bell entry is suppressed.
-  if (run.packageEphemeral === true) return 0;
+/**
+ * Read the caller's failure notices of one run (`runId`), or of every run: the
+ * run page is where a `run_failed` leads. Every other kind is read on its own page.
+ */
+export async function markRunFailureNotificationsRead(
+  scope: SpaceScope,
+  actor: Actor,
+  runId?: string,
+): Promise<void> {
+  await db
+    .update(notifications)
+    .set({ readAt: sql`now()` })
+    .where(
+      scopedWhere(notifications, {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        extra: [
+          recipientFilter(actor),
+          eq(notifications.type, "run_failed"),
+          isNull(notifications.readAt),
+          ...(runId ? [eq(notifications.runId, runId)] : []),
+        ],
+      }),
+    );
+}
 
-  const payload: NotificationPayloads["run_completed"] = {
+/**
+ * Write the notification an agent sends from inside its run (`notify`, a tool
+ * of `@appstrate/platform`), one row per recipient of the run
+ * (`resolveRunRecipients`, the same people its read state and failure notice
+ * go to).
+ *
+ * Each recipient receives at most one `agent_message` per run: the
+ * `(run, recipient, type)` unique index makes a second call a no-op. Returns how
+ * many rows were written; `0` means the run already sent its message. `recipients`
+ * is not empty.
+ */
+export async function createAgentMessageNotifications(
+  scope: SpaceScope,
+  run: { id: string; packageId: string | null; agentName: string | null },
+  recipients: Actor[],
+  message: { title: string; message: string },
+): Promise<number> {
+  const payload: NotificationPayloads["agent_message"] = toPgSafe({
     packageId: run.packageId,
-    status: run.status,
-  };
-  const base = {
-    orgId: scope.orgId,
-    spaceId: scope.spaceId,
-    type: "run_completed" as const,
-    runId,
-    payload,
-  };
-
-  let rows: Array<typeof base & { recipientType: "user" | "end_user"; recipientId: string }>;
-  if (run.userId) {
-    rows = [{ ...base, recipientType: "user", recipientId: run.userId }];
-  } else if (run.endUserId) {
-    rows = [{ ...base, recipientType: "end_user", recipientId: run.endUserId }];
-  } else {
-    // Actor-less run → fan out to org admins/owners only.
-    //
-    // Bounded race: a member removed between this SELECT and the INSERT (or
-    // whose run finalizes after they were removed) gets a notification they can
-    // no longer see — org-context middleware blocks a non-member from reading
-    // it, so it is invisible, not leaked, and is reaped when the org is
-    // deleted. Re-validating membership at insert time would only narrow, not
-    // close, the window (removal can still land after the INSERT), so we accept
-    // the harmless orphan rather than pay for a row lock on every fan-out.
-    const admins = await db
-      .select({ userId: organizationMembers.userId })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.orgId, scope.orgId),
-          inArray(organizationMembers.role, ["owner", "admin"]),
-        ),
-      );
-    rows = admins.map((m) => ({ ...base, recipientType: "user", recipientId: m.userId }));
-  }
-
-  if (rows.length === 0) return 0;
-  // onConflictDoNothing: a re-fire (the CAS should prevent it, but be safe)
-  // collides with the (run_id, recipient, type) unique indexes and is a no-op
-  // rather than an error. Return the count actually inserted.
+    agent_name: run.agentName,
+    title: message.title,
+    message: message.message,
+  });
   const inserted = await db
     .insert(notifications)
-    .values(rows)
+    .values(
+      recipients.map((r) => ({
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        recipientType: r.type,
+        recipientId: r.id,
+        type: "agent_message" as const,
+        runId: run.id,
+        payload,
+      })),
+    )
     .onConflictDoNothing()
     .returning({ id: notifications.id });
   return inserted.length;
@@ -183,63 +190,83 @@ export async function createPackageShareNotification(params: {
   });
 }
 
+// --- The feed ---
+//
+// The bell: every notification of the caller, newest first. What reaches it was
+// decided when it was written (`notifyRunFinished`, the share notice), so no
+// read below filters a kind.
+
+const notificationColumns = {
+  id: notifications.id,
+  type: notifications.type,
+  runId: notifications.runId,
+  payload: notifications.payload,
+  readAt: notifications.readAt,
+  createdAt: notifications.createdAt,
+};
+
+function toNotificationDto(
+  r: Pick<typeof notifications.$inferSelect, keyof typeof notificationColumns>,
+): NotificationDto {
+  return {
+    id: r.id,
+    type: r.type,
+    runId: r.runId,
+    payload: r.payload ?? null,
+    read_at: r.readAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+/** One notification of the caller; `null` when it is unknown or another's (the route's 404). */
+export async function getNotification(
+  scope: SpaceScope,
+  notificationId: string,
+  actor: Actor,
+): Promise<NotificationDto | null> {
+  if (!isUuid(notificationId)) return null;
+  const [row] = await db
+    .select(notificationColumns)
+    .from(notifications)
+    .where(
+      scopedWhere(notifications, {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
+      }),
+    )
+    .limit(1);
+  return row ? toNotificationDto(row) : null;
+}
+
 /**
  * Mark a single notification read. Idempotent for the recipient (already-read
- * → still `true`); returns `false` only when the notification does not exist
- * or does not belong to the caller, which the route maps to `404`.
+ * → still `true`); returns `false` only when the notification does not exist or
+ * does not belong to the caller, which the route maps to `404`.
  *
  * Single atomic UPDATE … RETURNING: `COALESCE(read_at, now())` preserves the
  * original read timestamp on a re-ack and makes an already-read row still
  * match (so it returns → `true`), while the recipient filter excludes a
- * non-caller's / missing row (zero rows → `false` → 404). This avoids the
- * former UPDATE-then-SELECT, whose two non-atomic statements could return a
- * spurious 404 if a concurrent run-delete cascaded the row away between them.
+ * non-caller's / missing row (zero rows → `false` → 404).
  */
 export async function markNotificationRead(
   scope: SpaceScope,
   notificationId: string,
   actor: Actor,
 ): Promise<boolean> {
-  const where = scopedWhere(notifications, {
-    orgId: scope.orgId,
-    spaceId: scope.spaceId,
-    extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
-  })!;
-
+  if (!isUuid(notificationId)) return false;
   const updated = await db
     .update(notifications)
     .set({ readAt: sql`COALESCE(${notifications.readAt}, now())` })
-    .where(where)
-    .returning({ id: notifications.id });
-  return updated.length > 0;
-}
-
-/**
- * Mark the caller's notification(s) for a run read, keyed by run id rather
- * than notification id. First-class convenience for callers that hold a run
- * id but not the notification id — the run-detail page marks the run's
- * notification read on open. Idempotent ack: never errors on a missing run
- * or non-recipient (nothing to mark is a no-op, not a 404).
- */
-export async function markNotificationReadByRun(
-  scope: SpaceScope,
-  runId: string,
-  actor: Actor,
-): Promise<void> {
-  await db
-    .update(notifications)
-    .set({ readAt: sql`now()` })
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [
-          eq(notifications.runId, runId),
-          recipientFilter(actor),
-          isNull(notifications.readAt),
-        ],
+        extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
       }),
-    );
+    )
+    .returning({ id: notifications.id });
+  return updated.length > 0;
 }
 
 export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor): Promise<number> {
@@ -271,36 +298,6 @@ export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor
   return row?.count ?? 0;
 }
 
-export async function getUnreadCountsByAgent(
-  scope: SpaceScope,
-  actor: Actor,
-): Promise<Record<string, number>> {
-  const agentId = sql<string | null>`${notifications.payload}->>'packageId'`;
-  const rows = await db
-    .select({ agentId, count: count() })
-    .from(notifications)
-    .where(
-      scopedWhere(notifications, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [
-          recipientFilter(actor),
-          isNull(notifications.readAt),
-          // `package_shared` carries `packageId` too, but is not a run notification.
-          eq(notifications.type, "run_completed"),
-          sql`${agentId} IS NOT NULL`,
-        ],
-      }),
-    )
-    .groupBy(agentId);
-
-  const result: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.agentId) result[row.agentId] = row.count;
-  }
-  return result;
-}
-
 /**
  * Recipient-scoped notification feed, newest first, keyset-paginated.
  *
@@ -316,10 +313,9 @@ export async function getUnreadCountsByAgent(
 export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
-  options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
+  options: { unread?: boolean; limit: number; startingAfter?: string },
 ): Promise<ListEnvelope<NotificationDto>> {
-  const { unread = false, startingAfter } = options;
-  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const { unread = false, limit, startingAfter } = options;
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
   const extra: SQL[] = [recipientFilter(actor)];
@@ -344,14 +340,7 @@ export async function listNotifications(
   })!;
 
   const rows = await db
-    .select({
-      id: notifications.id,
-      type: notifications.type,
-      runId: notifications.runId,
-      payload: notifications.payload,
-      readAt: notifications.readAt,
-      createdAt: notifications.createdAt,
-    })
+    .select(notificationColumns)
     .from(notifications)
     .where(where)
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
@@ -360,15 +349,5 @@ export async function listNotifications(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return listResponse(
-    page.map((r) => ({
-      id: r.id,
-      type: r.type,
-      runId: r.runId,
-      payload: r.payload ?? null,
-      read_at: r.readAt?.toISOString() ?? null,
-      createdAt: r.createdAt.toISOString(),
-    })),
-    { hasMore },
-  );
+  return listResponse(page.map(toNotificationDto), { hasMore });
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { useConnectionTest } from "../../hooks/use-connection-test";
@@ -33,14 +34,14 @@ export function SavedModelActions({
         </Button>
       )}
       {testable && (
-        <Button
+        <PendingButton
           type="button"
           variant="outline"
           onClick={() => void handleTest(model.id)}
           pending={testing}
         >
           {t("models.test")}
-        </Button>
+        </PendingButton>
       )}
       {result && <ModelTestResult result={result} />}
     </div>

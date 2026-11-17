@@ -5,11 +5,9 @@ import type { ModelProviderCredentialInfo } from "../hooks/use-model-provider-cr
 import type { OrgModelInfo } from "../hooks/use-models";
 
 /**
- * The confirmation of a key's deletion from Settings › Models. The server refuses an organization
- * key while any model references it, enabled or not (`credential_in_use`, the foreign key is
- * `ON DELETE RESTRICT`), so the confirmation names those models, says where they are deleted or
- * bound to another key, and offers only Annuler. A member's personal key serves no model of its
- * own: deleting it only leaves its holder without it.
+ * The server refuses an org key while any model references it, enabled or not (`credential_in_use`,
+ * `ON DELETE RESTRICT`), so the prompt names those models and offers only Annuler. A member's
+ * personal key serves no model of its own.
  */
 export function keyDeletionPrompt(
   credential: Pick<ModelProviderCredentialInfo, "id" | "label" | "owner_type">,

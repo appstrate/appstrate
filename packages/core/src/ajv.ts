@@ -17,7 +17,17 @@ import addFormatsImport from "ajv-formats";
 // ajv-formats ships a CJS default-export under an ESM wrapper; the named type
 // exposed by @types/ajv-formats expects AJV's Ajv (draft-07) class. The 2020-12
 // class is runtime-compatible. Cast through `unknown` once and forget.
-const addFormats = addFormatsImport as unknown as (ajv: Ajv2020) => Ajv2020;
+const addFormats = addFormatsImport as unknown as (
+  ajv: Ajv2020,
+  opts?: { keywords: boolean },
+) => Ajv2020;
+
+/**
+ * Every format, no `formatMinimum`-style limit keywords: they are Ajv extensions, not JSON
+ * Schema 2020-12, and they crash at validate time when ajv-formats resolves a different Ajv copy.
+ * The RJSF validator passes the same value so client and server agree.
+ */
+export const AJV_FORMATS_OPTIONS = { keywords: false } as const;
 
 /** Options passed through to Ajv2020 on construction. */
 export interface CreateAjvOptions {
@@ -37,7 +47,7 @@ export function createAjv(opts: CreateAjvOptions = {}): Ajv2020 {
     allErrors: opts.allErrors ?? true,
     strict: opts.strict ?? false,
   });
-  addFormats(ajv);
+  addFormats(ajv, AJV_FORMATS_OPTIONS);
   return ajv;
 }
 

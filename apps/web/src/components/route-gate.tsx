@@ -6,10 +6,12 @@ import { useTranslation } from "react-i18next";
 import { Lock, SearchX } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../hooks/use-permissions";
-import { useAppConfig } from "../hooks/use-app-config";
-import { routeVerdict, type RoutePath } from "../lib/route-access";
+import { useRouteVerdict } from "../hooks/use-can-reach";
+import { useEnterLinkedSpace } from "../hooks/use-current-space";
+import type { RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { EmptyState } from "./page-states";
+import { PanelMessage } from "./panel-layout";
 
 /**
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
@@ -22,31 +24,35 @@ import { EmptyState } from "./page-states";
 export function RouteGate({
   path,
   pending,
+  inPanel = false,
   children,
 }: {
   path: RoutePath;
   /** Drawn while the permissions load: the page's own skeleton. */
   pending: ReactNode;
+  /** The route is a panel overlay's: a refusal is said inside the panel's box, in the width of its panes. */
+  inPanel?: boolean;
   children: ReactNode;
 }) {
-  const { can, ready, inPersonalSpace } = usePermissions();
-  const { features } = useAppConfig();
-  const verdict = routeVerdict(path, can, features, inPersonalSpace);
+  const { ready } = usePermissions();
+  // A link naming another space (`?enterSpace=`) is judged once the resolver has entered it,
+  // never on the previous space's permissions.
+  const entering = useEnterLinkedSpace();
+  const verdictOf = useRouteVerdict();
+  const verdict = verdictOf(path);
   const landing = routeOf(useLocation().pathname) ?? path;
-  const absent =
-    verdict === "absent"
-      ? path
-      : routeVerdict(landing, can, features, inPersonalSpace) === "absent"
-        ? landing
-        : null;
+  const absent = verdict === "absent" ? path : verdictOf(landing) === "absent" ? landing : null;
 
+  const said = (state: ReactNode) => (inPanel ? <PanelMessage>{state}</PanelMessage> : state);
+
+  if (entering) return <>{pending}</>;
   if (absent) {
-    return <UnavailableState />;
+    return said(<UnavailableState />);
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
   if (!ready) return <>{pending}</>;
-  return <NoAccessState />;
+  return said(<NoAccessState />);
 }
 
 /**

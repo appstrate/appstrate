@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useId, type ComponentProps, type FormEventHandler, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
@@ -8,6 +9,10 @@ import { Modal } from "./modal";
 
 interface FormModalProps {
   title: string;
+  /** What the dialog does, read by assistive technology after the title. */
+  description?: string;
+  /** The form acts in the working space: `Modal`'s `inSpace`. */
+  inSpace?: boolean;
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   /** The request is in flight: the modal does not close and Cancel is disabled. */
@@ -22,7 +27,7 @@ interface FormModalProps {
   secondaryActions?: ReactNode;
   /** The dialog's own classes. */
   className?: string;
-  /** The form attributes a caller needs; a `className` replaces the default `space-y-4`. */
+  /** The form attributes a caller needs; a `className` replaces the default `flex flex-col gap-4`. */
   formProps?: Pick<ComponentProps<"form">, "noValidate" | "onChange" | "className">;
   children: ReactNode;
 }
@@ -33,6 +38,8 @@ interface FormModalProps {
  */
 export function FormModal({
   title,
+  description,
+  inSpace,
   onClose,
   onSubmit,
   isPending = false,
@@ -50,10 +57,11 @@ export function FormModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       preventClose={isPending}
       title={title}
+      description={description}
+      inSpace={inSpace}
       className={className}
       actions={
         <>
@@ -61,7 +69,7 @@ export function FormModal({
           <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button
+          <PendingButton
             type="submit"
             form={formId}
             data-testid={submitTestId}
@@ -69,11 +77,11 @@ export function FormModal({
             disabled={submitDisabled}
           >
             {submitLabel ?? t("btn.save")}
-          </Button>
+          </PendingButton>
         </>
       }
     >
-      <form className="space-y-4" {...formProps} id={formId} onSubmit={onSubmit}>
+      <form className="flex flex-col gap-4" {...formProps} id={formId} onSubmit={onSubmit}>
         {children}
         <FieldError>{error}</FieldError>
       </form>

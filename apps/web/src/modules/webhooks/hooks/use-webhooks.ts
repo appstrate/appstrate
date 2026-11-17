@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { invalidatePaths } from "@/lib/query-keys";
-import { keysetPaging } from "@/lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
 import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
@@ -31,21 +31,14 @@ const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
 };
 export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
 
-/**
- * Org/space context for queries. The spec-declared `X-Org-Id` header is passed
- * explicitly so it is part of the React Query key — switching org refetches
- * instead of serving another org's cached page.
- */
+/** `X-Org-Id` is passed explicitly so it is part of the query key (org switch refetches). */
 function useWebhookScope() {
   const org = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
   return { enabled: org.enabled && !!spaceId, header: org.header, spaceId };
 }
 
-/**
- * List webhooks for the current space — org-level webhooks plus those
- * pinned to the current space, via the spec-declared `spaceId` filter.
- */
+/** Org-level webhooks plus those pinned to the current space (`spaceId` filter). */
 export function useWebhooks() {
   const scope = useWebhookScope();
   // The `spaceId` filter asks for space `webhooks:read` on top of the list's
@@ -137,19 +130,15 @@ export function useRotateWebhookSecret() {
   return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
-/**
- * A webhook's delivery history, keyset-paged (`startingAfter` = last id seen).
- * The key keeps the `[method, path, init]` prefix so `useInvalidateWebhooks`
- * reaches it; a refetch re-reads every loaded page, keeping them on screen.
- */
+/** Delivery history, keyset-paged. `useInvalidateWebhooks` reaches it through the `[method, path]` prefix. */
 export function useWebhookDeliveries(webhookId: string) {
   const scope = useWebhookScope();
   const params = { path: { id: webhookId }, header: scope.header };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/webhooks/{id}/deliveries", { params }] as const,
+    queryKey: pagedQueryKey("/api/webhooks/{id}/deliveries", { params }),
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await client.GET("/api/webhooks/{id}/deliveries", {
-        params: { ...params, query: { startingAfter: pageParam } },
+        params: { ...params, query: { limit: 25, startingAfter: pageParam } },
         signal,
       });
       if (!data) throw new Error("empty response");

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
@@ -8,7 +9,7 @@ import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
-import { Badge } from "../status-badge";
+import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { latestMemoryDate, runSuccessRate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
@@ -17,7 +18,25 @@ import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
 import { AgentHealthSection } from "./agent-health-section";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonBadge, SkeletonLine } from "../skeleton-line";
+
+/** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
+function QueryValue({
+  loading,
+  error,
+  skeleton = "w-10",
+  children,
+}: {
+  loading: boolean;
+  error: boolean;
+  skeleton?: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation("agents");
+  // In the value's own line box (`OperationalStat`'s `dd`), so the figure lands in place.
+  if (loading) return <SkeletonLine className={skeleton} />;
+  return error ? t("detail.overview.unknown") : children;
+}
 
 export function AgentOverviewTab({
   packageId,
@@ -74,7 +93,6 @@ function OperationalSummary({
   } = useAgentPinned(packageId);
   const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
-  const unknown = t("detail.overview.unknown");
   const latestMemory = pinned && memories ? latestMemoryDate(pinned, memories) : undefined;
 
   const activity = runActivity.data;
@@ -98,18 +116,19 @@ function OperationalSummary({
     (pinned?.length ?? 0) + (memories?.length ?? 0) > 0 ? destination("#memory") : undefined;
 
   return (
-    <div className="space-y-8" data-agent-operational-overview>
+    <div className="flex flex-col gap-8" data-agent-operational-overview>
       <AgentHealthSection packageId={packageId} version={version} />
 
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
-          <dl className="grid h-full divide-y">
+          {/* A container for the compact status below: it follows the card's width. */}
+          <dl className="@container grid h-full divide-y">
             <OperationalStat
               size="sm"
               label={
                 <span className="flex flex-wrap items-center gap-2">
                   {t("detail.overview.lastRun")}
-                  {detail.last_run && <Badge status={detail.last_run.status} compact />}
+                  {detail.last_run && <RunStatusBadge status={detail.last_run.status} compact />}
                 </span>
               }
               value={
@@ -128,12 +147,12 @@ function OperationalSummary({
               label={t("schedule.paramNextRun")}
               value={
                 schedulesLoading ? (
-                  <Skeleton className="h-5 w-32" />
+                  <SkeletonLine className="w-32" />
                 ) : nextSchedule?.next_run_at ? (
                   formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
                 ) : (
                   <span className="text-muted-foreground">
-                    {schedulesError ? unknown : t("detail.overview.noSchedule")}
+                    {t(schedulesError ? "detail.overview.unknown" : "detail.overview.noSchedule")}
                   </span>
                 )
               }
@@ -161,11 +180,12 @@ function OperationalSummary({
               className="xl:border-border xl:border-r xl:border-b"
               label={t("detail.overview.totalRuns")}
               value={
-                runActivity.isLoading
-                  ? "…"
-                  : runActivity.isError || !activity
-                    ? unknown
-                    : String(activity.total)
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || !activity}
+                >
+                  {String(activity?.total)}
+                </QueryValue>
               }
               target={activity && activity.total > 0 ? { to: destination("#runs") } : undefined}
             />
@@ -173,11 +193,10 @@ function OperationalSummary({
               className="xl:border-border xl:border-b"
               label={t("detail.overview.successRate")}
               value={
-                runActivity.isLoading ? (
-                  "…"
-                ) : runActivity.isError || !activity ? (
-                  unknown
-                ) : (
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || !activity}
+                >
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
@@ -189,18 +208,19 @@ function OperationalSummary({
                     </TooltipTrigger>
                     <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
                   </Tooltip>
-                )
+                </QueryValue>
               }
             />
             <OperationalStat
               className="xl:border-border xl:border-r xl:border-b"
               label={t("detail.overview.failedRuns")}
               value={
-                runActivity.isLoading
-                  ? "…"
-                  : runActivity.isError || failedRunCount === undefined
-                    ? unknown
-                    : String(failedRunCount)
+                <QueryValue
+                  loading={runActivity.isLoading}
+                  error={runActivity.isError || failedRunCount === undefined}
+                >
+                  {String(failedRunCount)}
+                </QueryValue>
               }
               target={
                 failedRunCount && failedRunCount > 0
@@ -222,13 +242,9 @@ function OperationalSummary({
               className="xl:col-span-2"
               label={t("detail.overview.activeSchedules")}
               value={
-                schedulesLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : schedulesError || !schedulesSuccess ? (
-                  unknown
-                ) : (
-                  String(activeScheduleCount)
-                )
+                <QueryValue loading={schedulesLoading} error={schedulesError || !schedulesSuccess}>
+                  {String(activeScheduleCount)}
+                </QueryValue>
               }
               target={
                 activeScheduleCount && activeScheduleCount > 0
@@ -251,13 +267,9 @@ function OperationalSummary({
             <OperationalStat
               label={t("detail.overview.pinnedItems")}
               value={
-                pinnedLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : pinnedError ? (
-                  unknown
-                ) : (
-                  String(pinned?.length ?? 0)
-                )
+                <QueryValue loading={pinnedLoading} error={pinnedError}>
+                  {String(pinned?.length ?? 0)}
+                </QueryValue>
               }
               target={
                 pinned && pinned.length > 0
@@ -268,13 +280,9 @@ function OperationalSummary({
             <OperationalStat
               label={t("detail.overview.archivedItems")}
               value={
-                memoriesLoading ? (
-                  <Skeleton className="h-6 w-10" />
-                ) : memoriesError ? (
-                  unknown
-                ) : (
-                  String(memories?.length ?? 0)
-                )
+                <QueryValue loading={memoriesLoading} error={memoriesError}>
+                  {String(memories?.length ?? 0)}
+                </QueryValue>
               }
               target={
                 memories && memories.length > 0
@@ -285,19 +293,114 @@ function OperationalSummary({
             <OperationalStat
               label={t("detail.overview.lastUpdated")}
               value={
-                pinnedLoading || memoriesLoading ? (
-                  <Skeleton className="h-5 w-32" />
-                ) : pinnedError || memoriesError ? (
-                  unknown
-                ) : latestMemory ? (
-                  formatDateField(latestMemory, "datetime")
-                ) : (
-                  "—"
-                )
+                <QueryValue
+                  loading={pinnedLoading || memoriesLoading}
+                  error={pinnedError || memoriesError}
+                  skeleton="w-32"
+                >
+                  {latestMemory ? formatDateField(latestMemory, "datetime") : "—"}
+                </QueryValue>
               }
             />
           </dl>
         </DetailSectionCard>
+      </div>
+    </div>
+  );
+}
+
+/** An `OperationalStat` value on its way: a bar in the value's own line box. */
+function StatValueSkeleton({ size = "md" }: { size?: "md" | "sm" }) {
+  return <SkeletonLine className={size === "md" ? "w-10" : "w-32"} />;
+}
+
+/**
+ * The overview panel while the agent loads (`PackageDetailSkeleton`): the three summary cards
+ * drawn by the very components the loaded panel uses, labels included — only the values wait.
+ */
+export function AgentOverviewSkeleton() {
+  const { t } = useTranslation("agents");
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-8">
+        <div className="grid gap-6 xl:grid-cols-3">
+          <DetailSectionCard
+            title={t("detail.overview.runs")}
+            icon={PlayCircle}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full divide-y">
+              <OperationalStat
+                size="sm"
+                label={
+                  <span className="flex flex-wrap items-center gap-2">
+                    {t("detail.overview.lastRun")}
+                    <SkeletonBadge className="w-16 gap-1" />
+                  </span>
+                }
+                value={<StatValueSkeleton size="sm" />}
+              />
+              <OperationalStat
+                size="sm"
+                label={t("schedule.paramNextRun")}
+                value={<StatValueSkeleton size="sm" />}
+              />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard
+            title={`${t("detail.overview.activity")} · ${t("detail.overview.lastThirtyDays")}`}
+            icon={ChartNoAxesCombined}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full grid-cols-2 divide-x md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
+              <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.totalRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-b"
+                label={t("detail.overview.successRate")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.failedRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-b"
+                label={t("detail.overview.runningRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                className="xl:col-span-2"
+                label={t("detail.overview.activeSchedules")}
+                value={<StatValueSkeleton />}
+              />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard
+            title={t("detail.overview.memoryActivity")}
+            icon={Database}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
+              <OperationalStat
+                label={t("detail.overview.pinnedItems")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                label={t("detail.overview.archivedItems")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                label={t("detail.overview.lastUpdated")}
+                value={<StatValueSkeleton size="sm" />}
+              />
+            </dl>
+          </DetailSectionCard>
+        </div>
       </div>
     </div>
   );

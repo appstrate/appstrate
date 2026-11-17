@@ -10,7 +10,12 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
-import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import {
+  credentialScope,
+  executeApiCall,
+  targetsMcpEndpoint,
+  type ApiCallDeps,
+} from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -1016,7 +1021,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "secret-token" },
       // allow_all_uris is dropped for a call carrying a credential, so the
-      // redirect off authorized_uris is refused before its hop goes out.
+      // redirect off authorized_uris is returned unfollowed: its hop never goes out.
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: true,
       credentialHeaderName: "X-Api-Key",
@@ -1040,8 +1045,10 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     );
     expect(authHeadersSeen).toHaveLength(1);
     expect(authHeadersSeen[0]!.apiKey).toBe("secret-token");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("https://evil.attacker.com/steal");
+    }
   });
 
   it("strips an allowed caller override when the platform credential is empty", async () => {
@@ -1164,12 +1171,13 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     ]);
   });
 
-  it("refuses HTTPS→HTTP downgrade redirects when allowlist is https-only (#475)", async () => {
+  it("never follows HTTPS→HTTP downgrade redirects when allowlist is https-only (#475)", async () => {
     // makeDeps declares authorizedUris: ["https://api.example.com/**"]
     // — the matcher is scheme-sensitive, so http://… does NOT match.
     // Pre-#475: hop 2 was issued cross-origin with credentials stripped.
-    // Post-#475: per-hop allowlist gate refuses the hop entirely, never
-    // exposing the agent's request timing/IP to the downgraded target.
+    // Post-#475: per-hop allowlist gate stops at the hop, never exposing
+    // the agent's request timing/IP to the downgraded target; since #2154
+    // the 302 is handed back unfollowed instead of failing the call.
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.startsWith("https://api.example.com")) {
@@ -1192,11 +1200,9 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       },
       deps,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("unauthorized_target");
-      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
-      expect(result.error).toContain("api.example.com");
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("http://api.example.com/insecure");
     }
     // Hop 2 never issued — only the initial fetch happened.
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -1358,7 +1364,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     });
   }
 
-  it("refuses redirects to off-allowlist hosts even when reachable", async () => {
+  it("returns redirects to off-allowlist hosts unfollowed even when reachable (#2154)", async () => {
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.startsWith("https://api.example.com")) {
@@ -1381,14 +1387,11 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       },
       deps,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("unauthorized_target");
-      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
-      expect(result.error).toContain("evil.attacker.com");
-      // The raw URL path/query never appears (defence against capability
-      // leakage via redirect-encoded tokens).
-      expect(result.error).not.toContain("/steal");
+    // The upstream's own 302 and Location, for the caller to fetch itself; the
+    // off-allowlist host received nothing.
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("https://evil.attacker.com/steal");
     }
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
@@ -2897,5 +2900,151 @@ describe("executeApiCall — a rendered target past its wildcard's registrable d
     const { result, seen } = await send("sts");
     expect(result.ok).toBe(true);
     expect(seen[0]!.get("authorization")).toBe("Bearer tok-123");
+  });
+});
+
+describe("executeApiCall — the integration's own MCP endpoint", () => {
+  const MCP_ENDPOINT = "https://api.example.com/mcp/s3cr3t-token";
+  const call = (targetUrl: string, method = "POST") =>
+    executeApiCall(
+      {
+        integrationId: "remote",
+        connectionId: "conn-1",
+        targetUrl,
+        method,
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+  let fetchFn = mock(async () => new Response("{}", { status: 200 }));
+  let deps = makeDeps();
+  const reset = () => {
+    fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      mcpEndpoint: { url: MCP_ENDPOINT, transport: "streamable-http" },
+    });
+  };
+
+  for (const target of [
+    MCP_ENDPOINT,
+    `${MCP_ENDPOINT}/`,
+    `${MCP_ENDPOINT}?session=1`,
+    `${MCP_ENDPOINT}/messages`,
+    "https://API.example.com./MCP//s3cr3t-token",
+    "https://api.example.com:443/mcp/%73%33cr3t-token",
+  ]) {
+    it(`refuses ${target} without sending it`, async () => {
+      reset();
+      const result = await call(target);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("unauthorized_target");
+        expect(result.error).toBe(
+          'Integration "remote": its MCP endpoint is reached through its tools, not api_call',
+        );
+        expect(result.error).not.toContain("s3cr3t-token");
+      }
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("still sends an ordinary REST path of the same host", async () => {
+    reset();
+    for (const target of [
+      "https://api.example.com/v1/items",
+      "https://api.example.com/mcp/s3cr3t-tokenish",
+      "https://api.example.com/mcp",
+    ]) {
+      expect((await call(target, "GET")).ok).toBe(true);
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  for (const status of [301, 302, 307, 308]) {
+    it(`refuses a ${status} redirect onto the endpoint before sending anything there`, async () => {
+      const sent: { path: string; authorization: string | null }[] = [];
+      const transport = mock(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push({
+          path: url.pathname,
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        if (url.pathname === "/start") {
+          return new Response(null, { status, headers: { location: "/mcp/s3cr3t-token" } });
+        }
+        return new Response("{}", { status: 200 });
+      });
+      deps = makeDeps({
+        fetchFn: transport as unknown as typeof fetch,
+        mcpEndpoint: { url: MCP_ENDPOINT, transport: "streamable-http" },
+      });
+      const result = await call("https://api.example.com/start");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("unauthorized_target");
+        expect(result.error).toBe("its MCP endpoint is reached through its tools, not api_call");
+      }
+      expect(sent).toEqual([{ path: "/start", authorization: "Bearer tok-123" }]);
+    });
+  }
+
+  it("refuses every path of the origin of an SSE endpoint, and keeps other hosts", async () => {
+    fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      mcpEndpoint: { url: "https://api.example.com/sse", transport: "sse" },
+      declaredUris: ["https://api.example.com/**", "https://files.example.com/**"],
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: ["https://api.example.com/**", "https://files.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+    });
+    for (const target of [
+      "https://api.example.com/sse",
+      "https://api.example.com/messages?sessionId=1",
+      "https://api.example.com/v1/items",
+    ]) {
+      const result = await call(target);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("unauthorized_target");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect((await call("https://files.example.com/v1/items", "GET")).ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("targetsMcpEndpoint", () => {
+  it("matches the endpoint path and below it, on the same origin only", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
+  });
+
+  it("matches only the root path for an endpoint at the origin root", () => {
+    const endpoint = { url: "https://mcp.example.com/" };
+    expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
+  });
+
+  it("matches every path of the origin for an SSE endpoint, and that origin only", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/sse", transport: "sse" };
+    expect(targetsMcpEndpoint("https://mcp.example.com/messages?sessionId=1", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://other.example.com/messages", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/messages", endpoint)).toBe(false);
   });
 });

@@ -21,7 +21,6 @@ export function FilePreview({
   const { data, isLoading, error } = useFile(file.id);
   return (
     <Modal
-      open
       onClose={onClose}
       // Deep links (e.g. `?preview=<id>`) may target a file outside the caller's
       // loaded page, so `file.name` can be empty — fall back to the fetched DTO's name.

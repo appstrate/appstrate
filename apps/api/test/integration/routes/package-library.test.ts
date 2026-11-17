@@ -6,8 +6,8 @@
  * One row per package, one `placements` entry per space the package is placed
  * in and the caller reads, saying WHY it is there (`via`) and whether that
  * space runs it (`state`). There is no `shared` section in either shape: a
- * pending offer is a placement with `state: "none"`, on the package's own row
- * and behind the same switch as every other space.
+ * package placed and not switched on is a placement with `state: "inactive"`,
+ * on the package's own row and behind the same switch as every other space.
  *
  * The fixture is the shape the three axes are hardest to tell apart in: one
  * agent homed in Alpha, offered to Beta and taken up there, offered to Gamma
@@ -145,8 +145,8 @@ describe("GET /api/library — the organization map", () => {
     });
     expect(placementOf(row, betaId)).toMatchObject({ via: "shared", state: "active" });
     expect(placementOf(row, betaId)?.shared_by?.user_id).toBe(ctx.user.id);
-    // The pending offer: placed, and nothing has switched it on.
-    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    // Placed, and nothing has switched it on: a row saying `false`.
+    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     // Taken up and put back down — the row and its settings survive, which is
     // exactly what `inactive` reports and `none` does not.
     expect(placementOf(row, deltaId)).toMatchObject({ via: "shared", state: "inactive" });
@@ -201,16 +201,7 @@ describe("GET /api/library — the organization map", () => {
     expect(rowOf(await orgLibrary(owner(alphaId)), "skill", TEAMLESS)?.published).toBe(false);
   });
 
-  it("is refused to a member, a guest and an API key", async () => {
-    const member = await createTestUser();
-    await addOrgMember(ctx.orgId, member.id, "member");
-    await expectProblem(
-      await app.request("/api/library", {
-        headers: { Cookie: member.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": alphaId },
-      }),
-      403,
-    );
-
+  it("is refused to an API key, pinned to one space", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: alphaId,
@@ -224,6 +215,63 @@ describe("GET /api/library — the organization map", () => {
       403,
     );
   });
+
+  it("answers a member the union of the libraries of the spaces it reads", async () => {
+    // A closed space the member is not in, homing an agent placed nowhere else.
+    const hidden = await seedSpace({ orgId: ctx.orgId, name: "Hidden", visibility: "closed" });
+    await seedPackage({
+      id: "@lib/hidden",
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: hidden.id,
+    });
+    const member = await createTestUser();
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const headers = { Cookie: member.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": alphaId };
+
+    const listed = (await (await app.request("/api/spaces", { headers })).json()) as {
+      data: { id: string; access: string; permissions: string[] }[];
+    };
+    const readable = listed.data.filter(
+      (space) => space.access === "member" && space.permissions.includes("spaces:read"),
+    );
+    const perSpace = await Promise.all(readable.map((space) => spaceLibrary(headers, space.id)));
+    const merged = new Map<string, LibraryRow>();
+    for (const body of perSpace) {
+      for (const [type, rows] of Object.entries(body.packages)) {
+        for (const row of rows) {
+          const key = `${type}:${row.id}`;
+          const seen = merged.get(key);
+          merged.set(
+            key,
+            seen ? { ...seen, placements: [...seen.placements, ...row.placements] } : row,
+          );
+        }
+      }
+    }
+
+    const org = await orgLibrary(headers);
+    expect(org.spaces.map((space) => space.id).sort()).toEqual(
+      readable.map((space) => space.id).sort(),
+    );
+    expect(org.spaces.some((space) => space.id === hidden.id)).toBe(false);
+    const orgRows = new Map<string, LibraryRow>(
+      Object.entries(org.packages).flatMap(([type, rows]) =>
+        rows.map((row): [string, LibraryRow] => [`${type}:${row.id}`, row]),
+      ),
+    );
+    expect([...orgRows.keys()].sort()).toEqual([...merged.keys()].sort());
+    for (const [key, row] of merged) {
+      const sortBySpace = (placements: Placement[]) =>
+        [...placements].sort((a, b) => a.space_id.localeCompare(b.space_id));
+      expect(sortBySpace(orgRows.get(key)!.placements)).toEqual(sortBySpace(row.placements));
+    }
+    expect(orgRows.has("agent:@lib/hidden")).toBe(false);
+    // The control: the owner, who reads the hidden space, sees both.
+    const ownerMap = await orgLibrary(owner(alphaId));
+    expect(ownerMap.spaces.some((space) => space.id === hidden.id)).toBe(true);
+    expect(rowOf(ownerMap, "agent", "@lib/hidden")).toBeDefined();
+  });
 });
 
 describe("GET /api/spaces/{id}/library — one space's page", () => {
@@ -233,15 +281,15 @@ describe("GET /api/spaces/{id}/library — one space's page", () => {
     expect(placementOf(row, betaId)).toMatchObject({ via: "shared", state: "active" });
   });
 
-  it("shows a pending offer as a placement of the row, with its sharer", async () => {
+  it("shows a placement switched off as a placement of the row, with its sharer", async () => {
     const row = rowOf(await spaceLibrary(owner(gammaId), gammaId), "agent", AGENT);
     expect(row?.placements).toHaveLength(1);
-    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    expect(placementOf(row, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     expect(placementOf(row, gammaId)?.shared_by?.user_id).toBe(ctx.user.id);
   });
 
   it("stops naming a sharer who has LEFT the organization", async () => {
-    // `package_shares.shared_by` is `ON DELETE SET NULL` on `user`, so deleting
+    // `space_packages.shared_by` is `ON DELETE SET NULL` on `user`, so deleting
     // the ACCOUNT clears it — but leaving the ORG clears nothing, and this map
     // is served to every owner and admin, on every row. The membership is part
     // of the join, so the name never leaves the database rather than being
@@ -262,8 +310,8 @@ describe("GET /api/spaces/{id}/library — one space's page", () => {
       );
 
     const anonymous = rowOf(await spaceLibrary(owner(gammaId), gammaId), "agent", shared);
-    // The offer still stands — only the name behind it is withheld.
-    expect(placementOf(anonymous, gammaId)).toMatchObject({ via: "shared", state: "none" });
+    // The placement still stands — only the name behind it is withheld.
+    expect(placementOf(anonymous, gammaId)).toMatchObject({ via: "shared", state: "inactive" });
     expect(placementOf(anonymous, gammaId)?.shared_by).toBeNull();
   });
 

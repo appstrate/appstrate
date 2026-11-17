@@ -2,8 +2,13 @@
 
 import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { APPEARANCE_COLORS, ICON_MAX_LENGTH } from "@appstrate/core/appearance";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
+import {
+  CREDENTIAL_PROXY_OPEN_DESCRIPTION,
+  EMOJI_ICON_WRITE_RULE,
+  SPACE_ROLE_ID_PATTERN,
+} from "../schemas.ts";
 
 export const spacesPaths = {
   "/api/spaces": {
@@ -61,12 +66,15 @@ export const spacesPaths = {
                 object: "space",
                 orgId: "550e8400-e29b-41d4-a716-446655440000",
                 name: "My SaaS App",
+                icon: null,
+                color: null,
                 isDefault: false,
                 settings: {
                   allowedRedirectDomains: ["myapp.com", "staging.myapp.com"],
                 },
                 visibility: "open",
                 default_role: "operator",
+                credential_proxy_open: true,
                 personal: false,
                 access: "member",
                 role: { kind: "preset", key: "admin", name: "admin" },
@@ -122,10 +130,13 @@ export const spacesPaths = {
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Default",
+                    icon: null,
+                    color: null,
                     isDefault: true,
                     settings: { allowedRedirectDomains: [] },
                     visibility: "open",
                     default_role: "operator",
+                    credential_proxy_open: true,
                     personal: false,
                     access: "member",
                     role: { kind: "preset", key: "operator", name: "operator" },
@@ -139,10 +150,13 @@ export const spacesPaths = {
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "My SaaS App",
+                    icon: "emoji:🚀",
+                    color: "violet",
                     isDefault: false,
                     settings: { allowedRedirectDomains: ["myapp.com"] },
                     visibility: "closed",
                     default_role: "operator",
+                    credential_proxy_open: true,
                     personal: false,
                     access: "none",
                     role: null,
@@ -196,7 +210,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Update a space",
       description:
-        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
+        "Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -212,6 +226,17 @@ export const spacesPaths = {
                   minLength: 1,
                   maxLength: 100,
                   description: "Human-readable space name",
+                },
+                icon: {
+                  type: ["string", "null"],
+                  maxLength: ICON_MAX_LENGTH,
+                  description: `\`lucide:<name>\` or \`emoji:<one emoji>\`; \`null\` clears it. ${EMOJI_ICON_WRITE_RULE}`,
+                },
+                color: {
+                  type: ["string", "null"],
+                  enum: [...APPEARANCE_COLORS, null],
+                  description:
+                    "A palette key; `null` clears it, the colour then derived from the space id.",
                 },
                 settings: {
                   type: "object",
@@ -238,6 +263,10 @@ export const spacesPaths = {
                   type: "string",
                   enum: [...SPACE_ROLE_PRESETS],
                   description: "Preset the implicit members of an `open` space hold",
+                },
+                credential_proxy_open: {
+                  type: "boolean",
+                  description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
                 },
               },
               additionalProperties: false,
@@ -372,7 +401,7 @@ export const spacesPaths = {
       },
     },
   },
-  "/api/spaces/{spaceId}/packages": {
+  "/api/spaces/{id}/packages": {
     get: {
       operationId: "listSpacePackages",
       tags: ["Space Packages"],
@@ -381,7 +410,7 @@ export const spacesPaths = {
         "List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "type",
           in: "query",
@@ -426,14 +455,14 @@ export const spacesPaths = {
       description:
         "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. " +
         "Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. " +
-        "A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. " +
-        "If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. " +
-        "An API key never carries `share`, so it activates only what is already placed. " +
-        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. " +
+        "Where the package is PLACED here — homed in this space, holding a row here (`POST /api/packages/{scope}/{name}/shares` creates one), or a system package, placed everywhere — the row is switched on. " +
+        "Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. " +
+        "Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. " +
+        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. " +
         "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -483,28 +512,10 @@ export const spacesPaths = {
             "The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "422": {
-          description:
-            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
-          headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "about:blank",
-                title: "Invalid MCP Server Bundle",
-                status: 422,
-                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
-                code: "bundle_invalid",
-                request_id: "req_abc123",
-              },
-            },
-          },
-        },
       },
     },
   },
-  "/api/spaces/{spaceId}/packages/{scope}/{name}": {
+  "/api/spaces/{id}/packages/{scope}/{name}": {
     get: {
       operationId: "getSpacePackage",
       tags: ["Space Packages"],
@@ -513,7 +524,7 @@ export const spacesPaths = {
         "Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -538,11 +549,11 @@ export const spacesPaths = {
       summary: "Configure how this space runs a placed package",
       description:
         "Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. " +
-        "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. " +
+        "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{id}/packages` and `DELETE /api/spaces/{id}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. " +
         "There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -595,7 +606,7 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
+            "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -619,10 +630,10 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Deactivate a package in this space",
       description:
-        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only revoking the share that placed the package removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row and is not a system package: an offer nobody has taken up is not on, so there is nothing to switch off, and it stays an offer rather than becoming a refusal its recipient never made.",
+        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -636,7 +647,7 @@ export const spacesPaths = {
       },
     },
   },
-  "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
+  "/api/spaces/{id}/packages/{scope}/{name}/run-config": {
     get: {
       operationId: "getSpacePackageRunConfig",
       tags: ["Space Packages"],
@@ -645,7 +656,7 @@ export const spacesPaths = {
         "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, and the stored input layer (editor values plus locked fields). It carries no version — which bytes run is decided per launch by the `version` selector, defaulting to the latest published version. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],

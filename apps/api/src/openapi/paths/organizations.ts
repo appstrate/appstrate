@@ -1,11 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_LOGO_EMOJI_SCHEMA, ORG_LOGO_PROPERTY, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import {
+  APPEARANCE_PROPERTIES,
+  EMOJI_ICON_WRITE_RULE,
+  ORG_SETTINGS_PROPERTIES,
+} from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
+import {
+  APPEARANCE_COLORS,
+  ICON_IMAGE_MAX_BYTES,
+  ICON_IMAGE_MAX_SIZE,
+  ICON_IMAGE_TYPES,
+  ICON_MAX_LENGTH,
+} from "@appstrate/core/appearance";
+
+/** The two doors that write an organization slug document it once. */
+const SLUG_DESCRIPTION =
+  "Kebab-case. The scope the organization's uploads, forks and starter agent are created under (`@<slug>/<name>`). The platform's own scopes, `appstrate` (system packages) and `inline` (inline runs' shadow packages), are refused with `400 slug_reserved`; a slug another organization holds with `400 slug_taken`.";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
@@ -49,7 +63,8 @@ export const organizationsPaths = {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Acme Corp",
                     slug: "acme-corp",
-                    logo: null,
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
@@ -81,7 +96,11 @@ export const organizationsPaths = {
               required: ["name"],
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
               },
               additionalProperties: false,
             },
@@ -96,12 +115,12 @@ export const organizationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "name", "slug", "logo", "role", "createdAt"],
+                required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                 properties: {
                   id: { type: "string", format: "uuid" },
                   name: { type: "string" },
                   slug: { type: "string" },
-                  logo: ORG_LOGO_PROPERTY,
+                  ...APPEARANCE_PROPERTIES,
                   role: { type: "string", enum: ["owner"] },
                   createdAt: { type: "string", format: "date-time" },
                 },
@@ -110,7 +129,8 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440001",
                 name: "New Organization",
                 slug: "new-org",
-                logo: null,
+                icon: null,
+                color: null,
                 role: "owner",
                 createdAt: "2026-01-15T10:30:00Z",
               },
@@ -145,7 +165,8 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
                 slug: "acme-corp",
-                logo: null,
+                icon: null,
+                color: null,
                 members: [
                   {
                     userId: "usr_abc123",
@@ -153,6 +174,14 @@ export const organizationsPaths = {
                     email: "alice@acme.com",
                     role: "owner",
                     joinedAt: "2026-01-10T08:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "org_role",
+                        role: { kind: "preset", key: "admin", name: "admin" },
+                      },
+                    ],
                   },
                   {
                     userId: "usr_def456",
@@ -160,6 +189,14 @@ export const organizationsPaths = {
                     email: "bob@acme.com",
                     role: "member",
                     joinedAt: "2026-01-12T10:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "open_space",
+                        role: { kind: "preset", key: "operator", name: "operator" },
+                      },
+                    ],
                   },
                 ],
                 invitations: [],
@@ -177,7 +214,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Update organization",
       description:
-        'Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.',
+        "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -187,11 +224,21 @@ export const organizationsPaths = {
               type: "object",
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
-                logo: {
-                  oneOf: [ORG_LOGO_EMOJI_SCHEMA, { type: "null" }],
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
+                icon: {
+                  type: ["string", "null"],
+                  maxLength: ICON_MAX_LENGTH,
+                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\`, or ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it. ${EMOJI_ICON_WRITE_RULE}`,
+                },
+                color: {
+                  type: ["string", "null"],
+                  enum: [...APPEARANCE_COLORS, null],
                   description:
-                    '`{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo.',
+                    "A palette key; `null` clears it, the colour then derived from the organization id.",
                 },
               },
               additionalProperties: false,
@@ -229,87 +276,6 @@ export const organizationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
-  "/api/orgs/{orgId}/logo": {
-    get: {
-      operationId: "getOrganizationLogo",
-      tags: ["Organizations"],
-      summary: "Get organization logo image",
-      description:
-        "The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
-      parameters: [
-        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
-        {
-          name: "v",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "The logo version the caller expects: the `v` of `logo.url`.",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "The logo image.",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            ETag: { schema: { type: "string" }, description: "The quoted logo version." },
-            "Cache-Control": {
-              schema: { type: "string" },
-              description:
-                "`private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise.",
-            },
-            "X-Content-Type-Options": { schema: { type: "string", enum: ["nosniff"] } },
-          },
-          content: { "image/webp": { schema: { type: "string", format: "binary" } } },
-        },
-        "304": {
-          description: "Cached copy is still current (`If-None-Match` matched). No body.",
-          headers: {
-            ETag: { schema: { type: "string" }, description: "The quoted logo version." },
-            "Cache-Control": {
-              schema: { type: "string" },
-              description: "As on the `200`.",
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": {
-          $ref: "#/components/responses/NotFound",
-          description: "The organization's logo is not an image.",
-        },
-      },
-    },
-    put: {
-      operationId: "uploadOrganizationLogo",
-      tags: ["Organizations"],
-      summary: "Upload organization logo image",
-      description: `Replace the organization logo with a WebP image sent as the raw request body (\`Content-Type: image/webp\`, at most ${ORG_LOGO_MAX_BYTES} bytes, a RIFF container of form type \`WEBP\`). Requires \`org:update\`. \`logo\` becomes \`{ kind: "image", url }\`.`,
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
-      requestBody: {
-        required: true,
-        content: {
-          "image/webp": {
-            schema: { type: "string", format: "binary", maxLength: ORG_LOGO_MAX_BYTES },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgDetail" },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -430,6 +396,14 @@ export const organizationsPaths = {
                 email: "bob@acme.com",
                 role: "admin",
                 joinedAt: "2026-01-12T10:00:00Z",
+                spaces: [
+                  {
+                    id: "spc_default",
+                    name: "Default",
+                    source: "org_role",
+                    role: { kind: "preset", key: "admin", name: "admin" },
+                  },
+                ],
               },
             },
           },

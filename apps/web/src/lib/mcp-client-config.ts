@@ -1,36 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Builds the per-client connection snippets for an organization's MCP server.
- *
- * The server speaks standard MCP Streamable HTTP with OAuth 2.1 + Dynamic
- * Client Registration (RFC 7591) and resource discovery (RFC 8707 / 9728), so
- * any spec-compliant client can connect with nothing more than the endpoint
- * URL. The richer per-client snippets below are convenience only — they all
- * derive from the same two values.
- */
+// Per-client connection snippets for an organization's MCP server. Any spec-compliant
+// client (Streamable HTTP, OAuth 2.1 + DCR) connects with the URL alone; these all
+// derive from the same two values.
 
 interface McpClientConfig {
-  /** Logical server name used as the `mcpServers` key / CLI argument. */
   serverName: string;
-  /** Raw Streamable HTTP endpoint — the lowest-common-denominator input. */
   url: string;
-  /** `claude mcp add` one-liner (Claude Code CLI). */
   claudeCodeCommand: string;
-  /** Generic `mcpServers` JSON block (Claude Desktop, Windsurf, Cline, …). */
   httpJson: string;
   /** stdio bridge via `mcp-remote` for clients without native HTTP/OAuth. */
   mcpRemoteJson: string;
-  /** One-click Cursor deeplink (`cursor://…/mcp/install`). */
   cursorDeeplink: string;
-  /** One-click VS Code deeplink (`vscode:mcp/install`). */
   vscodeDeeplink: string;
 }
 
-/** Base64 of an arbitrary UTF-8 string. */
 function toBase64(value: string): string {
-  // btoa throws on code points > U+00FF, so encode to UTF-8 bytes first —
-  // server names can carry non-ASCII characters (accents, CJK, …).
+  // btoa throws on code points > U+00FF: encode to UTF-8 bytes first (non-ASCII server names).
   const bytes = new TextEncoder().encode(value);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);

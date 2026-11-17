@@ -23,6 +23,7 @@ import {
   withTurnBudgetNote,
   type PiTurnBudget,
 } from "../src/pi-chat/mcp-tools.ts";
+import { splitConnectPayload } from "../src/connect-offer.ts";
 import { extractRunId, extractRunStatus } from "../src/ui/run-events.ts";
 import { deriveToolPhase } from "../src/ui/tool-result.ts";
 
@@ -40,7 +41,7 @@ const complete = (result: unknown) => ({ status: { type: "complete" }, result })
 
 describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
   it("appends a model-facing note the UI must tolerate", () => {
-    const result = withTurnBudgetNote(toPiToolResult({ id: "run_1" }), BUDGET);
+    const result = withTurnBudgetNote(toPiToolResult({ id: "run_1" }, splitConnectPayload), BUDGET);
 
     // The hazard this whole file guards: the payload is no longer the only text
     // part of the model channel.
@@ -56,7 +57,7 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
       done: true,
       result: { output: { done: true } },
     };
-    const result = withTurnBudgetNote(toPiToolResult(payload), BUDGET);
+    const result = withTurnBudgetNote(toPiToolResult(payload, splitConnectPayload), BUDGET);
 
     expect(extractRunId(result)).toBe(payload.id);
     expect(extractRunStatus(result)).toBe("success");
@@ -71,7 +72,7 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
       done: true,
       error: "Cancelled by user",
     };
-    const result = withTurnBudgetNote(toPiToolResult(payload), BUDGET);
+    const result = withTurnBudgetNote(toPiToolResult(payload, splitConnectPayload), BUDGET);
 
     expect(extractRunId(result)).toBe(payload.id);
     expect(extractRunStatus(result)).toBe("cancelled");
@@ -96,7 +97,10 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
       },
     };
     const result = withTurnBudgetNote(
-      mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(envelope, null, 2) }] }),
+      mcpResultToPi(
+        { content: [{ type: "text", text: JSON.stringify(envelope, null, 2) }] },
+        splitConnectPayload,
+      ),
       BUDGET,
     );
 
@@ -111,7 +115,10 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
       body: { title: "Missing Integration Connection", status: 409 },
     };
     const result = withTurnBudgetNote(
-      mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(envelope) }] }),
+      mcpResultToPi(
+        { content: [{ type: "text", text: JSON.stringify(envelope) }] },
+        splitConnectPayload,
+      ),
       BUDGET,
     );
 

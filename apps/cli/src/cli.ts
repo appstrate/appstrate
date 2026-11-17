@@ -543,7 +543,7 @@ spaceGroup
     });
   });
 
-// ─── `appstrate code …` — skills and agent commands into coding-agent tools ──
+// ─── `appstrate code …` — skills into coding-agent tools ──
 
 const codeGroup = program
   .command("code")
@@ -554,7 +554,7 @@ const codeGroup = program
 codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the agents active there as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
@@ -566,7 +566,11 @@ codeGroup
     "Narrow this sync to a space — ID or name (repeatable; overrides syncSpaces).",
     (value: string, previous: string[] = []) => [...previous, value],
   )
-  .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
+  .option(
+    "--source <source>",
+    "Which artifact to sync: published | draft (the drafts of the skills you may write).",
+    parseSkillSource,
+  )
   .option(
     "--print-path",
     "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",
@@ -1108,14 +1112,11 @@ program
     "--run-id <id>",
     "Explicit run id (default: generated). In remote mode this is forwarded as the trigger's Idempotency-Key — re-running with the same value replays the original response instead of creating a duplicate run.",
   )
-  .option(
-    "--output <path>",
-    "Write the final RunResult JSON to this path. Note: in remote mode the `memories` / `pinned` / `logs` fields are emitted as empty defaults — the dashboard remains the source of truth for those surfaces.",
-  )
+  .option("--output <path>", "Write the final RunResult JSON to this path.")
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first; a space with direct connection access turned off refuses them)",
   )
   .option(
     "--report-fallback <mode>",

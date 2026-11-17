@@ -54,7 +54,6 @@ export function AgentConfigurationView({
     packageId,
     inputWrapperOverride,
     isHistorical,
-    showSectionDescription: false,
   };
 
   const sectionBody = (() => {

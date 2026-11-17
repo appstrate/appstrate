@@ -1,35 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Creating a schedule: a small object, so a modal (like a model or a webhook),
- * not a page (like a package). It asks what a schedule needs to exist — the
- * agent, a name, when it fires, the inputs the agent asks for — and, folded,
- * what may decide whether it can be created at all: who it runs as, the
- * version (an agent never published fires only its draft), the model (one
- * no organization credential serves is refused) and the connections.
- *
- * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
- * carrying the agent to preselect or `1` for none: the schedules list, an
- * agent's page and its settings all open the same modal.
+ * Creating a schedule, as a modal: the agent, a name, when it fires and the agent's
+ * inputs, with what may decide whether it can be created folded away (who it runs as,
+ * the version, the model, the connections). Mounted by whoever offers it, while open.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
-import { Field, FieldDescription, FieldGroup, FormItem } from "@appstrate/ui/components/field";
+import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ActorSelect } from "./actor-select";
+import { AdvancedSection } from "./advanced-section";
 import { AgentInputForm } from "./agent-input-form";
 import { FrequencyComposer } from "./frequency-composer";
 import { AgentVersionField } from "./package-version-select";
@@ -42,9 +32,6 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { isQueryInFlight } from "../lib/query-state";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
-import { useModalParam } from "../hooks/use-modal-param";
-import { usePermissions } from "../hooks/use-permissions";
-import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
@@ -66,31 +53,31 @@ import { scheduleVersionOptions, VERSION_INHERIT } from "../lib/schedule-options
 import { scheduleDetailPath } from "../lib/package-paths";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
-/** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
-export const NEW_SCHEDULE_PARAM = "newSchedule";
-
 /** A new schedule's first rhythm: every day at 9, in UTC. */
 const DEFAULT_CRON = "0 9 * * *";
 const DEFAULT_TIMEZONE = "UTC";
 
-/** Mounted once in the shell: the modal answers the parameter on any page. */
-export function NewScheduleModalHost() {
+/** `initialAgentId` is the agent to preselect, none for the first of the list. */
+export function NewScheduleModal({
+  initialAgentId,
+  onClose,
+}: {
+  initialAgentId?: string;
+  onClose: () => void;
+}) {
   const { t } = useTranslation(["agents"]);
-  const { can } = usePermissions();
-  const param = useModalParam(NEW_SCHEDULE_PARAM);
-  if (!param.value || !can("schedules:write")) return null;
+  const navigate = useNavigate();
   return (
     <Modal
-      open
-      onClose={param.close}
+      inSpace
+      onClose={onClose}
       title={t("schedule.titleNew")}
       className="max-h-[90svh] overflow-y-auto sm:max-w-xl"
     >
       <NewScheduleForm
-        initialAgentId={param.value === "1" ? undefined : param.value}
-        onCancel={param.close}
-        onCreated={(schedule) => param.leave(scheduleDetailPath(schedule.id))}
-        onLeave={param.leave}
+        initialAgentId={initialAgentId}
+        onCancel={onClose}
+        onCreated={(schedule) => navigate(scheduleDetailPath(schedule.id))}
       />
     </Modal>
   );
@@ -101,13 +88,10 @@ function NewScheduleForm({
   initialAgentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   initialAgentId?: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  /** A connection picker's way out to the integration page leaves this modal. */
-  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const agentsQuery = useAgents();
@@ -117,10 +101,10 @@ function NewScheduleForm({
   const agentId = picked ?? agents?.[0]?.id;
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
         {agentsPending ? (
-          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-10 w-full" />
         ) : (
           <OptionSelect
             value={agentId ?? ""}
@@ -136,13 +120,7 @@ function NewScheduleForm({
         <SettingsSkeleton />
       ) : agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
-        <ScheduleFields
-          key={agentId}
-          agentId={agentId}
-          onCreated={onCreated}
-          onCancel={onCancel}
-          onLeave={onLeave}
-        />
+        <ScheduleFields key={agentId} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
       ) : (
         agents && <p className="text-muted-foreground text-sm">{t("schedule.noAgent")}</p>
       )}
@@ -154,12 +132,10 @@ function ScheduleFields({
   agentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  onLeave?: (to: string) => void;
 }) {
   // The form seeds its inputs once: it waits for the agent detail, or a field
   // locked since would be seeded and refused (400 `locked_input_field`).
@@ -167,13 +143,7 @@ function ScheduleFields({
   if (error) return <ErrorState error={error} />;
   if (!deps) return <SettingsSkeleton />;
   return (
-    <ScheduleFieldsReady
-      deps={deps}
-      agentId={agentId}
-      onCreated={onCreated}
-      onCancel={onCancel}
-      onLeave={onLeave}
-    />
+    <ScheduleFieldsReady deps={deps} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
   );
 }
 
@@ -182,13 +152,11 @@ export function ScheduleFieldsReady({
   agentId,
   onCreated,
   onCancel,
-  onLeave,
 }: {
   deps: NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
-  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { user } = useAuth();
@@ -220,12 +188,6 @@ export function ScheduleFieldsReady({
   // Its `required` flags tell which integrations may run with "Aucune connexion".
   const firedIntegrations = usePackageDetail("agent", agentId, { version: firedVersion }).data
     ?.dependencies.integrations;
-  // The server takes no fallback for an enabled schedule, so the connection the viewer's fallback
-  // binds is named in the write — from their own verdict, asked only when the fires run as them.
-  const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
-    runsAsViewer ? agentId : undefined,
-    firedVersion,
-  );
   const picks = overrides.connection_overrides ?? {};
 
   // A scheduled fire cannot ask which connection to use: a refusal over it is answered here, in
@@ -261,8 +223,6 @@ export function ScheduleFieldsReady({
     create.mutate(
       scheduleCreatePayload({
         overrides,
-        runsAsViewer,
-        viewerReadiness: readiness?.integrations,
         declared: firedIntegrations?.map((i) => i.id),
         name,
         cron_expression: cron,
@@ -281,7 +241,7 @@ export function ScheduleFieldsReady({
 
   return (
     <form
-      className="space-y-5"
+      className="flex flex-col gap-5"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -314,65 +274,53 @@ export function ScheduleFieldsReady({
         </Field>
       )}
       {/* Open while a refusal speaks for this actor: answering it may mean changing them. */}
-      <Collapsible open={optionsOpen || refused.length > 0} onOpenChange={setOptionsOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
-          >
-            <span>{t("schedule.optionsTitle")}</span>
-            <ChevronDown
-              className={cn(
-                "text-muted-foreground size-4 transition-transform",
-                (optionsOpen || refused.length > 0) && "rotate-180",
-              )}
-            />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-4 pt-3">
-          <Field>
-            <Label>{t("schedule.actorTitle")}</Label>
-            <ActorSelect
-              value={actor}
-              onChange={changeActor}
-              placeholder={t("schedule.actorDefaultSelf")}
-            />
-            <FieldDescription>{t("schedule.actorHint")}</FieldDescription>
-          </Field>
-          <AgentVersionField
-            packageId={agentId}
-            label={t("run.overrides.versionLabel")}
-            value={versionOverride ?? VERSION_INHERIT}
-            onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
-            leadingOptions={scheduleVersionOptions(t, { draftOffered: deps.homeWritable })}
+      <AdvancedSection
+        title={t("schedule.optionsTitle")}
+        open={optionsOpen || refused.length > 0}
+        onOpenChange={setOptionsOpen}
+        contentClassName="flex flex-col gap-4"
+      >
+        <Field>
+          <Label>{t("schedule.actorTitle")}</Label>
+          <ActorSelect
+            value={actor}
+            onChange={changeActor}
+            placeholder={t("schedule.actorDefaultSelf")}
           />
-          <RunOverridesPanel
-            packageId={agentId}
-            persistedModelId={deps.persistedModelId}
-            persistedGenerationConfig={deps.persistedGenerationConfig}
-            persistedProxyId={deps.persistedProxyId}
-            {...(runsAsViewer && firedIntegrations ? { agentIntegrations: firedIntegrations } : {})}
-            value={overrides}
-            onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
-            onConnectionPick={setConnectionPick}
-            version={firedVersion}
-            scheduled
-            onLeave={onLeave}
-          />
-          {/* Fires running as someone else: the panel's pickers would judge the viewer's
-              connections. A refusal is answered below the options. */}
-          {!runsAsViewer &&
-            refused.length === 0 &&
-            ((firedIntegrations?.length ?? 0) > 0 || Object.keys(picks).length > 0) && (
-              <ScheduleActorConnectionChoice
-                choices={[]}
-                integrations={firedIntegrations ?? []}
-                value={picks}
-                onChange={setConnectionPick}
-              />
-            )}
-        </CollapsibleContent>
-      </Collapsible>
+          <FieldDescription>{t("schedule.actorHint")}</FieldDescription>
+        </Field>
+        <AgentVersionField
+          packageId={agentId}
+          label={t("run.overrides.versionLabel")}
+          value={versionOverride ?? VERSION_INHERIT}
+          onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
+          leadingOptions={scheduleVersionOptions(t, { draftOffered: deps.homeWritable })}
+        />
+        <RunOverridesPanel
+          packageId={agentId}
+          persistedModelId={deps.persistedModelId}
+          persistedGenerationConfig={deps.persistedGenerationConfig}
+          persistedProxyId={deps.persistedProxyId}
+          {...(runsAsViewer && firedIntegrations ? { agentIntegrations: firedIntegrations } : {})}
+          value={overrides}
+          onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
+          onConnectionPick={setConnectionPick}
+          version={firedVersion}
+          scheduled
+        />
+        {/* Fires running as someone else: the panel's pickers would judge the viewer's
+            connections. A refusal is answered below the options. */}
+        {!runsAsViewer &&
+          refused.length === 0 &&
+          ((firedIntegrations?.length ?? 0) > 0 || Object.keys(picks).length > 0) && (
+            <ScheduleActorConnectionChoice
+              choices={[]}
+              integrations={firedIntegrations ?? []}
+              value={picks}
+              onChange={setConnectionPick}
+            />
+          )}
+      </AdvancedSection>
       {refused.length > 0 && (
         <ScheduleConnectionAnswer
           choices={refused}
@@ -387,12 +335,12 @@ export function ScheduleFieldsReady({
       {/* Held at the bottom of the scrolling dialog: on a laptop the form is
           taller than the window, and Créer should not wait below the fold. */}
       <div className="bg-background border-border sticky -bottom-6 z-10 -mx-6 -mb-6 flex justify-end gap-2 border-t px-6 py-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={create.isPending}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" pending={create.isPending} disabled={!cron || readinessLoading}>
+        <PendingButton type="submit" pending={create.isPending} disabled={!cron}>
           {t("btn.create")}
-        </Button>
+        </PendingButton>
       </div>
     </form>
   );

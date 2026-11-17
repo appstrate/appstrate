@@ -1,0 +1,78 @@
+---
+title: Google Sheets
+description: Connect Google Sheets to your Appstrate agents.
+---
+
+## Overview
+
+Google Sheets is Google's online spreadsheet. The integration lets agents read and write spreadsheet data through the Sheets API.
+
+Integration: `@appstrate/google-sheets`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+
+## Connect Google Sheets
+
+An administrator registers an OAuth client once, then members connect their own accounts.
+
+<Steps>
+<Step>
+
+Create or select a Google Cloud project ([open](https://console.cloud.google.com/projectcreate)).
+
+</Step>
+<Step>
+
+Enable the API you need in that project.
+
+</Step>
+<Step>
+
+Configure the OAuth consent screen ([open](https://console.cloud.google.com/auth/overview)).
+
+</Step>
+<Step>
+
+Create an OAuth client ID of type "Web application" and register the Appstrate redirect URI ([open](https://console.cloud.google.com/apis/credentials)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the OAuth client's authorized redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/google-sheets": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/google-sheets": {
+      "tools": ["api_call"],
+      "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+    }
+  }
+}
+```
+
+`api_call` has no per-tool scopes, so scopes beyond the defaults are listed explicitly (here `https://www.googleapis.com/auth/spreadsheets`).
+
+Example prompt:
+
+```
+Read the "Monitoring" sheet, list the competitor URLs in column A, and add today's findings in column C.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

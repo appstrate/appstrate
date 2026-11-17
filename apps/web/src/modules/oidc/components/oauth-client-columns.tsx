@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
+import { useTranslation } from "react-i18next";
 import type { DataColumn } from "../../../components/data-table";
 import { rowActionsColumn } from "../../../components/row-actions-column";
 import { CellText } from "../../../components/table-cells";
@@ -18,15 +18,16 @@ export function useOAuthClientColumns({
   return [
     {
       id: "client",
-      header: t("oauthClients.nameLabel"),
-      width: "minmax(72px,1.3fr)",
+      header: t("spaces.nameLabel"),
+      width: 72,
+      elastic: true,
       cell: (client) => <CellText strong>{client.name ?? client.clientId}</CellText>,
     },
     {
       id: "clientId",
       header: t("oauthClients.clientIdColumn"),
-      width: "minmax(88px,1.3fr)",
-      tier: 2,
+      width: 88,
+      elastic: true,
       cell: (client) => (
         <span className="text-muted-foreground block truncate text-sm" title={client.clientId}>
           {client.clientId}
@@ -35,9 +36,8 @@ export function useOAuthClientColumns({
     },
     {
       id: "type",
-      header: t("oauthClients.typeColumn"),
-      width: "60px",
-      tier: 2,
+      header: t("proxies.col.type"),
+      width: 60,
       cell: (client) => (
         <CellText>
           {client.isFirstParty
@@ -48,20 +48,19 @@ export function useOAuthClientColumns({
     },
     {
       id: "status",
-      header: t("oauthClients.statusColumn"),
-      width: "56px",
-      tier: 2,
+      header: t("proxies.col.status"),
+      width: 56,
       cell: (client) => (
         <Badge variant={client.disabled ? "secondary" : "success"}>
-          {client.disabled ? t("oauthClients.disabledBadge") : t("oauthClients.activeBadge")}
+          {client.disabled ? t("oauthClients.disabledBadge") : t("catalogue.filter.active")}
         </Badge>
       ),
     },
     {
       id: "redirectUris",
       header: t("oauthClients.redirectUris"),
-      width: "minmax(88px,1.4fr)",
-      tier: 2,
+      width: 88,
+      elastic: true,
       cell: (client) => {
         const label = client.redirectUris.join(", ");
         return (

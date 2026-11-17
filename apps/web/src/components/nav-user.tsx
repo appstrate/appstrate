@@ -5,10 +5,11 @@ import { useTranslation } from "react-i18next";
 import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
+import { useViewer } from "../hooks/use-viewer";
+import type { SpaceViewer } from "../lib/identity-tile-props";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
-import { initials } from "../lib/initials";
-import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -22,47 +23,50 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 
-interface NavUserProps {
-  /**
-   * `avatar` is the round button in the header's right corner; `row` is the
-   * full-width identity line at the foot of the sidebar (avatar, name, email).
-   */
-  variant?: "avatar" | "row";
-  /**
-   * Drop every entry that needs an organization to be resolvable.
-   *
-   * `/preferences` lives under `MainLayout`, behind `OrgGate`: a user with no
-   * org who follows it is bounced straight back to `/onboarding/create`. The
-   * onboarding flow therefore mounts this menu with only the identity header,
-   * the theme switcher and logout — all org-independent.
-   */
-  minimal?: boolean;
+/** The signed-in person: their initials on the identity colour hashed from their id. */
+function UserAvatar({ viewer, className }: { viewer: SpaceViewer; className: string }) {
+  return <IdentityTile seed={viewer.id} label={viewer.name} shape="round" className={className} />;
 }
 
-export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
+interface NavUserProps {
+  /**
+   * `row` is the full-width identity line at the foot of the sidebar (avatar, name, email).
+   * `minimal` is the round avatar button of the onboarding flow, with only the entries that
+   * need no organization: `/preferences` sits behind `OrgGate`, which bounces an org-less
+   * user straight back to `/onboarding/create`.
+   */
+  variant: "row" | "minimal";
+}
+
+export function NavUser({ variant }: NavUserProps) {
   const { t } = useTranslation();
-  const { user, profile, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const viewer = useViewer();
   const { theme, setTheme } = useTheme();
 
-  if (!user) return null;
+  if (!user || !viewer) return null;
 
-  const displayName = profile?.displayName || user.email || "";
-  const userInitials = initials(profile?.displayName, user.email);
+  const row = variant === "row";
+  const minimal = variant === "minimal";
+  const displayName = viewer.name;
+  // Documentation and support live here as well as in the product switcher. The duplication is
+  // deliberate: this menu is where people look for help by habit.
+  const links = [
+    { href: DOCS_URL, icon: BookOpen, label: t("userMenu.documentation") },
+    { href: SUPPORT_URL, icon: LifeBuoy, label: t("userMenu.getHelp") },
+    ...(minimal ? [] : [{ href: "/api/docs", icon: FileText, label: t("userMenu.apiDocs") }]),
+  ];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        {variant === "row" ? (
+        {row ? (
           <button
             type="button"
             aria-label={t("userMenu.ariaLabel")}
             className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
           >
-            <Avatar className="size-7 shrink-0 rounded-full">
-              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-xs font-medium">
-                {userInitials}
-              </AvatarFallback>
-            </Avatar>
+            <UserAvatar viewer={viewer} className="size-7" />
             <span className="grid min-w-0 flex-1 leading-tight">
               <span className="truncate text-sm font-medium">{displayName}</span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
@@ -75,27 +79,19 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
             aria-label={t("userMenu.ariaLabel")}
             className="rounded-full"
           >
-            <Avatar className="size-8 rounded-full">
-              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
-                {userInitials}
-              </AvatarFallback>
-            </Avatar>
+            <UserAvatar viewer={viewer} className="size-8" />
           </Button>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="min-w-56 rounded-lg"
-        side={variant === "row" ? "right" : "bottom"}
+        side={row ? "right" : "bottom"}
         align="end"
         sideOffset={4}
       >
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-            <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="bg-spark text-spark-foreground rounded-lg text-sm font-medium">
-                {userInitials}
-              </AvatarFallback>
-            </Avatar>
+            <UserAvatar viewer={viewer} className="size-8 rounded-lg" />
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-semibold">{displayName}</span>
               <span className="truncate text-xs">{user.email}</span>
@@ -105,75 +101,40 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
         <DropdownMenuSeparator />
         {!minimal && (
           <DropdownMenuItem asChild>
-            <Link to="/preferences" className="flex items-center gap-2">
-              <Settings size={14} />
+            <Link to="/preferences">
+              <Settings />
               {t("userMenu.preferences")}
             </Link>
           </DropdownMenuItem>
         )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
-            <Palette size={14} />
+            <Palette />
             {t("userMenu.theme")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             {themeOptions.map(({ value, labelKey, icon: Icon }) => (
-              <DropdownMenuItem
-                key={value}
-                onSelect={() => setTheme(value)}
-                className="flex items-center gap-2"
-              >
-                <Icon size={14} />
+              <DropdownMenuItem key={value} onSelect={() => setTheme(value)}>
+                <Icon />
                 {t(labelKey)}
                 {theme === value && (
-                  <Check size={14} strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
+                  <Check strokeWidth={2.5} className="text-primary ml-auto shrink-0" />
                 )}
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {/* Documentation and support live here as well as in the product
-            switcher. The duplication is deliberate: this menu is where people
-            look for help by habit, and a second door onto the docs costs less
-            than a first door nobody finds. */}
-        <DropdownMenuItem asChild>
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2"
-          >
-            <BookOpen size={14} />
-            {t("userMenu.documentation")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a
-            href={SUPPORT_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2"
-          >
-            <LifeBuoy size={14} />
-            {t("userMenu.getHelp")}
-          </a>
-        </DropdownMenuItem>
-        {!minimal && (
-          <DropdownMenuItem asChild>
-            <a
-              href="/api/docs"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2"
-            >
-              <FileText size={14} />
-              {t("userMenu.apiDocs")}
+        {links.map(({ href, icon: Icon, label }) => (
+          <DropdownMenuItem key={href} asChild>
+            <a href={href} target="_blank" rel="noopener noreferrer">
+              <Icon />
+              {label}
             </a>
           </DropdownMenuItem>
-        )}
+        ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void logout()} className="flex items-center gap-2">
-          <LogOut size={14} />
+        <DropdownMenuItem onSelect={() => void logout()}>
+          <LogOut />
           {t("userMenu.logout")}
         </DropdownMenuItem>
       </DropdownMenuContent>

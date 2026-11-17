@@ -45,7 +45,7 @@ function ManualModelForm({
 
   return (
     <FormProvider {...form}>
-      <form onSubmit={submit} noValidate className="space-y-4 px-3 py-3">
+      <form onSubmit={submit} noValidate className="flex flex-col gap-4 px-3 py-3">
         <ManualModelFields
           idPrefix="mdl-manual"
           modelIdProps={register("modelId", {
@@ -78,7 +78,7 @@ export function ManualModelEntry({ onAdd }: { onAdd: (row: ModelPickRow) => void
       className="text-muted-foreground w-full justify-start rounded-none px-3"
       onClick={() => setOpen(true)}
     >
-      <Plus className="size-4" />
+      <Plus />
       {t("models.choice.manualAdd")}
     </Button>
   );

@@ -2,7 +2,7 @@
 /* global Bun */
 
 /**
- * #1547 probe runner — the `server.js` of the probe mcp-server bundle the
+ * #1547 probe runner — the `server.js` of the probe integration bundle the
  * smoke's platform stub serves. The in-guest sidecar runs it as an integration
  * runner in one of three roles (`PROBE_ROLE`):
  *

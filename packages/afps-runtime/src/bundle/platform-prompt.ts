@@ -8,7 +8,7 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / User Input / Files / Checkpoint / Memory /
+ * Tools / Skills / Integrations / User Input / Files / Checkpoint / Memory /
  * Run History) represent one reasonable convention for an
  * AFPS-style agent; platforms and CLIs may compose it as-is or override
  * specific option fields.
@@ -31,35 +31,34 @@ function inlineCode(text: string): string {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
+const XML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&apos;",
+};
+
+function escapeXml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => XML_ENTITIES[ch]!);
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export interface PlatformPromptTool {
-  id: string;
-  name?: string;
-  description?: string;
-}
-
 /**
- * Per-integration prompt entry. The integration is identified by its
- * package id; the optional human-readable description comes from the
- * integration manifest, and `doc` carries the raw `INTEGRATION.md`
- * content (AFPS §3.5) — when present, the runtime SHOULD surface it
- * to the agent. We inline it directly into the platform prompt so the
- * LLM can read it without an extra workspace lookup.
+ * Per-integration catalog entry. The prompt discloses where the
+ * integration's `INTEGRATION.md` (AFPS §3.5) sits; the agent reads it on
+ * demand (progressive disclosure), so the doc never inflates the prompt.
  */
 export interface PlatformPromptIntegration {
   id: string;
   description?: string;
-  /**
-   * Raw `INTEGRATION.md` content (markdown). When non-empty, renders a
-   * `### API Documentation` subsection under the integration's section.
-   * Caller-side truncation is applied before passing this in.
-   */
-  doc?: string;
+  /** Workspace-relative path of the member's `INTEGRATION.md`, when it ships one. */
+  location?: string;
 }
 
 export interface PlatformPromptSchema {
@@ -77,9 +76,7 @@ export const UNAVAILABLE_INTEGRATION_REASONS = {
   remote_source_invalid: "its server address is invalid",
   remote_url_unrenderable: "its server address cannot be built from the connection",
   remote_url_blocked: "its server address is blocked",
-  local_server_ref_missing: "its server package is missing",
-  mcp_server_unresolved: "its server package cannot be found",
-  mcp_server_not_runnable: "its server package cannot run",
+  local_server_not_runnable: "its local server cannot run",
   no_delivery: "the connection's credentials cannot be delivered",
   bound_set_incomplete: "another connection bound with it failed to start",
   resolve_error: "it failed to start",
@@ -120,19 +117,10 @@ export interface PlatformPromptOptions {
   };
 
   /**
-   * Bundled skills catalogue. Skills are workspace file references, not
-   * MCP tools, so they keep a prompt section (tools are advertised via
-   * MCP `tools/list` and are deliberately NOT listed in the prompt).
-   */
-  availableSkills?: ReadonlyArray<PlatformPromptTool>;
-
-  /**
-   * Integrations resolved for this run — one entry per declared,
-   * installed, and connected integration. Each entry surfaces the
-   * integration's description (from its manifest) and, when present,
-   * its `INTEGRATION.md` content inlined into the prompt so the agent
-   * can read the integration's API documentation alongside the
-   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS §3.5.
+   * Integrations available in this run, rendered as a catalog shaped like
+   * the runner's own `<available_skills>`. Their tools come through MCP
+   * `tools/list`; each entry only points at its `INTEGRATION.md`, which the
+   * agent reads on demand.
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
@@ -142,7 +130,8 @@ export interface PlatformPromptOptions {
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
   /**
-   * Output schema — drives the `## Output Format` section. The full JSON
+   * Output schema — drives the `## Output Format` section. Takes what
+   * `readDeclaredOutputSchema` returns: rendered as given when set. The full JSON
    * Schema (as it appears under `manifest.output.schema`) is surfaced in
    * plain text so the LLM sees the constraint in the prompt AND via the
    * `output` tool definition. This belt-and-suspenders is necessary
@@ -315,41 +304,36 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // description + input schema). The prompt deliberately does NOT list
   // them: a partial/stale in-prompt list would contradict the live tool
   // set, and the Communication contract above already states the only
-  // platform invariant the model can't infer from `tools/list`. Skills
-  // (below) are NOT MCP tools — they're workspace files — so they keep
-  // their own section.
-
-  if (opts.availableSkills && opts.availableSkills.length > 0) {
-    sections.push("### Skills");
-    sections.push(
-      "The following skill references are available in your workspace at `.pi/skills/`:\n",
-    );
-    for (const skill of opts.availableSkills) {
-      const desc = skill.description ? `: ${skill.description}` : "";
-      sections.push(`- **${skill.name || skill.id}**${desc}`);
-    }
-    sections.push("");
-  }
+  // platform invariant the model can't infer from `tools/list`. Skills are
+  // not listed either: Pi announces them itself (`<available_skills>`, from
+  // each SKILL.md frontmatter), and a second list could only disagree.
 
   // --- Integrations ---
-  // One section per integration resolved for this run. The integration's
-  // tools are advertised via MCP `tools/list` under the `{ns}__*` prefix —
-  // we deliberately do NOT list them here. The `### API Documentation`
-  // subsection surfaces the integration's `INTEGRATION.md` (AFPS §3.5)
-  // verbatim so the LLM can read its API contract without a workspace
-  // lookup. Subsection omitted when `doc` is absent / empty.
+  // The runner has no catalog of its own for these, so this one mirrors
+  // Pi's skills catalog: tools are advertised via MCP `tools/list` under
+  // `{ns}__*`, and `<location>` discloses the integration's
+  // `INTEGRATION.md` for the agent to read on demand.
   if (opts.integrations && opts.integrations.length > 0) {
+    sections.push("### Integrations");
+    sections.push(
+      "The following integrations are available in this run. Their tools are listed with your other tools, prefixed by the integration's namespace.",
+    );
+    sections.push(
+      "When an integration lists a `<location>`, read that file with your file-read tool before your first call to that integration's tools. The path is relative to your working directory.\n",
+    );
+    sections.push("<available_integrations>");
     for (const integ of opts.integrations) {
-      sections.push(`## Integration: ${integ.id}\n`);
+      sections.push("  <integration>");
+      sections.push(`    <name>${escapeXml(integ.id)}</name>`);
       if (integ.description) {
-        sections.push(`${integ.description}\n`);
+        sections.push(`    <description>${escapeXml(integ.description)}</description>`);
       }
-      if (integ.doc && integ.doc.trim().length > 0) {
-        sections.push("### API Documentation\n");
-        sections.push(integ.doc);
-        sections.push("");
+      if (integ.location) {
+        sections.push(`    <location>${escapeXml(integ.location)}</location>`);
       }
+      sections.push("  </integration>");
     }
+    sections.push("</available_integrations>\n");
   }
   if (opts.unavailableIntegrations && opts.unavailableIntegrations.length > 0) {
     sections.push("## Unavailable Integrations\n");
@@ -456,10 +440,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, tier 1). The archive tier is reachable via
-  // tool calls — those instructions live in each tool's MCP descriptor
-  // `description` (`note` for writes, runtime-injected `recall_memory`
-  // for searches, surfaced via `tools/list`). Section omitted when no
+  // set, tier 1). The archive tier is reachable via tool calls — those
+  // instructions live in each tool's MCP descriptor `description` (the
+  // `@appstrate/platform` tools `note` for writes, `recall_memory` for
+  // searches, surfaced via `tools/list`). Section omitted when no
   // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
@@ -496,7 +480,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // Rendered LAST so the constraint is freshly in the LLM's context when
   // it reads the agent task prompt below. See `outputSchema` docstring
   // for why this duplicates the tool-level schema.
-  if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
+  if (opts.outputSchema) {
     sections.push("## Output Format\n");
     sections.push(
       "You MUST call the `output` tool **exactly once**, as your FINAL action, " +
@@ -514,7 +498,12 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         )
       : [];
     const props = opts.outputSchema.properties;
-    if (props && typeof props === "object" && !Array.isArray(props)) {
+    if (
+      props &&
+      typeof props === "object" &&
+      !Array.isArray(props) &&
+      Object.keys(props).length > 0
+    ) {
       sections.push("### Required shape\n");
       for (const [key, prop] of Object.entries(props as Record<string, unknown>)) {
         const propRec = (prop as Record<string, unknown>) ?? {};

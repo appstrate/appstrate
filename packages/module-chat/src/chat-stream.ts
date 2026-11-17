@@ -21,13 +21,15 @@
 import type { Context } from "hono";
 import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody, invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { invalidRequest, conflict } from "@appstrate/core/api-errors";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
+import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -150,8 +152,8 @@ export const chatStreamSchema = z
       }),
     modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
-    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-    agent_authoring: z.boolean().optional(),
+    /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
+    package_authoring: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
@@ -246,7 +248,7 @@ export async function handleChatStream(
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
-  const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
+  const body = await readJsonBody(c, chatStreamSchema);
   // Only the new message is validated: earlier turns are the server's own rows.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {
@@ -314,7 +316,7 @@ export async function handleChatStream(
   // inference loopback calls carry a short-lived token only this process
   // can mint, scoped to llm-proxy:call + models:read. The MCP session keeps
   // the caller's own grants (full RBAC fidelity on tool calls, narrowed by
-  // `turnPermissions` when agent authoring is off).
+  // `turnPermissions` when package authoring is off).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // many steps (with a run long-poll blocking for ~55s between them), so the
@@ -347,11 +349,14 @@ export async function handleChatStream(
   // lives on the session row, so the turn's grants follow its upsert.
   const turn = sessionSkills.then((skills) => {
     const permissions = turnPermissions(c.get("permissions"), {
-      authoring: body.agent_authoring !== false,
+      authoring: body.package_authoring !== false,
       skillMode: skills.skillMode,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));
-    return { skills, permissions, capabilities };
+    // `auto` shows the whole catalogue in the context and `strict` lists nothing:
+    // only a `manual` turn lists the space's skills on the user's request.
+    const listsSkills = capabilities.readsSkills && skills.skillMode === "manual";
+    return { skills, permissions, capabilities, listsSkills };
   });
   const phaseAStart = Date.now();
 
@@ -399,6 +404,30 @@ export async function handleChatStream(
         permissions,
         skills,
         enforced: enforcedSkills,
+        // The turn's skills are read before the claim naming them exists, so
+        // over a connection of their own: the caller's permissions, not narrowed by
+        // `turnPermissions`, and no claim — what the caller reads.
+        // One in-process `initialize` plus the reads, only on a turn that lists
+        // (`auto` with `skills:read`) or injects skills; closed before the turn's
+        // connection opens.
+        openSkillsClient: (signal) =>
+          connectPlatformMcp({
+            signal,
+            url: platformMcpUrl(origin, orgId, spaceId),
+            headers: {
+              Authorization: `Bearer ${mintMcpLoopbackToken({
+                userId: user.id,
+                email: user.email,
+                name: user.name,
+                orgId,
+                orgRole,
+                permissions: [...c.get("permissions")],
+                viewAs: persona,
+              })}`,
+              "x-org-id": orgId,
+            },
+            fetch: platformFetch,
+          }),
       }).finally(() => {
         phaseBMs = Date.now() - phaseBStart;
       }),
@@ -408,7 +437,7 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities }] = await Promise.all([
+  const [models, { permissions, capabilities, listsSkills }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
     enforcedSkills,
@@ -648,6 +677,8 @@ export async function handleChatStream(
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
   // permissions (the caller's resolved set, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
+  // It is server-minted, so the integration tools reach the credential proxy
+  // with it, exactly as any MCP client's bearer does.
   const mcpToken = mintMcpLoopbackToken(
     {
       userId: user.id,
@@ -659,7 +690,7 @@ export async function handleChatStream(
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
-      // What `read_skill` serves without `skills:*`: the definitions this prompt injected.
+      // What `resources/read` serves without `skills:*`: the definitions this prompt injected.
       injectedSkills,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
@@ -695,7 +726,12 @@ export async function handleChatStream(
           // loopback sockets back into this process. Auth and RBAC still run on
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
-          surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
+          surfaceKey: platformMcpSurfaceKey(
+            mcpUrl,
+            permissions,
+            c.get("space").credentialProxyOpen,
+          ),
+          listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,

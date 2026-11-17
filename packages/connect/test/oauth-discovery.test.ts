@@ -110,6 +110,26 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     expect(result.grantTypesSupported).toBeUndefined();
   });
 
+  it("projects client_id_metadata_document_supported when it is a boolean", async () => {
+    const project = (value: unknown) =>
+      withFetch(
+        (async () =>
+          jsonResponse({
+            issuer: "https://mcp.example.com",
+            authorization_endpoint: "https://mcp.example.com/authorize",
+            token_endpoint: "https://mcp.example.com/token",
+            client_id_metadata_document_supported: value,
+          })) as unknown as typeof fetch,
+        (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://mcp.example.com" }),
+      );
+    expect((await project(true)).clientIdMetadataDocumentSupported).toBe(true);
+    clearAllCachesLocally();
+    expect((await project(false)).clientIdMetadataDocumentSupported).toBe(false);
+    clearAllCachesLocally();
+    // A non-boolean is not an advertisement: no truthiness coercion.
+    expect((await project("true")).clientIdMetadataDocumentSupported).toBeUndefined();
+  });
+
   it("trims a trailing slash on the issuer before joining the well-known suffix", async () => {
     const seen: string[] = [];
     await withFetch(

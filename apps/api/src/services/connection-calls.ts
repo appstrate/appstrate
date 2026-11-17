@@ -17,7 +17,7 @@ import {
 import type { ListEnvelope } from "@appstrate/shared-types";
 import { actorFilter } from "../lib/actor.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import type { SpaceScope } from "../lib/scope.ts";
 import { meConnectionAuthorityFilter } from "./connection-reach.ts";
 

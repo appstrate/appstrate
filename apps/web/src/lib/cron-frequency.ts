@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A schedule's frequency as a person composes it, and the cron expression the
- * server stores. The composer edits a `Frequency`; the wire carries cron.
- *
- * Every shape below maps to ONE five-field cron expression and back, so an
- * expression written by the composer always reopens in it. Anything else (a
- * range of hours, two minutes, a month list) stays `custom`: the raw
- * expression, still previewed, never rewritten behind its author's back.
- */
+// Every shape below maps to ONE five-field cron expression and back, so a composed expression
+// always reopens in the composer. Anything else (hour ranges, minute lists, month lists) stays
+// `custom`: never rewritten behind its author's back.
 
 import { CronExpressionParser } from "cron-parser";
 
@@ -38,14 +32,10 @@ function int(field: string, min: number, max: number): number | null {
   return value >= min && value <= max ? value : null;
 }
 
-/**
- * The steps « every N » can say. A cron step restarts at each hour (minutes) or each day (hours):
- * `*\/45` fires at :00 and :45, so only a step that divides the span is an even rhythm.
- */
+/** A cron step restarts each hour (minutes) or day (hours): `*\/45` fires at :00 and :45, so only divisors of the span are even rhythms. */
 export const MINUTE_STEPS: readonly number[] = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
 export const HOUR_STEPS: readonly number[] = [1, 2, 3, 4, 6, 8, 12];
 
-/** `*` (every unit, i.e. 1) or `*\/N` for N one of `steps`. */
 function step(field: string, steps: readonly number[]): number | null {
   if (field === "*") return 1;
   const match = /^\*\/(\d+)$/.exec(field);
@@ -72,7 +62,6 @@ function weekdays(field: string): number[] | null {
   return days.size > 0 ? [...days].sort((a, b) => a - b) : null;
 }
 
-/** The composer's reading of an expression; `custom` when no shape matches it. */
 export function parseCron(cron: string): Frequency {
   const custom: Frequency = { kind: "custom", cron };
   const fields = cron.trim().split(/\s+/);
@@ -106,7 +95,6 @@ export function parseCron(cron: string): Frequency {
   return custom;
 }
 
-/** The expression a frequency stores. */
 export function toCron(frequency: Frequency): string {
   switch (frequency.kind) {
     case "minutes":
@@ -126,10 +114,7 @@ export function toCron(frequency: Frequency): string {
   }
 }
 
-/**
- * The next `count` fires of `cron` in `timezone`, by the parser the scheduler
- * itself uses; `null` when the expression does not parse.
- */
+/** Uses the parser the scheduler itself uses; `null` when the expression does not parse. */
 export function nextFires(
   cron: string,
   timezone: string,

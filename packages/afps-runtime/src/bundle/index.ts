@@ -22,6 +22,7 @@ export {
   type BundleFormatVersion,
   type BundleMetadata,
   type BundlePackage,
+  type DependencySection,
   type PackageCatalog,
   type PackageIdentity,
   type ParsedPackageIdentity,
@@ -31,6 +32,7 @@ export {
 export { BundleError, type BundleErrorCode } from "./errors.ts";
 export { DEFAULT_BUNDLE_LIMITS, resolveBundleLimits, type BundleLimits } from "./limits.ts";
 export { canonicalJsonStringify } from "./canonical-json.ts";
+export { PI_SKILLS_DIR, PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 
 // ─── Integrity primitives (RECORD + bundle.json merkle) ─────────────
 export {
@@ -84,7 +86,6 @@ export {
   CONTEXT_FREE_FILENAMES_PHRASE,
   UNAVAILABLE_INTEGRATION_REASONS,
   type PlatformPromptOptions,
-  type PlatformPromptTool,
   type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./platform-prompt.ts";

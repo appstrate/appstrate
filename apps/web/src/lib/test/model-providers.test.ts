@@ -67,6 +67,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: null,
     allowed_actions: [],
     bindable: true,
+    serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -111,6 +112,8 @@ const MY_KEY = credential({
   owner_id: "usr_me",
   owner_name: "Moi",
   bindable: false,
+  // What the server's `servesModel` answers for this key (the same service).
+  serves_model_ids: ["mdl_m"],
 });
 const BOB_SUBSCRIPTION = credential({
   id: "cred_bob",
@@ -121,6 +124,8 @@ const BOB_SUBSCRIPTION = credential({
   owner_id: "usr_bob",
   owner_name: "Bob",
   bindable: false,
+  // What the server's `servesModel` answers for this subscription (its plan offers claude-a).
+  serves_model_ids: ["mdl_m"],
 });
 const BUILT_IN = credential({ id: "cred_builtin", source: "built-in", providerId: null });
 
@@ -161,12 +166,12 @@ describe("providerRows", () => {
     expect(row("cred_empty").models).toEqual([]);
   });
 
-  it("serves a personal key the unbound models of its own service", () => {
+  it("serves a personal key the unbound models the server says it pays for", () => {
     expect(row("cred_me").kind).toBe("personal-key");
     expect(row("cred_me").models.map((m) => m.id)).toEqual(["mdl_m"]);
   });
 
-  it("serves a subscription the unbound models its plan offers on the same API", () => {
+  it("serves a subscription the unbound models the server says its plan offers", () => {
     expect(row("cred_bob").kind).toBe("subscription");
     expect(row("cred_bob").models.map((m) => m.id)).toEqual(["mdl_m"]);
   });

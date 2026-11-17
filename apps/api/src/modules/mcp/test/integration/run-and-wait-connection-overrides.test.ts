@@ -41,6 +41,7 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
+import { installRuntimeBoundSystemPackages } from "../../../../../test/helpers/runtime-bound-system-packages.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import {
@@ -50,7 +51,7 @@ import {
   type JsonRpcEnvelope,
   mcpAuthHeaders,
 } from "../../../../../test/helpers/mcp.ts";
-import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
 import { activatePackage } from "../../../../services/space-packages.ts";
 
@@ -111,6 +112,7 @@ interface ProblemDetails {
 describe("mcp run_and_wait — connection_overrides", () => {
   let ctx: TestContext;
   let headers: Record<string, string>;
+  let restoreSystemPackages: () => void;
 
   beforeAll(() => {
     _setOrchestratorForTesting(createFakeOrchestrator());
@@ -122,6 +124,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    restoreSystemPackages = await installRuntimeBoundSystemPackages();
     // A session owner: it holds mcp:read + mcp:invoke AND the `agents:run`
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
@@ -133,7 +136,10 @@ describe("mcp run_and_wait — connection_overrides", () => {
   // fire-and-forget, so a FAILING assertion would skip the drain and leave the
   // pipeline's background writes racing the next test's `truncateAll()` — one
   // red test would cascade into unrelated FK failures.
-  afterEach(waitForRunPipelineSettled);
+  afterEach(async () => {
+    await waitForRunPipelineSettled();
+    restoreSystemPackages();
+  });
 
   it("returns the 409 must_choose_connection payload through the tool when no pick is given", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
@@ -290,8 +296,11 @@ describe("mcp run_and_wait — connection_overrides", () => {
       connection_overrides: { [INTEGRATION]: [] },
     });
 
+    // Not a static refusal: nothing imposes a set here, so resolution finds the required
+    // integration bound to none and refuses the launch.
     expect(result.isError).toBe(true);
-    expect(result.data.status).toBe(400);
+    expect(result.data.status).toBe(409);
+    expect(JSON.stringify(result.data.body)).toContain("required_integration_unbound");
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
@@ -303,7 +312,6 @@ describe("mcp run_and_wait — connection_overrides", () => {
     const OAUTH = "@mcpconn/oauth-svc";
     const manifest = localIntegrationManifest({
       name: OAUTH,
-      serverName: `${OAUTH}-server`,
       version: "1.0.0",
       auths: {
         primary: {
@@ -323,7 +331,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPackageVersion({ packageId: OAUTH, version: "1.0.0", manifest });
+    await seedPublishedVersion(OAUTH, "1.0.0", { manifest });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
     await seedDefaultOrgModel(ctx);
 

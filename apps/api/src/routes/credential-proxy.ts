@@ -11,7 +11,9 @@
  * core via the sidecar's MCP `{ns}__api_call` tools instead.
  *
  * `GET /api/credential-proxy/connections` lists what the caller reaches outside
- * a run.
+ * a run. `GET /api/credential-proxy/tools` lists every tool the caller may call
+ * outside a run, the typed tools of remote MCP servers included, and
+ * `POST /api/credential-proxy/tools/call` calls one of those typed tools.
  *
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
@@ -51,14 +53,20 @@
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
+import { z } from "zod";
+import { readJsonBody } from "@appstrate/core/request-body";
+import {
+  CREDENTIAL_STATUS_HEADER,
+  formatCredentialStatus,
+} from "../lib/credential-status-header.ts";
 
 // Streaming cap — single-sourced from the shared outbound-HTTP engine, the
 // same module the in-container resolvers enforce it from, so this route and
 // every runner apply one value. The streaming/buffered decision is
 // header-driven (X-Stream-Request), not threshold-driven, so only the hard cap
 // is needed here.
-import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
+import { MAX_STREAMED_BODY_SIZE, templateTarget } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -67,11 +75,12 @@ import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitive
 import { reportPermissionDenial } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { assertBearerOnly, bearerCaller } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -79,6 +88,7 @@ import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
   invalidRequest,
+  parseBody,
   forbidden,
   internalError,
   payloadTooLarge,
@@ -94,26 +104,49 @@ import {
   listConnectionsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
+import { listIntegrationTools } from "../services/credential-proxy/integration-tools.ts";
+import { callRemoteTool } from "../services/credential-proxy/remote-tools.ts";
+import type { ProxyReach } from "../services/integration-connections.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
+
+const listIntegrationToolsQuerySchema = z.strictObject({
+  integration_package_id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  connection_id: z.uuid().optional(),
+});
+
+export const callRemoteToolSchema = z.strictObject({
+  integration_package_id: z.string().min(1),
+  connection_id: z.uuid().optional(),
+  name: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
 
 export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getCredentialProxyLimits();
 
   router.use("/proxy", proxyStatusMarker());
+  // A response read with one connection must never answer for another, nor outlive the call.
+  for (const path of ["/proxy", "/tools", "/tools/call"]) router.use(path, noStore());
   // `Idempotency-Key` is the upstream's here: the global guard lets it through to be relayed.
   router.use("/proxy", relayIdempotencyKey());
   router.use("/*", requireSpaceContext());
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
-  router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
-    const reach = reachOutsideRun(callerPermissions(c));
-    const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
-    return c.json(listResponse(data));
-  });
+  router.get(
+    "/connections",
+    rateLimit(limits.rate_per_min),
+    requirePermission("credential-proxy", "call-own"),
+    async (c) => {
+      const reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
+      const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
+      return c.json(listResponse(data));
+    },
+  );
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
   // upstream fetch. A POST-only route would silently 404 GET/PUT/DELETE
@@ -125,14 +158,13 @@ export function createCredentialProxyRouter() {
     // `credential-proxy:call` implies `call-own`; `authorizeProxyCall` requires `call` for a run.
     requirePermission("credential-proxy", "call-own"),
     async (c: Context<AppEnv>) => {
-      // Accept headless API keys and bearer JWTs from the interactive CLI
-      // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
-      // Cookie sessions are refused — they would let a drive-by CSRF
-      // trigger arbitrary upstream calls on behalf of a logged-in user.
+      // Accept headless API keys, bearer JWTs from the interactive CLI
+      // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`), and
+      // server-minted bearers (the chat's MCP tools). Cookie sessions are
+      // refused — they would let a drive-by CSRF trigger arbitrary upstream
+      // calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      assertBearerOnly(authMethod, "Credential proxy", {
-        firstPartyLoopback: c.get("firstPartyLoopback"),
-      });
+      assertBearerOnly(bearerCaller(c), "credential-proxy");
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
       const apiKeyId = c.get("apiKeyId") || null;
@@ -144,6 +176,7 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
+      let reach: ProxyReach | null = null;
       if (runId !== null) {
         await authorizeProxyCall({
           permissions: callerPermissions(c),
@@ -153,6 +186,8 @@ export function createCredentialProxyRouter() {
           runId,
           onDenied: (required) => reportPermissionDenial(c, required),
         });
+      } else {
+        reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
       }
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
@@ -227,11 +262,14 @@ export function createCredentialProxyRouter() {
       const pipeDeadline = AbortSignal.timeout(STREAMING_PIPE_TIMEOUT_MS);
       const pipeSignal = AbortSignal.any([c.req.raw.signal, pipeDeadline]);
 
+      // Logs carry origin + path only: userinfo, query and fragment can hold credentials.
+      const loggedTarget = templateTarget(target);
+
       const streamLogCtx = {
         requestId: c.get("requestId"),
         orgId,
         integrationId,
-        target,
+        target: loggedTarget,
       };
 
       // Body handling — read raw bytes when present so substitution can
@@ -318,7 +356,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
-          ...(run ? { run } : { reach: reachOutsideRun(callerPermissions(c)) }),
+          ...(run ? { run } : { reach: reach! }),
           integrationId,
           method,
           target,
@@ -347,7 +385,7 @@ export function createCredentialProxyRouter() {
           integrationId,
           connectionId: result.connectionId,
           method,
-          target,
+          target: loggedTarget,
           status: result.status,
           runId,
           durationMs,
@@ -375,14 +413,16 @@ export function createCredentialProxyRouter() {
           CALLER_RESPONSE_SKIP_HEADERS,
         );
         responseHeaders.append("Proxy-Status", relayedProxyStatus(result.status));
-        // One URL serves every target and connection (they ride in headers), so an upstream
-        // cache policy must not let a client replay one connection's response for another.
-        responseHeaders.set("Cache-Control", "no-store");
 
         // Streaming upload on a 401: credentials may be stale but the body
         // cannot be replayed. Signal the client to refresh and retry itself.
         if (result.authRefreshed) {
           responseHeaders.set("X-Auth-Refreshed", "true");
+        }
+        // A relayed 401 the forced refresh could not recover from says what the platform
+        // concluded, so the caller can tell it from a refusal of the request itself.
+        if (result.credential) {
+          responseHeaders.set(CREDENTIAL_STATUS_HEADER, formatCredentialStatus(result.credential));
         }
 
         // Streaming response path: pipe upstream bytes through a 100 MB
@@ -432,7 +472,7 @@ export function createCredentialProxyRouter() {
               userId,
               spaceId,
               integrationId,
-              target,
+              target: loggedTarget,
             });
           }
           throw problem;
@@ -451,7 +491,74 @@ export function createCredentialProxyRouter() {
     },
   );
 
+  // The tools callable outside a run (`credential-proxy/integration-tools.ts`) and the typed tools
+  // of a remote MCP integration (`credential-proxy/remote-tools.ts`), under the access rule of
+  // `/proxy` outside a run. The limiter keys on the route pattern, so `/connections`, `/tools`,
+  // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
+  // of calls, and each `tools/call` counts once.
+  const remoteToolsCaller = (c: Context<AppEnv>) => {
+    assertBearerOnly(bearerCaller(c), "credential-proxy");
+    return {
+      scope: getSpaceScope(c),
+      actor: getActor(c),
+      reach: reachOutsideRun(callerPermissions(c), c.get("space")!),
+      caller: {
+        apiKeyId: c.get("apiKeyId") || null,
+        authMethod: c.get("authMethod"),
+        requestId: c.get("requestId"),
+      },
+      signal: c.req.raw.signal,
+      connectOffers: connectOfferPolicyFromRequest(c),
+    };
+  };
+
+  router.get(
+    "/tools",
+    rateLimit(limits.rate_per_min),
+    requirePermission("credential-proxy", "call-own"),
+    async (c) => {
+      const caller = remoteToolsCaller(c);
+      const query = parseBody(listIntegrationToolsQuerySchema, c.req.query());
+      const listing = await listIntegrationTools(caller, {
+        ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
+        ...(query.name ? { name: query.name } : {}),
+        ...(query.connection_id ? { connectionId: query.connection_id } : {}),
+      });
+      return c.json(listing);
+    },
+  );
+
+  router.post(
+    "/tools/call",
+    rateLimit(limits.rate_per_min),
+    requirePermission("credential-proxy", "call-own"),
+    async (c) => {
+      const caller = remoteToolsCaller(c);
+      const body = await readJsonBody(c, callRemoteToolSchema);
+      const result = await callRemoteTool({
+        ...caller,
+        integrationId: body.integration_package_id,
+        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+        name: body.name,
+        arguments: body.arguments ?? {},
+      });
+      return c.json({ result });
+    },
+  );
+
   return router;
+}
+
+/**
+ * `Cache-Control: no-store` on every response, the upstream's relayed one included: one URL
+ * serves every target and connection (they ride in headers or the body), so no cache may replay
+ * one connection's answer for another.
+ */
+function noStore(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "no-store");
+  };
 }
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
@@ -468,6 +575,8 @@ const CALLER_RESPONSE_SKIP_HEADERS = new Set([
   "x-stream-response",
   "set-cookie",
   "set-cookie2",
+  // The platform's own verdict header: an upstream must not be able to forge it.
+  CREDENTIAL_STATUS_HEADER.toLowerCase(),
 ]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */

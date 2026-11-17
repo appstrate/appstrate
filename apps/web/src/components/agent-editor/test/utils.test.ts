@@ -3,13 +3,12 @@
 import { describe, it, expect } from "bun:test";
 import {
   caretRange,
-  defaultEditorState,
+  defaultAgentManifest,
   defaultIntegrationManifest,
   defaultSkillManifest,
   getManifestName,
   getResourceEntries,
   setResourceEntries,
-  schemaToFields,
   fieldsToSchema,
   changeType,
   fieldType,
@@ -26,15 +25,20 @@ import {
   manifestToSchemaFields,
   manifestToMetadata,
   metadataToManifestPatch,
-  getRuntimeTools,
-  withNormalizedManifest,
-  setRuntimeTools,
-  withOutputTool,
 } from "../utils";
 import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+
+/** `schemaToFields` is internal to `../utils`; the tests reach it through the manifest entry point. */
+function schemaToFields(
+  schema: JSONSchemaObject | undefined,
+  mode: "input" | "output",
+  wrapper: Record<string, unknown> = {},
+): SchemaField[] {
+  return manifestToSchemaFields({ [mode]: { schema, ...wrapper } })[mode]!;
+}
 
 // ─── getManifestName ────────────────────────────────────────
 
@@ -88,12 +92,25 @@ describe("getResourceEntries / setResourceEntries", () => {
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
   });
 
+  // An agent created over the API may declare no `dependencies` at all; writing
+  // its (empty) skill list back must not invent the key, or the editor's state
+  // drifts from its initial snapshot and reads as dirty with no edit.
+  it("writes nothing for an empty skill list on a manifest without dependencies", () => {
+    const m: Record<string, unknown> = { name: "@org/agent" };
+    setResourceEntries(m, "skills", getResourceEntries(m, "skills"));
+    expect(m).toEqual({ name: "@org/agent" });
+  });
+
   // Niveau 2 — version + tool/scope selection both live on the canonical
   // `dependencies.integrations.<id>` object form (§4.1).
   describe("integrations (deps + integrations_configuration, §4.1/§4.4)", () => {
+    // The platform's own integration leads every list the editor shows.
+    const PLATFORM = { id: "@appstrate/platform", version: "^1.0.0", tools: [] };
+
     it("reads version from deps with no configuration entry", () => {
       const m = { dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/gmail", version: "^1.0.0" },
       ]);
     });
@@ -111,6 +128,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         {
           id: "@vendor/gmail",
           version: "^1.0.0",
@@ -170,6 +188,7 @@ describe("getResourceEntries / setResourceEntries", () => {
       ]);
       const back = getResourceEntries(m, "integrations");
       expect(back).toEqual([
+        PLATFORM,
         { id: "@vendor/none", version: "^1.0.0" },
         { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },
       ]);
@@ -185,6 +204,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         integrations_configuration: { "@vendor/github-mcp": { tools: "*" } },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*" },
       ]);
     });
@@ -228,7 +248,7 @@ describe("getResourceEntries / setResourceEntries", () => {
         },
       };
       const entries = getResourceEntries(m, "integrations");
-      expect(entries).toStrictEqual(parseManifestIntegrations(m));
+      expect(entries).toStrictEqual([PLATFORM, ...parseManifestIntegrations(m)]);
 
       const viaEditor: Record<string, unknown> = { dependencies: {} };
       const viaCore: Record<string, unknown> = { dependencies: {} };
@@ -243,24 +263,84 @@ describe("getResourceEntries / setResourceEntries", () => {
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
       ]);
       expect(getResourceEntries(m, "integrations")).toEqual([
+        PLATFORM,
         { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
       ]);
+    });
+
+    describe("the platform's own integration", () => {
+      it("is listed, with no tool selected, by a manifest that does not declare it", () => {
+        expect(getResourceEntries({}, "integrations")).toEqual([PLATFORM]);
+      });
+
+      it("is not written while it selects no tool: the manifest declares no integration", () => {
+        const viaEditor: Record<string, unknown> = { name: "@org/agent" };
+        const viaCore: Record<string, unknown> = { name: "@org/agent" };
+        setResourceEntries(
+          viaEditor,
+          "integrations",
+          getResourceEntries(viaEditor, "integrations"),
+        );
+        writeManifestIntegrations(viaCore, []);
+        expect(viaEditor).toStrictEqual(viaCore);
+      });
+
+      it("is written once a tool of it is picked, and read back where it stands", () => {
+        const m: Record<string, unknown> = {
+          dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
+        };
+        setResourceEntries(
+          m,
+          "integrations",
+          getResourceEntries(m, "integrations").map((e) =>
+            e.id === PLATFORM.id ? { ...e, tools: ["log"] } : e,
+          ),
+        );
+        expect(m.dependencies).toEqual({
+          integrations: { "@appstrate/platform": "^1.0.0", "@vendor/gmail": "^1.0.0" },
+        });
+        expect(m.integrations_configuration).toEqual({ "@appstrate/platform": { tools: ["log"] } });
+        expect(getResourceEntries(m, "integrations")).toEqual([
+          { ...PLATFORM, tools: ["log"] },
+          { id: "@vendor/gmail", version: "^1.0.0" },
+        ]);
+      });
+
+      it("leaves the manifest when its last tool is unpicked", () => {
+        const m: Record<string, unknown> = {
+          dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+          integrations_configuration: { "@appstrate/platform": { tools: ["log"] } },
+        };
+        setResourceEntries(
+          m,
+          "integrations",
+          getResourceEntries(m, "integrations").map((e) => ({ ...e, tools: [] })),
+        );
+        expect(getResourceEntries(m, "integrations")).toEqual([PLATFORM]);
+        expect(JSON.stringify(m)).not.toContain("@appstrate/platform");
+      });
+
+      it("keeps a declared entry that inherits the integration's default tools", () => {
+        const m = { dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } } };
+        expect(getResourceEntries(m, "integrations")).toEqual([
+          { id: "@appstrate/platform", version: "^1.0.0" },
+        ]);
+      });
     });
   });
 });
 
-// ─── defaultEditorState ─────────────────────────────────────
+// ─── default manifests ──────────────────────────────────────
 
-describe("defaultEditorState", () => {
+describe("defaultAgentManifest", () => {
   it("returns valid manifest structure", () => {
-    const state = defaultEditorState("my-org", "user@test.com");
-    expect(state.manifest.name).toBe("@my-org/");
-    expect(state.manifest.author).toBe("user@test.com");
-    expect(state.manifest.type).toBe("agent");
-    expect(state.manifest.version).toBe("1.0.0");
-    expect(state.manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
-    expect(state.manifest.schemaVersion).toBeUndefined();
-    expect(state.operations).toEqual([{ op: "write", path: "prompt.md", text: "" }]);
+    const manifest = defaultAgentManifest("my-org", "user@test.com");
+    expect(manifest.name).toBe("@my-org/");
+    expect(manifest.author).toBe("user@test.com");
+    expect(manifest.type).toBe("agent");
+    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
+    expect(manifest.schemaVersion).toBeUndefined();
   });
 
   it("skill and integration defaults declare the same schema_version", () => {
@@ -269,8 +349,7 @@ describe("defaultEditorState", () => {
   });
 
   it("handles missing org slug", () => {
-    const state = defaultEditorState();
-    expect(state.manifest.name).toBe("");
+    expect(defaultAgentManifest().name).toBe("");
   });
 });
 
@@ -296,7 +375,6 @@ const fieldOf = (
   prop: JSONSchema7,
   extra: Partial<SchemaField> = {},
 ): SchemaField => ({
-  _id: key,
   key,
   required: false,
   prop,
@@ -832,135 +910,6 @@ describe("manifestToMetadata", () => {
   });
 });
 
-// ─── getRuntimeTools ──────────────────
-
-describe("getRuntimeTools", () => {
-  it("reads canonical runtime_tools (snake_case)", () => {
-    const m = { runtime_tools: ["output", "note"] };
-    expect(getRuntimeTools(m)).toEqual(["output", "note"]);
-  });
-
-  it("tolerates missing field", () => {
-    expect(getRuntimeTools({})).toEqual([]);
-  });
-
-  it("tolerates malformed field", () => {
-    expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
-  });
-
-  // Non-regression: `report` was a real runtime tool until it was replaced by
-  // durable `outputs/` files. Agents saved back then still carry the id;
-  // the editor must ignore it, never render a phantom checkbox for it, and
-  // never surface a validation error to the user because of it.
-  it("drops a retired tool id (`report`) it can no longer render", () => {
-    expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
-      "output",
-      "log",
-    ]);
-  });
-});
-
-// ─── withNormalizedManifest ──────────────────
-
-// Delegates to `dropRetiredRuntimeTools` + `dropRetiredDependencyKeys`
-// (`@appstrate/core`). The former is gated on `type: "agent"` — the fixtures
-// carry it because the only call site (`package-editor.tsx`) runs in the agent
-// branch on a stored AFPS manifest, where `type` is required by the schema.
-describe("withOutputTool", () => {
-  it("turns the output tool on next to the tools already chosen", () => {
-    expect(withOutputTool({ runtime_tools: ["log"] }).runtime_tools).toEqual(["log", "output"]);
-    expect(withOutputTool({}).runtime_tools).toEqual(["output"]);
-  });
-
-  it("returns the same manifest when the tool is already there", () => {
-    const manifest = { runtime_tools: ["output", "log"] };
-    expect(withOutputTool(manifest)).toBe(manifest);
-  });
-});
-
-describe("withNormalizedManifest", () => {
-  it("strips a retired id from the manifest loaded into the editor", () => {
-    const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };
-    expect(withNormalizedManifest(m)).toEqual({
-      type: "agent",
-      name: "@o/a",
-      runtime_tools: ["log"],
-    });
-  });
-
-  it("removes the field entirely when nothing valid remains", () => {
-    expect(
-      withNormalizedManifest({ type: "agent", name: "@o/a", runtime_tools: ["report"] }),
-    ).toEqual({ type: "agent", name: "@o/a" });
-  });
-
-  it("returns the same reference when there is nothing to drop", () => {
-    const m = { type: "agent", name: "@o/a", runtime_tools: ["output"] };
-    expect(withNormalizedManifest(m)).toBe(m);
-    const noField = { type: "agent", name: "@o/a" };
-    expect(withNormalizedManifest(noField)).toBe(noField);
-  });
-
-  // Settled empty-array representation, checked on the editor side of the
-  // shared helper: loading an agent whose author wrote `runtime_tools: []`
-  // must NOT rewrite the manifest. The key is deleted only when a DROP empties
-  // the list — core is a dropper, not a canonicaliser. Mirrors
-  // `packages/core/test/validation.test.ts`; both sides are pinned so the
-  // editor and core cannot drift on the empty case again.
-  it("leaves an author-written empty runtime_tools untouched on load", () => {
-    const m = { type: "agent", name: "@o/a", runtime_tools: [] };
-    expect(withNormalizedManifest(m)).toBe(m);
-    expect(withNormalizedManifest(m)).toHaveProperty("runtime_tools");
-  });
-
-  // A draft can acquire a retired AFPS 1.x dependency key by importing a bundle
-  // assembled from a legacy published version (that path tolerates it). The
-  // author-direction save then REJECTS it, on a field the editor cannot
-  // display — so it has to go on load, or the agent becomes uneditable (#1021).
-  it("strips a retired AFPS 1.x dependency key on load", () => {
-    const m = {
-      type: "agent",
-      name: "@o/a",
-      dependencies: { tools: { "@appstrate/report": "^1.0.0" }, skills: { "@o/s": "^1.0.0" } },
-    };
-    expect(withNormalizedManifest(m)).toEqual({
-      type: "agent",
-      name: "@o/a",
-      dependencies: { skills: { "@o/s": "^1.0.0" } },
-    });
-  });
-
-  it("leaves an emptied dependencies map as {} — the shape the editor itself mints", () => {
-    expect(
-      withNormalizedManifest({
-        type: "agent",
-        name: "@o/a",
-        dependencies: { providers: { "@o/gmail": "^1.0.0" } },
-      }),
-    ).toEqual({ type: "agent", name: "@o/a", dependencies: {} });
-  });
-
-  it("leaves the canonical dependency maps and an extension key untouched", () => {
-    const m = {
-      type: "agent",
-      name: "@o/a",
-      dependencies: { skills: {}, mcp_servers: {}, integrations: {}, _meta: { "dev.x/y": 1 } },
-    };
-    expect(withNormalizedManifest(m)).toBe(m);
-  });
-
-  it("strips a retired runtime tool and a retired dependency key in one pass", () => {
-    expect(
-      withNormalizedManifest({
-        type: "agent",
-        name: "@o/a",
-        runtime_tools: ["report", "log"],
-        dependencies: { tools: {} },
-      }),
-    ).toEqual({ type: "agent", name: "@o/a", runtime_tools: ["log"], dependencies: {} });
-  });
-});
-
 // ─── Writers emit canonical AFPS keys only ──
 
 describe("writers emit canonical AFPS keys", () => {
@@ -977,17 +926,5 @@ describe("writers emit canonical AFPS keys", () => {
     const serialized = JSON.parse(JSON.stringify(patch)) as Record<string, unknown>;
     expect(serialized.display_name).toBe("New Canonical");
     expect(serialized).not.toHaveProperty("displayName");
-  });
-
-  it("setRuntimeTools — writes canonical runtime_tools", () => {
-    const m: Record<string, unknown> = {};
-    setRuntimeTools(m, ["output"]);
-    expect(m.runtime_tools).toEqual(["output"]);
-  });
-
-  it("setRuntimeTools — empty selection drops runtime_tools", () => {
-    const m: Record<string, unknown> = { runtime_tools: ["output"] };
-    setRuntimeTools(m, []);
-    expect(m).not.toHaveProperty("runtime_tools");
   });
 });

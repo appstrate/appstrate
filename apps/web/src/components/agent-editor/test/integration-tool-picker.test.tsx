@@ -34,6 +34,18 @@ describe("IntegrationToolPicker — required switch", () => {
     expect(html).toContain(i18n.t("settings:agentEditor.integrations.tools.detailUnavailable"));
   });
 
+  it("is not offered for the platform's own integration, which binds no connection", () => {
+    const id = "@appstrate/platform";
+    const html = render(
+      <IntegrationToolPicker
+        packageId={id}
+        entry={{ id, version: "^1.0.0", tools: [] }}
+        onChange={() => {}}
+      />,
+    );
+    expect(html).not.toContain(`integ-required-${id}`);
+  });
+
   it("is checked only for an entry marked required", () => {
     expect(renderPicker({ id: ID, version: "*", required: true })).toContain(
       'data-state="checked"',
@@ -109,5 +121,29 @@ describe("IntegrationToolPicker — inferred scopes", () => {
       expect(html).not.toContain(INFERRED);
     }
     expect(renderOver({ tools: ["search"] })).not.toContain(WILDCARD_NOTICE);
+  });
+
+  it("keeps the wildcard choice and its scope notice available without any catalog", () => {
+    for (const selected of [false, true]) {
+      const qc = new QueryClient();
+      qc.setQueryData(DETAIL_KEY, {
+        manifest: { auths: {} },
+        auths: [],
+        active: true,
+        allow_undeclared_tools: true,
+        tool_catalog: [],
+      });
+      const html = render(
+        <IntegrationToolPicker
+          packageId={ID}
+          entry={{ id: ID, version: "*", tools: selected ? "*" : [] }}
+          onChange={() => {}}
+        />,
+        { queryClient: qc },
+      );
+      expect(html).toContain(`integ-wildcard-${ID}`);
+      expect(html.includes(WILDCARD_NOTICE)).toBe(selected);
+      expect(html.includes('data-state="checked"')).toBe(selected);
+    }
   });
 });

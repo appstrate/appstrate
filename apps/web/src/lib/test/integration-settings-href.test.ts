@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An integration's Paramètres (its `#configuration` tab): the address of each
+ * An integration's Paramètres (its `#settings` tab): the address of each
  * section, and which navigations leave the definition editor its Définition
  * sections share.
  */
@@ -27,10 +27,10 @@ const leaves = (from: string, to: string) => leavesEditor(url(from), url(to), pl
 describe("integrationSettingsHref", () => {
   it("names the section under the configuration tab, and nothing from the page left", () => {
     expect(integrationSettingsHref(INTEGRATION, "access")).toBe(
-      `${INTEGRATION}?integrationSettings=access#configuration`,
+      `${INTEGRATION}?integrationSettings=access#settings`,
     );
     expect(integrationSettingsHref(INTEGRATION, "files", { file: "manifest.json" })).toBe(
-      `${INTEGRATION}?integrationSettings=files&file=manifest.json#configuration`,
+      `${INTEGRATION}?integrationSettings=files&file=manifest.json#settings`,
     );
   });
 });
@@ -45,7 +45,7 @@ describe("leavesEditor on an integration's Paramètres", () => {
 
   it("stops a switch to a section another view renders", () => {
     expect(leaves(identity, integrationSettingsHref(INTEGRATION, "authentication"))).toBe(true);
-    expect(leaves(identity, integrationSettingsHref(INTEGRATION, "bundle"))).toBe(true);
+    expect(leaves(identity, integrationSettingsHref(INTEGRATION, "functioning"))).toBe(true);
     expect(leaves(identity, `${INTEGRATION}#connections`)).toBe(true);
   });
 

@@ -5,14 +5,15 @@
  * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
  */
 
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { AlertTriangle, Plus } from "lucide-react";
+import { AlertDescription } from "@appstrate/ui/components/alert";
+import { Plus } from "lucide-react";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ProvidersTable } from "../../components/providers-table";
 import type { MenuAction } from "../../lib/menu-action";
@@ -35,9 +36,13 @@ import {
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
 import { invalidatePaths } from "../../lib/query-keys";
+import { errorMessage } from "../../lib/mutation-error";
 import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 import { EmptyStateAction } from "../../components/page-states";
+
+/** The key form shows a refusal under its fields. */
+const FORM_META = { errorHandledByCaller: true } as const;
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -55,16 +60,17 @@ export function PreferencesModelsPage() {
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
   const { data: registry } = useProvidersRegistry();
-  const createCredential = useCreateModelProviderCredential();
+  const createCredential = useCreateModelProviderCredential(FORM_META);
+  // The form shows its refusal inline; a rename goes through the cache's toast.
   const updateCredential = useUpdateModelProviderCredential();
+  const editKeyCredential = useUpdateModelProviderCredential(FORM_META);
   const deleteCredential = useDeleteModelProviderCredential();
 
-  const newParam = useModalParam("newCredential");
+  const [creating, setCreating] = useState(false);
   const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
-  const editParam = useModalTarget("editCredential", credentialsQuery.data && credentials);
+  const editParam = useUrlModalTarget("editCredential", credentialsQuery.data && credentials);
   const editCredential = editParam.target ?? null;
-  // `?newCredential` opens only for a caller the add action is offered to.
-  const formOpen = (newParam.value !== null && canAdd) || editCredential !== null;
+  const formOpen = (creating && canAdd) || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
   const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(
@@ -77,11 +83,13 @@ export function PreferencesModelsPage() {
   };
 
   const closeForm = () => {
-    (editCredential ? editParam : newParam).close();
+    createCredential.reset();
+    editKeyCredential.reset();
+    (editCredential ? editParam.close : () => setCreating(false))();
     refreshModels();
   };
 
-  const openCreate = () => newParam.open();
+  const openCreate = () => setCreating(true);
 
   const openEdit = (credential: ModelProviderCredentialInfo) => editParam.open(credential.id);
 
@@ -96,7 +104,7 @@ export function PreferencesModelsPage() {
   const submitForm = (data: { label: string; providerId: string; apiKey?: string }) => {
     if (editCredential) {
       // The provider is pinned at create time: only the label and the key change.
-      updateCredential.mutate(
+      editKeyCredential.mutate(
         {
           params: { path: { id: editCredential.id } },
           body: credentialUpdateBody(editCredential, data),
@@ -129,7 +137,6 @@ export function PreferencesModelsPage() {
     <>
       {personalModelCredentialsDisabled && (
         <Alert variant="warning" className="mb-4">
-          <AlertTriangle size={16} />
           <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
         </Alert>
       )}
@@ -139,8 +146,8 @@ export function PreferencesModelsPage() {
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       <ProvidersTable
+        tableId="own-model-keys"
         label={t("preferences.tabModels")}
-        tableId="my-providers"
         rows={rows}
         showType
         isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
@@ -163,7 +170,12 @@ export function PreferencesModelsPage() {
           key={editCredential?.id ?? "__create__"}
           onClose={closeForm}
           credential={editCredential}
-          isPending={createCredential.isPending || updateCredential.isPending}
+          isPending={createCredential.isPending || editKeyCredential.isPending}
+          error={
+            createCredential.error || editKeyCredential.error
+              ? errorMessage(createCredential.error ?? editKeyCredential.error)
+              : null
+          }
           onSubmit={submitForm}
           personal
         />
@@ -172,7 +184,7 @@ export function PreferencesModelsPage() {
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title={t("modelCredentials.deleteTitle")}
+        title={t("credentials.deleteTitle")}
         confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           confirmDelete ? t("modelCredentials.deleteConfirm", { label: confirmDelete.label }) : ""

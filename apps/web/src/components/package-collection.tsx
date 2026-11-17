@@ -3,12 +3,10 @@
 /**
  * A collection of packages: the bar, the body, the count.
  *
- * Everything the agents, skills and MCP-server pages draw below their title,
+ * Everything the agents, skills and integrations pages draw below their title,
  * and everything the organization's catalogue draws inside its panel. They are
- * the SAME list of the same objects, so they are one component: the same
- * search, the same faceted filters, the same column set, the same view toggle,
- * the same empty states. The catalogue adds a tick per row and one action in
- * the bar; it does not get a table of its own.
+ * the same objects with shared search, filters and empty states. Each caller
+ * composes the columns and their visibility menu.
  *
  * What the caller decides is where the state lives (the URL on a page, the
  * component in a panel, see `ListState`) and what, if anything, hangs off each
@@ -17,25 +15,22 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { LucideIcon } from "lucide-react";
+import { ListViewTabs } from "./list-view-tabs";
 import type { PackageType } from "@appstrate/core/validation";
-import type { ListView } from "@/stores/list-view-store";
 import type { DataColumn } from "./data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
-import { CardGrid } from "./card-grid";
-import { PackageCard } from "./package-card";
+import { CardGrid, CardGridSkeleton } from "./card-grid";
+import { SkeletonLine } from "./skeleton-line";
+import { PackageCard, PackageCardSkeleton } from "./package-card";
 import { PackagesTable } from "./packages-table";
-import { usePackageColumns } from "./package-columns";
-import { ListFooter, ListToolbar, type FilterSpec } from "./list-toolbar";
+import { ListFooter, ListToolbar, type ColumnMenuSpec, type FilterSpec } from "./list-toolbar";
 import { EmptyState, NoMatchState } from "./page-states";
 import { SettingsHeading } from "./settings/settings-heading";
-import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
+import type { ListView } from "../stores/list-view-store";
 import { PACKAGE_ACTIVITIES, PACKAGE_ORIGINS, narrowPackages } from "../lib/package-collection";
 import type { CardItem } from "../lib/package-card-item";
 
-const NO_COLUMNS: DataColumn<CardItem>[] = [];
-const NO_IDS: string[] = [];
 const NO_FILTERS: FilterSpec[] = [];
 
 export interface OriginLabels {
@@ -45,10 +40,12 @@ export interface OriginLabels {
 }
 
 export interface PackageCollectionProps {
+  columns: DataColumn<CardItem>[];
+  columnMenu: ColumnMenuSpec;
   items: CardItem[] | undefined;
   isLoading: boolean;
   error?: Error | null;
-  /** What the list holds. Decides which columns can say anything at all. */
+  /** What the list holds, for search and activity filters. */
   holds: PackageType;
   /**
    * Which list this is, for the columns its reader hides and the widths they
@@ -63,8 +60,9 @@ export interface PackageCollectionProps {
   /** The page's creation button, when the caller may create: the empty list offers it. */
   emptyAction?: ReactNode;
   list: ListState;
+  /** How this surface draws the list: the index pages let the reader choose, the catalogue's management view is a table. */
   view: ListView;
-  /** Absent when the view is the surface's decision, not the reader's. */
+  /** Offers the choice between the two drawings; without it the list keeps `view`. */
   onViewChange?: (view: ListView) => void;
   /**
    * Whether the list can say what is running or what uses this package. The
@@ -84,34 +82,28 @@ export interface PackageCollectionProps {
   extraFilters?: FilterSpec[];
   /** Whether an agent card offers its run button. A catalogue's cannot. */
   cardRun?: boolean;
+  /** The list spans several spaces: each card names its row's spaces. */
+  spanning?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
   /** Above the bar: what this collection is. */
   header?: ReactNode;
-  /** `CollectionTabs` for the bar's line, before the search. */
-  tabs?: ReactNode;
   /** Open a row in place rather than on its own page. */
   rowAction?: (item: CardItem) => void;
-  /** Ahead of the name: the catalogue's tick. */
-  leadingColumns?: DataColumn<CardItem>[];
-  /** After the rest: the catalogue's per-row deed. */
-  trailingColumns?: DataColumn<CardItem>[];
-  /**
-   * Columns this list cannot answer. The catalogue drops the run state and the
-   * run button: an agent that is not active here cannot be running, and cannot
-   * be run.
-   */
-  dropColumns?: string[];
   /**
    * Cards split into titled sections, in order — how the catalogue's Découvrir
    * says what its ticks mean ("Pas encore dans Default", "Déjà dans Default").
    * An empty section is not drawn. Loading, failure and an empty list keep the
    * single grid, whose states say those things already.
    */
+  /** A card while the collection loads; the index pages' card when unset. */
+  cardPlaceholder?: ReactNode;
   cardSections?: (items: CardItem[]) => { key: string; title: string; items: CardItem[] }[];
 }
 
 export function PackageCollection({
+  columns,
+  columnMenu,
   items,
   isLoading,
   error,
@@ -129,25 +121,21 @@ export function PackageCollection({
   originLabels,
   extraFilters = NO_FILTERS,
   cardRun = true,
+  spanning = false,
   actions,
   header,
-  tabs,
   rowAction,
-  leadingColumns = NO_COLUMNS,
-  trailingColumns = NO_COLUMNS,
-  dropColumns = NO_IDS,
   cardSections,
+  cardPlaceholder,
 }: PackageCollectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Client-side on purpose, and honestly so: this catalogue arrives whole, so
-  // the box searches the whole list rather than the page on screen — which is
-  // exactly why the run list, paginated server-side, has no box.
+  // the box searches the whole list rather than the page on screen. A list
+  // paged server-side (runs, files) searches through its `q` parameter instead.
   const query = list.search;
   const origins = list.values("origin", PACKAGE_ORIGINS);
   const activities = activityFilter ? list.values("activity", PACKAGE_ACTIVITIES) : [];
-  const baseColumns = usePackageColumns(holds).filter((c) => !dropColumns.includes(c.id));
   const searchPlaceholder = useSearchPlaceholder(entity);
-  const visibility = useColumnVisibility(tableId);
 
   const shown = narrowPackages(items ?? [], {
     query,
@@ -163,7 +151,7 @@ export function PackageCollection({
       values: origins,
       options: [
         { value: "local", label: originLabels?.local ?? t("list.filter.local") },
-        { value: "system", label: originLabels?.system ?? t("list.filter.system") },
+        { value: "system", label: originLabels?.system ?? t("list.badgeBuiltIn") },
       ],
       onChange: list.setValues("origin"),
     },
@@ -171,7 +159,7 @@ export function PackageCollection({
       ? [
           {
             id: "activity",
-            label: t(holds === "agent" ? "list.filter.execution" : "list.filter.usage"),
+            label: t(holds === "agent" ? "run.infoExecution" : "run.infoUsage"),
             values: activities,
             options:
               holds === "agent"
@@ -208,37 +196,46 @@ export function PackageCollection({
     </EmptyState>
   );
 
+  const placeholder = cardPlaceholder ?? (
+    <PackageCardSkeleton runnable={cardRun && holds === "agent"} spaceName={spanning} />
+  );
+
   return (
     <>
       {header}
       <ListToolbar
-        tabs={tabs}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}
         onReset={list.reset}
-        // Only the table view has columns to choose from, and only the set the
-        // list owns: a tick and a deed are not columns anyone hides.
-        columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}
-        view={view}
-        onViewChange={onViewChange}
-        actions={actions}
+        columns={view === "table" ? columnMenu : undefined}
+        actions={
+          <>
+            {onViewChange && <ListViewTabs view={view} onChange={onViewChange} />}
+            {actions}
+          </>
+        }
       />
       {view === "table" ? (
         <PackagesTable
-          items={shown}
           tableId={tableId}
+          label={entity}
+          items={shown}
           rowAction={rowAction}
-          columns={[
-            ...leadingColumns,
-            ...visibleColumns(baseColumns, visibility.hidden),
-            ...trailingColumns,
-          ]}
+          columns={columns}
           isLoading={isLoading}
           failure={error}
           empty={emptyBody}
         />
+      ) : cardSections && isLoading && !error ? (
+        // Sectioned cards wait in their first section: its heading, then its cards.
+        <div className="flex flex-col gap-8 pt-2">
+          <section>
+            <SettingsHeading level="group" title={<SkeletonLine className="w-48" />} />
+            <CardGridSkeleton placeholder={placeholder} />
+          </section>
+        </div>
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
-        <div className="space-y-8 pt-2">
+        <div className="flex flex-col gap-8 pt-2">
           {cardSections(shown)
             .filter((section) => section.items.length > 0)
             .map((section) => (
@@ -260,6 +257,7 @@ export function PackageCollection({
                   renderCard={(item) => (
                     <PackageCard
                       {...item}
+                      showSpace={spanning}
                       showRun={cardRun}
                       onOpen={rowAction ? () => rowAction(item) : undefined}
                     />
@@ -278,6 +276,7 @@ export function PackageCollection({
           renderCard={(item) => (
             <PackageCard
               {...item}
+              showSpace={spanning}
               showRun={cardRun}
               onOpen={rowAction ? () => rowAction(item) : undefined}
             />
@@ -285,6 +284,7 @@ export function PackageCollection({
           isLoading={isLoading}
           failure={error}
           empty={emptyBody}
+          placeholder={placeholder}
         />
       )}
       {/* Under the body, like the runs page: what the collection amounts to,

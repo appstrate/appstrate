@@ -31,8 +31,8 @@ export function PairingModal({
   const dismiss = usePairingDismissConfirm(onClose);
   return (
     <>
-      <Modal open onClose={dismiss.requestClose} title={title}>
-        <div className="space-y-4">
+      <Modal onClose={dismiss.requestClose} title={title}>
+        <div className="flex flex-col gap-4">
           {children}
           {showPairing && (
             <OAuthPairingBody

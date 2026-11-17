@@ -96,7 +96,7 @@ describe("the models page for a member who can only read models", () => {
     const { html } = renderFor(MEMBER);
     expect(html).toContain(settingsFr["providers.tabOrg"]);
     expect(html).toContain(settingsFr["providers.tabPersonal"]);
-    expect(html).toContain(`aria-label="${settingsFr["providers.tableLabel"]}"`);
+    expect(html).toContain(`aria-label="${settingsFr["providers.tabOrg"]}"`);
     expect(html).not.toContain(settingsFr["providers.personalTableLabel"]);
   });
 

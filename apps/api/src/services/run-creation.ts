@@ -61,7 +61,7 @@ interface CreateRunInput {
    * `freezeRunSpawnDependencies` — an unsatisfiable pin aborts the run.
    */
   dependencyOverrides?: Record<string, string> | null;
-  /** Cascade layer 3; its ids persist on `runs.connection_overrides`. */
+  /** The launch override; its ids persist on `runs.connection_overrides`. */
   launchOverrides?: LaunchOverrides | null;
   /** Client-requested sink TTL. */
   sink?: SinkRequest;
@@ -200,9 +200,10 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
           message:
             `Remote runs bind one connection per integration, but this run's connection choice binds ` +
             `several to '${integrationId}' — the remote runner's api_call tool cannot say which one ` +
-            `to use. Name one in connection_overrides or pick one with a member pin (a set an admin ` +
-            `pin or an enforced org default imposes is narrowed by an admin), or run the agent on ` +
-            `the platform.`,
+            `to use. Name one in connection_overrides or pick one with a member pin, or run the ` +
+            `agent on the platform. A set an admin pin or an enforced org default imposes is bound ` +
+            `whole, with any addition: one imposing several, or one plus an addition, is refused ` +
+            `here.`,
         })),
         versionRef,
       );

@@ -1,25 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import type { components } from "../api/schema";
 import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
 
-/** At the cap an addition is refused and `ids` comes back unchanged. */
-export function toggleCapped(ids: string[], id: string): string[] {
+/** At the cap (`max`, what an imposed set leaves) an addition is refused and `ids` comes back unchanged. */
+export function toggleCapped(
+  ids: string[],
+  id: string,
+  max: number = MAX_CONNECTIONS_PER_INTEGRATION,
+): string[] {
   if (ids.includes(id)) return ids.filter((x) => x !== id);
-  if (ids.length >= MAX_CONNECTIONS_PER_INTEGRATION) return ids;
+  if (ids.length >= max) return ids;
   return [...ids, id];
 }
 
-/** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
-export type ConnectionSet = string[] | null;
+/** What binds under an imposed set: all of it, in its order, then the additions it lacks. */
+export function imposedThenAdded(imposedIds: string[], addedIds: string[]): string[] {
+  return [...imposedIds, ...addedIds.filter((id) => !imposedIds.includes(id))];
+}
 
 /**
- * `overrides` with one integration's set replaced; `null` removes its key, and an emptied map
- * drops `connection_overrides`.
+ * A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. Under an
+ * imposed set (an admin pin or an enforced default) a launch override or a member pin only adds
+ * to it, so there `[]` means no addition and the imposed set still binds.
  */
+export type ConnectionSet = string[] | null;
+
+/** `null` removes the key; an emptied map drops `connection_overrides`. */
 export function withConnectionOverride(
   overrides: RunOverridesValue,
   integrationId: string,
@@ -32,10 +41,7 @@ export function withConnectionOverride(
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
 }
 
-/**
- * `overrides` with `connection_overrides` narrowed to the integrations the definition declares:
- * the server refuses any other key (400). `declared` unknown (not loaded) keeps every key.
- */
+/** Narrowed to declared integrations: the server 400s on any other key. `declared` unloaded keeps every key. */
 export function withDeclaredConnections(
   overrides: RunOverridesValue,
   declared: readonly string[] | undefined,
@@ -46,61 +52,60 @@ export function withDeclaredConnections(
   return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
 }
 
-/** What {@link withFallbackConnections} reads of one integration's readiness entry. */
-export interface FallbackBindingEntry {
-  integration_package_id: string;
-  inert: boolean;
-  resolution: Pick<
-    components["schemas"]["IntegrationAgentResolution"],
-    "source" | "resolved_connection_ids"
-  >;
-}
-
-/**
- * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
- * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
- */
-export function withFallbackConnections(
-  overrides: RunOverridesValue,
-  readiness: readonly FallbackBindingEntry[] | undefined,
-): RunOverridesValue {
-  let next = overrides;
-  for (const entry of readiness ?? []) {
-    const id = entry.integration_package_id;
-    const { source, resolved_connection_ids: bound } = entry.resolution;
-    const binds = !entry.inert && source === "fallback_auto" && bound.length > 0;
-    if (binds && next.connection_overrides?.[id] === undefined) {
-      next = withConnectionOverride(next, id, bound);
-    }
-  }
-  return next;
-}
-
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
 
 /**
- * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
- * only a stored pick naming an id that is not a candidate — never the set an unset pick shows.
+ * What « Enregistrer » writes for the ticked set, `undefined` when it writes nothing. `ticked` and
+ * `stored` hold what is CHOSEN (under an imposed set, the additions alone); `initial` is what the
+ * list opened with. Nothing is written while the ticks still show an unset choice untouched (that
+ * would pin what the cascade already gives), nor when it equals the stored choice. An empty tick is
+ * `emptyValue`: « no addition » under an imposed set, `undefined` elsewhere (« Aucune connexion »
+ * is its own action).
  */
-export function canApplyConnectionSet(
-  checked: readonly { id: string }[],
-  explicitIds: ConnectionSet,
-  touched: boolean,
-): boolean {
-  if (checked.length === 0) return false;
-  if (!touched && explicitIds === null) return false;
-  return !sameSet(
-    checked.map((c) => c.id),
-    explicitIds ?? [],
-  );
+export function connectionSetToSave(input: {
+  ticked: readonly string[];
+  initial: readonly string[];
+  stored: ConnectionSet;
+  emptyValue: ConnectionSet | undefined;
+}): ConnectionSet | undefined {
+  const { ticked, initial, stored, emptyValue } = input;
+  if (stored === null && sameSet(ticked, initial)) return undefined;
+  const value = ticked.length > 0 ? [...ticked] : emptyValue;
+  if (value === undefined) return undefined;
+  const unchanged = value === null ? stored === null : stored !== null && sameSet(value, stored);
+  return unchanged ? undefined : value;
 }
 
 /**
- * The pick a picker shows: the explicit one, else the stored set of the layer an unset pick
- * falls to — the member's pin (under an override), then a soft space default — else the set the
- * fallback binds. `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
+ * What the connection picker's « Enregistrer » writes for its ticks: a member's pin
+ * (`overrideMode` false) or a schedule's override (true). Under an imposed set (`imposedIds`: an
+ * admin pin open to additions) the write holds the additions alone, so an imposed id is dropped
+ * from the ticks and from what was stored (one written before the lock opened); unticking every
+ * addition is « no addition », which a pin encodes as no pin (`null`) and an override as `[]`.
+ * Without an imposed set an empty tick writes nothing. See `connectionSetToSave` for the rest.
+ */
+export function pickerSetToSave(input: {
+  ticked: readonly string[];
+  initial: readonly string[];
+  stored: ConnectionSet;
+  imposedIds: readonly string[];
+  overrideMode: boolean;
+}): ConnectionSet | undefined {
+  const { ticked, initial, stored, imposedIds, overrideMode } = input;
+  const additions = (ids: readonly string[]) => ids.filter((id) => !imposedIds.includes(id));
+  return connectionSetToSave({
+    ticked: additions(ticked),
+    initial: additions(initial),
+    stored: stored === null ? null : additions(stored),
+    emptyValue: imposedIds.length > 0 ? (overrideMode ? [] : null) : undefined,
+  });
+}
+
+/**
+ * Explicit pick, else the member's pin, then a soft space default, else what the fallback binds.
+ * `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
  */
 export function shownConnectionPick(input: {
   explicitIds: ConnectionSet;
@@ -114,52 +119,29 @@ export function shownConnectionPick(input: {
   return bound.length > 0 ? bound : null;
 }
 
-/**
- * The ticked set "Valider" writes: what is CHOSEN, never what the cascade would bind (while
- * nothing is chosen "Hériter" is the ticked row, not the connection it resolves to).
- */
-export function checkedConnectionIds(input: {
-  draft: string[] | null;
-  explicitIds: ConnectionSet;
-  candidateIds: string[];
-}): string[] {
-  const base = input.draft ?? input.explicitIds ?? [];
-  return keepAvailable(base, input.candidateIds);
-}
-
-/**
- * Stored members that are no candidate for this agent. The resolver refuses such a set rather
- * than bind what is left, so the picker names them and "Valider" visibly drops them.
- */
+/** The resolver refuses such a set rather than bind what is left, so the picker names them. */
 export function unavailableConnectionIds(storedIds: string[], candidateIds: string[]): string[] {
   return storedIds.filter((id) => !candidateIds.includes(id));
 }
 
 /**
- * The set a picker persists once a connection was created from it: `boundIds` (the pick the
- * picker shows, kept to the candidates) plus `createdId`. A connection created to replace a
- * member (`replacing`) takes its place 1-for-1. At the cap `boundIds` comes back unchanged.
+ * `boundIds` plus `createdId`; `replacing` is swapped 1-for-1. At the cap (`max`, what an
+ * imposed set leaves) `boundIds` comes back unchanged.
  */
 export function placeCreatedConnection(input: {
   boundIds: string[];
   createdId: string;
   replacing?: string;
+  max?: number;
 }): string[] {
-  const { boundIds, createdId, replacing } = input;
+  const { boundIds, createdId, replacing, max = MAX_CONNECTIONS_PER_INTEGRATION } = input;
   if (replacing !== undefined && boundIds.includes(replacing)) {
     return boundIds.map((id) => (id === replacing ? createdId : id));
   }
-  return boundIds.length >= MAX_CONNECTIONS_PER_INTEGRATION ? boundIds : [...boundIds, createdId];
+  return boundIds.length >= max ? boundIds : [...boundIds, createdId];
 }
 
-/**
- * Option label for the two admin pickers (org default, pins). Those lists
- * are org-wide — since the connections endpoint returns shared connections
- * owned by other members, an admin choosing a cross-agent default is picking
- * between rows whose labels can collide ("Connexion 1" for two members), so
- * the owner is part of the identity here. The per-row table carries the same
- * information as a badge instead, where a suffix would fight the rename UI.
- */
+/** Admin pickers list org-wide shared connections whose labels can collide across members, so the owner is part of the identity. */
 export function connectionOptionLabel(c: IntegrationConnection): string {
   return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }

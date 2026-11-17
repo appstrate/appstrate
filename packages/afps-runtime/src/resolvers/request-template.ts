@@ -59,8 +59,10 @@ function renderUrl(template: string, render: Render): string {
   const authority = urlTemplateAuthority(template);
   const rest = template.slice(authority.length);
   const pathEnd = /[?#]|$/.exec(rest)!.index;
-  const segments = rest.slice(0, pathEnd).split("/");
-  const path = segments.map((segment) => {
+  // `\` delimits like `/` in WHATWG; the capture keeps each delimiter as written.
+  const segments = rest.slice(0, pathEnd).split(/([\\/])/);
+  const path = segments.map((segment, i) => {
+    if (i % 2 === 1) return segment;
     let first: string | undefined;
     const rendered = render(segment, (value, key) => {
       first ??= key;
@@ -77,7 +79,7 @@ function renderUrl(template: string, render: Render): string {
   });
   return (
     render(authority, (value, _key, offset) => (offset === 0 ? value : encodeURIComponent(value))) +
-    path.join("/") +
+    path.join("") +
     render(rest.slice(pathEnd), encodeURIComponent)
   );
 }

@@ -17,7 +17,7 @@
  *     `bundle/validate-bundle.ts`; it is not a package subpath either.
  */
 
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument } from "yaml";
 
 /**
  * Stable, machine-readable companion-file violation reasons.
@@ -31,7 +31,7 @@ export type CompanionViolationReason =
   | "SKILL_INVALID_FRONTMATTER_NAME"
   | "SKILL_MISSING_FRONTMATTER_DESCRIPTION"
   | "SKILL_INVALID_FRONTMATTER_DESCRIPTION"
-  | "MCP_SERVER_MISSING_ENTRY_POINT";
+  | "LOCAL_SERVER_MISSING_ENTRY_POINT";
 
 /**
  * Structured error type for callers that want to translate companion-file
@@ -46,6 +46,11 @@ export interface CompanionFileViolation {
   message: string;
   /** Path the violation refers to, when relevant. */
   path?: string;
+  /**
+   * Where in the file the violation sits, 1-based and counted in the file itself (the
+   * frontmatter's opening `---` is line 1), when the checker knows it — a YAML syntax error.
+   */
+  position?: { line: number; column: number };
 }
 
 /**
@@ -107,9 +112,9 @@ function resolveArchivePath(files: CompanionFileSource, declared: string): strin
  *   - `skill` → `SKILL.md` present at root, with a YAML frontmatter `name`
  *     (§3.3). Missing `description` is tolerated — this is the LOADER gate;
  *     the producer rule is {@link checkSkillMarkdown}.
- *   - `mcp-server` → file at `manifest.server.entry_point` present in the
- *     archive (§3.4 "self-contained — every runtime dep bundled").
- *   - `integration` → no required companion (§3.5).
+ *   - `integration` with a `local` source → file at `source.server.entry_point`
+ *     present in the archive (§7.1: the integration archive carries its own
+ *     server payload). Any other source: no required companion (§3.5).
  *   - any other type → no check (caller validates manifest shape).
  *
  * The caller is responsible for throwing whatever error class fits its
@@ -117,7 +122,7 @@ function resolveArchivePath(files: CompanionFileSource, declared: string): strin
  * runtime loader).
  */
 export function checkCompanionFiles(
-  manifest: { type?: unknown; server?: unknown } & Record<string, unknown>,
+  manifest: { type?: unknown; source?: unknown } & Record<string, unknown>,
   files: CompanionFileSource,
 ): CompanionFileViolation | null {
   const type = manifest.type;
@@ -160,37 +165,37 @@ export function checkCompanionFiles(
     return null;
   }
 
-  if (type === "mcp-server") {
-    const server = manifest.server as { entry_point?: unknown } | undefined;
-    const entryPoint = server?.entry_point;
+  if (type === "integration") {
+    const source = manifest.source as
+      { kind?: unknown; server?: { entry_point?: unknown } } | undefined;
+    if (source?.kind !== "local") return null;
+    const entryPoint = source.server?.entry_point;
     if (typeof entryPoint !== "string" || entryPoint.length === 0) {
       // Manifest schema validation reports this — surface a structured
       // violation here too so callers that skip schema validation still
       // catch it.
       return {
-        reason: "MCP_SERVER_MISSING_ENTRY_POINT",
-        message: "mcp-server manifest must declare server.entry_point",
+        reason: "LOCAL_SERVER_MISSING_ENTRY_POINT",
+        message: "local integration must declare source.server.entry_point",
       };
     }
-    // MCPB manifests conventionally write the entry point relative-explicit
+    // The entry point is conventionally written relative-explicit
     // (`./server.js`), while archive entries are stored flat (`server.js`).
-    // Both spellings name the same file, so resolve either — an exact
-    // `has(entryPoint)` rejected every package in this repo's own
-    // `system-packages/` tree when imported through `POST /api/packages/import`,
-    // while the on-disk system-package loader accepted them. One archive, two
-    // verdicts, depending on which door it came through.
+    // Both spellings name the same file, so resolve either — one archive must
+    // get one verdict whichever door (HTTP import, on-disk system-package
+    // loader) it comes through.
     if (!resolveArchivePath(files, entryPoint)) {
       return {
-        reason: "MCP_SERVER_MISSING_ENTRY_POINT",
-        message: `mcp-server archive missing server.entry_point payload: ${entryPoint}`,
+        reason: "LOCAL_SERVER_MISSING_ENTRY_POINT",
+        message: `local integration archive missing source.server.entry_point payload: ${entryPoint}`,
         path: entryPoint,
       };
     }
     return null;
   }
 
-  // `integration` and unknown/missing types: no companion-file requirement
-  // here. The caller's manifest schema check rejects unsupported types.
+  // Unknown/missing types: no companion-file requirement here. The caller's
+  // manifest schema check rejects unsupported types.
   return null;
 }
 
@@ -244,13 +249,24 @@ export interface SkillFrontmatter {
   /** Opens with `---` but never closes the block. */
   unterminated: boolean;
   error: string | null;
+  /** Where the YAML parser stopped, in SKILL.md's own lines (1-based), on a syntax error. */
+  position?: { line: number; column: number };
   name: string;
   description: string;
+  /** The parsed frontmatter mapping, every key as authored; `{}` when absent or invalid. */
+  fields: Record<string, unknown>;
 }
 
 /** Parses the way the skill runtime does, so the gate cannot accept what it fails to read. */
 export function parseSkillFrontmatter(content: string): SkillFrontmatter {
-  const empty = { found: false, unterminated: false, error: null, name: "", description: "" };
+  const empty = {
+    found: false,
+    unterminated: false,
+    error: null,
+    name: "",
+    description: "",
+    fields: {},
+  };
 
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!normalized.startsWith("---")) return empty;
@@ -263,10 +279,12 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   try {
     parsed = parseYaml(block, { uniqueKeys: true, strict: true });
   } catch (err) {
+    const position = yamlErrorPosition(err);
     return {
       ...empty,
       found: true,
       error: `frontmatter is not valid YAML: ${firstLine(err)}`,
+      ...(position ? { position } : {}),
     };
   }
 
@@ -285,7 +303,7 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   const description = readStringField(record, "description");
   if (typeof description !== "string") return { ...empty, found: true, error: description.error };
 
-  return { found: true, unterminated: false, error: null, name, description };
+  return { found: true, unterminated: false, error: null, name, description, fields: record };
 }
 
 /** An absent key and an empty scalar both mean "not provided" and yield `""`. */
@@ -315,6 +333,17 @@ export function decodeSkillMarkdown(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
 }
 
+/**
+ * The `yaml` parser's own position (`linePos`, 1-based within the parsed block), moved onto the
+ * file: the block starts on the line after the opening `---`.
+ */
+function yamlErrorPosition(err: unknown): { line: number; column: number } | undefined {
+  const linePos = (err as { linePos?: unknown }).linePos;
+  const start = Array.isArray(linePos) ? (linePos[0] as { line?: unknown; col?: unknown }) : null;
+  if (!start || typeof start.line !== "number" || typeof start.col !== "number") return undefined;
+  return { line: start.line + 1, column: start.col };
+}
+
 function firstLine(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   return message.split("\n")[0]!.trim();
@@ -341,7 +370,7 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
     };
   }
 
-  const { unterminated, error, name, description } = parseSkillFrontmatter(content);
+  const { unterminated, error, position, name, description } = parseSkillFrontmatter(content);
 
   if (unterminated) {
     return {
@@ -355,6 +384,7 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
       reason: "SKILL_INVALID_FRONTMATTER",
       message: `skill SKILL.md ${error}`,
       path: "SKILL.md",
+      ...(position ? { position } : {}),
     };
   }
   if (!name) {
@@ -405,4 +435,59 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
     };
   }
   return null;
+}
+
+const SKILL_FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
+
+/**
+ * Point the frontmatter `name` at `name`, the one rewrite Agent Skills forces.
+ * Every other byte passes through as authored: unknown keys are client
+ * extensions, and invented content would hide a publishing mistake.
+ */
+export function normalizeSkillMd(content: string, name: string): string {
+  if (parseSkillFrontmatter(content).name === name) return content;
+  const match = content.match(SKILL_FRONTMATTER_RE);
+  if (!match) return content;
+
+  // Splice by offset, not `String.replace`: the block is user content that can
+  // recur later, and a replacement would re-interpret `$` sequences.
+  const blockStart = match[0]!.indexOf("\n") + 1;
+  const block = match[1]!;
+  const line = /^name:[^\r\n]*/m.exec(block);
+  if (!line) {
+    const eol = block.includes("\r\n") ? "\r\n" : "\n";
+    return `${content.slice(0, blockStart)}name: ${name}${eol}${content.slice(blockStart)}`;
+  }
+  const at = blockStart + line.index;
+  return `${content.slice(0, at)}name: ${name}${content.slice(at + line[0].length)}`;
+}
+
+function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Point the frontmatter `metadata.version` at `version`, or remove it when
+ * `version` is `null`. The frontmatter block is re-serialized only when the
+ * value differs; a `metadata` that is not a mapping gives way to
+ * `{ version }`. Content without a valid frontmatter mapping passes through.
+ */
+export function setSkillMdVersion(content: string, version: string | null): string {
+  const parsed = parseSkillFrontmatter(content);
+  const match = content.match(SKILL_FRONTMATTER_RE);
+  if (!parsed.found || parsed.error || !match) return content;
+  const metadata = parsed.fields.metadata;
+  const current = isMapping(metadata) ? metadata.version : undefined;
+  if (version === null ? current === undefined : current === version) return content;
+
+  const blockStart = match[0]!.indexOf("\n") + 1;
+  // The `\r` of a CRLF line before the closing `---` belongs to that line break.
+  const block = match[1]!.replace(/\r$/, "");
+  const eol = match[1]!.includes("\r\n") ? "\r\n" : "\n";
+  const doc = parseDocument(block.replace(/\r\n/g, "\n"), { uniqueKeys: true });
+  if (version === null) doc.deleteIn(["metadata", "version"]);
+  else if (isMapping(metadata)) doc.setIn(["metadata", "version"], version);
+  else doc.set("metadata", { version });
+  const edited = doc.toString({ lineWidth: 0 }).replace(/\n$/, "").replace(/\n/g, eol);
+  return `${content.slice(0, blockStart)}${edited}${content.slice(blockStart + block.length)}`;
 }

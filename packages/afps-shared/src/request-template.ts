@@ -19,9 +19,12 @@ export function headerNamed(
   return Object.entries(headers).find(([k]) => k.toLowerCase() === name)?.[1];
 }
 
-/** What precedes the path, query or fragment of a URL template: scheme and authority, or a base-URL placeholder. */
+/**
+ * What precedes the path, query or fragment of a URL template: scheme and authority, or a base-URL
+ * placeholder. WHATWG reads a backslash as a path delimiter, so it ends the authority too.
+ */
 export function urlTemplateAuthority(template: string): string {
-  return /^(?:[a-z][a-z\d+.-]*:\/\/)?[^/?#]*/i.exec(template)![0];
+  return /^(?:[a-z][a-z\d+.-]*:\/\/)?[^/?#\\]*/i.exec(template)![0];
 }
 
 export type BodyEncoding =

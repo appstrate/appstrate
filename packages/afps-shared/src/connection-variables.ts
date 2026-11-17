@@ -13,6 +13,16 @@ export function stripTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
+/**
+ * Whether the authority of `url` carries userinfo, even empty (`https://@host`). Judged on what
+ * WHATWG parses: ends trimmed, tab/CR/LF dropped, `\` a separator.
+ */
+export function hasUserinfo(url: string): boolean {
+  const clean = url.trim().replace(/[\t\n\r]/g, "");
+  const afterScheme = clean.slice(clean.indexOf(":") + 1).replace(/^[/\\]*/, "");
+  return afterScheme.split(/[/\\?#]/, 1)[0]!.includes("@");
+}
+
 /** One `{$variable.<name>}` reference; group 1 is the name (`VARIABLE_NAME_REGEX`, Appendix B). */
 export const VARIABLE_REF = /\{\$variable\.([a-z][a-z0-9_]*)\}/g;
 
@@ -48,12 +58,6 @@ export function parseUrlTemplate(template: string): UrlTemplate | null {
   const host = HOST_FORM.exec(template);
   if (host) return { form: "host", name: host[1]!, domain: host[2]!, path: host[3]! };
   return null;
-}
-
-/** Whether the authority of `value` carries userinfo, even empty (`https://@host`). */
-function hasUserinfo(value: string): boolean {
-  const afterScheme = value.slice(value.indexOf(":") + 1).replace(/^[/\\]*/, "");
-  return afterScheme.split(/[/\\]/, 1)[0]!.includes("@");
 }
 
 /**

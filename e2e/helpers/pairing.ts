@@ -78,15 +78,14 @@ export async function openPairingModal(page: Page): Promise<DisplayedPairing> {
 
 /**
  * Closes the modal while busy, then confirms the guard. The busy modal has no footer, so its
- * corner ✕ is the way out; the guard has its own text button, which shares the ✕'s accessible
- * name ("Fermer") through a screen-reader-only label: that label tells the two apart.
+ * corner ✕ is the way out; the guard is an alert dialog, which has no ✕ of its own, so the
+ * « Fermer » it shows is its confirm button.
  */
 export async function closePairingModal(page: Page): Promise<void> {
   await credentialDialog(page).getByRole("button", { name: "Fermer", exact: true }).click();
   await page
-    .getByRole("dialog", { name: CONFIRM_DIALOG })
+    .getByRole("alertdialog", { name: CONFIRM_DIALOG })
     .getByRole("button", { name: "Fermer", exact: true })
-    .filter({ hasNot: page.locator(".sr-only") })
     .click();
   await expect(credentialDialog(page)).toBeHidden();
 }

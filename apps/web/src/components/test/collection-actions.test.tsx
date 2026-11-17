@@ -9,7 +9,7 @@ import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
-import { textsOf } from "../../test/connection-menu-tree.tsx";
+import { textsOf } from "../../test/testid-walker.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -130,7 +130,7 @@ describe("document row capabilities", () => {
     const columns = columnsFrom(() =>
       useDocumentColumns({
         pendingKeepId: null,
-        showRunLink: true,
+        showRunLink: () => true,
         onDownload: () => {},
         onKeep: () => {},
         onDelete: () => {},
@@ -140,11 +140,11 @@ describe("document row capabilities", () => {
 
     expect(html).toContain(`aria-label="Plus d'actions pour ${editable.name}"`);
     expect(menuEntries(columns, editable)).toEqual([
-      t("row.download"),
+      t("common:btn.download"),
       t("row.openRun"),
       t("row.keep"),
       "—",
-      t("row.delete"),
+      t("common:btn.delete"),
     ]);
   });
 

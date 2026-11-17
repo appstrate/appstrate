@@ -77,18 +77,48 @@ export function referencesField(input: string, fields: Readonly<Record<string, u
  * `{{port}}`) is `<templated>`.
  */
 export function templateHost(template: string): string {
+  const parsed = parseTemplate(template);
+  return parsed ? parsed.restore(parsed.url.hostname) : unparsedTemplate(template);
+}
+
+/**
+ * The target `template` names, as a message echoes it: origin and WHATWG-normalised path (dot
+ * segments resolved, `\` read as `/`), each `{{key}}` written as `{{key}}`, userinfo, query and
+ * fragment dropped. A leading `{{key}}` standing for a whole base URL stays bare
+ * (`{{site_url}}/wp-json/x`). Unparseable: as {@link templateHost}.
+ */
+export function templateTarget(template: string): string {
+  const parsed = parseTemplate(template);
+  if (!parsed) return unparsedTemplate(template);
+  const { url, baseFromPlaceholder, restore } = parsed;
+  return restore(`${baseFromPlaceholder ? "" : `${url.protocol}//`}${url.host}${url.pathname}`);
+}
+
+function unparsedTemplate(template: string): string {
+  return template.search(PLACEHOLDER) >= 0 ? "<templated>" : "<unparseable>";
+}
+
+/** Parse a URL template with each placeholder swapped for an inert label; `restore` swaps them back. */
+function parseTemplate(
+  template: string,
+): { url: URL; baseFromPlaceholder: boolean; restore: (text: string) => string } | null {
   const keys: string[] = [];
   const marked = template.replace(PLACEHOLDER, (_match, key: string) => {
     keys.push(key);
     return `xph${keys.length - 1}x`;
   });
-  const url =
-    parseUrl(marked) ?? (/^\s*\{\{/.test(template) ? parseUrl(`https://${marked}`) : null);
-  if (!url) return keys.length > 0 ? "<templated>" : "<unparseable>";
-  return url.hostname.replace(/xph(\d+)x/g, (match, i: string) => {
-    const key = keys[Number(i)];
-    return key === undefined ? match : `{{${key}}}`;
-  });
+  const direct = parseUrl(marked);
+  const url = direct ?? (/^\s*\{\{/.test(template) ? parseUrl(`https://${marked}`) : null);
+  if (!url) return null;
+  return {
+    url,
+    baseFromPlaceholder: !direct,
+    restore: (text) =>
+      text.replace(/xph(\d+)x/g, (match, i: string) => {
+        const key = keys[Number(i)];
+        return key === undefined ? match : `{{${key}}}`;
+      }),
+  };
 }
 
 function parseUrl(input: string): URL | null {

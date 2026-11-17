@@ -4,20 +4,27 @@
  * The dialog around « Choose the models »: an organization key's, the personal keys' per
  * service, and the second step of « Ajouter une clé org ». The list is `ModelChoiceList`; this owns
  * the footer, the write (`useApplyModelChoice`) and the refusals it can name.
+ *
+ * The dialog opens once: each entry point renders one `Modal` whose body alone changes (waiting,
+ * then the list; another service, another list). Swapping the `Modal` itself would replay its
+ * backdrop and zoom.
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { DialogFooter } from "@appstrate/ui/components/dialog";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Modal } from "./modal";
 import { ErrorState } from "./page-states";
 import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
 import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
 import {
-  attemptTarget,
+  choiceRefusal,
   useApplyModelChoice,
   type NewProviderCredential,
 } from "../hooks/use-apply-model-choice";
@@ -28,12 +35,10 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useModels, type OrgModelInfo } from "../hooks/use-models";
 import { errorMessage } from "../lib/mutation-error";
-import { knownModels } from "@/lib/model-choice";
 import { isSystemModel, memberModels } from "@/lib/model-providers";
 import { resolveProviderEntry } from "@/lib/provider-registry-helpers";
 
-interface ChoiceDialogProps {
-  title: string;
+interface ChoiceBodyProps {
   /** A sentence under the title, before the list. */
   intro?: ReactNode;
   provider: ProviderRegistryEntry;
@@ -56,11 +61,11 @@ interface ChoiceDialogProps {
   header?: ReactNode;
 }
 
-function ChoiceDialog({
-  title,
+/** The list and its footer, inside the entry point's `Modal`. */
+function ChoiceBody({
   intro,
   provider,
-  existing: given,
+  existing,
   credentialId,
   credentialUnavailable,
   newCredential,
@@ -72,11 +77,8 @@ function ChoiceDialog({
   onClose,
   onAdvanced,
   header,
-}: ChoiceDialogProps) {
+}: ChoiceBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
-  // What a refused submission already created is known to the retry, which asks only for the rest.
-  const [created, setCreated] = useState<OrgModelInfo[]>([]);
-  const existing = knownModels(given, created);
   const choice = useModelChoice({
     provider,
     existing,
@@ -85,8 +87,6 @@ function ChoiceDialog({
     hasDefault,
   });
   const { apply, isPending } = useApplyModelChoice();
-  // The key a refused submission already minted (`attemptTarget`).
-  const [minted, setMinted] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ ids: string[]; refusal: string | null } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -94,56 +94,25 @@ function ChoiceDialog({
     setFailed(null);
     setRefusal(null);
     try {
-      const outcome = await apply({
+      await apply({
         plan: choice.plan,
-        existing,
-        ...attemptTarget(minted, { credentialId, providerId: provider.providerId, newCredential }),
+        target: { credentialId, providerId: provider.providerId },
+        ...(newCredential ? { newCredential } : {}),
       });
-      if (outcome.credentialId) setMinted(outcome.credentialId);
-      setCreated((models) => [...models, ...outcome.createdModels]);
-      if (outcome.failedModelIds.length === 0) onClose();
-      else setFailed({ ids: outcome.failedModelIds, refusal: outcome.refusal });
+      onClose();
     } catch (err) {
-      // The key was refused: nothing was written.
-      setRefusal(errorMessage(err));
+      // Refused as a whole or entry by entry: either way nothing was written.
+      const refused = choiceRefusal(err, choice.plan);
+      if (refused) setFailed({ ids: refused.failedModelIds, refusal: refused.refusal });
+      else setRefusal(errorMessage(err));
     }
   };
 
   const savedIds = new Map(existing.map((m) => [m.modelId, m.id]));
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title={title}
-      actions={
-        <>
-          {onBack && (
-            <Button
-              type="button"
-              variant="outline"
-              className="mr-auto"
-              onClick={onBack}
-              disabled={isPending}
-            >
-              {t("btn.back", { ns: "common" })}
-            </Button>
-          )}
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void save()}
-            pending={isPending}
-            disabled={!tickAll && !choice.canSave}
-          >
-            {submitLabel}
-          </Button>
-        </>
-      }
-    >
-      <fieldset disabled={isPending} className="min-w-0 space-y-3">
+    <>
+      <fieldset disabled={isPending} className="flex min-w-0 flex-col gap-3">
         {intro && <p className="text-muted-foreground text-sm">{intro}</p>}
         {header}
         <ModelChoiceList
@@ -171,7 +140,84 @@ function ChoiceDialog({
           </FieldError>
         )}
       </fieldset>
-    </Modal>
+      <ChoiceFooter
+        onBack={onBack}
+        onClose={onClose}
+        submitLabel={submitLabel}
+        onSubmit={() => void save()}
+        pending={isPending}
+        submitDisabled={!tickAll && !choice.canSave}
+      />
+    </>
+  );
+}
+
+/** The footer, the same while the list waits (its submit off) and once it is there. */
+function ChoiceFooter({
+  onBack,
+  onClose,
+  submitLabel,
+  onSubmit,
+  pending = false,
+  submitDisabled,
+}: {
+  onBack?: () => void;
+  onClose: () => void;
+  submitLabel: string;
+  onSubmit?: () => void;
+  pending?: boolean;
+  submitDisabled: boolean;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  return (
+    <DialogFooter>
+      {onBack && (
+        <Button
+          type="button"
+          variant="outline"
+          className="mr-auto"
+          onClick={onBack}
+          disabled={pending}
+        >
+          {t("btn.back", { ns: "common" })}
+        </Button>
+      )}
+      <Button type="button" variant="outline" onClick={onClose}>
+        {t("btn.cancel")}
+      </Button>
+      <PendingButton type="button" onClick={onSubmit} pending={pending} disabled={submitDisabled}>
+        {submitLabel}
+      </PendingButton>
+    </DialogFooter>
+  );
+}
+
+/** The body's stand-in while what it lists is loading, failed to load, or names no provider. */
+function ChoiceGate({
+  error,
+  unavailable = false,
+  onBack,
+  onClose,
+  submitLabel,
+}: {
+  error: unknown;
+  unavailable?: boolean;
+  onBack?: () => void;
+  onClose: () => void;
+  submitLabel: string;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <>
+      {error ? (
+        <ErrorState error={error} compact />
+      ) : unavailable ? (
+        <ErrorState message={t("models.form.providerUnavailable")} compact />
+      ) : (
+        <TextSkeleton lines={4} className="py-2" />
+      )}
+      <ChoiceFooter onBack={onBack} onClose={onClose} submitLabel={submitLabel} submitDisabled />
+    </>
   );
 }
 
@@ -190,41 +236,34 @@ export function ProviderModelsModal({
   const modelsQuery = useModels();
   const registry = registryQuery.data;
   const provider = registry ? resolveProviderEntry(credential, registry) : undefined;
-
-  if (!registry || !modelsQuery.data) {
-    return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
-        {registryQuery.error || modelsQuery.error ? (
-          <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
-    );
-  }
-  if (!provider) {
-    return (
-      <Modal open onClose={onClose} title={t("models.choice.title")}>
-        <ErrorState message={t("models.form.providerUnavailable")} compact />
-      </Modal>
-    );
-  }
   const models = modelsQuery.data;
+
   return (
-    <ChoiceDialog
-      title={t("models.choice.titleOf", { name: credential.label })}
-      intro={t("models.choice.orgIntro", { service: provider.displayName })}
-      provider={provider}
-      existing={models.filter((m) => m.credentialId === credential.id && !isSystemModel(m))}
-      credentialId={credential.id}
-      credentialUnavailable={credential.needs_reconnection === true}
-      discoverWith={{ credentialId: credential.id }}
-      tickAll={false}
-      hasDefault={models.some((m) => m.is_default)}
-      submitLabel={t("btn.save")}
-      onClose={onClose}
-      onAdvanced={onAdvanced}
-    />
+    // The key's label is known before the lists: the title does not change when they arrive.
+    <Modal onClose={onClose} title={t("models.choice.titleOf", { name: credential.label })}>
+      {!registry || !models || !provider ? (
+        <ChoiceGate
+          error={registryQuery.error ?? modelsQuery.error}
+          unavailable={!!registry && !!models}
+          onClose={onClose}
+          submitLabel={t("btn.save")}
+        />
+      ) : (
+        <ChoiceBody
+          intro={t("models.choice.orgIntro", { service: provider.displayName })}
+          provider={provider}
+          existing={models.filter((m) => m.credentialId === credential.id && !isSystemModel(m))}
+          credentialId={credential.id}
+          credentialUnavailable={credential.needs_reconnection === true}
+          discoverWith={{ credentialId: credential.id }}
+          tickAll={false}
+          hasDefault={models.some((m) => m.is_default)}
+          submitLabel={t("btn.save")}
+          onClose={onClose}
+          onAdvanced={onAdvanced}
+        />
+      )}
+    </Modal>
   );
 }
 
@@ -248,45 +287,40 @@ export function PersonalModelsModal({
   const provider = services.find((s) => s.providerId === providerId) ?? services[0];
   const models = modelsQuery.data;
 
-  if (!models || !provider) {
-    return (
-      <Modal open onClose={onClose} title={t("models.choice.personalTitle")}>
-        {modelsQuery.error ? (
-          <ErrorState error={modelsQuery.error} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
-    );
-  }
   return (
-    <ChoiceDialog
-      // A service has its own list, ticks and detection: another service starts over.
-      key={provider.providerId}
-      title={t("models.choice.personalTitle")}
-      intro={t("models.choice.personalIntro")}
-      provider={provider}
-      existing={memberModels(models).filter((m) => m.providerId === provider.providerId)}
-      credentialId={null}
-      discoverWith={null}
-      tickAll={false}
-      hasDefault={models.some((m) => m.is_default)}
-      submitLabel={t("btn.save")}
-      onClose={onClose}
-      onAdvanced={onAdvanced}
-      header={
-        <FormItem id="personal-models-service" label={t("models.form.provider")}>
-          <OptionSelect
-            value={provider.providerId}
-            onValueChange={onChangeService}
-            options={services.map((service) => ({
-              value: service.providerId,
-              label: service.displayName,
-            }))}
-          />
-        </FormItem>
-      }
-    />
+    <Modal onClose={onClose} title={t("models.choice.personalTitle")}>
+      {!models || !provider ? (
+        <ChoiceGate error={modelsQuery.error} onClose={onClose} submitLabel={t("btn.save")} />
+      ) : (
+        <ChoiceBody
+          // A service has its own list, ticks and detection: another service starts the body
+          // over, inside the same dialog.
+          key={provider.providerId}
+          intro={t("models.choice.personalIntro")}
+          provider={provider}
+          existing={memberModels(models).filter((m) => m.providerId === provider.providerId)}
+          credentialId={null}
+          discoverWith={null}
+          tickAll={false}
+          hasDefault={models.some((m) => m.is_default)}
+          submitLabel={t("btn.save")}
+          onClose={onClose}
+          onAdvanced={onAdvanced}
+          header={
+            <FormItem id="personal-models-service" label={t("providers.col.provider")}>
+              <OptionSelect
+                value={provider.providerId}
+                onValueChange={onChangeService}
+                options={services.map((service) => ({
+                  value: service.providerId,
+                  label: service.displayName,
+                }))}
+              />
+            </FormItem>
+          }
+        />
+      )}
+    </Modal>
   );
 }
 
@@ -305,33 +339,31 @@ export function NewProviderModelsModal({
   const modelsQuery = useModels();
   const provider = registryQuery.data?.find((p) => p.providerId === draft.providerId);
 
-  if (!registryQuery.data || !modelsQuery.data || !provider) {
-    return (
-      <Modal open onClose={onClose} title={t("credentials.form.title")}>
-        {registryQuery.error || modelsQuery.error ? (
-          <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
-        ) : registryQuery.data ? (
-          <ErrorState message={t("models.form.providerUnavailable")} compact />
-        ) : (
-          <TextSkeleton lines={4} className="py-2" />
-        )}
-      </Modal>
-    );
-  }
   return (
-    <ChoiceDialog
-      title={t("credentials.form.title")}
-      intro={t("models.choice.newIntro", { service: provider.displayName })}
-      provider={provider}
-      existing={[]}
-      credentialId={null}
-      newCredential={draft}
-      onBack={onBack}
-      discoverWith={{ inlineApiKey: draft.apiKey, baseUrl: draft.baseUrlOverride ?? "" }}
-      tickAll
-      hasDefault={modelsQuery.data.some((m) => m.is_default)}
-      submitLabel={t("credentials.add")}
-      onClose={onClose}
-    />
+    <Modal onClose={onClose} title={t("credentials.form.title")}>
+      {!registryQuery.data || !modelsQuery.data || !provider ? (
+        <ChoiceGate
+          error={registryQuery.error ?? modelsQuery.error}
+          unavailable={!!registryQuery.data && !!modelsQuery.data}
+          onBack={onBack}
+          onClose={onClose}
+          submitLabel={t("credentials.add")}
+        />
+      ) : (
+        <ChoiceBody
+          intro={t("models.choice.newIntro", { service: provider.displayName })}
+          provider={provider}
+          existing={[]}
+          credentialId={null}
+          newCredential={draft}
+          onBack={onBack}
+          discoverWith={{ inlineApiKey: draft.apiKey, baseUrl: draft.baseUrlOverride ?? "" }}
+          tickAll
+          hasDefault={modelsQuery.data.some((m) => m.is_default)}
+          submitLabel={t("credentials.add")}
+          onClose={onClose}
+        />
+      )}
+    </Modal>
   );
 }

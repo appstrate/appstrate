@@ -153,7 +153,7 @@ describe("OpenAPI response validation", () => {
   // emits `hasMore`. The spec previously omitted it (the same drift fixed for
   // GET /api/spaces), so `extraFields` would flag the undocumented field.
 
-  describe("GET /api/spaces/{spaceId}/packages -> 200", () => {
+  describe("GET /api/spaces/{id}/packages -> 200", () => {
     it("response body conforms to OpenAPI schema (incl. hasMore envelope field)", async () => {
       const pkg = await seedAgent({
         id: "@openapi-test/installed-agent",
@@ -163,7 +163,7 @@ describe("OpenAPI response validation", () => {
       await seedPackageShare(ctx.defaultSpaceId, pkg.id);
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
-      const schema = getResponseSchema("/api/spaces/{spaceId}/packages", "GET", "200");
+      const schema = getResponseSchema("/api/spaces/{id}/packages", "GET", "200");
       expect(schema).not.toBeNull();
 
       const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
@@ -191,10 +191,10 @@ describe("OpenAPI response validation", () => {
   // ── Agent detail (auth + space-scoped) ───────────────────────
   // Detail endpoints carry richer projections than the list envelopes — cover
   // one here so the AgentDetail schema is exercised against a real response,
-  // including the AFPS dependency groups (skills / mcp_servers / integrations).
+  // including the AFPS dependency groups (skills / integrations).
 
   describe("GET /api/packages/agents/{scope}/{name} -> 200", () => {
-    it("agent detail response conforms to OpenAPI schema (incl. mcp_servers deps)", async () => {
+    it("agent detail response conforms to OpenAPI schema (incl. skill deps)", async () => {
       const pkg = await seedAgent({
         id: "@openapi-test/detail-agent",
         orgId: ctx.orgId,
@@ -204,9 +204,9 @@ describe("OpenAPI response validation", () => {
           version: "1.2.0",
           type: "agent",
           display_name: "Detail Agent",
-          description: "Agent with an mcp_server dependency",
+          description: "Agent with a skill dependency",
           dependencies: {
-            mcp_servers: { "@openapi-test/some-mcp": "1.0.0" },
+            skills: { "@openapi-test/some-skill": "1.0.0" },
           },
         },
       });
@@ -233,11 +233,6 @@ describe("OpenAPI response validation", () => {
 
       expect(result.valid).toBe(true);
       expect(result.extraFields).toEqual([]);
-      // The mcp_servers dependency declared in the manifest must surface in the
-      // detail response (regression guard: the mapper previously dropped it).
-      expect((body as any).dependencies.mcp_servers).toEqual([
-        { id: "@openapi-test/some-mcp", version: "1.0.0" },
-      ]);
     });
 
     it("each space item conforms to SpaceObject schema", async () => {
@@ -375,40 +370,6 @@ describe("OpenAPI response validation", () => {
       expect(result.extraFields).toEqual([]);
       expect(body).toHaveProperty("count");
       expect(typeof (body as any).count).toBe("number");
-    });
-  });
-
-  // ── Notifications unread counts by agent (auth + space-scoped) ─
-
-  describe("GET /api/notifications/unread-counts-by-agent -> 200", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/notifications/unread-counts-by-agent", "GET", "200");
-      expect(schema).not.toBeNull();
-
-      const res = await app.request("/api/notifications/unread-counts-by-agent", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error(
-          "GET /api/notifications/unread-counts-by-agent validation errors:",
-          result.errors,
-        );
-      }
-      if (result.extraFields.length > 0) {
-        console.warn(
-          "GET /api/notifications/unread-counts-by-agent extra fields not in spec:",
-          result.extraFields,
-        );
-      }
-
-      expect(result.valid).toBe(true);
-      expect(result.extraFields).toEqual([]);
-      expect(body).toHaveProperty("counts");
     });
   });
 

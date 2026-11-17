@@ -21,10 +21,10 @@ import type { components } from "../../api/client";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
-import { CellText } from "../../components/table-cells";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
+import { SpaceName } from "../../components/space-name";
 
 export interface SpaceRow {
   id: string;
@@ -32,6 +32,8 @@ export interface SpaceRow {
   isDefault: boolean;
   createdAt: string;
   personal: boolean;
+  icon: string | null;
+  color: string | null;
   visibility: components["schemas"]["SpaceObject"]["visibility"];
   orphaned_at?: string | null;
   access: string;
@@ -56,24 +58,25 @@ export function useSpaceColumns({
     {
       id: "workspace",
       header: t("spaces.nameLabel"),
-      width: "minmax(160px,1.6fr)",
+      width: 160,
+      elastic: true,
       cell: (space) => (
-        <CellText
-          strong
+        <SpaceName
+          space={space}
+          size="lg"
+          className="text-foreground font-medium"
           // A `closed` space is listed so the caller knows it exists, not so they
           // can be dropped into it (pinning one 403s every space-scoped request,
           // same rule as the org switcher): its row is static and says why.
-          title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
-        >
-          {spaceLabel(space, t)}
-        </CellText>
+          title={isSpaceEnterable(space) ? undefined : t("spaces.requestAccess")}
+        />
       ),
     },
     {
       id: "kind",
       header: t("spaces.visibilityLabel"),
-      width: "minmax(150px,0.9fr)",
-      tier: 2,
+      width: 150,
+      elastic: true,
       cell: (space) =>
         space.orphaned_at ? (
           // The one state that asks the reader for a decision, so it is said
@@ -92,11 +95,8 @@ export function useSpaceColumns({
     {
       id: "created",
       header: t("spaces.createdAtLabel"),
-      width: "132px",
+      width: 132,
       align: "end",
-      // Tier 2, not 3: the settings dialog tops out around 800px and never
-      // crosses the 56rem threshold, so tier 3 there means never drawn.
-      tier: 2,
       cell: (space) => (
         <span className="text-muted-foreground text-xs">
           {space.orphaned_at
@@ -114,7 +114,7 @@ export function useSpaceColumns({
       const orphaned = Boolean(space.orphaned_at);
       return (
         <TableRowActions
-          menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}
+          menuLabel={t("providers.moreActions", { name: spaceLabel(space, t) })}
           actions={[
             {
               id: "convert",

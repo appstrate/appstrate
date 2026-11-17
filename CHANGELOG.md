@@ -8,6 +8,1155 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
+  `0103` creates `run_reads` and renames the stored run notifications to
+  `run_failed`). It copies each run's read state out of the
+  `run_completed` notifications and removes the notifications of runs that did
+  not fail or time out. Until it runs, runs finished before the deploy read as
+  read and the bell still lists them. The app may keep running. `0103` makes
+  the previous release unable to record a finished run: do not serve both
+  releases at once, and roll back by restoring the backup. Detail in
+  `scripts/migration/README.md`.
+
+- **BREAKING: run `scripts/migration/0053-migrate-runtime-tools.ts` in the release window**
+  (#2197, #2199). Until it runs, every stored agent runs without the `@appstrate/platform` tools
+  it had, and nothing reports it. Back up before the schema migrations. Then, with the app stopped,
+  after the schema migrations and before the app serves traffic:
+  1. Note an instant after the app stopped, in RFC 3339 with `Z` or an offset: it is `--before`,
+     the same value on every re-run.
+  2. Dry run:
+     `set -a && . ./.env && set +a && bun scripts/migration/0053-migrate-runtime-tools.ts --before <instant>`
+     (on the embedded database, name it: `PGLITE_DATA_DIR=<dir> bun scripts/migration/…`).
+  3. The same with `--apply`. It exits 1 while a malformed manifest remains: fix it by hand, then
+     re-run with the same `--before`.
+
+  What it rewrites and what `--before` bounds: the script's header. Verification, the embedded
+  database and rollback: its section in `scripts/migration/README.md`. Rehearse it on a restored
+  production dump first.
+
+- **Run `scripts/migration/0054-fold-mcp-servers.ts` before the first boot of
+  this release** (#2220). A local MCP server is no longer a package of its own:
+  the script folds every stored `mcp-server` package into the integration that
+  referenced it and removes stored `mcp-servers:*` grants. Run it BEFORE the
+  release's migrations: drizzle `0106` rebuilds the `package_type` enum without
+  `mcp-server` and fails, with nothing applied, while a row of that type remains.
+  **Snapshot object storage first** (buckets `agent-packages` and
+  `library-packages`): `--apply` overwrites archives in place and queues server
+  archives for deletion, which `pg_dump` cannot roll back. Dry run first; any
+  `UNFOLDED` line must be resolved before `--apply`, which refuses (exit 1,
+  nothing written) otherwise. Then `--apply` with the app stopped. Procedure
+  and rollback (database dump plus storage snapshot) in
+  `scripts/migration/README.md`, section "`mcp-server` packages folded into
+  their integrations".
+
+- **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
+  agents without the `@appstrate/platform` tools and without `output`.
+
+- **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
+  `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
+  sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
+  `APPSTRATE_RUNNER_TOKEN` and `FIRECRACKER_ARTIFACTS_PUBKEY` when run as a
+  non-root user, and its downloads lost the operator's proxy settings. It now
+  names them in `sudo --preserve-env=…`, which both sudo implementations honour,
+  together with `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and their lowercase
+  forms), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`. `ALL_PROXY` is not
+  forwarded: the runtime ignores it. Nothing changes when the script already
+  runs as root.
+
+- **Pi SDK bumped from 1.1.0 to 1.5.2: some models leave the embedded
+  registry** (#2149). Pi 1.5.2 now announces Claude Code `2.1.322` on its own,
+  which Anthropic requires for recent models such as `claude-fable-5-2`
+  (`claude_code_version_too_old` under 1.1.0). Its registry also drops models
+  that org models may reference. No automatic remap is done: re-point each
+  org model below to another model by hand, otherwise it becomes unavailable.
+  - Codex (ChatGPT) subscription: `gpt-5.5` and `gpt-5.3-codex-spark` are gone.
+    `PRO_PLAN_MODEL_IDS` is now `["gpt-6-astra"]`.
+  - OpenCode Go: `minimax-m2.7` and `deepseek-v4-flash` are gone. They leave the
+    featured models; `deepseek-v4.1-flash` replaces `deepseek-v4-flash`.
+  - OpenRouter: Pi now serves the plain Claude ids (`anthropic/claude-*`,
+    `~anthropic/claude-*-latest`) over `anthropic-messages`, so they leave the
+    OpenRouter offer (an `openai-completions` provider). Only the `:batch`
+    variants remain. Claude stays available through the Anthropic and Claude
+    Code providers.
+  - Anthropic and Claude Code feature `claude-fable-5-2` instead of
+    `claude-fable-5-1`.
+    The live model catalog follows the new Pi version: instances on this release
+    read `pi-1.5.2.json`, published by `publish-model-catalog.yml` once `main`
+    carries the bump; until then they run on the embedded registry only.
+
+- **Migration `0104` adds `spaces.credential_proxy_open`** (#2204): a
+  boolean, `NOT NULL DEFAULT true`, so every existing space keeps direct
+  connection access open. Applied at boot, no data rewrite;
+  `packages/db/schema-catalog.txt` gains the column.
+
+- **A non-system integration whose authorization server does not support RFC 9207
+  issuer identification no longer connects** (#2102). A client the platform
+  provisions (DCR or client metadata document) now requires the server to
+  advertise `authorization_response_iss_parameter_supported`, unless the
+  integration is a system one connecting to the server its manifest fixes. Such
+  a connect answers `403 authorization_server_iss_unsupported` before any client
+  is registered, and the MCP-URL wizard warns about it before saving. Measured
+  on 2026-10-18: Notion, Linear, Sentry, ClickUp and Appstrate advertise it;
+  Canva, Atlassian, Asana, Vercel, PayPal and Square do not.
+
+- **Auto-provisioned OAuth clients are bound to their authorization server**
+  (#2102). On the first connect after the deploy, each remote MCP integration
+  registers one new DCR client per authorization server, at that server's own
+  redirect URI (`/api/integrations/callback/<tag>`). Clients registered before
+  (issuer NULL, shared `/api/integrations/callback`) keep refreshing the
+  connections they minted and are left orphaned once those are reconnected. No
+  migration is needed, and none is wanted: back-filling their issuer would serve
+  them again on the untagged callback. The DCR connections of a manifest that
+  declares neither `issuer` nor `token_endpoint` cannot refresh through an
+  unbound client and must be reconnected.
+
+- **Run the read-only pre-flight `scripts/migration/0050-report-narrowing-overrides.ts`
+  before deploying the release that carries migration `0102`** (#2043):
+  `DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts`
+  (the image ships it, see "The image ships `scripts/migration/`" below). It
+  lists the schedules whose `connection_overrides` are `[]` or a strict subset of
+  a set an admin pin or an enforced org default imposes. Until now such an override
+  bound just that subset; after the deploy the whole imposed set binds, so each
+  listed schedule's bound set widens at its next fire. `[]` entries are expected:
+  until now the run and schedule form's locked picker let a user store `[]`
+  (« Aucune connexion ») under an admin pin or an enforced default for a
+  non-required integration, and those schedules bind the whole imposed set after
+  the deploy. Only a non-empty strict subset could not come from the interface.
+  Every listed schedule is a decision for its owner before the deploy; the script
+  rewrites nothing. Migration `0102` itself
+  rewrites no data: every existing admin pin stays closed.
+  Member pins masked under an existing admin pin or an enforced default are
+  deleted at the next governance write on that (space, integration): no action
+  is needed for runs, which already ignored them, but a deleted closed pin will
+  no longer revive them.
+
+- After deploying this version, run
+  `scripts/migration/0047-connection-personal-shares.sql` (the app may keep
+  running; PGlite: app stopped). It removes redundant personal-space shares,
+  each audited. See `scripts/migration/README.md`. (#2041)
+
+- Only where `0097` was applied before this release (staging, never production),
+  run `scripts/migration/0049-org-icon-images.ts --apply` in the same window as
+  `0101`, right after it: it clears the organization icons `0097` left as
+  `image:<version>` and empties the `orgs` bucket. See
+  `scripts/migration/README.md`. (#2046)
+
+- Existing rows are not rewritten for the reserved package scopes (#2072). Before deploying, check that both
+  queries return nothing:
+  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
+  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
+  A row in either is data to handle with a `scripts/migration/` script, never
+  left in place: a non-ephemeral `@inline/` agent is no longer served by the
+  persistence read.
+
+### Changed
+
+- **Breaking (AFPS 0.13, API, CLI): a local MCP server is declared inline on
+  its integration; the `mcp-server` package type is gone** (#2220). A
+  `source.kind: "local"` integration now carries `source.server = { type,
+entry_point, mcp_config, tools? }` and ships the server payload (`server/**`)
+  in its own archive, next to `manifest.json`. `mcp_config.env` holds literal
+  values merged into the runner env; the auth's `delivery.env` wins on
+  conflict.
+  - Removed: the `mcp-server` package type, `dependencies.mcp_servers` (a
+    manifest that still carries it is refused on every write path, naming the
+    key), `delivery.env.*.user_config_key`, `source.server.{name, version,
+vendored}`, the `/api/packages/mcp-servers*` routes, the `mcp-servers:*`
+    permissions, the `createMcpServerPackage` chat operation,
+    `@appstrate/core/mcp-server-bundle` and the `afps bundle` CLI command.
+    `@appstrate/core/mcp-server` stays, now reading the integration manifest
+    (`getMcpServerRuntime`, `getMcpServerWorkspaceMount`, `getLocalServerEnv`);
+    `@appstrate/core/integration` gains `getLocalServer` and
+    `getLocalServerTools`. The `dev.appstrate/mcp-server` and
+    `dev.appstrate/workspace` `_meta` keys move to the integration manifest.
+  - `resolveIntegrationToolCatalog({ integration, listedTools? })`: a local
+    source's catalog is its own `source.server.tools`, so
+    `findUnexposedDefaultTools` judges local sources synchronously and
+    `findUnexposedLocalDefaultTools` is gone.
+  - The sidecar fetches the integration archive from
+    `GET /internal/integration-bundle/:scope/:name[?version=]` (replaces
+    `/internal/mcp-server-bundle/`): a system integration from the boot
+    registry, a version from that exact published archive, no version from the
+    draft. The run's agent must declare that local integration, or a connect
+    grant `{ integrationId, version }` must name it. The
+    `local_server_ref_missing`, `mcp_server_unresolved` and
+    `mcp_server_not_runnable` drop reasons become `local_server_not_runnable`.
+  - System packages `@appstrate/ssh` and `@appstrate/github-git` 1.1.0 carry
+    their servers; the `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp`
+    packages are removed.
+  - The `package_type` Postgres enum keeps its `mcp-server` label for now
+    (Postgres cannot drop a value in place); application code never produces
+    it.
+
+- **The integrations page lists every integration in one list with a Source
+  column and filter** (API, remote MCP, local MCP). On an instance running
+  `RUN_ADAPTER=process` (app config `localIntegrations` false), a local
+  integration is marked « indisponible ici ».
+
+- **Breaking (API): a run's read state leaves the notifications; the bell
+  shows only what needs attention.** Every finished run used to be a bell
+  notification, so the bell repeated the unread runs of the runs page, and the
+  unread totals and acks lived under `/api/notifications`. Now:
+  - A run's read state is its own (`run_reads`): `GET /api/runs?unread=true`
+    lists the caller's unread runs (its `total` is the Runs badge),
+    `PUT /api/runs/{id}/read` marks one read, `PUT /api/runs/read-all` all;
+    `GET /api/agents` items carry `unread_count`, like a schedule.
+  - The bell (`/api/notifications`) receives a run only when it ended `failed`
+    or `timeout`, plus package shares. Opening the run reads its notification.
+    Its notification type is renamed `run_completed` → `run_failed`. Its payload
+    carries `agent_name`, the name stamped on the run, so the bell names an
+    agent that is switched off or deleted.
+  - A scheduled run refused before it starts is now unread and notified like
+    any other failed run; it used to be recorded for nobody.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use
+    `unread_count` on `GET /api/agents`) and
+    `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
+
+- **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). Only a system
+  package may bind an integration to the runtime, whose tools the platform serves with the run's
+  authority. Saving, forking or importing an organization integration that carries the key now
+  answers `400`.
+
+- **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
+  to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP
+  integrations, with the run's MCP server on the instance (`/api/runs/{id}/mcp`) as its
+  target, each request signed with the run's sink secret like its events. A run that reports to no
+  instance starts without it (`no connection is bound to this run`).
+
+- **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
+  inline manifest gets the `@appstrate/platform` dependency unless `dependencies.integrations`
+  already names it, and its `log` tool selected in `integrations_configuration` unless either
+  `dependencies.integrations` or `integrations_configuration` names it (the dependency alone
+  keeps its `default_tools`); the caller's own entries are kept, so a caller selects the tools
+  it wants there (`{ tools: [] }` gives a run without the platform tools). An inline manifest
+  without `output` gets the open object output schema. The
+  `runtime_tools` default and the `manifest.runtime_tools` argument are gone. The chat
+  prompt and the `run_and_wait` descriptions say so. The default "Hello World"
+  agent declares `@appstrate/platform`.
+
+- **BREAKING: `publish_file` is a harness tool** (#2199). The runner registers it whenever its
+  host supplies an uploader (`PiRunner` option `fileUploader`): every platform run has it,
+  whatever the manifest declares, and a CLI run has none.
+
+- **BREAKING: `output` is injected from `output.schema`** (#2197). A run has the `output` tool
+  exactly when its agent declares a non-empty `output.schema`; without a schema there is no
+  `output` tool. A run that ends without calling it gets one corrective turn, then is failed at
+  finalize unless the schema validates `{}` (it requires no property). The `PiRunner`
+  builds the tool in the agent container and in the CLI; the sidecar does not host it
+  (`OUTPUT_SCHEMA` is not part of the sidecar env). Inline runs keep their open object output
+  schema, so they keep `output`. The runner, the platform prompt's `## Output Format` section
+  and the output validation at finalize read the schema the same way: an empty `output.schema`
+  (`{}`) declares none.
+
+- **A model test says what it checked** (#2148). A successful model test reads
+  « Credential valid — model not tested », and the `testModel` /
+  `testModelInline` descriptions state that `ok: true` covers the credential
+  (validated offline for a subscription, by one lightweight provider request
+  for an API key), never the model itself. The response is unchanged.
+
+- **BREAKING (MCP): `search_integration_tools` and `call_integration_tool` replace
+  `list_connections` and `api_call`** (#2205, #2206). `search_integration_tools` lists the
+  tools of the integrations the caller holds a connection of in the space, each naming by
+  `connection_ids` the connections it reaches, which the result lists once in `connections`
+  (every field `list_connections` returned; a typed tool adds `missing_scopes` per
+  connection): `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths
+  expose one, for each `api_call` an integration's catalog exposes (every tool less
+  `hidden_tools`, not `default_tools`), and the typed tools of a remote MCP server (see
+  Added). A search by `query` or `integration` carries the first result's input schema
+  and usage in `best_match`. `call_integration_tool` takes the `tool` name, its
+  `arguments` and an optional `connection_id`: for `{ns}__api_call`, the `requests` batch,
+  `session_id` and `max_response_bytes` of the old `api_call`, without
+  `integration_package_id`, so a batch targets one integration. **An integration that
+  declares no `api_call` is no longer callable through the MCP** (the old generic
+  `api_call` took any integration); `/api/credential-proxy/proxy` is unchanged and still
+  serves it. A namespace is the normalised package id, cut at 20 characters without a
+  trailing `_`; two integrations active in the space whose namespaces are equal each take
+  `_` and a hash of their own id, 6 hex digits, 2 more while one still equals another,
+  where a run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. An
+  `{ns}__api_call__{auth}` name too long for the 56-character tool-name bound keeps
+  `{ns}__api_call__` and ends with its auth part cut to fit and a hash of the tool name.
+  Refusal codes: an unknown tool name passed to `call_integration_tool` is the tool result
+  `unknown_tool`, a name two tools would share `ambiguous_tool` (neither is called); an
+  `{ns}__api_call` batch has 45 s, past which an entry is `not_sent` or
+  `no_answer_before_deadline`. The old names answer `-32602 Unknown tool`, with no
+  alias: re-list the tools in the client. Each request still re-enters the proxy route
+  under its guard, rate limit and access rule.
+
+- **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
+  are read through the MCP Skills extension: `skills/list` and `skills/get` for the
+  entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule
+  is unchanged (`skills:read`, or a skill the chat turn injected, at the definition
+  injected); a refusal is `Resource not found` (`-32002`) on `resources/read` and
+  `-32602` on `skills/get` instead of a `read_skill` result carrying the REST 403 or
+  404, and a changed injected draft is `-32600` with
+  `data.code: "injected_draft_changed"`. A client calling `read_skill` gets
+  `-32602 Unknown tool`.
+  The chat's model reads a skill's files with its `read_resource` tool.
+
+- **The MCP server serves skills through the MCP Skills extension (SEP-2640)** (#2175). It
+  declares `io.modelcontextprotocol/skills` in `capabilities.extensions` at `initialize` and
+  answers `skills/list` and `skills/get`; `resources/read` returns a skill's files under
+  `skill://<spaceId>/<scope>/<package-name>/<name>/<path>` (a draft under
+  `<package-name>@draft`, readable by whoever may write the package, listed only on request: see the `dev.appstrate/definition` entry below). Entries
+  carry the served `SKILL.md` frontmatter verbatim and every file's `sha256` digest and size.
+  The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
+  `name` set to the served name, `metadata.version` set to the published version (absent from
+  a draft). The list covers every space the connection reaches (each space of an
+  organization URL), and each read is checked with the caller's permissions in
+  the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
+  injected, at the definition injected). A
+  skill with more than 512 files or more than 16 MiB of served bytes is not served; any file
+  size within that total is. Only the canonical spelling of a `skill://` URI resolves.
+  `GET /api/packages/skills/served` and `GET /api/packages/skills/served/archive` (a ZIP of
+  every file of one skill) serve the same entries and bytes through the package API for one
+  space (`X-Space-Id`, `skills:read`), for `appstrate code sync` (#2180);
+  `GET /api/packages/skills/served?definition=draft` lists the drafts the caller may read. The `skill://` grammar and the entry type live in `@appstrate/core/skill-uri`.
+
+- **`appstrate code sync` reads skills as the MCP Skills extension serves them**
+  (#2175, #2180). It lists each space's skills with `GET /api/packages/skills/served`
+  (`?definition=draft` for `--source draft`), downloads each changed skill in one
+  `GET /api/packages/skills/served/archive` request, checks each file against its served
+  `sha256` digest and the received `SKILL.md` frontmatter against the entry's,
+  and writes the bytes as served; only the `name` line of a skill renamed after a
+  collision is rewritten. An entry with a file path outside its skill directory,
+  two paths that are one file on a case- or normalization-insensitive disk, a name
+  that is not a valid Agent Skills name (or not the last segment of its URI), a
+  size or digest that is not one, or more than 512 files or 16 MiB is reported and
+  not written, and the skill already on disk is kept; the other skills sync. The
+  sync explains a 404 of its list route (an instance older than the CLI). The ledger compares the served digests, and the plan
+  shows the served `metadata.version`. The CLI no longer normalizes skills
+  itself: the server does. `--source draft` syncs the drafts the instance lists
+  for you, published or not: those of the skills you may write; a draft you may
+  not write is absent from the list, so it is not synced.
+
+- **The skills served for published versions are kept in memory** (#2175). A
+  published version is immutable, so `skills/list`, `skills/get`, `resources/read`
+  on `skill://` and the served-skill routes of the package API read and digest it once per API process,
+  then serve it from a least-recently-used cache bounded at 64 MiB of files (four
+  skills at the SEP-2640 limit). The access rule runs on every call, before the
+  cache. Drafts and system skills are read on every call.
+
+- **A draft the chat turn injected and that changed since is refused explicitly on
+  `skill://`** (#2175). `skills/get` and `resources/read` answer JSON-RPC
+  `-32600` with the `injected_draft_changed` message (the next turn injects the
+  current draft) instead of `Resource not found`. `skills/list` leaves that skill
+  out and lists the others.
+
+- **`skills/list` lists drafts on request, and a draft's entry names its
+  `lock_version`** (#2175). With `dev.appstrate/definition: "draft"` in the
+  request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
+  URIs, the entries `GET /api/packages/skills/served?definition=draft` serves (one server
+  function); without it, the list holds the published skills. A draft's entry
+  carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
+  files and digests were read from, read under the draft lock.
+
+- **The chat injects an enforced skill as the MCP Skills extension serves it**
+  (#2175). Its `SKILL.md` is the served one (`name` and `metadata.version`
+  normalized), with its `skill://` URI, so it is the bytes `resources/read`
+  answers there. A published version that cannot be served as a skill (over the
+  SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
+  unreadable archive (`version_artifact_unavailable`). Enforcing such a skill is
+  refused with `409 skill_not_servable` (also when another skill already enforced
+  in the space cannot be served), so the turns of the space are never refused for
+  it. The `enforced_skills_budget` check measures each enforced skill by this
+  served `SKILL.md`, the text the chat injects, read from its whole archive.
+
+- **The chat's model reads platform resources with a `read_resource` tool** (#2175).
+  It runs `resources/read` on the platform MCP server only, and returns each content
+  whole within the bounds of the platform's file reads: its text up to 1 MiB, or a
+  binary file's base64 in `blob` up to 700 KiB; a larger content returns its size and
+  a note.
+
+- **The chat reads the skills it injects through the MCP Skills extension**
+  (#2175). A chosen skill is listed by `skills/list` (the caller's draft when the
+  drafts list holds it, else the published version) and its `SKILL.md` read by
+  `resources/read`, over a platform MCP connection with the caller's own
+  permissions and no injected-skills claim, closed before the turn's connection
+  opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
+  pinned by its entry's `dev.appstrate/lock_version`, and a `SKILL.md` whose bytes
+  do not match the `sha256` digest its entry lists (a draft saved between the list
+  and the read) is not injected: the skill gets its could-not-be-read notice. Each injected `<skill>` tag
+  carries its `uri`, and the prompt teaches `read_resource` on that URI for the
+  files a skill references. In the `auto` mode, the skills the model may load are
+  listed the same way, each with its `skill://` URI, and the model loads one with
+  `read_resource`: the list is whole (no `(list truncated)` marker, no `listSkills`
+  call) and no longer comes from `GET /api/me/context`. Each line names the skill
+  by its id, its published version and its URI, followed by its description (the
+  served frontmatter carries no display name). A draft is listed only when the
+  turn itself may read it (it keeps the caller's `skills:write`, which the
+  authoring switch drops); otherwise the line is the published version's, and a
+  skill never published is not listed. A chosen skill the caller reads neither as
+  a draft nor published (a never-published skill chosen by someone who may not
+  write it) gets its not-available notice. In the `manual` mode, the model lists
+  the skills on the user's request with the chat's `list_skills` tool, which
+  relays `skills/list` (drafts with `definition: "draft"`) over the turn's own
+  MCP connection, so it lists only what the turn's `read_resource` reads, and
+  loads one with `read_resource`; `list_skills` is registered on a `manual` turn
+  holding `skills:read` alone. The read of a turn's skills is bounded to 10 seconds; a
+  failed list or read is logged. `AppstrateMcpClient` gains `listSkills`, which
+  follows `nextCursor` and accepts an entry whose `resources` is `"dynamic"`.
+
+- **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
+  syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
+  commands become MCP prompts of the organization's server: `prompts/list`
+  offers one `run-<agent>` prompt per agent you can launch, in every space of
+  the connection where you hold what `run_and_wait` needs, and `prompts/get`
+  renders its launch instructions at the agent's latest published version,
+  with one optional free-text argument, `request`. Claude Code lists them as
+  `/mcp__plugin_appstrate_appstrate__run-<agent>`; every MCP client that
+  supports prompts (not only the plugin) gets them, and the model cannot
+  trigger one on its own. The same agent in a second space is
+  `run-<space name>-<agent>`, another agent with the same name
+  `run-<scope>-<agent>`. An agent with no published version has no prompt, and
+  `--source draft` no longer applies to agents. `appstrate code sync` writes
+  and reads no agent: a space is a sync source only where your role holds
+  `skills:read`, and the next sync removes the installed `run-<agent>`
+  directories through the ordinary removal of entries the catalogue no longer
+  lists. `--space` and `syncSpaces` no longer select agents.
+
+- **`run_and_wait` waits within a `wait` budget, with or without a progress token** (#2169).
+  A new `wait` argument (integer seconds, counted from the start of the call) sets how long the
+  MCP tool waits for the run: 50 s when omitted, `0` for none, clamped to 30 min. When the wait
+  ends first, the call returns `done:false` with the run `id`, to be resumed with `getRun`. A
+  call carrying a `progressToken` used to wait up to 30 min, past the fixed per-call timeout of
+  some clients (the Claude connector cuts a tool call at 230 s, whatever the progress), which
+  lost the call; a call without one waited 45 s. Progress notifications are still sent during
+  the wait. `wait` takes non-negative integer seconds only; a wait longer than 55 s chains reads
+  of `GET /api/runs/{id}?wait=`, whose behaviour does not change (`true`/`false` or integer
+  seconds, 55 s ceiling, no wait when omitted).
+  The in-app chat is not offered `wait`: its wait still descends from the turn budget.
+- **`api_call` returns a redirect off `authorized_uris` instead of failing** (#2154). When an
+  allowlisted upstream answers with a 3xx whose `Location` lies outside the auth's
+  `authorized_uris`, the call no longer fails with `unauthorized_target`
+  (`Redirect blocked (unauthorized): host=…`; `403` on `POST /api/credential-proxy/proxy`,
+  status `0` with that code on the sidecar `api_call`, `ApiCallFailureError` in the CLI
+  resolver). The 3xx comes back as the upstream sent it (status, `Location`, body), and the
+  caller fetches the URL itself if it wants to. Nothing is sent to that host, not even a DNS
+  lookup, so the credential never reaches it. Example: GitHub Actions logs
+  (`/actions/jobs/{id}/logs`), which redirect to signed blob-storage URLs. A call that
+  substitutes a `{{credential_field}}` keeps the refusal, because an upstream often copies the
+  query string into `Location`. Redirects to an allowlisted host are followed as before, and the
+  SSRF checks do not change.
+- **OAuth connect to remote MCP servers is hardened** (#2102, #2078, #2084). Each DCR client
+  is registered at, bound to and called back on its own authorization server. A server whose
+  metadata does not list PKCE S256 is refused before any client is provisioned, with
+  `403 authorization_server_pkce_unsupported` (MCP 2026-07-28). A server whose metadata does
+  not answer (network failure, timeout, 5xx) gives a retryable
+  `503 authorization_server_unreachable` instead of a "register a client manually" 403.
+  A client the platform provisions for an integration other than a system one needs a server
+  advertising RFC 9207 `iss`, else `403 authorization_server_iss_unsupported`; discovery warns
+  with the same code.
+  `offline_access` is requested when the server's `scopes_supported` lists it, and is never
+  reported as a denied scope, since issuing a refresh token is the server's decision.
+- **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
+  `persistence:delete` (admin, builder) who names no actor in `GET /api/agents/{scope}/{name}/persistence`
+  now sees every actor's memories, as it already did for pinned slots, with or without `runId`. A
+  colleague's run page now lists that run's memories. On the agent page, "Mine" now covers only the
+  signed-in user's rows; other actors' rows get their own "Other actors" filter and badge.
+- **Connection use and sharing are separate** (#2041). “Multi-space use” describes the owner's
+  reach; the sharing control grants access to other members. “All spaces” includes current and
+  future team spaces and hides the individual list. Any effective withdrawal switches atomically
+  to specific-space sharing, preserving pin checks and schedule revocation. Personal spaces are
+  excluded from sharing targets and rejected by the API.
+
+- **Organizations, team spaces and agents carry one visual identity,
+  `{ icon, color }`** (#2046), both always present on the wire, both nullable.
+  `icon` is `lucide:<name>`, `emoji:<one emoji>` or, on an organization only, an
+  image held inline as a base64 data URI (`data:image/webp;base64,…` or
+  `data:image/png;base64,…`, at most 12 000 bytes and 256×256 px; the audit log
+  records it by a hash, never its bytes). A written emoji must be exactly one
+  emoji of Unicode's RGI set and is stored in its RGI form, the only rewrite
+  being a U+FE0F added or removed (`❤` → `❤️`, `👍️` → `👍`, `1⃣` → `1️⃣`).
+  `color` is a palette key (`neutral`, `blue`, `emerald`, `violet`, `amber`,
+  `rose`, `cyan`, `pink`, `orange`); `null` means a hue derived from the id,
+  never `neutral`. An organization's pair is returned by `GET /api/orgs`,
+  `GET /api/me/orgs` and invitation accept and written by `PATCH /api/orgs/{id}`;
+  a space's by the space routes and `PATCH /api/spaces/{id}`, which refuses both
+  on a personal space (`409 personal_space_immutable`): it has no identity of
+  its own. An agent's is its manifest `icon` and `_meta["dev.appstrate/ui"].color`,
+  on the list and the detail, `null` when absent or, for the colour, not a
+  palette key. Migrations `0097_org_logo` (a nullable `organizations.logo`), then
+  `0101_identity_appearance` (renames it `icon`; adds `color` to organizations,
+  `icon` and `color` to spaces; caps each `icon` at 16 384 bytes with a CHECK).
+
+- **The dashboard is redesigned** (#1937): settings and preferences open as
+  routed overlays, every real dialog has a URL, tables share one component, and
+  one connection menu and one model picker serve every screen. SPA routes moved
+  without redirects: `/library` is `/catalogue/<type>` (its per-space table
+  `/catalogue/<type>?view=spaces`), `/webhooks`, `/end-users` and
+  `/org-settings/space/*` live under `/workspace-settings/*`, and
+  `/schedules/new` and the `…/edit` routes are gone (editing happens in a
+  package's settings). The API changes behind it:
+  - **Run lists.** `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs` and
+    `GET /api/schedules/{id}/runs` take several comma-separated `status` values
+    (an unknown one is a 400 for the whole list) and a `q` search over agent,
+    error and run number (400 above 200 characters), applied before pagination.
+    In the OpenAPI spec `status` becomes an array of the status enum, serialized
+    `style: form, explode: false` (`status=failed,timeout`), so clients generated
+    from the spec type it `string[]`.
+  - **Runs carry `model_error`** (migration `0098_run_model_error`, three
+    nullable columns, no backfill): a run that failed on a model call names its
+    `category`, the provider's HTTP `status` and its own sentence, classified
+    once at finalize. Also on the `run_update` realtime event (`modelError`) and
+    in the MCP `run_and_wait` result.
+  - **`POST /api/models/apply`** (new) applies a model-provider choice in one
+    transaction: an optional new credential, models enabled or disabled, the
+    default. It honours `Idempotency-Key`, which widens the core set of
+    idempotent routes to five.
+  - **`GET /api/org-roles`** (new, read-only, any member): the four org roles
+    and the org-level permissions each grants, modules included, so the SPA no
+    longer mirrors the role matrix.
+  - **`GET /api/library` is open to every member** (still refused to a
+    delegate): it was 403 below admin, and now answers each caller the union of
+    the per-space library pages it could open. Each package carries
+    `activation[]`, the verdict of the activation routes served in advance:
+    `{ spaceId, activate, deactivate }`, each `allowed`, `not_shareable` or
+    `forbidden`.
+  - **`GET /api/integrations`** takes `q` and `id` (comma-separated), and each
+    item carries `source_kind` (`local` | `remote` | `none`) and `server`.
+  - **Org members carry `spaces`** (`OrgDetail.members[]`, and the response of
+    `PUT /api/orgs/{id}/members/{userId}`): the spaces the caller can see the
+    member in.
+  - **Model-provider credentials carry `serves_model_ids`**: on a personal
+    credential, the organization models left to members' own credentials that
+    it pays for; `[]` on an organization or built-in credential.
+  - **Files**: `GET /api/files` takes `q` (by name, inside the existing
+    visibility filter).
+  - **Schedules**: `GET`, `POST` and `PATCH /api/schedules/{id}` return an
+    `ETag`, and a `PATCH` carrying `If-Match` answers `412` when the schedule
+    moved since it was read. When the caller writes a schedule for itself and
+    holds exactly one connection for an integration the set leaves unpicked, the
+    server now names it and stores it in `connection_overrides` — on every
+    `POST` or `PATCH` of an enabled schedule, a rename included — where it used
+    to answer `409 must_choose_connection`.
+  - **Manifest validation**: `errors[]` items carry `line`/`column` on a YAML
+    syntax error.
+- **An integration's `INTEGRATION.md` reaches the agent as a file, not inlined
+  in the prompt** (#2005). The run bundle carries each integration the run uses
+  at the version the run froze, written to `.pi/integrations/<id>/`; the
+  prompt lists them in an `<available_integrations>` catalog (name,
+  description, path of the doc) and the agent reads the doc before its first
+  call. The doc is no longer cut at 50 KB, and it is the one of the version the
+  run executes, not the integration's draft. The prompt's own `### Skills`
+  list is removed: Pi already lists the skills from their `SKILL.md`
+  frontmatter, so the agent saw each skill twice, with two descriptions.
+  - **Agent export** (`GET /api/agents/{scope}/{name}/bundle`) carries the same
+    integration members, frozen as a run freezes them: an integration pin no
+    version satisfies answers `422 dependency_unresolved`, and an export of an
+    agent that declares integrations needs `integrations:read`. An API key
+    minted without that scope now gets a 403 on such an export.
+    Each integration member must also be readable by the caller in one of its
+    spaces: one confined to a space the caller cannot read fails the export
+    with `404 not_found`. Under `restrict_package_copy`, each integration
+    member also needs `integrations:share` in its home space, as its own
+    `download` does (`403 package_copy_restricted`).
+    The export applies no dependency override, so
+    `appstrate run <agent>@draft --local` on an agent that depends on a
+    never-published integration now answers that same 422, as a server-side
+    run without `dependency_overrides` does.
+  - **`INTEGRATION.md` sent as the JSON `content` field** of
+    `POST /api/packages/integrations` or of an editor save is now stored with
+    the package's files, so the versions published from it carry the doc.
+    Before, it reached only the draft column, and a version published from
+    such a draft had no `INTEGRATION.md`: republish one to give runs its doc.
+    An empty `content` now removes the stored `INTEGRATION.md`, so the next
+    version published carries no doc, instead of the previous one. Saved with
+    `operations`, `content` is applied first and they apply on top, as for a
+    skill's `SKILL.md`; before, it was ignored.
+  - **A run on an integration's draft** whose manifest is saved between the
+    freeze and the bundle starts the tools it froze without the doc (a
+    warning is logged), rather than with a doc written for other tools.
+  - **An integration member is bundled alone**: the dependencies its own
+    manifest declares (a `dependencies.skills` entry, say) are not bundled.
+  - **Integrity**: a declared integration whose stored archive no longer
+    matches its published hash fails the run (`bundle_integrity_mismatch`),
+    even when the run does not start that integration, as for a skill. A
+    missing archive or a signature-policy refusal only withholds its doc.
+  - **System integrations** are served into the bundle from the registry
+    loaded at boot, at the version that registry holds.
+  - **`AFPS_SIGNATURE_POLICY`** applies to an organization's published
+    integration when a run fetches it. Under `required`, an unsigned or
+    unverifiable one is left out of the bundle with a warning: its doc is
+    withheld from the agent, and the run is not failed for it.
+  - **`appstrate run`** on an exported agent wires the integrations'
+    `{ns}__api_call` tools, since the bundle now carries their manifests, and
+    shows the same catalog for the integrations it wired. With
+    `--local --integrations local` it therefore needs credentials for every
+    `api_call` integration the exported agent declares, as a local bundle
+    read from disk already did.
+- **BREAKING: an admin pin or an enforced org default is a floor, and an
+  override no longer narrows it** (#2043). Its connections are always bound,
+  whatever a run's or a schedule's `connection_overrides` or a member's pin say.
+  An override naming only imposed connections, or `[]`, is a no-op (`[]` means
+  "no addition", never "no connection"); before, it bound just that subset. Under
+  an imposed set the selection is the launch override, else the member's pin when
+  the admin pin allows additions, else nothing: a soft org default and the actor
+  fallback add nothing. An override naming a connection outside a set that
+  allows no additions is still refused (`override_outranked`), at the run, the
+  API, the MCP tools and a schedule write. `[]` on an integration the agent marks
+  `required` is no longer refused at the write (the `400 validation_failed` item
+  `required_integration_unbound` and its entry in `OVERRIDE_REFUSAL_CODES` are
+  gone): under an imposed set the floor binds; elsewhere the resolver answers it
+  as a `409 missing_integration_connection` item (`source: run_override` at a
+  launch, `schedule_override` at a schedule write) and as a `400` item on
+  `integrations.<id>` from the inline `/validate`. A floor plus additions above
+  20 connections is refused with the new `connection_set_too_large` (in
+  `CONNECTION_RESOLUTION_ERROR_CODES`), never truncated. Each bound connection
+  carries its `source` in the run's snapshot: `admin_pin` or
+  `org_default_enforced` for the floor, `run_override`, `schedule_override` or
+  `member_pin` for an addition. Under a closed imposed set of two connections or
+  more, a member can no longer narrow it to one: a locally executed run
+  (`POST /api/runs/remote`) is refused with `remote_binds_one_connection` until
+  an admin changes the pin. Removing an imposed set (deleting an admin pin or an
+  enforced org default, or writing the default with `enforce: false`) disables
+  (`connection_set_unnamed`), in the same transaction, every enabled schedule it
+  governed that nothing governs afterwards and whose `connection_overrides` for
+  the integration strictly narrows the removed set (fewer of its connections, `[]`
+  included; ids compared case-insensitively): without the set it would bind fewer
+  connections than written. The org default `PUT` removes their jobs and audits
+  them. A schedule write storing `connection_overrides` while the admin pin or org
+  default of one of its integrations changes answers the new
+  `409 schedule_governance_changed` and writes nothing. The credential proxy
+  outside a run is unchanged.
+
+- **BREAKING: governance writes delete member pins, and a member pin write can
+  be refused** (#2043). No member pin survives under a closed imposed set. Every
+  admin pin `PUT` or `DELETE` where the pin is, or was, closed, and every org
+  default `PUT` or `DELETE` where the default is, or was, enforced, deletes in
+  the same transaction the member pins of that space and integration (that
+  agent's for a pin, every agent's for a default); the audit records list them as
+  `memberPinsCleared: [{ userId, agentPackageId, connectionIds }]`. Migration
+  `0102` makes every existing pin closed, so the first admin write to one deletes
+  the member pins it was masking, and deleting a closed pin no longer revives
+  them. An open pin written where there was none, rewritten, or deleted keeps
+  them, except the ones strictly narrowing its connections on a delete and all of
+  them where the space enforces a default (it governs once the pin is gone); a
+  schedule that relied on a deleted pin is disabled like the others above.
+  `PUT /api/me/integration-pins/…` now answers `409 connection_additions_blocked`
+  under an admin pin closed to additions, an enforced org default, or an open pin
+  under one, and `409 connection_set_too_large` under an open pin when the set
+  takes the imposed connections past 20; before, it always succeeded. Nothing is
+  stored; `DELETE` is always allowed.
+
+### Removed
+
+- **`log`, `note`, `pin`, `recall_memory` and `run_history` leave the sidecar and the CLI**
+  (#2199). They are tools of the `@appstrate/platform` system integration, which an agent gets
+  as `appstrate_platform__<tool>` by declaring its dependency, served by the run MCP server.
+  `GET /internal/run-history`, `GET /internal/memories`, the sidecar's runtime-event journal,
+  `GET /runtime-events` and the `RUNTIME_TOOLS_JSON` env var are removed, and `appstrate run`
+  no longer registers them as local tools; `@appstrate/runner-pi` drops
+  `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories`, `buildRuntimeToolExtensions` and its
+  `./runtime-tools` export.
+- **BREAKING: the finalize contract carries no memories, pinned slots or logs** (#2199).
+  `POST /api/runs/{id}/events/finalize` ignores `memories`, `pinned` and `logs`, and
+  finalize writes neither `package_persistence`, `runs.checkpoint` nor a run log from them:
+  `note`, `pin` and `log` write when the tool is called. `@appstrate/afps-runtime` drops
+  `RunResult.memories`, `RunResult.pinned`, `RunResult.logs`, `Memory`, `PinnedSlot`,
+  `LogEntry` and `LogLevel`.
+- **`memory.added`, `pinned.set` and `log.written` are no longer canonical run events**
+  (#2199). Nothing emits them: `note`, `pin` and `log` write server-side. Ingestion writes no
+  row for such an envelope; `@appstrate/afps-runtime` removes its canonical-events module (see
+  its CHANGELOG) and its reducer reads `output.emitted` only; the L4 conformance script does not
+  contain them, and `appstrate run` prints no `+ memory:` line.
+- **The `_meta["dev.appstrate/events"]` channel is removed** (#2199). The runner's
+  `output` and `publish_file` tools emit their event through the `emit` their
+  handler receives, and the sidecar no longer strips the key from third-party tool results.
+- **BREAKING: the `runtime_tools` manifest field is removed** (#2199). An agent gets
+  `log`, `note`, `pin`, `recall_memory` and `run_history` by declaring the
+  `@appstrate/platform` integration (`integrations_configuration` restricts the
+  selection); `output` and `publish_file` are harness tools. The field leaves the
+  `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema, and the agent editor loses
+  its Tools tab. Nothing reads it any more: `scripts/migration/0053` moves the stored agents
+  (see Operators). Because it rewrites the jsonb manifest of every agent version, a version
+  signed before it exports unsigned (see `SECURITY.md`, package signatures) and is refused on
+  import under `AFPS_SIGNATURE_POLICY=required`; the archive a version download serves is
+  unchanged, so an agent imported from one still carries `runtime_tools` and has none of the
+  platform tools until it declares the integration.
+
+- **BREAKING: `@appstrate/core` removes its runtime-tool exports** (#2197, #2199):
+  `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
+  `@appstrate/core/runtime-event-drain`, and the `runtime_tools` helpers of
+  `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
+
+### Added
+
+- **Tool events name the integration tool they call** (#2233). The `appstrate.progress` start
+  and end events of a call to an integration's tool carry `data.integration`:
+  `{ id, tool, title? }`, the integration's package id, the tool's name on its server and its
+  title when the server gives one (`tool` and `title` are each sanitised and capped at 512
+  bytes). `data.tool` stays the name the model called. The sidecar's host and the CLI stamp it on
+  each tool they expose (`_meta["dev.appstrate/integration"]`); the platform's own tools
+  (`@appstrate/platform`) and `api_call` / `api_upload` carry it too, the runner's `output` and
+  `publish_file` do not. Runs recorded before this release have none.
+
+- **System integration `@appstrate/platform`** (#2199). Runtime-bound
+  (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
+  `recall_memory`, `run_history` and `notify`. All but `notify` are selected by default:
+  `notify` reaches people, so an agent gets it by selecting it. Its tools exist only inside a
+  run: outside one, the credential proxy considers no runtime-bound integration, so
+  `GET /api/credential-proxy/tools` (and `search_integration_tools`) never lists it and
+  `POST /api/credential-proxy/tools/call` naming it answers `404`, before any request to its
+  declared URL.
+
+- **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{id}/mcp`** (#2199).
+  One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
+  for one run, and each tool writes at call time: `log` a run log (message up to 2 000
+  characters), `note` an archive memory (up to 2 000 characters, refused beyond rather than
+  cut), `pin` a pinned slot (and, for `checkpoint` with an object content, the run's checkpoint
+  snapshot `run_history` returns), `notify` a notification. The sidecar authenticates `/internal/mcp` with the run
+  token (a run that is not `running` answers 403). The host executing a remote run reaches
+  `/api/runs/{id}/mcp` with the Standard Webhooks signature it already puts on the run's
+  events, over the exact request body, so the credential lasts as long as the run's sink, not
+  a session: a bad signature answers 401, a replayed `webhook-id` 409, a closed sink 410, and a
+  platform-origin run 404 (its sidecar serves these tools, restricted to the agent's selection).
+  `/internal/mcp` allows 200 requests a minute per run token (429 beyond), every verb counted;
+  `/api/runs/{id}/mcp` allows 200 signed POSTs a minute per run. Both refuse a JSON-RPC batch
+  with 400 and answer 405 (`Allow: POST`) to every other verb, GET included.
+
+- **`notify`: an agent sends an in-app notification from inside its run** (#2200).
+  A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100
+  characters, message 1–500) writes an `agent_message` notification, linked to the
+  run, to the run's recipients (those of its read state): the member or end-user
+  who triggered it, else the organization's owners and admins. Each recipient gets
+  one per run; a second call, a run with no recipient (an inline run) and
+  arguments outside the schema are tool errors that write nothing. The bell
+  renders it with its title, message and a link to the run. `GET /api/notifications`
+  adds the `agent_message` kind (payload `packageId`, `title`, `message`);
+  migration `0105` restates the `notifications_type_valid` CHECK. The bell shows it at its
+  next refresh — when the run ends, on reconnect, or at its five-minute poll — not instantly.
+  Opening the run reads it, like a failure notice. An agent gets it
+  by selecting it: it is not in the integration's `default_tools`, and the agents
+  `scripts/migration/0053` rewrites keep an explicit selection without it.
+
+- **`appstrate run --local` wires unauthenticated remote MCP integrations**
+  (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
+  CLI connects to `source.remote.url` itself and exposes each tool the agent
+  selects (`integrations_configuration.<id>.tools`, else `default_tools`), minus
+  `hidden_tools`, as `{ns}__{tool}`, named as on the platform. Requests go
+  through the same SSRF guard as the CLI's `api_call` calls: the declared host
+  is reachable, a redirect to a blocked range is refused. A server the CLI
+  cannot reach, a connection and `tools/list` that take more than 10 s, a
+  failing `tools/list`, an SSE transport or a `{$variable.<name>}` URL template
+  leaves the integration unavailable: the agent is told and the run starts
+  without it.
+  Authenticated remote integrations and `local` sources stay unavailable to a
+  local run; `--integrations none` wires none.
+
+- **The typed tools of a remote MCP integration are callable outside a run**
+  (#2206). `search_integration_tools` lists, for an integration backed by a
+  remote MCP server, the tools its catalog selects (the `tools_policy` keys, or
+  everything the server lists under `allow_undeclared_tools`, less
+  `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
+  the server's `tools/list`. The name is a function of the upstream name alone,
+  whatever the listing order, the connection listed with or the other tools:
+  `{ns}__{tool}` when that is a valid tool name (56 characters at most, the body
+  in `[A-Za-z0-9_-]`), the tool is not named `api_call`, `api_upload` or a
+  `…__{auth}` form of either, and its name does not end in `_` and 8 hex digits
+  (nor is 8 hex digits alone); otherwise the upstream name with each other
+  character made `_`, `_` runs collapsed, cut to fit, stripped of leading and
+  trailing `_` and always followed by `_` and 8 hex digits of its hash, so a
+  hashed name holds no `__` and never equals a plain one (two hashed names
+  still equal, a hash collision, are both dropped and logged; a run keeps a
+  transformed name's plain form while it is free, so there the name differs
+  from a run's). The catalog
+  is read through the credential proxy with the connection the proxy selects (when several qualify, the first of the caller's
+  own connections it accepts, never a colleague's shared one the caller did not
+  name; sanitised; cached 5 minutes per connection, integration version and
+  rendered server URL, read only after that selection, at most 128 catalogs
+  per replica; at most 500 tools of names up to 128 characters and 512 KiB of
+  descriptors, a longer catalog reported by a `note` and, on the listing route,
+  in `truncated_catalogs` with the number of tools read, `listed_tools`; a
+  declared output schema
+  relayed as `output_schema`). A server that cannot be listed leaves the names,
+  marked `catalog_unreadable`; one the proxy refused to list for the caller, or
+  whose server refused the connection's credential, comes back in `unlisted`
+  with that refusal. `call_integration_tool` sends one `tools/call` through the proxy, on
+  the named `connection_id` or the connection selected for that tool:
+  `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
+  `remedy`, or `must_choose_connection` with the candidates, both before
+  anything is sent (every auth of the integration serves a typed tool). A
+  JSON-RPC error -32602 (Invalid params) the server answers to the `tools/call` is
+  `422 upstream_invalid_params`, any other `502 upstream_mcp_error`
+  (`mcp_error: { code, message }`, the message bounded), an answer over the
+  exchange bound (2 MiB, or the proxy's `max_response_bytes` when lower)
+  `502 upstream_response_too_large` (at once, as JSON or as an event stream),
+  -32602 answered to anything but the `tools/call` itself (the handshake, which
+  MCP uses for an unsupported protocol version) `502 upstream_mcp_error`,
+  a 401 or 403 of the server `502 upstream_credential_rejected`
+  (`upstream_status`, and the proxy's `credential` verdict when its forced
+  refresh judged the rejection), no answer within 45 s `504 upstream_timeout`,
+  each with its `Proxy-Status` (`received-status` on a credential rejection and
+  on a JSON-RPC error, the status the error came in, with
+  `error=http_request_error` on `upstream_invalid_params` and
+  `error=http_protocol_error` on `upstream_mcp_error` and on a `bad_gateway`
+  that received an answer); the server sync of
+  `POST /api/integrations/{packageId}/discover` answers the same codes (its
+  timeout 20 s, never `upstream_invalid_params`: it sends no arguments) where it
+  answered `bad_gateway`. The result
+  keeps no reserved `_meta` key, on the result or on any content block: a key
+  whose prefix (before its first `/`, in any case) is `dev.appstrate`, or has
+  `modelcontextprotocol` or `mcp` as its first or second label (`mcp/`,
+  `io.modelcontextprotocol/`, `dev.mcp/`, `api.modelcontextprotocol.org/`).
+  Past 256 KiB the result is cut so that its JSON stays within 256 KiB: a text
+  block that does not fit is cut on a character boundary, any other is
+  replaced by a note while one fits, a closing note counts what was cut or
+  dropped, and `_meta["dev.appstrate/truncated"]` is set.
+  The call journal records one row per `tools/call` (that exchange, not a later
+  one of its session), a timeout included, and one per listing that reached the
+  server, a refused or unanswered handshake
+  included (one row for the sync as well), and a listing reaching a server
+  goes through the forced refresh on a 401, which can rotate the stored OAuth
+  tokens, and can flag the connection on a credential refusal, as a call does:
+  a search is annotated neither read-only nor idempotent. A
+  listing waits 20 s for all its servers (5 s when `call_integration_tool`
+  resolves its tool by name, keeping resolution and call under a client's
+  60 s), and no longer than its request: a catalog not read by then is listed
+  `catalog_unreadable` and read on for the next listing, and no further server
+  is contacted. Resolving a name its catalog is not there to prove — not
+  declared, under `allow_undeclared_tools`, and not an upstream name exposed as
+  itself (a name ending in `_` and 8 hex digits never is) — answers, in
+  `unlisted`, `503 tool_catalog_unavailable` and sends nothing: the catalog
+  could not be read, `listing_failure` naming why when known (the proxy's
+  problem code, or `timeout`); retryable, a later listing may read it. Tool names are unique in a space: a namespace equal to another
+  active integration's after normalisation (cut at 20 characters, without a
+  trailing `_`) takes a hash of its package id, and a name never depends on the
+  caller's connections. The listing gives the connections the tools reach
+  once (`connections`), each tool naming its own (`connection_ids`, a typed
+  tool's `missing_scopes` per connection). Both routes answer `Cache-Control: no-store`, like
+  `/proxy`. Two routes
+  back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
+  and `unlisted`) and
+  `POST /api/credential-proxy/tools/call`, under the access rule of
+  `/api/credential-proxy/proxy` outside a run, each with its own rate-limit
+  bucket, and both kept out of the MCP operation catalog like `/proxy`.
+  `search_integration_tools` also lists, in `not_ready`, the integrations
+  active in the space the caller has no usable connection of and that offer a
+  tool outside a run, each with the
+  `proxy_connection` verdict of a call naming none (`none`,
+  `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
+  the selection's `refusal` item, whose `connect_url` (run launch's minter and
+  policy, `integrations:connect`) connects or reconnects it. The MCP exchange
+  of the editor's server sync and of these routes share one proxy adapter;
+  `stripForgedRuntimeEvents` moves from the sidecar to
+  `@appstrate/mcp-transport`, which both consume, beside the relay's wider
+  `stripReservedResultMeta`.
+
+- **A space can close direct access to its connections** (#2204). A space
+  admin turns off « Direct connection access » in the space settings
+  (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
+  `spaces.credential_proxy_open`, default `true`, migration `0104`). The
+  credential proxy then answers calls that name no run
+  (`GET /api/credential-proxy/connections`, `GET /api/credential-proxy/tools`,
+  `POST /api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without
+  `X-Run-Id`) and the authenticated `POST /api/integrations/{packageId}/discover`
+  with `403 credential_proxy_closed` for every role,
+  organization owners and admins included, and the MCP tools
+  `search_integration_tools` and `call_integration_tool` are not declared for
+  that space; `get_me` stops naming them there. On the organization URL, a
+  call whose `space_id` names that space is refused with
+  `credential_proxy_closed`. Runs are unaffected: platform runs reach
+  their connections through the sidecar, remote runs (`X-Run-Id`) their bound
+  ones. The switch does not stop a member allowed to launch inline runs from
+  having an agent make the call inside a run. The space object carries
+  `credential_proxy_open`; a personal space keeps it open
+  (`409 personal_space_immutable`). The integration detail's `proxy_connection`
+  verdict (`GET /api/integrations/{packageId}`) is then `proxy_closed`, and the
+  editor's connect step says so instead of offering a connection.
+
+- **A model refused for the runtime version says so** (#2148). When a provider
+  refuses a model for the client version the agent SDK announces (Anthropic's
+  `claude_code_version_too_old` on a Claude Code subscription), the chat shows
+  that the runtime must be updated by an Appstrate release and that another
+  model is to be chosen meanwhile, instead of the generic rejected-request
+  sentence, with neither a retry nor a reconnection link, live and after
+  reload. The run trail records it as
+  `run_logs.data.error_reason: "runtime_version_too_old"` beside the unchanged
+  `error_category`, and a failed run's page reads it there to show the same
+  sentence in place of the provider's own advice. It is read from the refusal's
+  structured code only.
+
+- **Live-catalog models of a subscription provider carry a warning** (#2148).
+  `GET /api/model-provider-credentials/registry` flags them
+  `subscription_unverified: true` and the model picker shows « Not verified with
+  a subscription »: the catalog proves their request builds offline, not that
+  the vendor serves them to a subscription. They stay offered; API-key
+  providers are not flagged.
+
+- **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
+  has a published version (or is a system agent), so launching it without a
+  version selector resolves; `false` for a draft-only agent. The row's
+  `version` is the draft manifest's and does not answer this. The MCP server
+  builds its agent prompts from this flag with one listing read per space.
+
+- **`run_and_wait` relays the run's log lines as MCP progress** (#2147). A
+  call carrying a `progressToken` keeps its 15 s heartbeat and also receives
+  each `info`, `warn` or `error` log line of the run as a
+  `notifications/progress` message `Run <id> [<level>] <message>` (one line,
+  200 characters at most, without `data`), at most one per second, the latest
+  line of a burst winning; a line still held when the wait ends is sent before
+  the result. The lines come from the realtime `run_log` stream
+  under the same gates as `GET /api/realtime/runs/{id}` (run read, run
+  visibility), so they cost no `GET /api/runs/{id}/logs` call. The chat is
+  unchanged.
+
+- **A relayed upstream `401` on the credential proxy says what the platform
+  tried** (#2155). When the forced refresh after the `401` could not recover the
+  credential, `/api/credential-proxy/proxy` adds
+  `X-Appstrate-Credential-Status: in_use; cause=…[; failures=…; max-failures=…]`
+  or `needs_reconnection; cause=…` (the connection is now flagged so), and the
+  MCP `api_call` tool reports it as the entry's `credential` member
+  `{ status, cause, detail, failures?, max_failures? }`. The upstream body, the
+  refresh behaviour and the failure threshold are unchanged; an upstream's own
+  copy of the header is stripped. On a streaming upload, `X-Auth-Refreshed: true`
+  is now set only when the forced refresh served a credential to retry with,
+  no longer when it could not refresh anything.
+
+- **Integrations from a remote MCP server that needs no authentication**
+  (#2075, AFPS §7.2). The MCP-URL wizard no longer refuses a server that answers
+  without a Bearer challenge: it proposes an integration without `auths`, its
+  `source.remote.url` the address exactly as pasted. The review states that the
+  address is saved as package configuration, visible to anyone who can read the
+  integration, included in exports and shared by every member. Such an
+  integration needs no connection: runs start it without one, `required: true`
+  asks nothing of it, readiness reports `connection_required: false`, the
+  integration detail `proxy_connection.status: "not_required"`, and the server
+  sync reads its tools directly, egress-guarded. A server that asks for a
+  credential later leaves it unavailable. Declaring `variables` without `auths`
+  is refused (no connection would hold them). The `remote_mcp_auth_not_supported`
+  discovery error is gone. Requires `@afps-spec/schema` `^0.12.0`.
+
+- **An admin pin can let members add connections to the imposed ones**
+  (#2043). `PUT` of an integration pin takes `allow_additional_connections`
+  (default `false`, also when absent on the replacing `PUT`; `true` with
+  `connection_ids: []` is a `400`). The pin responses return it with
+  `agent_active` (the pin's agent is active in the space; always `true` on a
+  write's response), the audit record carries `allowAdditionalConnections`, each
+  integration's readiness verdict returns `additional_connections_allowed`, and
+  the org default `PUT` returns `schedules_disabled_count`. The dashboard offers
+  the pin's mode, « Exactement ces connexions » (default) or « Ces connexions,
+  plus celles de l'utilisateur »: in the latter a run binds the imposed
+  connections plus those the actor chose among the ones they can use in the space
+  (`block_user_connections` still bounds them); nothing is added automatically.
+  An open pin and an enforced org default exclude each other on one space and
+  integration: opening one while the other exists is the new
+  `409 connection_additions_conflict`, on the pin `PUT` and on the org default
+  `PUT` with `enforce: true` (an admin pin of an agent not active in the space
+  does not count); at resolution an enforced default closes the additions.
+  Migration `0102_integration_pin_additions` adds the column and two `CHECK`s: a
+  member pin is never open, and an open pin imposes at least one connection.
+  Rewriting an open pin with more imposed connections does not judge the member
+  pins already stored: where the imposed set plus one of them exceeds 20, that
+  member's runs fail with `connection_set_too_large`. The connection picker shows
+  the imposed connections locked and edits the additions only.
+
+- **The admin edits an agent's pin from its Connexions** (#2043): the « … » menu
+  of each active integration offers « Définir des connexions spécifiques », or
+  « Modifier les connexions spécifiques » and « Retirer les connexions
+  spécifiques », in the same dialogs as the integration page.
+
+- **« Mes connexions » filters an integration's Connexions** (#2043), replacing
+  the « Partage » filter (Partagée / Personnelle).
+
+### Added
+
+- **Garmin LiveTrack — an agent reads where a Garmin device is (#2064).**
+  `@appstrate/garmin-livetrack@1.0.0` reads the owner's last known position and
+  LiveTrack sessions through `api_call`, from one `custom` auth whose only field
+  is the owner's public personal link (`https://livetrack.garmin.com/<name>` or
+  `https://live.garmin.com/<name>`); nothing secret is injected. Garmin has no
+  public API: the integration reads the undocumented JSON API behind the
+  LiveTrack web page, which may break if Garmin changes it, and automated
+  reading may fall outside Garmin's terms of use. Its `INTEGRATION.md` gives the
+  call sequence: load the page (`{{livetrack_url}}`, spilled to a workspace
+  file) for its CSRF token and `garminGuid`, list the sessions, read the latest
+  session's track points, each API call sending `Livetrack-Csrf-Token` while the
+  run's cookie jar replays the `livetrack_csrf` cookie. A `403` with an empty
+  body is retried once from the page; a `403` with a JSON `errors` body is
+  reported as is. Only sessions visible to everyone are read; passcode-protected
+  links are refused with a clear message.
+- **An oauth2 connection can be acquired through `connect.login`** (AFPS §7.7,
+  afps-spec/afps-spec#44, #2083). For a provider whose sign-in no redirect flow
+  can drive (a mobile-app SSO), an oauth2 auth declares `connect.login` as a token
+  request to its `token_endpoint` whose body holds only the grant parameters
+  (`grant_type=refresh_token&refresh_token={{refresh_token}}`), and the fields the
+  user submits in `credentials.schema`. The fields doors (`connect/fields`, the
+  hosted form, which the portal now opens instead of an authorization server) take
+  them; the platform renders the grant, adds the client authentication of the
+  auth's default client — the client later refreshes use — and the RFC 8707
+  `resource` it sends, and posts it through the same token request refreshes run,
+  before anything is stored. A grant the server refuses (`invalid_grant`, or a
+  400 or 401) is a 400 `login_rejected` on the form, a refused client a 502
+  `oauth_client_rejected`, an unreachable, throttled, refusing (any other 4xx)
+  or failing server a 502 `login_upstream_unavailable` that says the grant may
+  have been redeemed when the request may have reached it (never on a 4xx), an
+  auth with no usable OAuth client (none registered, a secret that cannot be
+  decrypted) a 403, a chosen client removed before the token request or one
+  authenticating with a method the platform does not implement (anything but
+  `client_secret_basic`, `client_secret_post` and `none`) a 409
+  `connection_not_ready`, and a failure after a successful token request says
+  the grant may have been redeemed. Every refusal saying so carries the RFC 9457
+  extension member `grant_may_be_redeemed: true`, which the hosted form turns
+  into a sentence of its own. When the auth declares an `issuer`, its metadata
+  must answer and name the token endpoint the client is presented to before
+  anything is sent (400 `invalid_request` on a contradiction, 502
+  `login_upstream_unavailable` when unreadable). The answer must carry
+  `token_type` `Bearer` (any case), else a 502 that may have redeemed the grant.
+  Identity comes from the token response and `userinfo_endpoint` (discovered
+  from the `issuer` when not declared), never from an `id_token`, which is not
+  validated on this path; a response without `scope` is granted the grant's
+  `scope` parameter, if any; a `refresh_token` grant answered without
+  `refresh_token` keeps the one it presented. A hosted form submits its grant
+  once: the page session is spent before the token request, so a repeated or
+  concurrent submission is a 404, and it is handed back only when the refusal
+  preceded any request (an invalid field, no usable client, an issuer or egress
+  refusal), so the form can be fixed and submitted again. Every refusal that ends
+  the page session — on this path or an authorization flow begun from the form —
+  carries the RFC 9457 extension member `connect_session_ended: true`, and the
+  hosted form then stops on the spent link, telling the user to restart the
+  connection from the application (with the redemption sentence when
+  `grant_may_be_redeemed` is set) instead of offering a submission that would be
+  a 404. A `login_rejected` names what was refused in the extension member
+  `login_refusal` — `grant` for an oauth2 token request, `integration` for a
+  login tool, whose own text rides `integration_diagnostic` — and the SPA words
+  each case in the reader's language: it no longer interpolates the server's
+  English detail into its sentence (any `connect.login` or `connect.tool` auth).
+  The connection is then an
+  ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
+  `connect/oauth2` refuses such an auth and connect offers skip it.
+  `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,
+  form body, no `outputs`, no client parameters); Appstrate's own rule that a
+  `connect.login` declares `outputs` now applies to `custom` auths only.
+- **Garmin Connect — an agent reads the owner's activities.**
+  `@appstrate/garmin-connect@1.0.0` lists activities by date and reads their
+  summary, dense track and time series (`details`), laps, heart-rate zones,
+  weather, GPX and original FIT files through `api_call`, on
+  `connectapi.garmin.com`. Its description presents it as advanced: connecting
+  needs a refresh token obtained with python-garminconnect (uv/Python). The auth
+  requires the `userName` identity claim, so a reconnect whose profile read
+  fails is refused (the existing connection keeps its identity and tokens; the
+  refusal says the submitted grant may have been redeemed) instead of falling
+  back to the `default` account and replacing another account's tokens. It is
+  the first oauth2 auth acquired through
+  `connect.login`: the user obtains a refresh token once with
+  python-garminconnect (Garmin's mobile sign-in, MFA included) and pastes it;
+  Garmin rotates it at each refresh and it lapses after 30 days unused. Garmin
+  has no public API for individuals: the integration reads the undocumented API
+  of the Garmin Connect mobile app, which may break, and automated reading may
+  fall outside Garmin's terms of use. It also reads daily health data
+  (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training
+  readiness). `authorized_uris` covers all of `connectapi.garmin.com` and
+  `INTEGRATION.md` tells the agent to use `GET` only, but nothing enforces a
+  method: the token can also edit and delete the owner's data (activities,
+  settings, workouts, gear).
+
+  **Operators:** the auth needs a public client. Declare it in
+  `SYSTEM_INTEGRATIONS` —
+  `{"id":"@appstrate/garmin-connect","clients":[{"id":"garmin-connect-mobile","auth_key":"primary","client_id":"GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2","token_endpoint_auth_method":"none"}]}`
+  — or register it as an organization OAuth client. The `client_id` must be the
+  one the refresh token was issued to (python-garminconnect stores it as
+  `di_client_id`).
+
+### Fixed
+
+- **A draft saved right after a run starts no longer reaches that run** (#2203).
+  The run's integration versions were frozen with their manifest reads still
+  in flight, so an integration draft saved within that window could be the
+  manifest the run spawned with. The freeze now completes before the run
+  proceeds.
+
+- **`get_me` lists only the integrations active in the space** (#2146).
+  `GET /api/me/context` listed every integration with a connection the caller
+  may bind in the space, including an org-scope connection of an integration
+  not activated there, which the credential proxy and runs refuse.
+  `connections[]` now holds the active integrations only, as the agent and
+  skill hints of the same payload do, and the `get_me` tool description points
+  to `search_integration_tools` for the tools those connections can call.
+
+- **A remote MCP integration whose credential is rejected at boot is flagged on
+  the first run** (#2181). A 401 on the MCP handshake of an API key, basic or
+  other unrefreshable credential counted toward `INTEGRATION_REFRESH_MAX_FAILURES`
+  like a 401 on a tool call, and every count cost a whole run (the boot gate
+  stops it), so the connection reached `needs_reconnection` only after five lost
+  runs. The sidecar now sends `rejected_request=handshake` on
+  `POST /internal/integration-credentials/{scope}/{name}/refresh` for a 401
+  received before the remote client connects; the platform flags the connection
+  and answers `410` on that first rejection, and the run fails with an error
+  that names the connection and asks to reconnect it. A 401 on a call made for
+  the agent still counts toward the threshold; OAuth2 refresh and connect.tool
+  re-login are unchanged.
+
+- **`{ns}__api_call` steers request bodies through a workspace file.** An agent
+  re-typed a file's base64 into `body` and the upstream accepted the truncated
+  value. The `body` description of both api_call surfaces (sidecar and
+  in-process) now says to write the complete body to a file and pass
+  `{ fromFile }`, and frames `{ fromBytes }` as small payloads only.
+
+- **A schedule saved while the pin or default naming its connections was removed
+  no longer stays armed with no connection named.** It is now disabled
+  (`connection_set_unnamed`) by the removal, or its write is refused with
+  `409 schedule_governance_changed`; the member pin of the schedule's actor counts
+  as such a layer, and the check covers every write leaving a schedule enabled.
+  Deleting a connection that empties a member pin (`DELETE /api/me/connections/{id}`,
+  an OAuth client delete) is covered too, disabling with `connection_deleted`.
+  Resolution and disabling commit with the removal: a failure rolls everything
+  back, and recreating a pin or default cannot race a later cleanup.
+
+- **The run page of an inline run no longer gets two 404s** (#2068).
+  `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so
+  the memories and pinned slots an inline run wrote with `note`/`pin` were
+  unreachable. The read route now serves them to a caller who may read the
+  run in that space; every other agent route is unchanged.
+- **The platform's package scopes can no longer be claimed** (#2072). `@appstrate/`
+  is the system packages' namespace and `@inline/` the inline runs' shadow
+  packages', but an organization could take `inline` or `appstrate` as its slug,
+  and any organization could create a package under either scope by naming it
+  in a manifest. Creating or renaming an organization to one of these slugs now
+  answers `400 slug_reserved`, explicit or derived from the name; the
+  bootstrap organization takes `appstrate-2` instead. Every door that writes an
+  organization package (JSON create, ZIP and GitHub import, bundle import with
+  its carried dependencies, and the MCP `validate_package_file` /
+  `import_package_file` pair) answers `400 scope_reserved` for such an id; a
+  system package carried by a bundle is still reused.
+- **An `api_call` target can carry a `{{field}}` in its path or query**
+  (#2063). The target's published JSON schema said `format: "uri"`, which the
+  agent's tool-argument validator applies before the call leaves the agent: it
+  refused `{` and `}`, so `https://share.garmin.com/feed/share/{{mapshare_id}}`
+  (or Twilio's `/Accounts/{{account_sid}}/…`) never reached the sidecar,
+  although the sidecar renders such a field as one percent-encoded component.
+  The schema is now a pattern on `http(s)://`, shared by `api_upload` (which
+  published the same `format: "uri"`); the rendered URL is still parsed and
+  matched against the allowlist. The validator also refuses `ftp:` or
+  `javascript:` targets it used to let through. A base-URL field may now be
+  followed by a query or fragment (`{{base_url}}?d1=…`), not only a path.
+- **`responseMode.toFile` writes under a workspace reached through a symlink**
+  (#2063). The escape check compared the real path of the target directory to
+  the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
+  temp dir is `/var` → `/private/var`) every `toFile` was refused as "escapes
+  the workspace via a symlink". The workspace root is now resolved the same
+  way; a symlinked subdirectory pointing outside is still refused. A refused
+  `toFile` no longer creates directories outside the workspace before refusing.
+- **`api_upload` no longer sends back a server-supplied session URL holding
+  `{{`** (#2063). A tus or Google `Location`, or a Microsoft `uploadUrl`,
+  becomes the target of the next call, and the sidecar would have rendered its
+  `{{field}}` as a credential placeholder. A relative tus `Location` under a
+  templated target resolves only where rendering cannot change the result,
+  otherwise it is refused. A tus `Location` that is not an http(s) URL, or that
+  holds `{{` once parsed, is an `UploadError`.
+
+- **A link to a catalogue sheet opens it from the package id alone** (#2013).
+  `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
+  lands on the package's own kind instead of closing the sheet. Interface only.
+- **A link to an object that does not exist is announced** (#2013). A dialog
+  address naming an object its list does not hold (deleted, mistyped, out of
+  reach) shows « Élément introuvable ou inaccessible » instead of closing in
+  silence, on every dialog that has an address. An object that leaves the list
+  while its dialog is open (renamed, deleted) still closes silently.
+
+## [1.0.0-beta.68] - 2026-10-15
+
+### Operators
+
 - **Runner daemon variables go in a systemd drop-in** (#1943). beta.67 said to
   add `EGRESS_ALLOW_INTERNAL_HOSTS` to `/etc/appstrate-runner/env`, which
   `appstrate runner install` re-renders: move that line, and any other one added
@@ -45,25 +1194,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   may not be the space it was pinned to, and an agent whose read fails loses
   its command until the next sync. Both settle on the following sync.
 
-- **The dashboard is redesigned** (#1937). The interface changes, not what the
-  platform accepts or refuses: settings and preferences open as routed
-  overlays, every real dialog has a URL, tables share one component, and one
-  connection menu and one model picker serve every screen. Additive API
-  changes behind it: `GET /api/runs`, `GET /api/agents/{scope}/{name}/runs` and
-  `GET /api/schedules/{id}/runs` take several comma-separated `status` values
-  (an unknown one is a 400 for the whole list) and a `q` search over agent,
-  error and run number (400 above 200 characters), applied before pagination;
-  `GET /api/files` takes `q` (by name, inside the existing visibility filter);
-  the agent list and detail return optional `icon` and `color`; organizations
-  carry a `logo` (migration `0097_org_logo`, a nullable column), returned by
-  `GET /api/orgs`, `GET /api/me/orgs` and invitation accept as
-  `{ kind: "emoji", emoji }`, `{ kind: "image", url }` or `null`. An emoji (or
-  `null`) is written by `PATCH /api/orgs/{id}`; an image is uploaded as WebP
-  bytes by `PUT /api/orgs/{id}/logo`, kept in object storage and served by
-  `GET /api/orgs/{id}/logo`, whose URL names the image's version. The audit log
-  records an image logo by its version, never its bytes. In the OpenAPI spec the
-  `status` parameter of the run lists becomes an array of the status enum,
-  serialized `style: form, explode: false` (`status=failed,timeout`).
+### Added
+
+- **Vapi — an agent collects an answer through an outbound phone call
+  (#2002).** `@appstrate/vapi@1.0.0` calls Vapi's REST API through `api_call`
+  with one `api_key` auth (the Vapi private key, sent as
+  `Authorization: Bearer`). Not Vapi's MCP server: its `get_call` returns no
+  transcript and no extracted data, and its `create_call` takes no per-call
+  assistant. It is the first system package shipping an `INTEGRATION.md`,
+  inlined in the prompt of every run that uses it: pick the caller number
+  (`GET /phone-number`), place the call with a transient assistant and
+  transient `artifactPlan.structuredOutputs` (the JSON schema of the answer),
+  poll `GET /call/{id}` until the call ends and the extraction lands, then read
+  the answer by name. An agent using it needs a manifest `timeout` of at least
+  the call's `maxDurationSeconds` plus 120 s; the 300 s default is too short.
+  Calling French numbers needs a Twilio number imported into Vapi: free Vapi
+  numbers are US-only.
 
 ### Fixed
 

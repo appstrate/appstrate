@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * THE uploader every surface hands to a file input: the typed 2-step staged
- * upload (`api/uploads.ts`), plus a refresh of the org storage gauge.
- *
- * Why the invalidation lives here: uploading is the only user action that ADDS
- * bytes, and the gauge (`use-org-storage.ts`) + the "quota reached" alert are
- * read from the org detail. `used_bytes` counts durable files, which the
- * server materializes from the staged upload slightly later (when the chat
- * message is sent, or when the run starts), so this refresh is what folds in
- * everything materialized so far rather than an exact after-image of this one
- * file — the gauge stops drifting instead of drifting forever.
+ * THE uploader every file input uses: the staged upload (`api/uploads.ts`) plus a refresh of the
+ * org storage gauge. `used_bytes` counts durable files, materialized slightly after the staged
+ * upload, so the refresh folds in what is materialized so far, not an exact after-image.
  */
 
 import { useCallback } from "react";

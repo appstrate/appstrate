@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ComponentProps, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Plus, Settings2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,11 +13,12 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { authMethodLabel } from "../../lib/integration-presentation";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-hosted-connect-popup";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { connectPopupInput, scopeChoiceFor } from "../integration-detail/connect-scope-choice";
 import {
   CONNECT_SCOPES_PARAM,
@@ -42,7 +45,7 @@ type AddProps = {
  */
 export function AddIntegrationConnection(props: AddProps) {
   const { packageId, detail, userId } = props;
-  const modal = useModalTarget(CONNECT_SCOPES_PARAM, detail.auths, (auth) => auth.auth_key);
+  const modal = useUrlModalTarget(CONNECT_SCOPES_PARAM, detail.auths, (auth) => auth.auth_key);
   const { openPopup, isPending } = useHostedConnectPopup();
   const forceAccountSelect = (auth: IntegrationAuthStatus) =>
     auth.connections.some((connection) => isConnectionOwnedBy(connection, userId));
@@ -76,6 +79,32 @@ export function AddIntegrationConnection(props: AddProps) {
   );
 }
 
+/** The add action's button in every state: icon alone once its `bar` container is narrow. */
+function AddConnectionButton({
+  icon,
+  label,
+  chevron = false,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "children"> & {
+  icon: ReactNode;
+  label: string;
+  chevron?: boolean;
+}) {
+  return (
+    <Button
+      variant="outline"
+      className={cn(TOOLBAR_ACTION, "@max-sm/bar:size-8 @max-sm/bar:p-0")}
+      aria-label={label}
+      title={label}
+      {...props}
+    >
+      {icon}
+      <span className="hidden @sm/bar:inline">{label}</span>
+      {chevron && <ChevronDown className="hidden @sm/bar:inline" />}
+    </Button>
+  );
+}
+
 function AddButton({
   detail,
   onConfigure,
@@ -91,17 +120,7 @@ function AddButton({
   // The button the server would refuse stays, dead, with the reason on it.
   const refused = (reason: string, testId: string) => (
     <DisabledReasonTooltip reason={reason}>
-      <Button
-        variant="outline"
-        size="sm"
-        className="@max-sm/bar:size-8 @max-sm/bar:p-0"
-        aria-label={label}
-        disabled
-        data-testid={testId}
-      >
-        <Plus className="size-4" />
-        <span className="hidden @sm/bar:inline">{label}</span>
-      </Button>
+      <AddConnectionButton icon={<Plus />} label={label} disabled data-testid={testId} />
     </DisabledReasonTooltip>
   );
   if (!detail.auths.length) return null;
@@ -110,17 +129,11 @@ function AddButton({
     return refused(t("integration.auth.noClientHint"), "no-oauth-client");
   if (!allowed.size)
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="@max-sm/bar:size-8 @max-sm/bar:p-0"
-        aria-label={t("integration.presentation.configureAuth")}
-        title={t("integration.presentation.configureAuth")}
+      <AddConnectionButton
+        icon={<Settings2 />}
+        label={t("integration.presentation.configureAuth")}
         onClick={() => onConfigure(detail.auths[0]?.auth_key)}
-      >
-        <Settings2 className="size-4" />
-        <span className="hidden @sm/bar:inline">{t("integration.presentation.configureAuth")}</span>
-      </Button>
+      />
     );
   if (blockedReason && canConnect) return refused(blockedReason, "connections-blocked-by-admin");
   // Each method offers what the caller may do with it: connect when it is
@@ -131,34 +144,17 @@ function AddButton({
   if (!offered.length) return null;
   if (detail.auths.length === 1)
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="@max-sm/bar:size-8 @max-sm/bar:p-0"
-        aria-label={label}
-        title={label}
+      <AddConnectionButton
+        icon={<Plus />}
+        label={label}
         onClick={() => connect(detail.auths[0]!)}
         disabled={isPending}
-      >
-        <Plus className="size-4" />
-        <span className="hidden @sm/bar:inline">{label}</span>
-      </Button>
+      />
     );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="@max-sm/bar:size-8 @max-sm/bar:p-0"
-          aria-label={label}
-          title={label}
-          disabled={isPending}
-        >
-          <Plus className="size-4" />
-          <span className="hidden @sm/bar:inline">{label}</span>
-          <ChevronDown className="hidden size-4 @sm/bar:inline" />
-        </Button>
+        <AddConnectionButton icon={<Plus />} label={label} chevron disabled={isPending} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {offered.map((auth) => (

@@ -26,21 +26,24 @@
  */
 
 import { Hono, type Context } from "hono";
-import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
-import { forbidden, notFound, parseBody, payloadTooLarge, unauthorized } from "../lib/errors.ts";
+import {
+  callerPermissions,
+  callerSpaceGrant,
+  fileLifecycleCeiling,
+  type SpaceGrant,
+} from "../lib/permissions.ts";
+import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { attachmentDisposition } from "@appstrate/core/naming";
-import { zFilePurposeEnum } from "@appstrate/db/schema";
 import {
   getFileForActor,
   listFilesForActor,
@@ -51,9 +54,8 @@ import {
   loadFileForPreview,
   getFileCapabilities,
   parseStorageKey,
-  type ListFilesFilters,
 } from "../services/files.ts";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListFilesQuery } from "../lib/list-query.ts";
 import {
   verifyPreviewToken,
   previewKind,
@@ -64,67 +66,21 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
 
-/**
- * The lifecycle half of the file ACL for THIS request. Every file resolution in
- * this router passes it, so the DTO's `capabilities` and the two enforcement
- * points below can never disagree.
- */
-function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
-  // Ownership is not a role grant, so `permissions` cannot cap it — the
-  // credential's own scope ceiling does (RBAC spec §7.1).
-  return { creatorCanManage: ceilingAllows(c, "files:delete") };
+/** The gallery list over `grants`: `GET /api/files` and `GET /api/orgs/{orgId}/files`. */
+export async function respondFileList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  const filters = parseListFilesQuery(c);
+  return c.json(
+    await listFilesForActor(orgId, grants, getActor(c), filters, fileLifecycleCeiling(c)),
+  );
 }
-
-const listFilesQuerySchema = z
-  .object({
-    purpose: zFilePurposeEnum.optional(),
-    runId: z.string().optional(),
-    packageId: z.string().optional(),
-    chat_session_id: z.string().optional(),
-    context_chat_session_id: z.string().optional(),
-    q: z.string().max(200).trim().optional(),
-    startingAfter: z.string().optional(),
-    // Checked by `parseListPagination` (anything but 1..100 is a 400).
-    limit: z.string().optional(),
-  })
-  .strict();
 
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/files — gallery list. Filters: purpose, runId, packageId,
-  // chat_session_id, context_chat_session_id; keyset pagination via
-  // startingAfter + limit. Query-param
-  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `runId`,
-  // `packageId` and the `startingAfter` pagination param are camelCase;
-  // `chat_session_id` is a snake_case domain field. Strict: an unknown or
-  // misspelled filter is a 400, never a silently widened listing.
-  router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getSpaceScope(c);
-    const actor = getActor(c);
-
-    const query = parseBody(listFilesQuerySchema, c.req.query());
-    const filters: ListFilesFilters = {};
-    if (query.purpose) filters.purpose = query.purpose;
-    if (query.runId) filters.runId = query.runId;
-    if (query.packageId) filters.packageId = query.packageId;
-    if (query.chat_session_id) filters.chatSessionId = query.chat_session_id;
-    if (query.context_chat_session_id) {
-      filters.contextChatSessionId = query.context_chat_session_id;
-    }
-    if (query.q) filters.search = query.q;
-    if (query.startingAfter) filters.startingAfter = query.startingAfter;
-    filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
-
-    const page = await listFilesForActor(
-      scope,
-      actor,
-      filters,
-      callerPermissions(c),
-      fileLifecycleCeiling(c),
-    );
-    return c.json(page);
-  });
+  // GET /api/files — gallery list.
+  router.get("/files", rateLimit(120), requirePermission("files", "read"), (c) =>
+    respondFileList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.

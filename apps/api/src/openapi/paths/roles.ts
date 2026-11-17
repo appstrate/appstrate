@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import { ORG_ROLES, SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
@@ -13,6 +13,52 @@ const ROLE_ID_PARAM = {
 } as const;
 
 export const rolesPaths = {
+  "/api/org-roles": {
+    get: {
+      operationId: "listOrgRoles",
+      tags: ["Roles"],
+      summary: "List organization roles",
+      description:
+        'The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform\'s own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.',
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Organization roles",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["object", "role", "permissions"],
+                      properties: {
+                        object: { type: "string", enum: ["org_role"] },
+                        role: { type: "string", enum: [...ORG_ROLES] },
+                        permissions: {
+                          type: "array",
+                          items: { type: "string" },
+                          description: "Org-level permissions the role grants, sorted.",
+                        },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/roles": {
     get: {
       operationId: "listRoles",

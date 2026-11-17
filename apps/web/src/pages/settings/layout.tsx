@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../../hooks/use-unsaved-changes";
+
 /**
  * One settings shell for three scopes: organization, workspace and the
  * caller's own account (`/preferences`).
@@ -9,10 +11,12 @@
  * the previous scope flashing after a context switch.
  */
 import { useState, type ReactNode } from "react";
+import { useStore } from "zustand";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
 import { spaceLabel } from "../../lib/space-label";
+import { orgTile, spaceTile } from "../../lib/identity-tile-props";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetProvider } from "../../components/settings/settings-page-actions";
@@ -21,19 +25,18 @@ import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { PanelDialog } from "../../components/panel-dialog";
-import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { PanelLayout } from "../../components/panel-layout";
+import { PanelTitleBlock, SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
-import {
-  isSpaceEnterable,
-  useSpaceSwitcher,
-  useCurrentSpaceId,
-} from "../../hooks/use-current-space";
+import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { useOrg } from "../../hooks/use-org";
-import { useCloseOverlay, useLandAfterOrgSwitch } from "../../lib/modal-route";
+import { useViewer } from "../../hooks/use-viewer";
+import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
+import { breadcrumbStore } from "../../stores/breadcrumb-store";
 import {
   activeSettingsItem,
   firstSettingsPath,
@@ -46,7 +49,7 @@ import { useSettingsSections } from "./use-settings-sections";
 
 /** The rail's groups, as they stand before the caller's permissions say which entries exist. */
 const RAIL_PLACEHOLDER: { scope: SettingsScope; labelKey: string; rows: number }[] = [
-  { scope: "organization", labelKey: "orgSettings.sectionOrganization", rows: 6 },
+  { scope: "organization", labelKey: "source.org", rows: 6 },
   { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
   { scope: "account", labelKey: "preferences.sectionAccount", rows: 5 },
 ];
@@ -86,13 +89,16 @@ function ScopeNavigation({
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const location = useLocation();
-  const closeSettings = useCloseOverlay();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: spaces = [] } = useSpaces();
+  const viewer = useViewer();
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
+  const [badgeTarget, setBadgeTarget] = useState<HTMLDivElement | null>(null);
+  // A page under the item (a webhook) names itself through its own crumb, which the heading shows.
+  const subPageTitle = useStore(breadcrumbStore, (s) => s.overlayPage.entries[0]?.label);
 
   const sections = useSettingsSections();
   const { ready } = usePermissions();
@@ -102,7 +108,7 @@ export function UnifiedSettingsLayout() {
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const label = (key: string) => t(key, { ns: "settings" });
-  const settingsBreadcrumbLabel = label("unifiedSettings.title");
+  const settingsBreadcrumbLabel = label("common:nav.settings");
   const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
   const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
 
@@ -126,10 +132,16 @@ export function UnifiedSettingsLayout() {
     <ContextSelector
       value={currentOrg?.id ?? ""}
       label={label("unifiedSettings.organizationSelector")}
-      options={orgs}
+      options={orgs.map((org) => ({
+        id: org.id,
+        name: org.name,
+        tile: orgTile(org),
+      }))}
       onValueChange={(id) => {
-        switchOrg(id);
-        landAfterOrgSwitch();
+        requestScopeChange(() => {
+          switchOrg(id);
+          landAfterOrgSwitch();
+        });
       }}
     />
   );
@@ -142,9 +154,10 @@ export function UnifiedSettingsLayout() {
       options={spaces.map((space) => ({
         id: space.id,
         name: spaceLabel(space, t),
+        tile: spaceTile(space, viewer),
         disabled: !isSpaceEnterable(space),
       }))}
-      onValueChange={switchSpace}
+      onValueChange={(id) => requestScopeChange(() => switchSpace(id))}
     />
   );
   const selectors: Partial<Record<SettingsScope, ReactNode>> = {
@@ -153,7 +166,7 @@ export function UnifiedSettingsLayout() {
   };
   const rail = (
     <div className="flex h-full flex-col">
-      <RailHeader icon={Settings} title={label("unifiedSettings.title")} />
+      <RailHeader icon={Settings} title={label("common:nav.settings")} />
       <div className="flex-1">
         {ready
           ? sections.map((section, index) => (
@@ -189,8 +202,8 @@ export function UnifiedSettingsLayout() {
   );
 
   return (
-    <PanelDialog
-      title={label("unifiedSettings.title")}
+    <PanelLayout
+      title={settingsBreadcrumbLabel}
       rail={rail}
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface
@@ -207,11 +220,25 @@ export function UnifiedSettingsLayout() {
           </span>
         ) : null
       }
-      onClose={closeSettings}
     >
+      {/* Until the permissions land no entry is reachable, so none is active yet: hold the
+          title row's place rather than push the page down when it appears. */}
+      {!ready && <PanelTitleBlock />}
       {activeItem && (
         <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
-          <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <SettingsHeading
+              className="mb-0 min-w-0"
+              title={
+                subPageTitle ? (
+                  <span className="break-all">{subPageTitle}</span>
+                ) : (
+                  label(activeItem.labelKey)
+                )
+              }
+            />
+            <div ref={setBadgeTarget} className="flex shrink-0 items-center gap-2" />
+          </div>
           <div
             ref={setActionTarget}
             data-page-actions
@@ -219,17 +246,12 @@ export function UnifiedSettingsLayout() {
           />
         </div>
       )}
-      <div
-        key={contentKey}
-        data-settings-table-surface="integrated"
-        data-settings-content-scope={activeScope}
-        className="[&_[data-data-table-row]]:[grid-template-columns:var(--dt-cols-3)] [&_[data-data-table-scroll]_table]:min-w-(--dt-full-floor) [&_td[data-data-table-tier]]:flex [&_th[data-data-table-tier]]:block"
-      >
-        <SettingsPageActionTargetProvider target={actionTarget}>
+      <div key={contentKey} data-settings-content-scope={activeScope}>
+        <SettingsPageActionTargetProvider target={actionTarget} badgeTarget={badgeTarget}>
           <Outlet />
         </SettingsPageActionTargetProvider>
       </div>
-    </PanelDialog>
+    </PanelLayout>
   );
 }
 

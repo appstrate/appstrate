@@ -11,8 +11,8 @@
  *   1. if the run was aborted, RETHROW immediately — the caller's
  *      `finally` owns cancellation cleanup, the runner must NOT finalize;
  *   2. surface the failure as a live `appstrate.error` event;
- *   3. best-effort final drain of any runtime events journaled before the
- *      throw (log/note/pin/output the agent produced mid-run);
+ *   3. best-effort wait for the sink writes still in flight, so they land
+ *      before `finalize` (every event is already captured; this adds none);
  *   4. reduce the captured events into a {@link TerminalRunResult}, stamp
  *      the failure error + terminal status + the runner's own token-usage
  *      snapshot, and `finalize` it.
@@ -60,10 +60,10 @@ export interface FinalizeThrownFailureOptions {
   /** The run's single event sink writer (captures + forwards each event). */
   emit: (event: RunEvent) => Promise<void>;
   /**
-   * Best-effort final drain (journaled runtime events). Invoked before the
-   * result is reduced; this helper guarantees it cannot throw past it.
+   * Best-effort wait for the runner's in-flight sink writes, so they land before
+   * `finalize`; it adds no event. This helper guarantees it cannot throw past it.
    */
-  drainAndEmit: () => Promise<void>;
+  settlePending: () => Promise<void>;
   /** Terminal sink. */
   eventSink: FinalizeSink;
   /**
@@ -92,7 +92,7 @@ function errorMessage(err: unknown): string {
 }
 
 export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions): Promise<void> {
-  const { events, err, signal, runId, now, emit, drainAndEmit, eventSink, usage } = opts;
+  const { events, err, signal, runId, now, emit, settlePending, eventSink, usage } = opts;
 
   // 1. Cancellation: propagate without finalizing — the caller's finally
   //    block decides. MUST stay first so an aborted run never produces a
@@ -126,10 +126,11 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
   };
   await emit(errorEvent);
 
-  // 3. Best-effort final drain: capture any runtime events journaled before
-  //    the session threw. A dead drain must NOT mask the failure.
+  // 3. Best-effort wait for the in-flight sink writes, so they land before
+  //    `finalize`; every event is already captured. A failed wait must NOT
+  //    mask the failure.
   try {
-    await drainAndEmit();
+    await settlePending();
   } catch {
     /* best-effort — the run outcome is decided below regardless */
   }

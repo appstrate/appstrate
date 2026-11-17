@@ -17,7 +17,7 @@
  */
 
 // --- values ---
-export { Type } from "@earendil-works/pi-ai";
+export { unsafe as unsafeSchema } from "@earendil-works/pi-schema";
 // No test-only re-export here either. The one that stood here claimed it
 // "costs nothing in the image" because `pi-ai/compat` was already in the
 // entrypoint's bundle graph through the runner's barrel — which was only true

@@ -1,67 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A text setting you edit in place: no Edit button, no mode.
- *
- * Commits on blur or Enter, reverts on Escape, and stays quiet when the value
- * did not actually change — so a stray focus never fires a write.
- *
- * Uncontrolled, keyed on the incoming value rather than mirrored into state.
- * The mirror would need an effect to follow the server, and syncing state from
- * an effect is exactly what the Rules-of-React gate rejects
- * (`react-hooks/set-state-in-effect`, see apps/web/CLAUDE.md). Remounting on a
- * value change costs nothing here and needs no state at all.
- *
- * Marked `data-inline-editing` so Escape reverts the field without closing the
- * dialog the settings page sits in (`keepOpenWhileRenaming`).
+ * A text setting saved by Save or Enter, cancelled by Cancel or Escape; blur never saves.
+ * An empty value cannot be saved. `data-inline-editing` keeps Escape from closing the
+ * surrounding dialog (`keepOpenWhileRenaming`).
  */
 import { Input } from "@appstrate/ui/components/input";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { useSaveAction } from "../../hooks/use-save-action";
+import { SaveControls } from "./manual-save";
 
 export function InlineTextSetting({
   value,
   onCommit,
-  disabled,
+  disabled = false,
   placeholder,
   maxLength,
   className,
   "aria-label": ariaLabel,
 }: {
   value: string;
-  onCommit: (next: string) => void;
+  onCommit: (next: string) => Promise<unknown>;
   disabled?: boolean;
   placeholder?: string;
   maxLength?: number;
   className?: string;
   "aria-label"?: string;
 }) {
+  const draft = useSettingDraft(value);
+  const action = useSaveAction(async () => {
+    const sent = draft.value;
+    await onCommit(sent.trim());
+    draft.accept(sent);
+  });
+  const next = draft.value.trim();
+  const saveDisabled = disabled || next === "" || next === value;
   return (
-    <Input
-      key={value}
-      defaultValue={value}
-      disabled={disabled}
-      placeholder={placeholder}
-      maxLength={maxLength}
-      aria-label={ariaLabel}
-      className={className}
-      data-inline-editing=""
-      onBlur={(e) => {
-        const next = e.currentTarget.value.trim();
-        if (!next || next === value) {
-          e.currentTarget.value = value;
-          return;
-        }
-        onCommit(next);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          e.currentTarget.blur();
-        }
-        if (e.key === "Escape") {
-          e.currentTarget.value = value;
-          e.currentTarget.blur();
-        }
-      }}
-    />
+    <div className="w-full min-w-0">
+      <Input
+        value={draft.value}
+        disabled={action.saving || disabled}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        aria-label={ariaLabel}
+        className={className}
+        data-inline-editing=""
+        onChange={(event) => draft.set(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (draft.dirty && !saveDisabled) void action.save().catch(() => {});
+          }
+          if (event.key === "Escape") draft.reset();
+        }}
+      />
+      <SaveControls
+        dirty={draft.dirty}
+        saveDisabled={saveDisabled}
+        onDiscard={draft.reset}
+        action={action}
+      />
+    </div>
   );
 }

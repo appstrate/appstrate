@@ -27,7 +27,7 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 ## Upgrading
 
-1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.67`, not `v1.0.0-beta.67`).
+1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.68`, not `v1.0.0-beta.68`).
 2. Redeploy.
 
 `appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
@@ -73,6 +73,8 @@ Facts worth writing down, because each one is easy to break:
   docker run --rm -v <uuid>_miniodata:/data --user 0 --entrypoint chown \
     cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
   ```
+
+- **`APP_URL` must be fetchable from the internet, and its origin must not move casually.** Integration authorization servers fetch an instance document under it, and changing its origin forces some integration connections to be reconnected. Behind an access proxy, IP allow-list or split DNS, set `INTEGRATION_OAUTH_CIMD=off`; see `docs/ENV.md`.
 
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 

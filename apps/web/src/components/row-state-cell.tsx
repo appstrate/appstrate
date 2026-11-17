@@ -6,8 +6,8 @@
  * applies; this draws it.
  */
 
-import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
+import { useTranslation } from "react-i18next";
 import type { RowState } from "../lib/model-providers";
 
 export function RowStateCell({

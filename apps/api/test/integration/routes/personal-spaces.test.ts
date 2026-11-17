@@ -29,7 +29,6 @@ import {
   organizationMembers,
   packages,
   runs,
-  packageShares,
   spaceMembers,
   spacePackages,
   spaces,
@@ -138,6 +137,13 @@ describe("personal spaces — provisioning at every membership door", () => {
     const rows = await db.select().from(spaces).where(eq(spaces.orgId, result.orgId));
     expect(rows.filter((s) => s.isDefault)).toHaveLength(1);
     expect(rows.filter((s) => s.ownerUserId === user.id)).toHaveLength(1);
+  });
+
+  it("first-boot bootstrap never takes a platform-reserved slug", async () => {
+    const user = await createTestUser();
+    const result = await createBootstrapOrg(user.id, "Appstrate");
+    expect(result.created).toBe(true);
+    expect(result.slug).toBe("appstrate-2");
   });
 
   it("accepting an invitation provisions one for the invitee", async () => {
@@ -546,6 +552,11 @@ describe("personal spaces — the write rules", () => {
     await expectProblem(await patch({ visibility: "private" }), 409, {
       code: "personal_space_immutable",
     });
+    for (const credential_proxy_open of [false, true]) {
+      await expectProblem(await patch({ credential_proxy_open }), 409, {
+        code: "personal_space_immutable",
+      });
+    }
   });
 
   it("refuses `owner_user_id` on creation — it is not a body field", async () => {
@@ -703,15 +714,19 @@ describe("personal spaces — references that bypass the package routes", () => 
     personalId = (await ownPersonalSpace(member)).id;
   });
 
-  /** A `source.kind: "local"` integration — the shape that names an mcp-server. */
-  const localIntegrationManifest = (name: string, serverName: string) => ({
+  /** An integration declaring a dependency on a skill, the one reference an integration manifest can name. */
+  const localIntegrationManifest = (name: string, skillId: string) => ({
     name,
     version: "1.0.0",
     type: "integration",
     schema_version: "0.1",
     display_name: "Local Integration",
     description: "A local-source MCP integration",
-    source: { kind: "local", server: { name: serverName, version: "0.1.0" } },
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
+    },
+    dependencies: { skills: { [skillId]: "^0.1.0" } },
     auths: {
       primary: {
         type: "api_key",
@@ -741,27 +756,24 @@ describe("personal spaces — references that bypass the package routes", () => 
     "X-Space-Id": owner.defaultSpaceId,
   });
 
-  const createIntegration = (name: string, serverName: string) =>
+  const createIntegration = (name: string, skillId: string) =>
     app.request("/api/packages/integrations", {
       method: "POST",
       headers: { ...spaceHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ manifest: localIntegrationManifest(name, serverName) }),
+      body: JSON.stringify({ manifest: localIntegrationManifest(name, skillId) }),
     });
 
-  it("refuses a local-source integration naming an mcp-server homed in somebody else's personal space", async () => {
-    // `source.server.name` is a reference the SPAWN path resolves and runs
-    // (`integration-spawn-resolver.ts`), and it lives OUTSIDE `dependencies.*`.
-    // The access check reads it for that reason: without it, naming a package
-    // was a way to reach one §3.6 says does not exist for the caller — the
-    // resolver applies the organization boundary and asks nothing about
-    // placement.
-    const SERVER = "@ref-bypass/private-server";
+  it("refuses an integration depending on a skill homed in somebody else's personal space", async () => {
+    // A declared dependency lives in `dependencies.*` and is judged by the same
+    // access check: without it, naming a package was a way to reach one §3.6
+    // says does not exist for the caller.
+    const SERVER = "@ref-bypass/private-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
+      type: "skill",
       homeSpaceId: personalId,
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     // The control: the package routes already refuse it to the organization owner.
@@ -777,15 +789,15 @@ describe("personal spaces — references that bypass the package routes", () => 
     ).toBe(true);
   });
 
-  it("takes the same reference once the server is homed in a space the author reaches", async () => {
+  it("takes the same reference once the skill is homed in a space the author reaches", async () => {
     // The positive control: the refusal above is about PLACEMENT, not about the
     // shape of the reference.
-    const SERVER = "@ref-bypass/team-server";
+    const SERVER = "@ref-bypass/team-skill";
     await seedPackage({
       id: SERVER,
       orgId: owner.orgId,
-      type: "mcp-server",
-      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+      type: "skill",
+      draftManifest: { name: SERVER, version: "0.1.0", type: "skill" },
     });
 
     const created = await createIntegration("@ref-bypass/fine", SERVER);
@@ -1187,19 +1199,11 @@ describe("personal spaces — offboarding", () => {
     expect(await db.select().from(spaces).where(eq(spaces.id, personalId))).toHaveLength(0);
   });
 
-  it("re-homes a package the org still runs AND writes the offer that places it", async () => {
-    // The sweeper MOVES a placement — it takes `home_space_id` away from a
-    // space that is about to stop existing. Every space still holding a
-    // `space_packages` row needs the other placement or it is left with an
-    // orphan: the package vanishes from its index, its detail, its
-    // space-package pages and its run gate, and its schedules fail on every
-    // tick, with nobody having decided anything.
-    //
-    // The fixture is that shape exactly: the team space holds the row and no
-    // offer. It is what inherited data looks like (`scripts/migration/0016`
-    // repairs precisely this), and what any second writer of `space_packages`
-    // would produce — which is why the invariant is asserted on the sweeper's
-    // OUTPUT rather than on the path that happened to create the row.
+  it("re-homes a package the org still runs, and its row keeps placing it there", async () => {
+    // The sweeper MOVES the home away from a space that is about to stop
+    // existing. A team space holding a `space_packages` row keeps it, and the
+    // row keeps placing the package there: the package stays on its index, its
+    // detail and its run gate, and its schedules keep firing.
     const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
     await seedPackage({
       id: SHARED,
@@ -1220,18 +1224,8 @@ describe("personal spaces — offboarding", () => {
     expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
       owner.defaultSpaceId,
     );
-    // …and placed in the space that runs it, by nobody in particular: the home
-    // was the placement until this sweep, so no person offered it. The default
-    // space gets NO offer — it HOMES the package now, and a package is not
-    // offered to the space it lives in.
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId, sharedBy: packageShares.sharedBy })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id, sharedBy: null }]);
-
-    // The row survives, and it now means something again — the same verdict
-    // the three HTTP doors and the scheduler tick read.
+    // The row survives, untouched — the same verdict the three HTTP doors and
+    // the scheduler tick read.
     expect(
       await db
         .select({ enabled: spacePackages.enabled })
@@ -1241,50 +1235,11 @@ describe("personal spaces — offboarding", () => {
     expect(await agentExecutionBlock({ orgId: owner.orgId, spaceId: team.id }, SHARED)).toBeNull();
   });
 
-  it("drops the DEFAULT space's own offer when it re-homes there", async () => {
-    // The mirror image of the offer it writes. Before the sweep the default
-    // space was just another space running the package, so it held an offer of
-    // its own; afterwards it HOMES the package, and a package is not offered to
-    // the space it lives in (`share_target_is_home` says the same thing on the
-    // HTTP door). Left behind, that row would show the organization's own
-    // package as "shared with us" on the very page that owns it.
-    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
-    await seedPackage({
-      id: SHARED,
-      orgId: owner.orgId,
-      type: "agent",
-      homeSpaceId: personalId,
-      draftManifest: { name: SHARED, version: "0.1.0", type: "agent" },
-      draftContent: "prompt",
-    });
-    for (const spaceId of [team.id, owner.defaultSpaceId]) {
-      await seedPackageShare(spaceId, SHARED);
-      await seedSpacePackage(spaceId, SHARED, { enabled: true });
-    }
-
-    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
-    await ageOrphan(personalId);
-    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
-
-    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
-      owner.defaultSpaceId,
-    );
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id }]);
-  });
-
-  it("re-homes a package an OFFER alone reached, and leaves that offer standing", async () => {
-    // An offer is a placement, here as everywhere else: "placed elsewhere" is
-    // `placementReadFilter`, not "holds a `space_packages` row". A space that
+  it("re-homes a package placed elsewhere switched OFF, and leaves that row standing", async () => {
+    // A row switched off is a placement, here as everywhere else. A space that
     // was SHOWN the package can see it, so the package was never private, and
     // destroying it would take away work its author deliberately handed to a
     // colleague who had not switched it on yet.
-    //
-    // The reconciliation writes no offer here — the one that placed the package
-    // is untouched by the move and keeps placing it.
     const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
     await seedPackage({
       id: SHARED,
@@ -1303,16 +1258,16 @@ describe("personal spaces — offboarding", () => {
     expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
       owner.defaultSpaceId,
     );
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id }]);
+    const rows = await db
+      .select({ spaceId: spacePackages.spaceId, enabled: spacePackages.enabled })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, SHARED));
+    expect(rows).toEqual([{ spaceId: team.id, enabled: false }]);
   });
 
   it("deletes a package no other space was ever placed for", async () => {
-    // The other branch, and the only one that deletes: no offer, no row, no
-    // space but the one being emptied. Private to a person who is gone, and
+    // The other branch, and the only one that deletes: no row, no space but
+    // the one being emptied. Private to a person who is gone, and
     // nobody else could ever see it.
     await seedPackage({
       id: HOMED,
@@ -1322,9 +1277,8 @@ describe("personal spaces — offboarding", () => {
       draftManifest: { name: HOMED, version: "0.1.0", type: "agent" },
       draftContent: "prompt",
     });
-    // A row and an offer in the space being emptied place it THERE, and that
-    // placement is the one leaving — they must not read as "elsewhere".
-    await seedPackageShare(personalId, HOMED);
+    // A row in the space being emptied places it THERE, and that placement is
+    // the one leaving — it must not read as "elsewhere".
     await seedSpacePackage(personalId, HOMED);
 
     await removeMember(owner.orgId, member.user.id, ownerActor(owner));
@@ -1333,7 +1287,7 @@ describe("personal spaces — offboarding", () => {
 
     expect(await db.select().from(packages).where(eq(packages.id, HOMED))).toHaveLength(0);
     expect(
-      await db.select().from(packageShares).where(eq(packageShares.packageId, HOMED)),
+      await db.select().from(spacePackages).where(eq(spacePackages.packageId, HOMED)),
     ).toHaveLength(0);
   });
 

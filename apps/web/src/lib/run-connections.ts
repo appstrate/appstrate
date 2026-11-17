@@ -23,19 +23,15 @@ export function groupByIntegration(
   return [...groups.entries()];
 }
 
-/** One integration of a run's "Connexions utilisées" card. */
 export interface RunConnectionRow {
   integrationId: string;
-  /** Every connection it bound; empty when the run started without it. */
+  /** Empty when the run started without it. */
   bound: ConnectionUsed[];
   /** Why it started without a connection, in the launch toast's words; `null` when bound. */
   unboundCause: string | null;
 }
 
-/**
- * The card's rows: one per integration the run bound, then one per declared integration it
- * started without, which `connections_used` (one entry per bound connection) cannot carry.
- */
+/** One row per integration bound, then one per declared integration the run started without (`connections_used` cannot carry those). */
 export function runConnectionRows(
   run: Pick<EnrichedRun, "connections_used" | "integrations_unbound">,
 ): RunConnectionRow[] {

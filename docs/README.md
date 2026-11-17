@@ -4,6 +4,17 @@ Reference documentation for developing, operating and extending Appstrate.
 Start at [`../README.md`](../README.md) for what Appstrate is and how to install
 it; start here when you need the detail behind a subsystem.
 
+## Public documentation
+
+[**site/**](./site/) is the public documentation at <https://docs.appstrate.com>: get started, features,
+integrations, self-hosting, API guides, resources. It is maintained here, next to the code it describes, so a
+change that alters behaviour updates its page in the same pull request. [**web/**](./web/) is the site itself,
+a static Next.js export with its own `package.json` and lockfile, outside the workspaces and `bun run check`.
+It also publishes [ENV.md](./ENV.md) as the "Environment Variables" page and generates the API reference from
+the OpenAPI document of the same commit, so neither is written in `site/`.
+`.github/workflows/docs-site.yml` builds it on every pull request that touches the docs or the API spec and
+deploys it to Cloudflare Pages. Read `site/README.md` before adding a page.
+
 ## Reference
 
 - [**ENV.md**](./ENV.md) — every environment variable, with defaults and notes. Kept in sync with the `@appstrate/env` Zod schema, which is the source of truth.

@@ -82,8 +82,15 @@ describe("buildPreviewCsp", () => {
       expect(copy).toContain("connect-src 'none'");
       expect(copy).toContain("form-action 'none'");
       expect(copy).toContain("base-uri 'none'");
-      expect(copy).toContain("frame-ancestors https://app.example");
     }
+    expect(csp.header).toContain("frame-ancestors https://app.example");
+  });
+
+  it("keeps the directives a meta context ignores off the meta copy", () => {
+    // Browsers log each one as a console error on every HTML preview.
+    const { meta } = buildPreviewCsp("https://app.example");
+    expect(meta).not.toContain("frame-ancestors");
+    expect(meta).not.toContain("sandbox");
   });
 
   it("sandboxes the header copy into an opaque origin", () => {

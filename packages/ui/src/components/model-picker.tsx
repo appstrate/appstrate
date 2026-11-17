@@ -127,9 +127,7 @@ export function ModelPickerList({
                   </div>
                 )}
               </div>
-              <Check
-                className={cn("mt-0.5 size-3.5", value === null ? "opacity-100" : "opacity-0")}
-              />
+              <Check className={cn("mt-0.5", value === null ? "opacity-100" : "opacity-0")} />
             </CommandItem>
           </CommandGroup>
         )}
@@ -173,10 +171,7 @@ export function ModelPickerList({
                       )}
                     </div>
                     <Check
-                      className={cn(
-                        "mt-0.5 size-3.5",
-                        model.id === value ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("mt-0.5", model.id === value ? "opacity-100" : "opacity-0")}
                     />
                   </CommandItem>
                 );
@@ -234,7 +229,7 @@ export function ModelPicker({
               </span>
             )}
           </span>
-          <ChevronsUpDown className="text-muted-foreground size-4 shrink-0" />
+          <ChevronsUpDown className="text-muted-foreground shrink-0" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 p-0">

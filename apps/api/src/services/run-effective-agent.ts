@@ -8,7 +8,7 @@
  * published `package_versions` snapshot and stamps the concrete semver on
  * `runs.version_ref` (`"draft"` when the working copy runs). Every runtime
  * surface that consults the agent manifest AFTER kickoff — the sidecar
- * credential guards, the mcp-server bundle guard, finalize's output-schema
+ * credential guards, the integration bundle guard, finalize's output-schema
  * validation — must read that SAME definition. Re-reading the mutable draft
  * lets a post-publish draft edit retroactively change a pinned run's
  * authorization set or output contract: a dependency removed from the draft

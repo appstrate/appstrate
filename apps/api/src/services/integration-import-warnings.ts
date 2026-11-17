@@ -4,15 +4,16 @@ import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
 import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { normalizeMime } from "@appstrate/core/mime";
 import { headerNamed } from "@appstrate/afps-shared/request-template";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
- * retired (`tools` → `mcp_servers`, `providers` → `integrations`).
+ * retired (`tools` → declared inline on a local integration, `providers` → `integrations`).
  *
  * Author input carrying one is REJECTED upstream by `validateManifest` — this
  * channel exists for the other direction: a manifest the platform already holds
  * (a published, integrity-checked artifact re-ingested through a bundle) cannot
- * be repaired in place, so it is validated with `retiredRuntimeTools: "drop"`
+ * be repaired in place, so it is validated with `retiredDependencyKeys: "tolerate"`
  * and keeps its retired key. The key is inert (no reader has ever read it), so
  * nothing is stripped and nothing breaks — but the operator should learn that
  * the dependencies declared under it were never honoured, and that a republish
@@ -23,8 +24,8 @@ import { headerNamed } from "@appstrate/afps-shared/request-template";
  */
 export function collectRetiredDependencyKeyWarnings(manifest: unknown): string[] {
   return findRetiredDependencyKeys(manifest).map(
-    ({ key, replacement }) =>
-      `dependencies.${key} is a retired AFPS 1.x key (renamed to dependencies.${replacement}) and is ignored — republish to remove it`,
+    ({ key, guidance }) =>
+      `dependencies.${key} is a retired key (${guidance}) and is ignored — republish to remove it`,
   );
 }
 
@@ -65,15 +66,19 @@ interface LoginShape {
 /**
  * Warn on a `connect.login` that posts a form and declares no `success_criteria`. Any 2xx then
  * counts as success, and a web app commonly answers a wrong password with `200` and its login
- * page: the connection would be stored with a dead session. Pure; `[]` for any other manifest.
+ * page: the connection would be stored with a dead session. An oauth2 login is a token request
+ * whose answer is judged as a token response, so it declares no criteria. Pure; `[]` for any
+ * other manifest.
  */
 export function collectLoginCriteriaWarnings(manifest: unknown): string[] {
   const auths = (manifest as { auths?: unknown } | null)?.auths;
   if (typeof auths !== "object" || auths === null) return [];
   const warnings: string[] = [];
   for (const [key, auth] of Object.entries(auths)) {
-    const login = (auth as { connect?: { login?: LoginShape } } | null)?.connect?.login;
+    const declared = (auth ?? {}) as { type?: unknown; connect?: { login?: LoginShape } };
+    const login = declared.connect?.login;
     if (!login?.request || (login.success_criteria?.length ?? 0) > 0) continue;
+    if (acquiresByConnectLogin(declared)) continue;
     const header = headerNamed(login.request.headers ?? {}, "content-type");
     if (
       normalizeMime(header ?? login.request.content_type) !== "application/x-www-form-urlencoded"

@@ -1,0 +1,174 @@
+---
+title: Webhooks
+description: Receive signed HTTP callbacks when runs start, finish or cannot start.
+---
+
+Webhooks notify your systems when something happens to a run. They follow the [Standard Webhooks](https://www.standardwebhooks.com/) conventions: JSON events, HMAC-SHA256 signatures, retries and delivery history.
+
+Webhooks are provided by the `webhooks` module, which is in the default `MODULES` list. If an operator removes it, `/api/webhooks` answers `404` and the web app hides the Webhooks pages.
+
+## Scope: space or organization
+
+A webhook is attached to one of two levels:
+
+| `level` | Fires for                               | Created with                   | Permission                        |
+| ------- | --------------------------------------- | ------------------------------ | --------------------------------- |
+| `space` | Runs of one space (`spaceId`)           | `webhooks:write` in that space | `admin` and `builder` space roles |
+| `org`   | Runs of every space in the organization | `org-webhooks:write`           | organization `owner` and `admin`  |
+
+Each level also has `read` and `delete` permissions. An optional `packageId` narrows the webhook to one agent. API keys can create space-level webhooks for their own space only. Org-level webhooks are session-only. Each space, and the organization itself, can hold at most 20 webhooks.
+
+## Creating a webhook
+
+```bash
+curl -X POST https://your-instance/api/webhooks \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Idempotency-Key: create-webhook-001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "space",
+    "spaceId": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+    "url": "https://example.com/hooks/appstrate",
+    "events": ["run.success", "run.failed"],
+    "payloadMode": "full"
+  }'
+```
+
+| Field         | Notes                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `level`       | `space` or `org`. Required.                                                                                                                             |
+| `spaceId`     | Required for `level: "space"`.                                                                                                                          |
+| `url`         | HTTPS only. A URL that points at a private, loopback or reserved address is refused (`blocked_url`), `localhost` and every `*.localhost` name included. |
+| `events`      | At least one value from the list below. No wildcards.                                                                                                   |
+| `packageId`   | Optional agent filter. `null` or absent means every agent in scope.                                                                                     |
+| `payloadMode` | `full` (default) or `summary`.                                                                                                                          |
+| `enabled`     | `true` by default.                                                                                                                                      |
+
+The response is the stored webhook plus the signing `secret` (`whsec_...`), **returned only once**. Update a webhook with `PATCH /api/webhooks/{id}` (merge semantics). The secret and the level cannot be changed. Deleting a webhook deletes its delivery history. `GET /api/webhooks` lists the webhooks you may read: the org-level ones by default, `spaceId=` adds one space's, and `all=true` (needs `org-webhooks:read`) spans every space. With an API key, the list is the webhooks of the key's space and these query parameters are ignored.
+
+In the web app, the **Webhooks** page creates and edits webhooks, shows the delivery history of each one, rotates the secret and sends a test ping.
+
+## Events
+
+| Event                    | Sent when                                                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `run.started`            | The run moves from `pending` to `running`.                                                                                        |
+| `run.success`            | The run finished successfully.                                                                                                    |
+| `run.failed`             | The run failed. This includes a scheduled tick that could not start, and a run stopped by the [watchdog](/features/run-liveness). |
+| `run.timeout`            | The run exceeded its timeout.                                                                                                     |
+| `run.cancelled`          | The run was cancelled.                                                                                                            |
+| `run.connection_missing` | A launch was refused because the actor lacks a usable connection to a required integration. No run exists.                        |
+| `test.ping`              | You called `POST /api/webhooks/{id}/test`. Never subscribed to, always delivered.                                                 |
+
+## Event envelope
+
+```json
+{
+  "id": "evt_0194...",
+  "object": "event",
+  "type": "run.success",
+  "apiVersion": "2026-...",
+  "timestamp": "2026-09-23T10:31:12.345Z",
+  "data": {
+    "object": {
+      "object": "run",
+      "id": "run_0194...",
+      "packageId": "@acme/support-triage",
+      "status": "success",
+      "result": { "output": { "handled": 12 } },
+      "duration": 72000
+    }
+  }
+}
+```
+
+| Field         | Description                                                                  |
+| ------------- | ---------------------------------------------------------------------------- |
+| `id`          | Event id (`evt_` prefix). The same id is reused when a delivery is retried.  |
+| `type`        | One of the events above.                                                     |
+| `apiVersion`  | The API version of the event payload.                                        |
+| `timestamp`   | When the event occurred (RFC 3339). The signing time is `webhook-timestamp`. |
+| `data.object` | The run, kept minimal on purpose.                                            |
+
+`data.object` carries `id`, `packageId` and `status` on every run event. Terminal events add `duration` (milliseconds). `run.success` adds `result` (an object holding the `output`). Failed, timed out and cancelled runs add `error` (a string). Runs of an inline agent add `package: { "ephemeral": true }`. Fetch `GET /api/runs/{id}` for everything else (input, cost, files).
+
+For `run.connection_missing`, `data.object` has `object: "run_attempt"`, the `packageId`, the `actor` (`type` and `id`) and an `errors` list. Treat it as informational: nothing was persisted.
+
+### Payload modes
+
+- `full` includes `result`. If the run object would exceed 256 KiB of serialized JSON, `result` is dropped and `resultTruncated: true` is added.
+- `summary` removes `result` and `input` from the run object. Run events do not carry `input`, so in practice only `result` goes. Read it from the API.
+
+## Verifying signatures
+
+Each delivery is a `POST` with these headers:
+
+```
+webhook-id: evt_0194...
+webhook-timestamp: 1758623472
+webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2/d+B0b2OBbtgu8=
+webhook-attempt: 1
+content-type: application/json
+```
+
+`webhook-timestamp` is the signing time in Unix seconds, and `webhook-attempt` starts at 1. The signature is `v1,` followed by the base64 HMAC-SHA256 of `webhook-id + "." + webhook-timestamp + "." + raw body`. The HMAC key is the secret without its `whsec_` prefix, **decoded as base64url**, not standard base64. Verify against the raw request body, before any JSON parsing.
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verify(secret: string, headers: Headers, rawBody: string): boolean {
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64url");
+  const content = `${headers.get("webhook-id")}.${headers.get("webhook-timestamp")}.${rawBody}`;
+  const expected = createHmac("sha256", key).update(content).digest("base64");
+  // During a rotation the header carries several space-separated signatures.
+  return (headers.get("webhook-signature") ?? "").split(" ").some((sig) => {
+    const [version, value] = sig.split(",");
+    return (
+      version === "v1" &&
+      value !== undefined &&
+      value.length === expected.length &&
+      timingSafeEqual(Buffer.from(value), Buffer.from(expected))
+    );
+  });
+}
+```
+
+Also reject deliveries whose `webhook-timestamp` is far from your clock (five minutes is a common tolerance). Delivery is at least once and not ordered: deduplicate on `webhook-id`, which a retry reuses while it increments `webhook-attempt`.
+
+## Delivery and retries
+
+Each attempt has a 15 second timeout, so answer quickly and process the event asynchronously. Redirects are never followed: a signed payload is not re-sent to another address.
+
+- A `2xx` answer is a success.
+- A `4xx` answer other than `408` and `429` is a **permanent failure**: no retry. Fix the endpoint and send a test ping.
+- A network error, timeout, redirect, `5xx`, `408` or `429` is retried, up to 8 attempts in total, with delays of 30 s, 5 min, 30 min, 1 h, 2 h, 3 h and 4 h.
+- A hostname that does not resolve is abandoned at the third attempt instead of going through all eight.
+- The destination is resolved and checked again at every delivery. One that now resolves to a private or reserved address is refused permanently.
+
+`test.ping` is a single attempt. The history of every attempt is available:
+
+```bash
+curl "https://your-instance/api/webhooks/wh_xxx/deliveries?limit=20" \
+  -H "Authorization: Bearer apst_your_key"
+```
+
+Each entry has `id`, `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, `error` and `createdAt`, newest first. Request and response bodies are not stored. Pagination follows the `Link: rel="next"` header (`startingAfter`).
+
+## Rotating the secret
+
+```bash
+curl -X POST https://your-instance/api/webhooks/wh_xxx/rotate \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "windowSeconds": 604800 }'
+```
+
+The body is optional. The response returns the new `secret`, the `secretPrevious` and `rotationWindowEndsAt`. During the window (7 days by default, 30 at most) every delivery is signed with both secrets, so you can switch your receiver without dropping events. After the window, the previous secret is retired.
+
+## Testing
+
+`POST /api/webhooks/{id}/test` queues a signed `test.ping` event with a sample run object and returns its `eventId` and `payload`. The `200` confirms the delivery was queued, not that your endpoint received it: read the outcome in the delivery history. It is sent even if the webhook is disabled.
+
+## Rate limits
+
+Writes are limited to 10 per minute, tests and rotations to 5 per minute, reads to 300 per minute.

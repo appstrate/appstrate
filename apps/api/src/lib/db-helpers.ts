@@ -4,6 +4,7 @@ import { and, eq, inArray, ne, type AnyColumn, type SQL } from "drizzle-orm";
 import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spacePackages, spaces } from "@appstrate/db/schema";
+import { findCause } from "./error-cause.ts";
 import { notFound } from "./errors.ts";
 import { logger } from "./logger.ts";
 
@@ -28,6 +29,31 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * there is no transaction to join.
  */
 export type DbOrTx = typeof db | Tx;
+
+/**
+ * Locks the organization row: the one lock that orders writes to the org's owner set and roles,
+ * the creation or conversion of its team spaces, and all-spaces sharing consent, so each
+ * of these sees the others' committed rows. NO KEY UPDATE: child inserts take FOR KEY SHARE on
+ * this row and must not queue behind it.
+ */
+export async function lockOrganizationRow(tx: Tx, orgId: string): Promise<void> {
+  const [org] = await tx
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .for("no key update");
+  if (!org) throw notFound("Organization not found");
+}
+
+/**
+ * Run `fn` in a transaction: its own on the root `db`, or a SAVEPOINT of the one `executor`
+ * already is — so a service that needs its writes atomic stays atomic alone, and joins a
+ * caller's transaction (committing or rolling back with it) when handed one. Drizzle's
+ * transaction handle nests through the same method; only the union type hides it.
+ */
+export function inTransaction<T>(executor: DbOrTx, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return (executor as typeof db).transaction(fn);
+}
 
 // --- Scoped WHERE builder ---
 
@@ -105,20 +131,12 @@ export function isUuid(value: string): boolean {
 }
 
 /**
- * True when `err`, or any error up to 5 levels down its `cause` chain, matches.
- * The walk is what makes the predicates below usable: Drizzle wraps the driver
- * error in a `DrizzleQueryError` whose own `code` is undefined, on both the
- * Tier-0 embedded driver (PGlite) and a real server (postgres.js).
+ * True when `err`, or an error down its `cause` chain, matches. The walk is what makes the
+ * predicates below usable: Drizzle wraps the driver error in a `DrizzleQueryError` whose own
+ * `code` is undefined, on both the Tier-0 embedded driver (PGlite) and a real server (postgres.js).
  */
 function someCause(err: unknown, match: (e: Record<string, unknown>) => boolean): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current !== "object") break;
-    const node = current as Record<string, unknown>;
-    if (match(node)) return true;
-    current = node.cause;
-  }
-  return false;
+  return findCause(err, match) !== undefined;
 }
 
 /** True when any error in the `cause` chain carries one of the SQLSTATE codes. */

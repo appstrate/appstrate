@@ -7,11 +7,12 @@
  */
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
-import type { useModalParam } from "../../hooks/use-modal-param";
+import type { useUrlModal } from "../../hooks/use-url-modal";
 import { usePackageDetail, useVersionDetail } from "../../hooks/use-packages";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { TextSkeleton } from "../loading-skeletons";
+import { ErrorState } from "../page-states";
 
 export function CompareWithDraftModal({
   type,
@@ -21,25 +22,32 @@ export function CompareWithDraftModal({
 }: {
   type: PackageType;
   packageId: string;
-  compare: ReturnType<typeof useModalParam>;
+  compare: ReturnType<typeof useUrlModal>;
   /** The latest version when the page already holds it: comparing it reads nothing more. */
   latestVersion?: ReturnType<typeof useVersionDetail>["data"];
 }) {
   const { t } = useTranslation("agents");
   const version = compare.value ?? undefined;
-  const { data: draft } = usePackageDetail(type, version && packageId);
+  const { data: draft, error: draftError } = usePackageDetail(type, version && packageId);
   const isLatest = version !== undefined && latestVersion?.version === version;
-  const { data: fetched } = useVersionDetail(type, packageId, isLatest ? undefined : version);
+  const { data: fetched, error: fetchedError } = useVersionDetail(
+    type,
+    packageId,
+    isLatest ? undefined : version,
+  );
   const compared = isLatest ? latestVersion : fetched;
+
+  if (version === undefined) return null;
 
   return (
     <Modal
-      open={version !== undefined}
       onClose={compare.close}
       title={t("detail.files.compareTitle", { version })}
       className="max-w-5xl"
     >
-      {draft && compared ? (
+      {draftError || fetchedError ? (
+        <ErrorState error={draftError ?? fetchedError} />
+      ) : draft && compared ? (
         <DiffTab
           type={type}
           latestVersion={compared}

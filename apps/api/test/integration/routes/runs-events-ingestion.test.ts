@@ -2,10 +2,9 @@
 
 /**
  * Regression tests for the HMAC-signed event-ingestion path:
- * `POST /api/runs/:runId/events` + `POST /api/runs/:runId/events/finalize`.
+ * `POST /api/runs/:id/events` + `POST /api/runs/:id/events/finalize`.
  *
- * Protects two fixes introduced after the stdout-JSONL → HttpSink
- * transport swap:
+ * Protects two properties of the HttpSink transport:
  *
  *   1. Ingestion + finalize MUST not crash when the platform is booted
  *      without Redis (Tier 0 dev mode). Before the `EventBuffer` +
@@ -31,13 +30,13 @@ import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, type Mock } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, llmUsage, packages, packagePersistence } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage, packages } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -163,7 +162,7 @@ function bufferedProgress(runId: string, message: string): RunEvent {
   return { type: "appstrate.progress", runId, timestamp: Date.now(), message };
 }
 
-describe("POST /api/runs/:runId/events — ingestion without Redis-specific coupling", () => {
+describe("POST /api/runs/:id/events — ingestion without Redis-specific coupling", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -247,8 +246,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
-      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
-      dataschema: "https://schemas.afps.dev/v0/events/log.written.schema.json",
+      ...buildEnvelope(runId, "output.emitted", { data: { ok: true } }, 1),
+      dataschema: "https://schemas.afps.dev/v0/events/output.emitted.schema.json",
     };
     const res = await postEvent(runId, envelope);
 
@@ -263,7 +262,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
-      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      ...buildEnvelope(runId, "output.emitted", { data: { ok: true } }, 1),
       subject: "not-modelled",
     };
     const res = await postEvent(runId, envelope);
@@ -790,7 +789,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   });
 });
 
-describe("POST /api/runs/:runId/events/finalize — complete result persistence", () => {
+describe("POST /api/runs/:id/events/finalize — complete result persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -803,10 +802,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const result = {
-      memories: [{ content: "m1" }],
       checkpoint: { step: 3 },
       output: { answer: 42 },
-      logs: [],
       status: "success",
       durationMs: 1234,
       usage: { input_tokens: 10, output_tokens: 5 },
@@ -833,9 +830,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       failed: [{ name: "outputs/big.csv", code: "file_too_large" }],
     } satisfies RunArtifactsSummary;
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts,
@@ -856,9 +851,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
     });
@@ -879,9 +872,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // timeout, i.e. a successful run reported as failed. Anything invalid
     // degrades to `undefined` (column null) instead.
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       // `status` outside the enum + `published` a string.
@@ -908,9 +899,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // finalize, so unknown keys are stripped and everything the platform DOES
     // understand is persisted.
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts: {
@@ -942,9 +931,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       code: "y".repeat(100),
     }));
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts: { status: "partial", published: 3, failed },
@@ -969,13 +956,11 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // image-trio tag rule refuses at boot except where it is blind: a floating
   // tag rebuilt on one side, a digest-pinned ref, a platform with no build
   // identity.
-  it("ignores a retired report field on the finalize body", async () => {
+  it("strips an unknown top-level key from the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
-      memories: [],
       output: null,
-      logs: [],
-      report: "# Legacy report",
+      not_a_finalize_field: { anything: true },
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
     });
@@ -1389,6 +1374,54 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.error).toMatch(/server_error/);
+  });
+
+  it("classifies a model-call failure once, at finalize, and serves it as model_error", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: {
+        code: "adapter_error",
+        message: '429 {"error":{"type":"rate_limit_error","message":"Too many requests"}}',
+      },
+      durationMs: 100,
+      usage: { input_tokens: 5, output_tokens: 1 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    // `error` keeps the provider's text verbatim; the reader branches on the classification.
+    expect(row?.error).toStartWith("429 {");
+    expect(row?.modelErrorCategory).toBe("rate_limited");
+    expect(row?.modelErrorStatus).toBe(429);
+    expect(row?.modelErrorMessage).toBe("Too many requests");
+
+    const read = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+    expect(((await read.json()) as { model_error: unknown }).model_error).toEqual({
+      category: "rate_limited",
+      retryable: true,
+      status: 429,
+      message: "Too many requests",
+    });
+  });
+
+  it("classifies nothing on a failure that is not a model call", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    // A provider-shaped text without the runner's `adapter_error` code is not read.
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: { code: "timeout", message: '429 {"error":{"message":"looks like a refusal"}}' },
+      durationMs: 100,
+      usage: { input_tokens: 5, output_tokens: 1 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.modelErrorCategory).toBeNull();
+    expect(row?.modelErrorStatus).toBeNull();
+    expect(row?.modelErrorMessage).toBeNull();
   });
 
   it("preserves success when output is null and no error is declared", async () => {
@@ -1815,7 +1848,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 // (org) runs. Skipping the field collapses every run to "system" in a
 // subscriber's fallback and silently charges runs the platform never paid for.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", () => {
+describe("POST /api/runs/:id/events/finalize — terminal broadcast params", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -2274,7 +2307,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
 // `runs.error`, but the payload is still persisted on `runs.result` — the
 // deliverable is flagged, never dropped.
 // ---------------------------------------------------------------------------
-describe("POST /api/runs/:runId/events/finalize — output-schema validation persistence", () => {
+describe("POST /api/runs/:id/events/finalize — output-schema validation persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -2289,7 +2322,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         version: "0.1.0",
         type: "agent",
         description: "Agent with a declared output schema",
-        runtime_tools: ["output"],
         output: {
           schema: {
             type: "object",
@@ -2366,8 +2398,8 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
 
   it("a platform-SYNTHESISED success still gets the `output` tool wording when the schema was unmet", async () => {
     // Lost finalize POST + container exit 0: execute-background synthesises
-    // success. Every run delivers structured output through the single `output`
-    // runtime tool, so an unmet schema fails with that tool's wording.
+    // success. A run delivers structured output only through the `output`
+    // tool, so an unmet schema fails with that tool's wording.
     const runId = await seedRunWithSink(ctx, "@test/schema-agent");
 
     await synthesiseFinalize(runId, {
@@ -2396,7 +2428,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "1.0.0",
         type: "agent",
-        runtime_tools: ["log"],
       },
     });
     const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "1.0.0" });
@@ -2424,7 +2455,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "2.0.0",
         type: "agent",
-        runtime_tools: ["output", "log"],
         output: {
           schema: {
             type: "object",
@@ -2442,7 +2472,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
           name: "@test/schema-agent",
           version: "2.0.1",
           type: "agent",
-          runtime_tools: ["log"],
         },
       })
       .where(eq(packages.id, "@test/schema-agent"));
@@ -2615,19 +2644,6 @@ describe("Postgres-poisoned values (#1501)", () => {
 
     const [log] = await readLogs(runId);
     expect(log).toMatchObject({ message: `console${FFFD}tail`, data: { text: `a${FFFD}b` } });
-  });
-
-  it("stores a memory whose trim splits a surrogate pair, the half replaced", async () => {
-    const runId = await seedRunWithSink(ctx, AGENT);
-
-    const res = await finalize(runId, { memories: [{ content: `${"a".repeat(1999)}😀` }] });
-    expect(res.status).toBe(200);
-
-    const memories = await db
-      .select()
-      .from(packagePersistence)
-      .where(eq(packagePersistence.runId, runId));
-    expect(memories.map((m) => m.content)).toEqual([`${"a".repeat(1999)}${FFFD}`]);
   });
 
   it("drains a buffered successor behind a dirty event that arrives late", async () => {

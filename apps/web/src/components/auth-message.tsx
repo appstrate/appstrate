@@ -50,11 +50,11 @@ export function AuthMessage({
     <div className="flex flex-col items-center gap-6 text-center">
       <div
         className={cn(
-          "flex h-16 w-16 items-center justify-center rounded-full",
+          "flex size-16 items-center justify-center rounded-full",
           destructive ? "bg-destructive/10" : "bg-primary/10",
         )}
       >
-        <Icon className={cn("h-8 w-8", destructive ? "text-destructive" : "text-primary")} />
+        <Icon className={cn("size-8", destructive ? "text-destructive" : "text-primary")} />
       </div>
       {(title || description) && (
         <div className="flex flex-col gap-2">

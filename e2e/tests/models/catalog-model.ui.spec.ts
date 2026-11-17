@@ -153,9 +153,10 @@ test.describe("Catalogued model — UI", () => {
 
     const dialog = await openModelSettings(page);
 
-    // The endpoint belongs to the saved row: the provider is locked, and the
-    // key it runs on is shown as a chip rather than asked for again.
-    await expect(dialog.locator("#mdl-provider")).toBeDisabled();
+    // The endpoint belongs to the saved row: the form offers no provider to change,
+    // and the key it runs on is the credential shown selected, not a secret asked for again.
+    await expect(dialog.locator("#mdl-provider")).toHaveCount(0);
+    await expect(dialog.locator("#mdl-credential")).toContainText(PROVIDER);
     await expect(dialog.getByPlaceholder("sk-...")).toHaveCount(0);
     await expect(dialog.locator("#mdl-modelId")).toHaveValue(MODEL_ID);
     // The row's numbers ARE the catalog's, so it has overridden nothing: the

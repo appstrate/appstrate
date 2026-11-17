@@ -21,7 +21,11 @@ import type {
   RefreshContext as IntegrationRefreshContext,
   RefreshExchangeResult,
 } from "@appstrate/connect";
-import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import {
+  isFixedAuthorizationServer,
+  type AfpsManifestAuth,
+} from "./integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import type { Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -281,8 +285,11 @@ type ConnectionRefreshOutcome =
 
 export type RefreshTrigger =
   | { kind: "expiring" }
-  /** Upstream rejected the credential of `revision`; `null`: the one the connection holds. */
-  | { kind: "rejected"; revision: string | null };
+  /**
+   * Upstream rejected the credential of `revision`; `null`: the one the connection holds.
+   * `handshake`: the rejected request is the MCP handshake the sidecar writes itself.
+   */
+  | { kind: "rejected"; revision: string | null; handshake?: boolean };
 
 /**
  * The one decision over a connection's credential. A rejection is evidence only against the
@@ -298,21 +305,23 @@ export async function refreshConnectionCredential(input: {
     credentialRevision: string;
   };
   integrationId: string;
-  /** The declaration of the connection's auth in the caller's manifest. */
+  /** The caller's manifest, and the declaration of the connection's auth in it. */
+  manifest: IntegrationManifest;
   authDef: AfpsManifestAuth;
   scope: SpaceScope;
   actor: Actor;
   trigger: RefreshTrigger;
 }): Promise<ConnectionRefreshOutcome> {
-  const { connection, integrationId, authDef, scope, actor, trigger } = input;
+  const { connection, integrationId, manifest, authDef, scope, actor, trigger } = input;
   const { authKey } = connection;
   const forced =
     trigger.kind === "rejected" &&
     (trigger.revision === null || trigger.revision === connection.credentialRevision);
   if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) return { status: "kept" };
 
-  // One 401 can be a transient upstream fault, or a permission error the agent provoked, so a
-  // forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
+  // One 401 on a call can be a transient upstream fault, or a permission error the agent provoked,
+  // so a forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
+  // A rejected handshake is a request no agent shapes: it flags at once.
   const unrefreshable = async (detail: string): Promise<ConnectionRefreshOutcome> => {
     const cause = "unrefreshable";
     if (!forced) return { status: "kept", cause, detail };
@@ -321,6 +330,9 @@ export async function refreshConnectionCredential(input: {
       integrationId,
       { spaceId: scope.spaceId, actor },
       connection.credentialRevision,
+      trigger.kind === "rejected" && trigger.handshake
+        ? 1
+        : getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
     );
     if (!counted) return { status: "kept" };
     if (counted.needsReconnection) return { status: "dead", cause, detail };
@@ -337,6 +349,7 @@ export async function refreshConnectionCredential(input: {
     refreshContext = await buildIntegrationOAuthRefreshContext(
       integrationId,
       authKey,
+      manifest,
       authDef,
       scope.spaceId,
       connection,
@@ -392,6 +405,8 @@ function expiresWithinLeadWindow(expiresAt: Date | null): boolean {
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
   authKey: string,
+  /** The current manifest, and the declaration of the connection's auth in it. */
+  manifest: IntegrationManifest,
   authDef: AfpsManifestAuth,
   spaceId: string,
   /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
@@ -432,8 +447,8 @@ export async function buildIntegrationOAuthRefreshContext(
     // `token_endpoint` is NOT terminal — discovery is best-effort and a routine
     // IdP/network blip would otherwise brick refresh and falsely flag the
     // connection `needsReconnection`. Surface it as TRANSIENT so the caller
-    // keeps the cached credential and retries later (resolveOAuthEndpoints no
-    // longer negatively-caches, so the next attempt re-discovers). Only a
+    // keeps the cached credential and retries later (resolveOAuthEndpoints does
+    // not cache metadata that did not answer, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
     if (issuer) {
@@ -449,10 +464,14 @@ export async function buildIntegrationOAuthRefreshContext(
     return null;
   }
 
-  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint is re-checked
-  // (its metadata may have changed). An unresolvable host is a blip; any other refusal is terminal.
+  // The token endpoint of a client's bound server is re-checked (its metadata may have changed):
+  // https is waived only for the server the manifest fixes, as at connect. Any other bound server —
+  // the user's (AFPS §8.7), even under a manifest since republished as fixed — needs it. An
+  // unresolvable host is a blip; any other refusal is terminal.
   if (boundIssuer !== undefined) {
-    const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
+    const egress = await checkEgressUrl(tokenEndpoint, {
+      requireHttpsForUntrustedHost: !isFixedAuthorizationServer(boundIssuer, manifest, authDef),
+    });
     if (!egress.ok) {
       if (egress.detail === "resolution-failed") {
         throw new RefreshError(

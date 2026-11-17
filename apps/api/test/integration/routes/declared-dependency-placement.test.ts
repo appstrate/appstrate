@@ -25,21 +25,25 @@
  * reference is never re-judged once the package appears.
  *
  * NEGATIVE CONTROL: every "is hidden" assertion below is paired with the same
- * read after ONE `package_shares` row is inserted. Without that pair the
+ * read after ONE `space_packages` row places the skill. Without that pair the
  * assertions would pass on any refusal at all, including a broken fixture.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { packageShares } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { db, truncateAll } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import {
   authHeaders,
   createTestContext,
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPublishedVersion, seedSpace } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedPublishedVersion,
+  seedSpace,
+} from "../../helpers/seed.ts";
 import { collectAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 
@@ -75,7 +79,7 @@ async function readiness(): Promise<string[]> {
 
 /** The one row that PLACES the skill where the agent lives. */
 async function offerSkillToAgentHome(): Promise<void> {
-  await db.insert(packageShares).values({ packageId: SKILL, spaceId: ctx.defaultSpaceId });
+  await seedPackageShare(ctx.defaultSpaceId, SKILL);
 }
 
 beforeEach(async () => {
@@ -216,13 +220,13 @@ describe("the anchor is the declaring agent's HOME, not the launching space", ()
   /**
    * The regression this pairs with: judging the closure against the space a run
    * starts in would break the ordinary case the sharing feature exists for — an
-   * agent OFFERED to another space must keep running there with the skills its
+   * agent placed in another space must keep running there with the skills its
    * own home placed beside it, which that space was never given.
    */
   it("resolves a skill placed at the agent's home when the run starts in another space", async () => {
     await offerSkillToAgentHome();
     const recipient = await seedSpace({ orgId: ctx.orgId, name: "Recipient" });
-    await db.insert(packageShares).values({ packageId: AGENT, spaceId: recipient.id });
+    await seedPackageShare(recipient.id, AGENT);
 
     const agent = await getPackage(AGENT, ctx.orgId);
     const { errors } = await collectAgentReadiness({

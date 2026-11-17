@@ -687,6 +687,69 @@
       "when": 1791978176918,
       "tag": "0097_org_logo",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792046443974,
+      "tag": "0098_run_model_error",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792150175832,
+      "tag": "0099_connection_share_all_spaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1792160000000,
+      "tag": "0100_space_packages_shared_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792160060000,
+      "tag": "0101_identity_appearance",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792240060000,
+      "tag": "0102_integration_pin_additions",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1794587121381,
+      "tag": "0103_run_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1794700000000,
+      "tag": "0104_space_credential_proxy_open",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1794753815682,
+      "tag": "0105_notification_agent_message",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1794773354130,
+      "tag": "0106_package_type_without_mcp_server",
+      "breakpoints": true
     }
   ]
 }

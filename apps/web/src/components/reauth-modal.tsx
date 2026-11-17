@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FormModal } from "./form-modal";
 import { Modal } from "./modal";
+import { FormItem } from "@/components/app-ui/form-item";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { useAuth } from "../hooks/use-auth";
 import type { ReauthMethod } from "../lib/reauth-methods";
 import { errorMessage } from "../lib/mutation-error";
@@ -54,48 +54,63 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
     }
   };
 
-  return (
-    <Modal open={open} onClose={handleClose} title={t("preferences.reauthTitle")}>
-      <div className="space-y-4">
-        <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
+  if (!open) return null;
 
-        {methods.length === 0 ? (
-          <div className="space-y-4">
-            <p className="text-muted-foreground text-sm">{t("preferences.reauthFallback")}</p>
+  const social = socialMethods.map((method) => (
+    <SocialSignInButton
+      key={method.provider}
+      provider={method.provider}
+      callbackURL="/preferences"
+      disabled={submitting}
+    />
+  ));
+  const description = (
+    <p className="text-muted-foreground text-sm">{t("preferences.reauthDescription")}</p>
+  );
+
+  if (!passwordMethod) {
+    return (
+      <Modal
+        onClose={handleClose}
+        title={t("preferences.reauthTitle")}
+        actions={
+          methods.length === 0 ? (
             <Button onClick={() => logout("/login")}>{t("login.login")}</Button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {passwordMethod && (
-              <form onSubmit={onPasswordSubmit} className="space-y-3">
-                <div className="space-y-2">
-                  <Label>{t("preferences.reauthPassword")}</Label>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    autoFocus
-                  />
-                </div>
-                <FieldError>{error}</FieldError>
-                <Button type="submit" pending={submitting}>
-                  {t("preferences.reauthConfirm")}
-                </Button>
-              </form>
-            )}
+          ) : undefined
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {description}
+          {methods.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t("preferences.reauthFallback")}</p>
+          ) : (
+            social
+          )}
+        </div>
+      </Modal>
+    );
+  }
 
-            {socialMethods.map((method) => (
-              <SocialSignInButton
-                key={method.provider}
-                provider={method.provider}
-                callbackURL="/preferences"
-                disabled={submitting}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </Modal>
+  return (
+    <FormModal
+      onClose={handleClose}
+      title={t("preferences.reauthTitle")}
+      onSubmit={onPasswordSubmit}
+      isPending={submitting}
+      error={error || null}
+      submitLabel={t("common:btn.confirm")}
+    >
+      {description}
+      <FormItem id="reauth-password" label={t("common:claim.passwordLabel")}>
+        <Input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          autoFocus
+        />
+      </FormItem>
+      {social}
+    </FormModal>
   );
 }

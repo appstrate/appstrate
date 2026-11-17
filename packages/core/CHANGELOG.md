@@ -9,18 +9,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AuthResolution.serverMinted`** (`@appstrate/core/module`): declares the bearer a strategy
+  verified a server-minted one (process-local secret, never reachable from a browser). The
+  credential proxy accepts it like an allowlisted bearer; `firstPartyLoopback` stays the one
+  capability the LLM proxy admits. The chat's platform-MCP bearer declares it, so the chat is
+  offered the MCP integration tools.
+
+- **`ToolIntegration`** (`@appstrate/core/integration`, #2233): `{ id, tool, title? }`, the
+  integration tool a run's tool call reached, as its `appstrate.progress` events carry it in
+  `data.integration`.
+
+### Fixed
+
+- **`createAjv`** (`@appstrate/core/ajv`) no longer registers ajv-formats' `formatMinimum` /
+  `formatMaximum` / `formatExclusive*` keywords: they are not JSON Schema 2020-12 and threw a
+  `TypeError` at validation time. All formats stay.
+
+### Removed
+
+- **`bundleMcpServer`, `BundleMcpServerInput`, `BundleMcpServerResult`, `BundlerError`,
+  `BunCompatProbeResult`, `BunProbeOptions`, `probeBunCompat`, `DOS_EPOCH_MS`,
+  `packDeterministicZip`, `rewriteManifestForDistribution`, `suggestBundleFileName`,
+  `readVendorSource`, `VendorSource`, `VendorResult`, `VENDOR_META_KEY`,
+  `SOURCE_RESOLUTION_META_KEY`, `SourceResolution`, `vendorNpmPackage`, `vendorPypiPackage`,
+  `resolveNpmVersion`, `resolvePypiVersion`, `pickNpmEntryPoint`, `pickPypiEntryPoint`,
+  `NpmInstallSpec`, `NpmRegistryVersion`, `NpmVendorDeps`, `PypiInstallSpec`, `PypiVendorDeps`,
+  `FetchPypiFn`, `FetchRegistryFn`, `InstallPackageFn`, `InstallPypiFn`** — BREAKING. The whole
+  **`@appstrate/core/mcp-server-bundle`** subpath (the npm/pypi vendoring bundler for `mcp-server`
+  archives) is deleted: the `mcp-server` package type is folded into the `local` integration
+  (AFPS 0.13, `@afps-spec/schema` `^0.13.0`, #2220). A `local` source declares its MCP server
+  inline (`source.server`: `type`, `entry_point`, `mcp_config`, advisory `tools`) and the server
+  payload ships in the integration's own archive.
+- **`mcpServerManifestSchema`, `McpServerManifest`, `mcpServerSchema`** — BREAKING
+  (`@appstrate/core/mcp-server`, `@appstrate/core/validation`, `@appstrate/core/schemas`), with
+  `schema/mcp-server.schema.json`. The `mcp-server` value leaves `PackageType`,
+  `AFPS_SCHEMA_URLS`, `PACKAGE_TYPE_ROUTE_SEGMENT`, `PACKAGE_CONTENT_ENTRY` (every entry is now
+  non-null, so `PACKAGE_CONTENT_FILE` is `Record<PackageType, string>`) and the permission
+  resource `mcp-servers` (`mcp-servers:read|write|delete|share`).
+- **`getMcpServerMcpConfigEnv`, `renderMcpConfigEnv`** — BREAKING (`@appstrate/core/mcp-server`):
+  the `${user_config.*}` bridge is gone (no `user_config`, no `delivery.env.*.user_config_key`).
+  The literal `mcp_config.env` is read with `getLocalServerEnv` (`@appstrate/core/integration`, see Added).
+- **`dependencies.mcp_servers`** — BREAKING. It leaves `Dependencies` and `extractDependencies`
+  (`DepEntry.depType` is `"skill" | "integration"`); no reader reads it any more, so a manifest
+  still carrying it validates and the key is inert. A local MCP server is declared inline on its
+  integration (`source.server`). `RetiredDependencyKeyUse` carries `guidance` (a sentence) instead
+  of `replacement`.
+- **`@appstrate/core/mcp-server-meta`** — BREAKING. The subpath is removed; every export
+  (`MCP_SERVER_APPSTRATE_META_KEY`, `MCP_SERVER_RUNTIME_CAPABILITIES`, `MCP_SERVER_RUNTIMES`,
+  `McpServerRuntime`, `isMcpServerRuntime`, `getMcpServerRuntime`, `effectiveMcpServerType`)
+  is imported from `@appstrate/core/mcp-server`.
+- **The `mcpServerTools` input** — BREAKING — of `resolveIntegrationToolCatalog`,
+  `findUnexposedDefaultTools` and `validateAgentIntegrationScopes`: a local source's catalog is
+  its own `source.server.tools`.
+
+### Changed
+
+- **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
+  `agentManifestSchema` does not declare it: `runtime_tools` is an undeclared key, which nothing
+  reads. The option that tells the author and stored directions apart covers the retired
+  `dependencies` keys only, and is renamed: `RetiredRuntimeToolsPolicy` → **`RetiredDependencyKeysPolicy`**,
+  `ValidateManifestOptions.retiredRuntimeTools` /
+  `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredDependencyKeys`**, with the values
+  `"reject"` and **`"tolerate"`** (was `"drop"`).
+
+- **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
+  #2199). `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
+  (`"^1.0.0"`) is added when
+  `dependencies.integrations` does not name that id, and
+  `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
+  table names it; the caller's own entries are kept. An absent `output` defaults to the open
+  object schema. The `runtime_tools` default and the refusal of a non-array
+  `manifest.runtime_tools` are removed.
+
+- **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
+  the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
+  resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
+  chat injects the bytes `resources/read` answers. A `loadEnforcedChatSkills` implementation
+  returns both. (#2175)
+
+- **BREAKING: `@appstrate/core/runtime-tool-defs` is removed** (#2197, #2199), with
+  `buildRuntimeToolDefs`, `BuildRuntimeToolDefsOptions`, `buildOutputToolDef`,
+  `buildPublishFileDef`,
+  `filePublishedEvent`, `FilePublishedEvent`, `FileUploader`, `PublishedFile`, `RuntimeToolDef`,
+  `RuntimeToolEvent`, `RuntimeToolResult`, `RUNTIME_TOOL_EVENTS_META_KEY`,
+  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`. `output` and
+  `publish_file` are harness tools of `@appstrate/runner-pi`; `log`, `note` and `pin` are tools
+  of the `@appstrate/platform` system integration; the `_meta["dev.appstrate/events"]` channel
+  is gone. `output` exists exactly when `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`) finds a schema.
+
+- **BREAKING: `@appstrate/core/runtime-tools-catalog` and `@appstrate/core/runtime-event-drain`
+  are removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
+  `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
+  `RuntimeToolCatalogEntry`, `isSelectableRuntimeTool`, `canonicalizeRuntimeToolIds`,
+  `CanonicalizedRuntimeToolIds`, `createRuntimeEventDrainer`, `drainAndEmitInto`,
+  `RuntimeEventDrainer`, `RuntimeEventDrainerOptions`, `DrainOptions`, `DrainAndEmitOptions` and
+  `DrainLogger`. `SidecarLaunchSpec.outputSchema` and `SidecarLaunchSpec.runtimeTools`
+  (`@appstrate/core/sidecar-types`) are removed.
+
+- **BREAKING: `dropRetiredRuntimeTools`, `ValidateManifestResult.droppedRuntimeTools` and
+  `ParsedPackageZip.droppedRuntimeTools` are removed** (`@appstrate/core/validation`, #2199):
+  nothing drops `runtime_tools` any more, since nothing reads it.
+
+### Added
+
+- **`@appstrate/core/integration`**: `platformToolName(tool)`, the exposed name of a tool of
+  `@appstrate/platform`; `getIntegrationSourceKind` and `getRemoteSource`, the readers of an
+  integration manifest's `source`.
+
+- **`INLINE_MANIFEST_RULE`** (`@appstrate/core/run-and-wait-client`, #2203): the sentence
+  describing the defaults `run_and_wait` applies to an inline manifest, for the tool descriptions
+  and prompts that state it. (#2203)
+
+- **`PLATFORM_INTEGRATION_ID`** and **`PLATFORM_INTEGRATION_RANGE`**
+  (`@appstrate/core/integration`, #2199): `"@appstrate/platform"`, the id of the system
+  integration that ships the run tools, and `"^1.0.0"`, the range under which the manifests the
+  platform writes on an author's behalf declare it; `isRuntimeBoundIntegration` never reads
+  either.
+
+- **Runtime-bound integrations** (`@appstrate/core/integration`, #2199).
+  **`PLATFORM_META_KEY`** (`"dev.appstrate/platform"`) is the `_meta` key that binds an
+  integration's MCP endpoint to the runtime executing the run; `integrationManifestSchema`
+  accepts it only on an integration without `auths` and with `source.kind: "remote"`.
+  **`isRuntimeBoundIntegration(manifest)`** is the one predicate that reads it (its value must
+  be a JSON object, AFPS §10.1: `null` binds nothing), and
+  **`findRuntimeBinding(manifest)`** is its write-path refusal for packages the platform did not
+  ship.
+
+- **`resolveIntegrationToolCatalog`** takes **`listedTools`**: the tools the running server
+  listed, which stand for the catalog when the caller passes them (a remote source with
+  `allow_undeclared_tools`).
+- **Local server accessors** (`@appstrate/core/integration`, `@appstrate/core/mcp-server`):
+  **`LocalServer`**, **`getLocalServer(manifest)`** and **`getLocalServerTools(manifest)`** read
+  `source.server` of a `local` integration (`null` unless it carries `type`, `entry_point` and an
+  `mcp_config` object with a string `command`); **`getLocalServerEnv(manifest)`** (in
+  `@appstrate/core/integration`, `{}` for any other source) returns its literal
+  `mcp_config.env`. `getMcpServerRuntime`, `effectiveMcpServerType` and
+  `getMcpServerWorkspaceMount` now read the INTEGRATION manifest (`source.server` and its `_meta`),
+  whose schema validates the `dev.appstrate/workspace` and `dev.appstrate/mcp-server` hints.
+  `findUnexposedDefaultTools` is complete for a local source declaring `source.server.tools`. A
+  `local` integration archive lacking `source.server.entry_point` is refused where archives are
+  validated (`LOCAL_SERVER_MISSING_ENTRY_POINT`, replacing `MCP_SERVER_MISSING_ENTRY_POINT`).
+- **`allowsUndeclaredTools(manifest)`** (`@appstrate/core/integration`): whether an integration
+  declares `allow_undeclared_tools: true` (AFPS §7.8), the one reader of that flag for core and the
+  platform (#2206).
+- **`ApiError.with(changes)`** (`@appstrate/core/api-errors`): the same error with a new `detail`,
+  `errors`, `extensions` or `cause`, every other member carried over (`retryAfter`, headers) (#2206).
+- **`@appstrate/core/list-query`**: **`parseListPagination`**, **`parseListLimit`** (keyset lists: `limit`
+  only), **`listResponse`**, **`ListEnvelope`** and **`ListPagination`**, so a module validates
+  `limit` / `offset` (400 naming the parameter) and builds the list envelope as the platform does.
+- **`@appstrate/core/model-error`: a structured reason beside the category.**
+  **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
+  optional `reason` on `ModelErrorClassification` that `classifyModelError` and
+  `describeModelFailure` set when a `<status> <JSON body>` refusal names a known
+  `error.details.error_code` (Anthropic's `claude_code_version_too_old`). The category, its
+  `retryable` and the five persisted categories are unchanged. `AppstrateTurnMetadata`
+  (`@appstrate/core/chat-turn-metadata`) gains the optional `errorReason`. (#2148)
+- **`@appstrate/core/skill-uri`**: the `skill://` URIs of the MCP Skills extension (SEP-2640)
+  as Appstrate serves them — **`SKILL_URI_PREFIX`**, **`skillFileUri`**, **`parseSkillUri`**
+  (the canonical spelling only, a file path `isSafeArchivePath` accepts, a valid skill name),
+  **`parseSkillUriPackage`** (the package and definition of a URI, from its package segments),
+  the SEP-2640 size limits **`SKILL_MAX_FILES`** (512) and **`SKILL_MAX_TOTAL_BYTES`** (16 MiB),
+  **`skillFileDigest`** (the `sha256:<hex>` digest of a served file, one computation for the
+  server, the chat and the CLI),
+  the `_meta` keys **`SKILL_DEFINITION_META_KEY`** (`dev.appstrate/definition`, a `skills/list`
+  of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lock_version`, the draft an
+  entry was read from), and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
+- **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
+- **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
+  the RJSF validator registers the same formats and client and server agree.
+
+- **Unauthenticated integrations** (`@appstrate/core/integration`, AFPS §7.2):
+  **`isUnauthenticatedIntegration(manifest)`** — the manifest omits `auths`, so it binds no
+  connection; **`findConnectionlessVariables`**, a write-path refusal of `variables` on such an
+  integration, which no connection could hold. `IntegrationSpawnSpec.connection` is absent for
+  one. (#2075)
+
+- **`acquiresByConnectLogin(auth)`** (`@appstrate/core/integration`): true for an `oauth2` auth
+  declaring `connect.login` (AFPS §7.7, afps-spec/afps-spec#44) — its first token is acquired by
+  a token request to `token_endpoint` carrying the grant the user submits, instead of the
+  authorization-code flow. `integrationManifestSchema` no longer asks such a login for `outputs`:
+  that rule, and the delivery gating that reads them, stay on `custom` auths.
+- **`isReservedScope(scope)`** and **`INLINE_SHADOW_SCOPE`** (`@appstrate/core/naming`):
+  the package scopes the platform owns — `appstrate` (system packages) and `inline`
+  (inline runs' shadow packages, `@inline/r-<uuid>`). The API refuses a reserved scope both as
+  an organization slug and as the scope of an organization package.
+- **`describeModelFailure`** and **`MODEL_ERROR_CATEGORIES`** (`@appstrate/core/model-error`):
+  one failed model call's text read once into `{ category, retryable, status?,
+providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
+  server-side — and the category vocabulary as a runtime tuple.
+- **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
+  manifest, the failures structured as **`ManifestIssue`** `{ path, message }` beside the `errors`
+  strings. **`ValidationFieldError.line` / `.column`**
+  (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
-  agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
-  `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
-- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
-  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
-  other Iconify id, or image URL), `null` when no surface can draw it;
-  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
-- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
-  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+  agent's identity tile, `{ icon, color }`, both always present — the manifest
+  `icon` when it is a non-empty string, else `null`, and the `color` under
+  `_meta[AGENT_UI_META_KEY]` when it is a palette key (`isAppearanceColor`),
+  else `null` (derived from the agent id).
+- **`@appstrate/core/appearance`**: the one grammar of a visual identity
+  (agent, space, organization). **`parseIcon(value)`** reads an `icon` as an
+  **`AppearanceIcon`** (`lucide` name, other Iconify id, image URL, or
+  `emoji:<text>`), `null` when no surface can draw it — leniently: an `emoji:`
+  value is drawn as written when it carries a pictograph, a regional indicator
+  or a keycap and holds no whitespace within 32 UTF-16 units, read with `u`-flag
+  expressions only, so the module loads and reads on browsers that cannot
+  compile a `v`-flag one. The prefixes
+  **`LUCIDE_ICON_PREFIX`** and **`EMOJI_ICON_PREFIX`**;
+  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (beyond 32
+  UTF-16 units, before any work), only U+FE0F added or removed: a superfluous
+  one dropped, a missing one inserted after each text-default pictograph or
+  keycap base (`👍️` → `👍`, `❤` → `❤️`, `1⃣` → `1️⃣`, `👁‍🗨` → `👁️‍🗨️`), its
+  `\p{RGI_Emoji}` expression compiled on first call. The palette
+  **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
+  **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
+  and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
+  image: **`isIconImage(value)`**, a base64 data URI of one of
+  **`ICON_IMAGE_TYPES`** (`image/webp`, `image/png`) whose bytes are that type,
+  within **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`**
+  (256 px), its type and size read by **`imageSize(bytes)`** (a WebP's first
+  chunk, a PNG's `IHDR`). The write-side Zod schemas
+  **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
+  `emoji`, `image`, at most **`ICON_MAX_LENGTH`** (16 384) characters; it
+  parses an emoji to its RGI form) and
+  **`appearanceColorSchema`**.
 - **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
   an MCP tool result — a `CallToolResult`, a bare content array or a JSON
   string — recovered even when a prose text part (the turn-budget note) follows
@@ -54,8 +269,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`extensionForMime`**: `image/jpeg` now returns `jpg` (platform-named inline inputs: `.jpeg` → `.jpg`) and `image/svg+xml` returns `svg` (was `xml`). (#2120)
+- **Requires `@afps-spec/schema` `^0.12.0`** (was `^0.10.0`): `auths` is optional (AFPS §7.2,
+  an empty map stays invalid); a `{$credential.<field>}` in `source.remote.url` stays invalid.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_key_on_unauthenticated_integration`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the agent sets an
+  `auth_key` on an integration that declares no auth method (AFPS §4.4 MUST), which it may have
+  lost after the agent was saved. Always an error, carrying `requiredAuthKey`: no connection
+  clears it. Exhaustive switches over the union must handle it.
+- **BREAKING: `IntegrationSpawnSpec.manifest.server.vendored` and `IntegrationBootReport.spawned[].vendored`
+  removed** (`@appstrate/core/sidecar-types`): no spawn spec ever carried the field to the
+  sidecar, so the boot report never set it. The AFPS manifest field `source.server.vendored` is
+  unchanged.
 - **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
   type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `connection_set_too_large`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the set an
+  admin pin or an enforced org default imposes plus the connections a selection
+  adds to it would bind more than `MAX_CONNECTIONS_PER_INTEGRATION`; the union is
+  refused, never truncated. `source` is the adding layer and `boundConnectionIds`
+  the deduped union. An imposed set is no longer narrowed: a launch override
+  naming only its members, or `[]`, adds nothing and the whole set binds;
+  `override_outranked` now means an override adding a connection to a set that
+  allows no addition. Exhaustive switches over the union must handle it. (#2043)
+- **BREAKING: `OVERRIDE_REFUSAL_CODES` / `OverrideRefusalCode` lose
+  `required_integration_unbound`** (`@appstrate/core/integration`) — `[]` on a
+  `required` integration is no longer refused at the write: under an imposed set
+  it adds nothing and the set satisfies the integration. Where nothing imposes
+  one, resolution answers `required_integration_unbound` (a
+  `ConnectionResolutionErrorCode`, unchanged) as a 409 item instead. (#2043)
+
+### Fixed
+
+- **`schema/*.schema.json`** (`@appstrate/core/schemas`) are generated from the JSON Schemas
+  `@afps-spec/schema` publishes, plus the fields core redefines, instead of from the Zod schemas
+  alone, which dropped the cross-field rules AFPS writes in JSON Schema. The integration schema
+  now refuses what its Zod schema refuses — an empty `auths` map, a `none` source or
+  `required_scopes` without `auths`, among others — and the mcp-server schema keeps
+  `manifest_version: "0.4"` for a `uv` server.
 
 ## [16.0.0] — 2026-10-14
 

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The role editor's dependent permissions. The server refuses a role missing
- * a read; the picker applies the vocabulary's `requires_one_of` before the save instead.
- */
+// The server refuses a role missing a read; the picker applies `requires_one_of` before the save.
 
 import type { components } from "../api/client";
 import { permissionLabel } from "./permission-labels";
@@ -11,11 +8,7 @@ import { permissionLabel } from "./permission-labels";
 export type RoleVocabularyEntry =
   components["schemas"]["RoleVocabularyGroup"]["permissions"][number];
 
-/**
- * `selected` with the read of every selected entry held: what ticking an action adds, and
- * what unticking a read a selected action depends on alone cannot remove. The first of
- * `requires_one_of` is the one added, when none is held yet.
- */
+/** `selected` plus the read each selected entry needs; the first of `requires_one_of` is added when none is held. */
 export function withRequiredReads(
   selected: ReadonlySet<string>,
   entries: readonly RoleVocabularyEntry[],

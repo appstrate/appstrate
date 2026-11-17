@@ -382,7 +382,7 @@ describe("lookup — segment by segment, as Hono matches", () => {
   // Each case below was checked against Hono itself: the guard answers 403 on
   // a concrete request exactly where the table reports it.
   const table = tableOf((sub) => {
-    sub.use("/spaces/:spaceId/*", requirePermission("spaces", "read"));
+    sub.use("/spaces/:id/*", requirePermission("spaces", "read"));
     sub.get("/spaces/:id/members", ok);
     sub.get("/spaces/current/members", ok);
     sub.get("/spaces/:id", ok);

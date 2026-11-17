@@ -9,8 +9,17 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { useShallow } from "zustand/react/shallow";
 import { breadcrumbStore, visibleTrail } from "@/stores/breadcrumb-store";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { useOverlayPath } from "@/lib/modal-route";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@appstrate/ui/components/breadcrumb";
 
 /**
  * The header's slot elements. The trail is drawn twice (the desktop row and the
@@ -36,14 +45,6 @@ export function ShellTrailContent({ children }: { children: ReactNode }) {
   ));
 }
 
-function Separator() {
-  return (
-    <span className="text-border shrink-0 select-none" aria-hidden>
-      /
-    </span>
-  );
-}
-
 export function ShellBreadcrumb() {
   const { t } = useTranslation("common");
   const overlayOpen = useOverlayPath() !== null;
@@ -52,33 +53,40 @@ export function ShellBreadcrumb() {
     useShallow((s) => visibleTrail(s, overlayOpen)),
   );
   const canReach = useCanReach();
+  useDocumentTitle(entries);
 
   return (
-    <nav
+    <Breadcrumb
       aria-label={t("nav.breadcrumb")}
-      className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm"
+      data-trail
+      className="flex min-w-0 flex-1 overflow-hidden"
     >
-      {entries.map((crumb, i) => (
-        <Fragment key={i}>
-          {i > 0 && <Separator />}
-          {crumb.slot ? (
-            <span ref={registerTrailSlot} className="flex min-w-0" />
-          ) : crumb.href && canReach(crumb.href) ? (
-            <Link
-              to={crumb.href}
-              className="text-muted-foreground hover:text-foreground truncate transition-colors"
-            >
-              {crumb.label}
-            </Link>
-          ) : crumb.href ? (
-            // A parent the caller may not open: named, not linked.
-            <span className="text-muted-foreground truncate">{crumb.label}</span>
-          ) : (
-            // Last segment: where you are, so it carries the weight.
-            <span className="truncate font-semibold">{crumb.label}</span>
-          )}
-        </Fragment>
-      ))}
-    </nav>
+      <BreadcrumbList className="min-w-0 flex-nowrap gap-1.5 sm:gap-1.5">
+        {entries.map((crumb, i) => (
+          <Fragment key={i}>
+            {i > 0 && (
+              <BreadcrumbSeparator className="text-border shrink-0 select-none">
+                /
+              </BreadcrumbSeparator>
+            )}
+            <BreadcrumbItem className="min-w-0">
+              {crumb.slot ? (
+                <span ref={registerTrailSlot} className="flex min-w-0" />
+              ) : crumb.href && canReach(crumb.href) ? (
+                <BreadcrumbLink asChild className="truncate">
+                  <Link to={crumb.href}>{crumb.label}</Link>
+                </BreadcrumbLink>
+              ) : crumb.href ? (
+                // A parent the caller may not open: named, not linked.
+                <span className="truncate">{crumb.label}</span>
+              ) : (
+                // Last segment: where you are, so it carries the weight.
+                <BreadcrumbPage className="truncate font-semibold">{crumb.label}</BreadcrumbPage>
+              )}
+            </BreadcrumbItem>
+          </Fragment>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 }

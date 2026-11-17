@@ -118,7 +118,14 @@ function gmailManifest(tokenUrl: string): IntegrationManifest {
     name: PACKAGE_ID,
     version: "1.0.0",
     display_name: "Gmail",
-    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       primary: {
         type: "oauth2",
@@ -191,6 +198,7 @@ function refreshOf(
   return refreshConnectionCredential({
     connection: { ...target, authKey: "primary" },
     integrationId: PACKAGE_ID,
+    manifest: gmailManifest(token.url),
     authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
     scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     actor: { type: "user", id: ctx.user.id },
@@ -308,6 +316,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     const outcome = await refreshConnectionCredential({
       connection: { ...(await readTarget(connId)), authKey: "primary" },
       integrationId: PACKAGE_ID,
+      manifest: gmailManifest(token.url),
       authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
       scope: { orgId: ctx.orgId, spaceId: other.id },
       actor: { type: "user", id: ctx.user.id },

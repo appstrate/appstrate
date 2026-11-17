@@ -3,7 +3,6 @@
 import type { OrgRole } from "@appstrate/shared-types";
 import { hasFullOrgAccess } from "./org-role";
 
-/** Who is asking: the signed-in user, their (effective) org role, and what they hold here. */
 interface ScheduleCaller {
   userId: string | undefined;
   orgRole: OrgRole | null;
@@ -11,7 +10,6 @@ interface ScheduleCaller {
   canCreateApiKeys: boolean;
 }
 
-/** The identity a schedule runs as: exactly one of the two, as the schedule row carries them. */
 interface ScheduleActor {
   userId?: string | null;
   endUserId?: string | null;

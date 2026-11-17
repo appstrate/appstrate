@@ -22,9 +22,9 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildApiCallExtensionFactory,
-  buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
+  type RuntimeEventEmitter,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
@@ -35,8 +35,10 @@ import {
   readBundleFromFile,
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  type Bundle,
+  type PlatformPromptOptions,
 } from "@appstrate/afps-runtime/bundle";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
 import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
@@ -73,15 +75,12 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
-import {
-  attachStdoutBridge,
-  CompositeSink,
-  type HttpSink,
-  type StdoutBridgeHandle,
-} from "@appstrate/afps-runtime/sinks";
+import { CompositeSink, sinkSiblingUrl, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
+import { buildRemoteMcpExtensions, type RemoteMcpExtensions } from "./run/remote-mcp.ts";
+import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
 import { parseRunTarget } from "./run/package-spec.ts";
 import { fetchBundleForRun } from "./run/bundle-fetch.ts";
@@ -304,10 +303,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   validateLocalInput(bundle, input);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
-  // Derive the full platform prompt (tools / skills / schemas / output)
-  // from the bundle. The runtime `output` tool receives the output schema as
-  // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
-  // via the environment.
+  // Derive the full platform prompt (skills / integrations / schemas /
+  // output) from the bundle. The `output` tool is built by the PiRunner from
+  // the declared output schema (`outputSchema` option below).
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
   // context so dev-loop replays
@@ -322,74 +320,20 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
   // The integrations the platform bound this run to none of: told to the agent, tools withheld.
   const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
-  const promptInputs = buildPlatformPromptInputs(bundle, context, {
-    platformName: "Appstrate CLI",
-    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
-  });
-  const systemPrompt = renderPlatformPrompt(promptInputs);
-
-  // System tools (`@appstrate/output`, `@appstrate/log`, …) read
-  // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
-  // The stdout bridge installed below re-stamps events with the canonical
-  // `runId` regardless, but exporting the var keeps any tool-side log
-  // output (debug prints, error messages) consistent with the run record.
-  const priorAgentRunId = process.env.AGENT_RUN_ID;
-  process.env.AGENT_RUN_ID = runId;
-  const restoreAgentRunId = (): void => {
-    if (priorAgentRunId === undefined) delete process.env.AGENT_RUN_ID;
-    else process.env.AGENT_RUN_ID = priorAgentRunId;
-  };
+  const boundBundle = withoutIntegrations(
+    bundle,
+    unavailable.map((entry) => entry.id),
+  );
 
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
   await prepareBundleForPi(bundle, { workspaceDir });
 
-  // ─── 7a. Integration api_call tools — one {ns}__api_call per integration ──
-  // PiRunner takes pre-built Pi extension factories; the integration
-  // resolver yields one tool per serverless `apiCall` integration, exposed
-  // to the LLM as `{ns}__api_call` — same surface as the platform sidecar's
-  // `{ns}__api_call` MCP tool, so prompts are identical regardless of
-  // execution mode. Pure MCP-server integrations are skipped here (no
-  // generic call surface in-process).
-  const apiCallFactories = await buildApiCallExtensionFactory({
-    bundle: withoutIntegrations(
-      bundle,
-      unavailable.map((entry) => entry.id),
-    ),
-    integrationResolver,
-    runId,
-    workspace: workspaceDir,
-    emitEvent: () => {
-      // Events are swallowed in the CLI — the run-result aggregate is
-      // assembled from stdout CloudEvents, not from these telemetry hooks.
-    },
-  });
-  if (!opts.json && apiCallFactories.length > 0) {
-    process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
-  }
-
-  // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
-  // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
-  // runs in-process), register the shared MCP tool definitions
-  // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
-  // emitter writes the canonical events as stdout-JSONL, harvested by the
-  // `attachStdoutBridge` wired below into the run sink.
-  const rootRuntimeTools = (
-    bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
-  )?.runtime_tools;
-  const runtimeToolFactories = buildRuntimeToolExtensions({
-    ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
-    outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,
-  });
-  if (!opts.json && runtimeToolFactories.length > 0) {
-    process.stderr.write(`→ wired ${runtimeToolFactories.length} runtime tool(s)\n`);
-  }
-
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
   // and exposes a single AbortSignal we pass to the runner. Cleanup
-  // (heartbeat stop, safety-net finalize POST, workspace teardown) is
-  // factored into one idempotent function and registered as a shutdown
+  // (heartbeat stop, safety-net finalize POST, MCP connections close,
+  // workspace teardown) is factored into one idempotent function and registered as a shutdown
   // hook AND awaited from the `finally` below. The coordinator awaits
   // the hook before exiting, so the platform sees an explicit
   // `cancelled` finalize instead of waiting on the heartbeat watchdog
@@ -413,34 +357,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     quiet: opts.quiet,
     envValue: process.env.APPSTRATE_VERBOSE,
   });
-  // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). The built-in runtime tools (`output`, `log`, `note`, `pin`)
-  // emit canonical events via
-  // `process.stdout.write(JSON+\n)`. Without the bridge these events
-  // never reach the configured sink — they're printed as raw JSON noise
-  // and lost. The bridge intercepts stdout, parses canonical events,
-  // and folds them into the runner's sink stream so:
-  //   - `--report` mode POSTs `output.emitted` to
-  //     the platform → `run_logs` populated, finalize body carries
-  //     `result.output` / `result.pinned`.
-  //   - Offline mode (no `--report`) still aggregates the events so
-  //     `--output <file>` writes the actual `result.output`.
-  //
-  // `writeStdout` trampoline: the console sink needs a writer that
-  // bypasses the bridge (otherwise `--json` would re-emit canonical
-  // events on stdout and the bridge would re-aspirate them, dispatching
-  // every event a second time). The bridge needs the composite sink to
-  // attach its forwarder. Both circular dependencies are resolved with
-  // late binding — defaultWriteStdout up-front, swapped to
-  // `bridge.writeRaw` after the bridge attaches.
-  let writeStdout: (chunk: string) => void = (chunk) => {
-    process.stdout.write(chunk);
-  };
   const consoleSink = createConsoleSink({
     json: opts.json,
     outputPath: opts.output,
     verbosity,
-    writeStdout: (chunk) => writeStdout(chunk),
   });
   // Track whether finalize was already sent to the HttpSink so the
   // CLI's safety-net finalize in the cleanup doesn't double-post.
@@ -450,30 +370,25 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
   const runnerFinalize = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
-  const composite: EventSink = reportSession
+  const sink: EventSink = reportSession
     ? new CompositeSink([consoleSink, reportSession.httpSink])
     : consoleSink;
-  const bridge: StdoutBridgeHandle = attachStdoutBridge({ sink: composite, runId });
-  // Bridge is attached: route the console sink's writes through its
-  // escape hatch so `--json` mode's JSONL output isn't re-parsed.
-  writeStdout = (chunk) => {
-    bridge.writeRaw(chunk);
-  };
-  const sink: EventSink = bridge.sink;
   announceLaunch({
     type: "appstrate.report.started",
     json: opts.json,
     bundleLabel,
     instance: resolverInputsInstance(resolverInputs),
     run: reportSession,
-    writeStdout,
+    writeStdout: (chunk) => process.stdout.write(chunk),
     writeStderr: (chunk) => process.stderr.write(chunk),
   });
 
-  // Heartbeat is lifted out of the `try` so the cleanup hook can stop
-  // it whether or not the runner ever started. The shutdown coordinator
-  // can fire during setup (between here and `runner.run`).
+  // Lifted out of the `try` so the cleanup hook can stop the heartbeat and
+  // close the MCP connections whether or not the runner ever started. The
+  // shutdown coordinator can fire during setup (between here and `runner.run`),
+  // a connection build still in flight included.
   let heartbeat: SinkHeartbeatHandle | null = null;
+  let integrationToolsBuild: ReturnType<typeof buildIntegrationTools> | undefined;
 
   let cleanupPromise: Promise<void> | null = null;
   const runCleanup = (): Promise<void> => {
@@ -519,11 +434,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // The run is over: no report request may outlive it, or a stalled
       // platform would keep the process from exiting.
       reportSession?.httpSink.abort(new Error("run ended"));
-      // Tear down env-var + stdout-bridge mutations in the reverse order
-      // they were installed. `bridge.restore()` swaps `process.stdout.write`
-      // back to the original.
-      bridge.restore();
-      restoreAgentRunId();
+      await (await integrationToolsBuild?.catch(() => undefined))?.remoteMcp.close();
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
     return cleanupPromise;
@@ -532,22 +443,53 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const unregisterCleanup = onShutdown(runCleanup);
 
   try {
-    const runner = new PiRunner({
-      model,
-      apiKey: llmApiKey,
-      ...(typeof inheritedConfig.generation?.temperature === "number"
-        ? { temperature: inheritedConfig.generation.temperature }
+    // ─── 9a. Integration tools ─────────────────────────────────────────
+    // One `{ns}__api_call` tool per serverless `apiCall` integration, the
+    // integration resolver injecting its credential: the same surface as the
+    // platform sidecar's `{ns}__api_call` MCP tool, so prompts are identical
+    // regardless of execution mode. Then the MCP tools of the unauthenticated
+    // remote integrations: no credential to inject, so the CLI connects to
+    // `source.remote.url` itself (to the run's MCP server on the instance for an
+    // integration bound to the runtime) and exposes each selected tool as
+    // `{ns}__{tool}`, as the sidecar does. A server it cannot reach within the
+    // startup timeout leaves that integration unavailable; the run starts.
+    const emitEvent: RuntimeEventEmitter = (event) => {
+      sink.handle(event as RunEvent).catch(() => {});
+    };
+    const emittedRunId = reportSession?.runId ?? runId;
+    integrationToolsBuild = buildIntegrationTools({
+      bundle: boundBundle,
+      integrationResolver,
+      ...(reportSession
+        ? {
+            runToolsMcp: {
+              url: sinkSiblingUrl(reportSession.sinkUrl, "mcp"),
+              runSecret: reportSession.runSecret,
+            },
+          }
         : {}),
-      ...(inheritedConfig.generation?.reasoning_level != null
-        ? { thinkingLevel: inheritedConfig.generation.reasoning_level }
-        : {}),
-      systemPrompt,
-      cwd: workspaceDir,
-      agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
-      authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
-      ...piLoopOptions,
+      runId: emittedRunId,
+      workspace: workspaceDir,
+      emit: emitEvent,
+      signal: shutdownSignal,
     });
+    const { apiCall, remoteMcp, factories: extensionFactories } = await integrationToolsBuild;
+    if (!opts.json) {
+      if (apiCall.factories.length > 0) {
+        process.stderr.write(`→ wired ${apiCall.factories.length} integration api_call tool(s)\n`);
+      }
+      if (remoteMcp.factories.length > 0) {
+        process.stderr.write(`→ wired ${remoteMcp.factories.length} remote MCP tool(s)\n`);
+      }
+      process.stderr.write(unavailableIntegrationLines(remoteMcp.unavailable));
+    }
+    // The catalog lists only integrations the agent can call.
+    const promptInputs = cliPromptInputs(
+      bundle,
+      context,
+      [...unavailable, ...remoteMcp.unavailable],
+      new Set([...apiCall.integrationIds, ...remoteMcp.integrationIds]),
+    );
 
     // Emit the "runtime ready" heartbeat through the same sink that
     // receives every downstream event — the console sink renders it for the
@@ -564,11 +506,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // `Date.now()` captured at function entry would miss the import
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
-    const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = apiCallFactories.length + runtimeToolFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
-      extensions: extensionsCount,
+      extensions: extensionFactories.length,
       bootDurationMs: performance.now(),
     }).catch((err) => {
       // Do not fail the run because the heartbeat failed — the sink's
@@ -596,6 +536,25 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
         },
       });
     }
+
+    const runner = new PiRunner({
+      model,
+      apiKey: llmApiKey,
+      ...(typeof inheritedConfig.generation?.temperature === "number"
+        ? { temperature: inheritedConfig.generation.temperature }
+        : {}),
+      ...(inheritedConfig.generation?.reasoning_level != null
+        ? { thinkingLevel: inheritedConfig.generation.reasoning_level }
+        : {}),
+      systemPrompt: renderPlatformPrompt(promptInputs),
+      cwd: workspaceDir,
+      agentDir: path.join(workspaceDir, ".pi-agent"),
+      extensionFactories,
+      authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
+      // Its presence gives the run the `output` tool, registered by the PiRunner.
+      ...(promptInputs.outputSchema ? { outputSchema: promptInputs.outputSchema } : {}),
+      ...piLoopOptions,
+    });
 
     await runner.run({
       bundle,
@@ -854,6 +813,59 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
     );
   }
   return resolved.profileName;
+}
+
+/**
+ * The run's integration tools in one allocation: the `{ns}__api_call` tools, then the remote MCP
+ * tools past the names those hold. `factories` is every tool factory the runner is given.
+ */
+export async function buildIntegrationTools(
+  opts: Omit<Parameters<typeof buildRemoteMcpExtensions>[0], "takenToolNames"> & {
+    integrationResolver: IntegrationApiCallResolver;
+  },
+) {
+  const { integrationResolver, ...remoteOptions } = opts;
+  const apiCall = await buildApiCallExtensionFactory({
+    bundle: opts.bundle,
+    integrationResolver,
+    runId: opts.runId,
+    workspace: opts.workspace,
+    emitEvent: opts.emit,
+  });
+  const remoteMcp = await buildRemoteMcpExtensions({
+    ...remoteOptions,
+    takenToolNames: apiCall.toolNames,
+  });
+  return { apiCall, remoteMcp, factories: [...apiCall.factories, ...remoteMcp.factories] };
+}
+
+/** The stderr warning of each integration the run starts without, its cause indented below. */
+export function unavailableIntegrationLines(entries: RemoteMcpExtensions["unavailable"]): string {
+  return entries
+    .map(
+      (entry) =>
+        `warn: integration ${entry.id} unavailable: ${entry.reason}\n` +
+        (entry.detail ? `  ${entry.detail}\n` : ""),
+    )
+    .join("");
+}
+
+/**
+ * Prompt inputs of a local run. The integrations catalog lists only the ones
+ * the run wired tools for (none under `--integrations none`), so the agent is
+ * never pointed at the doc of an integration it cannot call.
+ */
+export function cliPromptInputs(
+  bundle: Bundle,
+  context: ExecutionContext,
+  unavailable: ReadonlyArray<{ id: string; reason: string }>,
+  wiredIntegrationIds: ReadonlySet<string>,
+): PlatformPromptOptions {
+  return buildPlatformPromptInputs(bundle, context, {
+    platformName: "Appstrate CLI",
+    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
+    availableIntegrationIds: wiredIntegrationIds,
+  });
 }
 
 async function buildResolverInputs(

@@ -2,12 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
-import {
-  filterIntegrations,
-  integrationExecution,
-  integrationOrigin,
-  integrationProtocol,
-} from "../integration-collection.ts";
+import { filterIntegrations, integrationOrigin } from "../integration-collection.ts";
 
 function integration({
   id,
@@ -22,6 +17,7 @@ function integration({
 }): IntegrationIndexItem {
   return {
     id,
+    space_ids: ["spc_here"],
     source,
     name,
     description: null,
@@ -39,7 +35,8 @@ function integration({
     home_deletable: false,
     home_shareable: false,
     source_kind: sourceKind,
-    server: sourceKind === "local" ? { name: `${id}-server`, version: "^1.0.0" } : null,
+    server: sourceKind === "local" ? { type: "node", entry_point: "server/index.js" } : null,
+    authenticated: true,
   };
 }
 
@@ -66,29 +63,21 @@ describe("filterIntegrations", () => {
     expect(filterIntegrations(rows, { query: "fixture" })).toHaveLength(4);
   });
 
-  it("splits by execution and protocol off the row's source kind", () => {
-    expect(ids(filterIntegrations(rows, { query: "", executions: ["local"] }))).toEqual([
-      "@acme/qbo",
+  it("filters by source kind, one or several", () => {
+    expect(ids(filterIntegrations(rows, { query: "", sources: ["local"] }))).toEqual(["@acme/qbo"]);
+    expect(ids(filterIntegrations(rows, { query: "", sources: ["none"] }))).toEqual([
+      "@appstrate/gmail",
     ]);
-    expect(
-      ids(filterIntegrations(rows, { query: "", executions: ["remote"], protocols: ["api"] })),
-    ).toEqual(["@appstrate/gmail"]);
+    expect(ids(filterIntegrations(rows, { query: "", sources: ["none", "remote"] }))).toEqual([
+      "@appstrate/gmail",
+      "@appstrate/slack",
+      "@acme/crm",
+    ]);
+    expect(filterIntegrations(rows, { query: "", sources: [] })).toHaveLength(4);
   });
 });
 
-describe("source kind", () => {
-  it("runs locally only for a local source", () => {
-    expect(integrationExecution("local")).toBe("local");
-    expect(integrationExecution("remote")).toBe("remote");
-    expect(integrationExecution("none")).toBe("remote");
-  });
-
-  it("is MCP unless the source has no MCP backing", () => {
-    expect(integrationProtocol("local")).toBe("mcp");
-    expect(integrationProtocol("remote")).toBe("mcp");
-    expect(integrationProtocol("none")).toBe("api");
-  });
-
+describe("origin", () => {
   it("classifies the origin", () => {
     expect(integrationOrigin(rows[0]!)).toBe("system");
     expect(integrationOrigin(rows[2]!)).toBe("custom");

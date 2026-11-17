@@ -3,11 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusIcon } from "@appstrate/ui/components/run-status";
-import { Badge as UIBadge } from "@appstrate/ui/components/badge";
-import type { BadgeProps } from "@appstrate/ui/components/badge";
+import { Badge } from "@appstrate/ui/components/badge";
 
 /**
- * The outline counterpart to {@link Badge}: it qualifies WHAT a row is
+ * The outline counterpart to {@link RunStatusBadge}: it qualifies WHAT a row is
  * ("Inline", "Distant", "Supprimé") where the status badge says how it ended.
  *
  * Shared by the run provenance badges (`RunProvenanceBadges`: run table, run
@@ -40,26 +39,25 @@ export function MetaBadge({
   );
 }
 
-const statusVariantMap: Record<string, BadgeProps["variant"]> = {
-  success: "success",
-  failed: "failed",
-  running: "running",
-  pending: "pending",
-  timeout: "timeout",
-  cancelled: "cancelled",
-};
+const RUN_STATUSES = ["success", "failed", "running", "pending", "timeout", "cancelled"] as const;
+type RunStatus = (typeof RUN_STATUSES)[number];
 
-export function Badge({
+export function RunStatusBadge({
   status,
   compact,
   unread,
 }: {
   status: string;
+  /**
+   * The bare icon until its container reaches 32rem (`@lg`), the full badge
+   * from there: a table, a row or a card decides, not the screen. Without a
+   * container around it, it stays the icon.
+   */
   compact?: boolean;
   unread?: boolean;
 }) {
   const { t } = useTranslation();
-  const variant = statusVariantMap[status] || "pending";
+  const variant: RunStatus = RUN_STATUSES.find((known) => known === status) ?? "pending";
   const icon = <RunStatusIcon status={status} className="h-3 w-3" />;
   const dot = unread && (
     <span className="bg-destructive absolute -top-1 -right-1 size-2 rounded-full" />
@@ -68,10 +66,10 @@ export function Badge({
   if (!compact) {
     return (
       <span className="relative shrink-0">
-        <UIBadge variant={variant} className="gap-1">
+        <Badge variant={variant} className="gap-1">
           {icon}
           {t(`status.${status}`, status)}
-        </UIBadge>
+        </Badge>
         {dot}
       </span>
     );
@@ -79,13 +77,16 @@ export function Badge({
 
   return (
     <span className="relative shrink-0">
-      {/* Mobile: bare icon, toned by its status */}
-      <span className="sm:hidden [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
-      {/* Desktop: full badge */}
-      <UIBadge variant={variant} className="hidden gap-1 sm:inline-flex">
+      {/* A narrow container: the bare icon, toned by its status (its word for screen readers). */}
+      <span className="@lg:hidden [&_svg]:h-4 [&_svg]:w-4">
+        {icon}
+        <span className="sr-only">{t(`status.${status}`, status)}</span>
+      </span>
+      {/* From a 32rem container: the full badge. */}
+      <Badge variant={variant} className="hidden gap-1 @lg:inline-flex">
         {icon}
         {t(`status.${status}`, status)}
-      </UIBadge>
+      </Badge>
       {dot}
     </span>
   );

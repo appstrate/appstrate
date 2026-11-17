@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
@@ -35,7 +36,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
-import { parseListPagination } from "../lib/list-query.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
@@ -55,7 +56,9 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
+  withScheduleFallback,
   assertScheduleOverridesReachable,
+  readScheduleGovernance,
   sameRecord,
   sameSet,
 } from "../services/schedule-connections.ts";
@@ -68,10 +71,12 @@ import {
 } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
+import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
-import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
+import { parseEmptyQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -434,17 +439,32 @@ export const updateScheduleSchema = z
   })
   .strict();
 
+/**
+ * A schedule's version for `ETag` / `If-Match`: its `updated_at`, which every write of its
+ * governed state bumps (a fire's bookkeeping does not), in milliseconds — the precision the
+ * write's compare-and-set compares at.
+ */
+function scheduleVersion(schedule: { updatedAt: string }): number {
+  return Date.parse(schedule.updatedAt);
+}
+
+/**
+ * The schedule list over `grants`: `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`. The
+ * caller is the VIEWER of the run counters (`unread_count` is recipient-scoped), never the
+ * schedules' own execution actor.
+ */
+export async function respondScheduleList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+  parseEmptyQuery(c);
+  return c.json(listResponse(await listSchedules(orgId, grants, getActor(c))));
+}
+
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/schedules — list all schedules (space-scoped)
-  router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
-    const scope = getSpaceScope(c);
-    // The caller is the VIEWER of the run counters (`unread_count` is
-    // recipient-scoped), never the schedules' own execution actor.
-    const schedules = await listSchedules(scope, getActor(c), runVisibilityFilter(c));
-    return c.json(listResponse(schedules));
-  });
+  router.get("/schedules", requirePermission("schedules", "read"), (c) =>
+    respondScheduleList(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
+  );
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
   router.get(
@@ -535,8 +555,14 @@ export function createSchedulesRouter() {
         );
       }
 
-      // Armed: its actor must be able to fire it, and its connection choice is made now.
+      // Armed: its actor must be able to fire it, and its connection choice is made now — under
+      // the governance read here, which the insert re-checks.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
+      const judgedGovernance = await readScheduleGovernance(
+        scope.spaceId,
+        agent.id,
+        actor.type === "user" ? actor.id : null,
+      );
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
         actor,
@@ -544,13 +570,22 @@ export function createSchedulesRouter() {
         connectionOverrides: data.connection_overrides ?? null,
         storedOverrides: null,
       });
-      const warnings = await assertScheduleConnectionsChosen({
+      const connectionOverrides = await withScheduleFallback({
         agent: effectiveAgent,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
         actor,
         caller: getActor(c),
         connectionOverrides: data.connection_overrides ?? null,
+        dependencyOverrides: data.dependency_overrides ?? null,
+      });
+      const warnings = await assertScheduleConnectionsChosen({
+        agent: effectiveAgent,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        actor,
+        caller: getActor(c),
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
 
@@ -563,8 +598,9 @@ export function createSchedulesRouter() {
         generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
-        connectionOverrides: data.connection_overrides ?? null,
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
+        judgedGovernance,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -586,6 +622,7 @@ export function createSchedulesRouter() {
           actorId: actor.id,
         },
       });
+      setEtag(c, scheduleVersion(schedule));
       return c.json({ ...schedule, warnings }, 201);
     },
   );
@@ -594,6 +631,7 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
     const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
+    setEtag(c, scheduleVersion(schedule));
     return c.json(schedule);
   });
 
@@ -605,6 +643,9 @@ export function createSchedulesRouter() {
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
     assertMayGovern(c, actorFromIds(existing.userId, existing.endUserId), "write");
+    // Optional: a client holding the row's ETag refuses to overwrite a write it has not seen.
+    // The compare-and-set in `updateSchedule` still guards the window inside this request.
+    assertIfMatch(c, scheduleVersion(existing));
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -782,11 +823,11 @@ export function createSchedulesRouter() {
     // On a real change, frozen `connection_overrides` reference the previous
     // identity's connections — reset them unless this patch supplies fresh
     // picks, forcing a re-pick under the new identity.
-    const connectionOverrides =
+    let connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
     const nextActor = actor ?? existingActor;
-    const nextOverrides =
+    let nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
     // FORM, on the same trigger as the dependency map above: either half of the
     // (map, fired manifest) pair moving re-judges the whole map the row replays.
@@ -800,6 +841,12 @@ export function createSchedulesRouter() {
         nextOverrides,
       );
     }
+    // Read before any judgment of the set: the update re-checks it when it leaves the row armed.
+    const judgedGovernance = await readScheduleGovernance(
+      scope.spaceId,
+      existing.packageId,
+      nextActor.type === "user" ? nextActor.id : null,
+    );
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     await assertScheduleOverridesReachable({
       spaceId: scope.spaceId,
@@ -826,6 +873,18 @@ export function createSchedulesRouter() {
         throw err;
       });
       if (definition) {
+        // The fallback named here, not by the client: a write that adds nothing stores
+        // what it was sent, so a patch of another field leaves the set as it is.
+        const named = await withScheduleFallback({
+          agent: definition,
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          actor: nextActor,
+          caller: getActor(c),
+          connectionOverrides: nextOverrides,
+          dependencyOverrides: effectiveDependencyOverrides ?? null,
+        });
+        if (named !== nextOverrides) connectionOverrides = nextOverrides = named;
         const judged = await assertScheduleConnectionsChosen({
           agent: definition,
           orgId: scope.orgId,
@@ -855,6 +914,7 @@ export function createSchedulesRouter() {
         versionOverride: data.version_override,
         connectionOverrides,
         dependencyOverrides: data.dependency_overrides,
+        judgedGovernance,
         actor,
       },
       // `actor` above is the schedule's (possibly re-pointed) execution
@@ -887,6 +947,7 @@ export function createSchedulesRouter() {
         ...diff,
       });
     }
+    setEtag(c, scheduleVersion(schedule));
     return c.json({ ...schedule, warnings });
   });
 
@@ -918,7 +979,7 @@ export function createSchedulesRouter() {
     async (c) => {
       const scheduleId = c.req.param("id")!;
       const scope = getSpaceScope(c);
-      const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+      const limit = parseListLimit(c, { defaultLimit: 20 });
       // `schedules:read` is space-wide, so the schedule itself is readable to
       // every member — but its RUNS are runs, and follow the run predicate:
       // without `runs:read-all` a colleague's schedule lists nothing.
@@ -926,12 +987,12 @@ export function createSchedulesRouter() {
       const result = await listScheduleRuns(scope, scheduleId, {
         ...filters,
         limit,
-        offset,
+        startingAfter: c.req.query("startingAfter") || undefined,
         actor: getActor(c),
         visibility: runVisibilityFilter(c),
         canReadAgentInput: !agentReadIsSummary(c),
       });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
       return c.json(result);
     },
   );

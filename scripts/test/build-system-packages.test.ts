@@ -49,14 +49,14 @@ describe("findSchemaVersionDrift", () => {
       findSchemaVersionDrift([
         ["integration-a-1.0.0", manifest("0.1")],
         ["integration-b-1.0.0", manifest(AFPS_SCHEMA_VERSION)],
-        ["mcp-server-c-1.0.0", manifest()],
+        ["integration-c-1.0.0", manifest()],
         ["integration-d-1.0.0", manifest("0.2")],
         ["integration-e-1.0.0", null],
         ["integration-f-1.0.0", []],
       ]),
     ).toEqual([
       { dirName: "integration-a-1.0.0", declared: "0.1" },
-      { dirName: "mcp-server-c-1.0.0", declared: undefined },
+      { dirName: "integration-c-1.0.0", declared: undefined },
       { dirName: "integration-d-1.0.0", declared: "0.2" },
       { dirName: "integration-e-1.0.0", declared: undefined },
       { dirName: "integration-f-1.0.0", declared: undefined },

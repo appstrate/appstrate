@@ -7,11 +7,7 @@ import type { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import type { useUploadClient } from "../../hooks/use-upload";
 import { subsetWrapper } from "../../lib/agent-input";
 
-/**
- * One input as a settings row: its field, then under it what the value is
- * (left) and what can be done to it (right): a note is text, a control acts. The agent's Entrées (with
- * "Verrouiller") and a schedule's Entrées share it.
- */
+/** One input as a settings row: its field, then a `hint` (left, text) and a `control` (right, acts). */
 export function InputFieldRow({
   fieldKey,
   wrapper,
@@ -42,10 +38,16 @@ export function InputFieldRow({
   const fieldWrapper: SchemaWrapper = { ...subset, schema: fieldSchema };
 
   return (
-    <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`input-setting-${fieldKey}`}>
       <SchemaForm
         wrapper={fieldWrapper}
         formData={value === undefined ? {} : { [fieldKey]: value }}
+        // Author defaults stay on their own layer; mounting or resetting never stages them.
+        experimental_defaultFormStateBehavior={{
+          emptyObjectFields: "skipDefaults",
+          constAsDefaults: "never",
+          arrayMinItems: { populate: "never" },
+        }}
         upload={upload}
         labels={labels}
         disabled={disabled}

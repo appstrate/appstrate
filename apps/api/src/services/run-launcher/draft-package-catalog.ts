@@ -7,8 +7,9 @@
  * bucket) rather than against published versions.
  *
  * It has ONE caller: {@link RunPackageCatalog}, and only for a dependency
- * a run explicitly overrode with `"draft"` — the skill-development edit loop
- * (edit SKILL.md → run → observe, no republish per iteration). That override
+ * a run explicitly overrode with `"draft"` — the edit loop (edit SKILL.md or
+ * INTEGRATION.md → run → observe, no republish per iteration). For an
+ * integration the override arrives as the run's frozen `draft` source. It
  * is an act of authorship and carries its own gate
  * (`assertDependencyDraftOverridesAllowed`, RBAC spec §6.10), so every path
  * through this class has already proven write authority over the package whose
@@ -27,10 +28,10 @@
  *   - `fetch(identity)` returns a `BundlePackage` whose `integrity` is
  *     left empty; `buildBundleFromCatalog` recomputes it from the
  *     RECORD entries (same policy as `DbPackageCatalog`).
- *   - Skills are returned as-is (their contract is file-based, not
- *     source-based). Integrations are NOT bundle dependencies — they are
- *     spawned as separate MCP servers at runtime — so they never flow
- *     through this catalog.
+ *   - Skills and integrations are the draft types it serves (both are bundle
+ *     members). Skills are returned as stored. Integrations get the
+ *     DB-authoritative draft columns overlaid ({@link applyDraftOverlay}), so
+ *     their `INTEGRATION.md` is exactly what the file explorer shows.
  *   - System packages (`orgId IS NULL`) are visible cross-org — same
  *     rule as every other platform resolver.
  */
@@ -48,15 +49,22 @@ import {
   type ResolvedPackage,
 } from "@appstrate/afps-runtime/bundle";
 import { asRecord } from "@appstrate/core/safe-json";
+import type { PackageType } from "@appstrate/core/validation";
 import { downloadPackageFiles } from "../package-items/storage.ts";
+import { storageFolderForType } from "../package-items/config.ts";
+import { applyDraftOverlay } from "../package-files.ts";
 
 interface DraftPackageCatalogOptions {
   /** Org whose draft packages are visible (plus system packages, `orgId IS NULL`). */
   orgId: string;
 }
 
+/** Draft types that are bundle members — the only ones a run resolves. */
+const DRAFT_BUNDLE_TYPES: ReadonlySet<PackageType> = new Set(["skill", "integration"]);
+
 interface DraftPackageRow {
   draftManifest: unknown;
+  draftContent: string | null;
   /** `null` → system package (global `_system/` storage namespace). */
   orgId: string | null;
 }
@@ -103,10 +111,8 @@ export class DraftPackageCatalog implements PackageCatalog {
     }
 
     const manifest = asRecord(row.draftManifest);
-    // Skills are the only draft type this catalog resolves — see the class
-    // header. The storage folder is therefore the literal `"skills"`, not a
-    // lookup: a type→folder mapper with one arm only obscured that.
-    if (manifest.type !== "skill") {
+    const type = manifest.type as PackageType;
+    if (!DRAFT_BUNDLE_TYPES.has(type)) {
       throw new BundleError(
         "BUNDLE_JSON_INVALID",
         `DraftPackageCatalog: ${parsed.packageId} has unsupported type ${String(manifest.type)}`,
@@ -120,7 +126,7 @@ export class DraftPackageCatalog implements PackageCatalog {
     // packages on the run hot path.
     const ownership = row.orgId === null ? "system" : "org";
     const files = await downloadPackageFiles(
-      "skills",
+      storageFolderForType(type),
       this.opts.orgId,
       parsed.packageId,
       undefined,
@@ -134,11 +140,23 @@ export class DraftPackageCatalog implements PackageCatalog {
       );
     }
 
+    // An integration's draft companion lives in `draft_content`, not only in
+    // the stored ZIP — overlay it so the run reads what the author sees.
+    if (type === "integration") {
+      applyDraftOverlay(files, {
+        id: parsed.packageId,
+        type,
+        orgId: row.orgId,
+        draftManifest: row.draftManifest,
+        draftContent: row.draftContent,
+      });
+    }
+
     const fileMap = new Map<string, Uint8Array>();
     for (const [p, bytes] of Object.entries(files)) fileMap.set(p, bytes);
 
-    // For skills, ensure `manifest.json` is materialised since some upload
-    // paths only store content files.
+    // Ensure `manifest.json` is materialised since some upload paths only
+    // store content files.
     if (!fileMap.has("manifest.json")) {
       fileMap.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
     }
@@ -158,7 +176,11 @@ export class DraftPackageCatalog implements PackageCatalog {
     if (cached !== undefined) return Promise.resolve(cached);
 
     const promise = db
-      .select({ draftManifest: packages.draftManifest, orgId: packages.orgId })
+      .select({
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+        orgId: packages.orgId,
+      })
       .from(packages)
       .where(
         and(

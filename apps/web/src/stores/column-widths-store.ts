@@ -2,15 +2,9 @@
 
 import { createKeyedLocalStore } from "./local-storage";
 
-/**
- * The widths a person gave a table's columns, remembered across reloads.
- *
- * Same call as `column-visibility-store.ts`: a convenience per browser and per
- * table, never a location, and the table works without it. Keyed like that
- * store, by table only: no account identifier is written to storage.
- */
+/** Column widths per table, persisted like `column-visibility-store.ts`; no account identifier in storage. */
 
-export type ColumnWidths = Readonly<Record<string, number>>;
+type ColumnWidths = Readonly<Record<string, number>>;
 
 const NONE: ColumnWidths = {};
 
@@ -27,16 +21,14 @@ const columnWidths = createKeyedLocalStore<ColumnWidths>(
   NONE,
 );
 
-export interface ColumnWidthsControl {
-  widths: ColumnWidths;
-  set: (id: string, width: number) => void;
-}
-
-/** `table` is the table's stable, untranslated id: it keeps its widths wherever it is shown. */
-export function useColumnWidths(table: string): ColumnWidthsControl {
+/** `table` names the table; `width: null` gives a column back its declared width. */
+export function useColumnWidths(table: string) {
   const [widths, setWidths] = columnWidths.useValue(table);
   return {
     widths,
-    set: (id, width) => setWidths({ ...widths, [id]: Math.round(width) }),
+    set: (id: string, width: number | null) => {
+      const { [id]: _dropped, ...rest } = widths;
+      setWidths(width === null ? rest : { ...rest, [id]: Math.round(width) });
+    },
   };
 }

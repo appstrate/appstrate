@@ -52,7 +52,8 @@ test("the switcher pins the caller's own space above the team spaces", async ({
 
   const personalItem = page.getByTestId(`space-item-${personalId}`);
   await expect(personalItem).toBeVisible();
-  await expect(personalItem).toContainText(/^(Mon espace|My space)/);
+  // The label on its own element: the row opens on the owner's tile (their initials).
+  await expect(personalItem.getByText(/^(Mon espace|My space)$/)).toBeVisible();
 
   // Pinned: the personal entry comes before the default team space in the menu.
   const items = await page.getByTestId(/^space-item-/).all();
@@ -108,7 +109,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
   const authorContext = await createAuthedContext(browser, author, orgId, personalId);
   try {
     const authorPage = await authorContext.newPage();
-    await authorPage.goto("/catalogue/placed/agent");
+    await authorPage.goto("/catalogue/agent?view=spaces");
     await expect(libraryRow(authorPage)).toBeVisible();
     await authorPage.goto(agentPath);
     // The detail page DOES print the id, under the display name.
@@ -132,7 +133,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
           response.request().method() === "GET" &&
           /\/api\/(spaces\/[^/]+\/)?library(\?|$)/.test(response.url()),
       );
-      await page.goto("/catalogue/placed/agent");
+      await page.goto("/catalogue/agent?view=spaces");
       expect((await library).status()).toBe(200);
       await expect(libraryRow(page)).toHaveCount(0);
 

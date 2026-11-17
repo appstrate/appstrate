@@ -10,7 +10,8 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox, CheckboxField } from "@appstrate/ui/components/checkbox";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
@@ -64,6 +65,14 @@ function PickRow({
           <span className="text-muted-foreground block truncate font-mono text-xs">{row.id}</span>
         )}
       </Label>
+      {row.subscriptionUnverified && (
+        <span
+          className="text-warning shrink-0 text-xs"
+          title={t("models.form.subscriptionUnverifiedHint")}
+        >
+          {t("models.form.subscriptionUnverified")}
+        </span>
+      )}
       {row.contextWindow !== null && (
         <span className="text-muted-foreground shrink-0 text-xs">
           {Math.round(row.contextWindow / 1000)}k
@@ -96,12 +105,7 @@ function PickRow({
           disabled={starBlocked}
           onClick={() => extras.onDefaultChange?.(row.id)}
         >
-          <Star
-            className={cn(
-              "size-4",
-              isDefault ? "fill-warning text-warning" : "text-muted-foreground",
-            )}
-          />
+          <Star className={cn(isDefault ? "fill-warning text-warning" : "text-muted-foreground")} />
         </Button>
       )}
     </div>
@@ -144,7 +148,7 @@ export function ModelPickList({
   const section = (items: typeof indexed, label: string | null) => (
     <>
       {label && (
-        <div className="text-muted-foreground bg-muted/50 px-3 py-1 text-xs font-medium">
+        <div className="text-muted-foreground bg-muted/40 px-3 py-1 text-xs font-medium">
           {label}
         </div>
       )}
@@ -162,7 +166,7 @@ export function ModelPickList({
   );
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Input
         id="mdl-modelSearch"
         type="search"

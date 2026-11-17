@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQueryClient,
+  type MutationMeta,
+} from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentSpaceId } from "./use-current-space";
-import { useOrgOnlyScope } from "./use-org-scope";
+import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { packageSightPermissions } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
-import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
-import { submitModelForm } from "../lib/model-form-submit";
-import {
-  invalidateCredentialsAndModels,
-  useCreateModelProviderCredential,
-} from "./use-model-provider-credentials";
-import { agentModelKeys, packageKeys } from "../lib/query-keys";
+import { invalidateCredentialsAndModels } from "./use-model-provider-credentials";
+import { invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -32,14 +29,6 @@ export function useModels(enabled = true) {
     { params: { header: scope.header } },
     { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
-}
-
-export function useCreateModel() {
-  const invalidate = useInvalidatePaths("/api/models");
-  return $api.useMutation("post", "/api/models", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
-  });
 }
 
 export function useUpdateModel() {
@@ -86,6 +75,8 @@ export function useOpenRouterModels(search: string | undefined) {
     { params: { query: { q: search || undefined } } },
     {
       enabled: search !== undefined,
+      // Each debounced search keeps the previous list drawn until the new one answers.
+      placeholderData: keepPreviousData,
       staleTime: 5 * 60 * 1000,
       gcTime: 10 * 60 * 1000,
       // The spec marks every item field optional — normalize to the
@@ -113,21 +104,14 @@ export function useOpenRouterModels(search: string | undefined) {
 }
 
 export function useAgentModel(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const scope = useOrgScope();
   const { can } = usePermissions();
-  return useQuery({
-    // Key kept legacy-shaped: invalidated by useSetAgentModel below and
-    // space-switch resets.
-    queryKey: agentModelKeys.detail(orgId, spaceId, packageId),
-    queryFn: async () => {
-      const { data } = await client.GET("/api/agents/{scope}/{name}/model", {
-        params: { path: splitPackageRef(packageId!) },
-      });
-      return data!;
-    },
-    enabled: packageSightPermissions("agent").some(can) && !!orgId && !!spaceId && !!packageId,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/agents/{scope}/{name}/model",
+    { params: { header: scope.header, path: splitPackageRef(packageId ?? "") } },
+    { enabled: packageSightPermissions("agent").some(can) && scope.enabled && !!packageId },
+  );
 }
 
 export function useSetAgentModel(packageId: string) {
@@ -145,48 +129,9 @@ export function useSetAgentModel(packageId: string) {
       return data;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentModelKeys.all });
+      void invalidatePaths(qc, ["/api/agents/{scope}/{name}/model"]);
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       void invalidateAgentDiagnostics(qc);
     },
   });
-}
-
-/**
- * ModelFormModal submission: the inline key first if any, then one create or
- * update — or, for a batch, one create per entry against that one key.
- */
-export function useModelFormHandler(opts: {
-  editModel?: OrgModelInfo | null;
-  onSuccess: () => void;
-}) {
-  const createModel = useCreateModel();
-  const updateModel = useUpdateModel();
-  const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
-
-  // Spans the whole submission: the per-mutation flags drop between calls.
-  const [submitPending, setSubmitPending] = useState(false);
-  const isPending =
-    submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
-
-  const submit = submitModelForm({
-    writes: {
-      createCredential: (body) => createCredential.mutateAsync({ body }),
-      createModel: (body) => createModel.mutateAsync({ body }),
-      updateModel: (id, body) => updateModel.mutateAsync({ params: { path: { id } }, body }),
-    },
-    editModelId: opts.editModel?.id ?? null,
-    onSuccess: opts.onSuccess,
-  });
-
-  const onSubmit = async (data: ModelFormSubmission): Promise<ModelFormSubmitOutcome> => {
-    setSubmitPending(true);
-    try {
-      return await submit(data);
-    } finally {
-      setSubmitPending(false);
-    }
-  };
-
-  return { onSubmit, isPending };
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { useIntegrationName } from "../hooks/use-integration-name";
 import {
@@ -37,10 +36,9 @@ export function ScheduleConnectionRefusals({
       ))}
       {refusals.length > 0 && (
         <Alert variant="destructive" data-testid="schedule-connection-refusals">
-          <AlertTriangle />
           <AlertTitle>{t("schedule.connectionOverrides.refusedTitle")}</AlertTitle>
           <AlertDescription>
-            <ul className="list-disc space-y-1 pl-5 text-xs">
+            <ul className="flex list-disc flex-col gap-1 pl-5 text-xs">
               {refusals.map((choice) => (
                 <RefusalItem key={choice.integrationId} choice={choice} />
               ))}
@@ -80,13 +78,11 @@ function ChoiceRequest({
   const integration = useIntegrationName(choice.integrationId);
   const actor = actorName ?? t("schedule.connectionOverrides.actorFallback");
   const hasCandidates = choice.candidates.length > 0;
-  const Icon = hasCandidates ? Info : AlertTriangle;
   return (
     <Alert
       variant={hasCandidates ? "info" : "warning"}
       data-testid={`schedule-connection-request-${choice.integrationId}`}
     >
-      <Icon />
       <AlertTitle>
         {hasCandidates
           ? t("schedule.connectionOverrides.choiceTitle", { integration, actor })

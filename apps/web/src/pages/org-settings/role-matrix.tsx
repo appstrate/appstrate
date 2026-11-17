@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Every space role against every permission.
- *
- * The role modal answers "what can this role do". Choosing a role to hand out
- * asks the other question — who can launch an agent, what separates an
- * operator from a runner — and only a crossed view answers it.
- *
- * It is a MATRIX, not a list: a column is another role, not an attribute of
- * the row, so dropping one for width would hide an answer. It keeps the raw
- * table and scrolls, like the library's packages × spaces, with the permission
- * column pinned so a row stays readable wherever it scrolled to.
+ * Every space role against every permission. A MATRIX, not a list: a column is
+ * another role, so dropping one for width would hide an answer; it scrolls with
+ * the permission column pinned.
  */
 import { useTranslation } from "react-i18next";
 import { PermissionMark } from "../../components/permission-mark";
@@ -26,8 +19,7 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const { t } = useTranslation(["settings", "common"]);
   const { data: vocabulary } = useRoleVocabulary();
 
-  // The rows are the catalog once it answered; before that, every permission
-  // some role holds — the admin preset holds the lot, so nothing is missing.
+  // Rows: the catalog once loaded; before that every permission some role holds (admin holds the lot).
   const permissions = vocabulary
     ? vocabulary.flatMap((group) => group.permissions.map((entry) => entry.permission))
     : [...new Set(roles.flatMap((role) => role.permissions))].sort();
@@ -36,7 +28,7 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const firstCustom = roles.find((role) => role.kind === "custom");
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
         {t("roles.matrixOrgNote")}
       </p>

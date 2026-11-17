@@ -31,6 +31,7 @@ const FRAME: RunUpdateEvent = {
   spaceId: SPACE,
   scheduleId: null,
   error: null,
+  modelError: null,
   startedAt: "2026-09-07T10:00:00.000Z",
   completedAt: "2026-09-07T10:00:42.000Z",
   duration: 42_000,

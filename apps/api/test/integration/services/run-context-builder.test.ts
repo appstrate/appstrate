@@ -237,6 +237,7 @@ describe("buildRunContext generation settings", () => {
       modelId,
       generationConfig: stored,
       generationConfigOverride: override,
+      resolvedIntegrationVersions: {},
       ...(scheduleId ? { scheduleId } : {}),
     });
   }

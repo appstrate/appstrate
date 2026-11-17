@@ -33,7 +33,7 @@ interface AgentReadinessParams {
   spaceId: string;
   /** Actor whose integration connections we validate. */
   actor: Actor;
-  /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
+  /** Launch override picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
   /** The resolver's `noFallback`. */
   noFallback?: boolean;

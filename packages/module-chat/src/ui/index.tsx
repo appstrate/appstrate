@@ -19,7 +19,6 @@
 
 import {
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -34,10 +33,11 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { Thread } from "./thread.tsx";
+import { createMessageQueue } from "./message-queue.ts";
 import {
-  ChatHeadersProvider,
+  ChatTransportProvider,
   ChatHostProvider,
   SelectConversationProvider,
   useChatHost,
@@ -46,8 +46,8 @@ import type {
   ChatCan,
   ChatHost,
   ChatTranslate,
+  ChatTransport,
   DownloadFile,
-  GetHeaders,
   OpenFile,
   SelectConversation,
   UploadFile,
@@ -55,15 +55,17 @@ import type {
 } from "./runtime-context.ts";
 export type {
   ChatCan,
+  ChatRequest,
   ChatTranslate,
+  ChatTransport,
   GetHeaders,
   OpenFile,
   SelectConversation,
 } from "./runtime-context.ts";
-export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
-export { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
+export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
+export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
-import { fetchModels, type OrgModelOption } from "./models-data.ts";
+import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";
 import {
   loadHistory,
   markSessionRead,
@@ -88,13 +90,11 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
-import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
-import { SkillsPicker } from "./skills-picker.tsx";
-import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
+import { ComposerTools } from "./composer-tools.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
-import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
+import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -108,19 +108,24 @@ const subscribeVisibility = (cb: () => void) => {
 };
 const getVisible = () => document.visibilityState === "visible";
 
-/** React Query key for the chat model catalog (module-local, not the typed client). */
-// Prefixed like the shell's typed-client key for `GET /api/models` on purpose:
-// every `invalidateQueries({ queryKey: ["get", "/api/models"] })` the shell
-// issues on a catalog change (model added, credential paired, auto-seed) then
-// reaches this entry too. The third segment keeps it a separate cache entry.
-const MODELS_QUERY_KEY = ["get", "/api/models", { consumer: "chat" }] as const;
+/**
+ * The chat model catalog under the shell's typed-client key for `GET /api/models`
+ * (`[method, path, { params: { header } }]`, org-scoped): one cache entry for both sides, so a
+ * catalog change the shell invalidates (model added, credential paired, auto-seed) refetches
+ * the chat's too, and neither fetches what the other holds. The entry holds the raw envelope;
+ * the chat narrows it with `select`.
+ */
+function modelsQueryKey(orgId: string | undefined) {
+  return ["get", "/api/models", { params: { header: { "X-Org-Id": orgId } } }] as const;
+}
 /** A catalog change (credential added/revoked) is rare; re-entering `/chat` is not. */
 const MODELS_STALE_MS = 60_000;
 /** Stable empty list so the composer slot memo below does not miss on `undefined`. */
 const EMPTY_MODELS: OrgModelOption[] = [];
 
 export interface ChatPageProps {
-  getHeaders?: GetHeaders;
+  /** The scoping headers and the request function (see `ChatTransport`). Pass a stable object. */
+  transport?: ChatTransport;
   /**
    * Active conversation id (`chs_…`) from the host URL, or `null`/`undefined`
    * for the "new conversation" state (bare `/chat`). The host wires this to a
@@ -154,8 +159,6 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile?: OpenFile;
-  /** Optional host-owned controls beside the model picker. Pass a memoized node. */
-  composerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -173,16 +176,19 @@ export interface ChatPageProps {
   modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+  /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
+  onPackagesChanged: ChatHost["onPackagesChanged"];
+  /** The user's first name, greeted on a new conversation (see `ChatHost`). */
+  firstName?: ChatHost["firstName"];
 }
 
 export function ChatPage({
-  getHeaders,
+  transport,
   conversationId,
   newChatKey,
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
@@ -191,6 +197,8 @@ export function ChatPage({
   personalModelCredentials,
   modelCredentials,
   formatBytes,
+  onPackagesChanged,
+  firstName,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -216,8 +224,10 @@ export function ChatPage({
   // outage is an error state React Query retries — never an empty catalog
   // served as fresh for `staleTime`.
   const modelsQuery = useQuery({
-    queryKey: MODELS_QUERY_KEY,
-    queryFn: () => fetchModels(getHeaders),
+    queryKey: modelsQueryKey(transport?.getHeaders()["X-Org-Id"]),
+    queryFn: () => fetchModelsEnvelope(transport!.request),
+    select: selectChatModels,
+    enabled: !!transport,
     staleTime: MODELS_STALE_MS,
   });
   const models = modelsQuery.data ?? EMPTY_MODELS;
@@ -245,10 +255,10 @@ export function ChatPage({
   // server-computed (read-state lives in `chat_sessions`, shared across
   // devices); the list stays fresh via the `chat_session_update` SSE signal.
   // There is no toast — the pill is the only notification.
-  const sessions = useSessions(getHeaders);
+  const sessions = useSessions(transport);
   // The host's current space, off the same headers every request carries. Every
   // chat query is keyed by it (see `sessions.ts`).
-  const pageSpaceId = spaceIdFromHeaders(getHeaders);
+  const pageSpaceId = spaceIdFromHeaders(transport?.getHeaders);
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, getVisible, getVisible);
 
@@ -264,7 +274,7 @@ export function ChatPage({
   const canWrite = can("chat:write");
   useEffect(() => {
     // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
-    if (!visible || !canWrite) return;
+    if (!visible || !canWrite || !transport) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
     queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
@@ -272,8 +282,8 @@ export function ChatPage({
         rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
       ),
     );
-    void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
+    void markSessionRead(transport.request, activeId).catch(() => {});
+  }, [sessions.data, activeId, transport, pageSpaceId, queryClient, visible, canWrite]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -288,6 +298,8 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      onPackagesChanged,
+      firstName,
     }),
     [
       onOpenFile,
@@ -298,6 +310,8 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      onPackagesChanged,
+      firstName,
     ],
   );
 
@@ -317,33 +331,21 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const authorsAgents = canAuthorAgents(can);
   const composerSlot = useMemo(
     () => (
-      <div className="flex items-center gap-2">
-        {authorsAgents ? <AgentAuthoringToggle /> : null}
-        <ModelSelect
-          models={models}
-          selectedId={selectedModel}
-          onSelect={setSelectedModel}
-          generation={generation}
-          onGenerationChange={editGenerationSettings}
-          pending={modelsPending}
-          failed={modelsFailed}
-        />
-        {composerActions}
-      </div>
+      <ModelSelect
+        models={models}
+        selectedId={selectedModel}
+        onSelect={setSelectedModel}
+        generation={generation}
+        onGenerationChange={editGenerationSettings}
+        pending={modelsPending}
+        failed={modelsFailed}
+      />
     ),
-    [
-      authorsAgents,
-      models,
-      selectedModel,
-      generation,
-      composerActions,
-      modelsPending,
-      modelsFailed,
-    ],
+    [models, selectedModel, generation, modelsPending, modelsFailed],
   );
+  const authorsPackages = canAuthorPackages(can);
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
   // the memoised `Conversation` re-renders only when they change (a few times
@@ -354,25 +356,26 @@ export function ChatPage({
   const serverUpdatedAt = activeRow?.updatedAt;
 
   return (
-    <ChatHeadersProvider value={getHeaders ?? null}>
+    <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
-          {/* The conversation list and the conversation title are NOT here:
-              they are the shell's navigation and the shell's "where you are",
-              mounted by the host from `ChatConversationList` /
-              `ChatConversationTitle`. What is left is the thread itself. */}
+          {/* The conversation list and the conversation settings are NOT here:
+              they are the shell's navigation and header actions, mounted by
+              the host from `ChatConversationList` /
+              `ChatConversationSettingsButton`. What is left is the thread itself. */}
           {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-          <div className="bg-canvas flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+          <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
             <Conversation
               key={activeId}
               id={activeId}
-              getHeaders={getHeaders}
+              transport={transport}
               isPersisted={isPersisted}
               initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
               onConversationChange={onConversationChange}
               attachments={attachments}
               composerSlot={composerSlot}
+              authorsPackages={authorsPackages}
               canPinSkills={canPinSkills(can)}
               canWrite={canWrite}
               serverGenerating={serverGenerating}
@@ -381,19 +384,20 @@ export function ChatPage({
           </div>
         </ChatHostProvider>
       </SelectConversationProvider>
-    </ChatHeadersProvider>
+    </ChatTransportProvider>
   );
 }
 
 interface ConversationProps {
   id: string;
-  getHeaders?: GetHeaders;
+  transport?: ChatTransport;
   isPersisted: boolean;
   initialComposerDraft?: string;
   onConversationChange?: SelectConversation;
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  authorsPackages: boolean;
   canPinSkills: boolean;
   /** `chat:write`: without the picker, the space's enforced skills are still named. */
   canWrite: boolean;
@@ -413,16 +417,17 @@ interface ConversationProps {
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
  * `isPersisted`, `serverGenerating`, `serverUpdatedAt`), a stable host function
- * (`getHeaders`, `onConversationChange` — the host must memoise it, as
+ * (`transport`, `onConversationChange` — the host must memoise it, as
  * documented on `ChatPageProps`), or a `useMemo` product of `ChatPage`
  * (`attachments`, `composerSlot`), so a list refetch that leaves the active row
  * untouched is a no-op here.
  */
 const Conversation = memo(function Conversation({
   id,
-  getHeaders,
+  transport,
   isPersisted,
   composerSlot,
+  authorsPackages,
   canPinSkills,
   canWrite,
   ...rest
@@ -436,13 +441,13 @@ const Conversation = memo(function Conversation({
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
   const { t } = useChatHost();
-  const spaceId = spaceIdFromHeaders(getHeaders);
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
   const history = useQuery({
     queryKey: sessionQueryKey(spaceId, id),
-    queryFn: () => loadHistory(getHeaders, id),
+    queryFn: () => loadHistory(transport!.request, id),
     // `GET /api/chat/sessions/:id` requires `X-Space-Id`; without one the
     // request is a guaranteed 400, so wait for the host's space instead.
-    enabled: persistedAtMount && !!spaceId,
+    enabled: persistedAtMount && !!spaceId && !!transport,
     staleTime: Infinity,
     gcTime: 0,
   });
@@ -464,18 +469,18 @@ const Conversation = memo(function Conversation({
   }, []);
   const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
   const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
-  const slot = useMemo(
+  const tools = useMemo(
     () => (
-      <div className="flex items-center gap-2">
-        {showPicker ? (
-          <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
-        ) : (
-          canWrite && <EnforcedSkillsIndicator getHeaders={getHeaders} />
-        )}
-        {composerSlot}
-      </div>
+      <ComposerTools
+        transport={transport}
+        selection={skills}
+        onSelectionChange={chooseSkills}
+        showPicker={showPicker}
+        authorsPackages={authorsPackages}
+        showEnforced={canWrite}
+      />
     ),
-    [getHeaders, skills, chooseSkills, showPicker, canWrite, composerSlot],
+    [transport, skills, chooseSkills, showPicker, authorsPackages, canWrite],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -495,10 +500,11 @@ const Conversation = memo(function Conversation({
   return (
     <ConversationInner
       id={id}
-      getHeaders={getHeaders}
+      transport={transport}
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
-      composerSlot={slot}
+      composerTools={tools}
+      composerSlot={composerSlot}
       getChosenSkills={getChosenSkills}
       {...rest}
     />
@@ -532,22 +538,24 @@ function ConversationNotFound({
 
 function ConversationInner({
   id,
-  getHeaders,
+  transport,
   initialMessages,
   isPersisted,
   initialComposerDraft,
   onConversationChange,
   attachments,
+  composerTools,
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
-}: Omit<ConversationProps, "canPinSkills" | "canWrite"> & {
+}: Omit<ConversationProps, "canPinSkills" | "canWrite" | "authorsPackages"> & {
+  composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
 }) {
   const queryClient = useQueryClient();
-  const spaceId = spaceIdFromHeaders(getHeaders);
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
 
   // Pre-select the model of this conversation's newest turn. A layout effect,
   // so the composer never paints one frame of the stored default first.
@@ -563,16 +571,16 @@ function ConversationInner({
   // its `Chat` instance only when `id` changes, so a transport rebuilt over
   // fresh state would be silently ignored and every send would keep the model
   // captured at mount. The store read resolves per request, so a model switch
-  // applies to the next send. `getHeaders` is a stable host fn.
+  // applies to the next send. `transport` is a stable host object.
   const buildHeaders = useCallback((): Record<string, string> => {
     const model = getSelectedModel();
     return {
-      ...getHeaders?.(),
+      ...transport?.getHeaders(),
       ...(model ? { "X-Model-Id": model } : {}),
     };
-  }, [getHeaders]);
+  }, [transport]);
 
-  const transport = useMemo(
+  const turnTransport = useMemo(
     () =>
       new DefaultChatTransport<UIMessage>({
         api: "/api/chat",
@@ -587,7 +595,7 @@ function ConversationInner({
               messages,
               generation: getCompatibleGenerationSettings(),
               // Read at request time, like the model above, for the same reason.
-              agent_authoring: getAgentAuthoringEnabled(),
+              package_authoring: getPackageAuthoringEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,
@@ -607,7 +615,7 @@ function ConversationInner({
   const chat = useChat({
     id,
     messages: initialMessages,
-    transport,
+    transport: turnTransport,
     // Reconnect to an in-flight turn on mount (mid-inference reload). 204 when
     // nothing is generating → no-op.
     //
@@ -659,11 +667,12 @@ function ConversationInner({
     }
     // `serverUpdatedAt` is defined here (the rule returns false otherwise).
     lastReconciledUpdatedAt.current = serverUpdatedAt ?? null;
+    if (!transport) return;
     let cancelled = false;
     void queryClient
       .fetchQuery({
         queryKey: sessionQueryKey(spaceId, id),
-        queryFn: () => loadHistory(getHeaders, id),
+        queryFn: () => loadHistory(transport.request, id),
         // The mounted history query pins `staleTime: Infinity`; force the GET.
         staleTime: 0,
       })
@@ -684,7 +693,7 @@ function ConversationInner({
     serverUpdatedAt,
     setMessages,
     queryClient,
-    getHeaders,
+    transport,
     spaceId,
     id,
   ]);
@@ -749,70 +758,27 @@ function ConversationInner({
   // real user stop must also hit the dedicated server endpoint. Start that
   // independent request before aborting the local stream so it cannot be
   // mistaken for an ordinary disconnect.
+  //
+  // Every stop path (button, Escape) lands here, so this is also where the
+  // message queue learns the user stopped: its messages are then held, not sent.
+  const [messageQueue] = useState(createMessageQueue);
   const stop = useCallback(() => {
-    void stopSession(getHeaders, id).catch(() => {});
+    messageQueue.markStopped();
+    if (transport) void stopSession(transport.request, id).catch(() => {});
     return chat.stop();
-  }, [chat, getHeaders, id]);
+  }, [chat, transport, id, messageQueue]);
   const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
+      <Thread
+        composerTools={composerTools}
+        composerSlot={composerSlot}
+        initialComposerDraft={initialComposerDraft}
+        messageQueue={messageQueue}
+      />
     </AssistantRuntimeProvider>
-  );
-}
-
-/**
- * A saved conversation while its history loads: the turns it will show, in
- * place, above an inert composer frame of the live one's height. The runtime is
- * not mounted, so the frame is static markup, not the real composer.
- */
-function ConversationSkeleton({
-  label,
-  placeholder,
-}: {
-  label: string;
-  /** The composer's placeholder; null for a reader, who gets no composer. */
-  placeholder: string | null;
-}) {
-  return (
-    <div
-      role="status"
-      aria-busy="true"
-      aria-label={label}
-      className="flex h-full w-full flex-col overflow-hidden"
-    >
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-6 px-4 pt-8">
-        <Skeleton aria-hidden className="ml-auto h-10 w-2/5 rounded-2xl" />
-        <div aria-hidden className="space-y-2.5">
-          <Skeleton className="h-3.5 w-full" />
-          <Skeleton className="h-3.5 w-11/12" />
-          <Skeleton className="h-3.5 w-3/5" />
-        </div>
-        <Skeleton aria-hidden className="ml-auto h-10 w-1/3 rounded-2xl" />
-        <div aria-hidden className="space-y-2.5">
-          <Skeleton className="h-3.5 w-full" />
-          <Skeleton className="h-3.5 w-2/5" />
-        </div>
-      </div>
-      {placeholder !== null && (
-        <div aria-hidden className="mx-auto w-full max-w-2xl px-4 pb-4">
-          <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-            <div className="text-muted-foreground flex min-h-9 items-center py-1 text-sm">
-              {placeholder}
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <Skeleton className="size-8 rounded-lg" />
-                <Skeleton className="h-7 w-32 rounded-md" />
-              </div>
-              <Skeleton className="size-8 rounded-lg" />
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

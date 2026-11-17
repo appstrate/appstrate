@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Badge } from "@appstrate/ui/components/badge";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../components/data-table";
 import { rowActionsColumn } from "../components/row-actions-column";
 import { TableRowActions } from "../components/table-row-actions";
@@ -46,22 +46,21 @@ export function useApiKeyColumns({
   return [
     {
       id: "name",
-      header: t("apiKeys.nameLabel"),
-      width: "minmax(104px,1.3fr)",
+      header: t("spaces.nameLabel"),
+      width: 104,
+      elastic: true,
       cell: (key) => <CellText strong>{key.name}</CellText>,
     },
     {
       id: "prefix",
-      header: t("apiKeys.keyColumn"),
-      width: "88px",
-      tier: 2,
+      header: t("spaces.metadataKey"),
+      width: 88,
       cell: (key) => <CellText mono>{key.keyPrefix}…</CellText>,
     },
     {
       id: "status",
-      header: t("apiKeys.statusColumn"),
-      width: "80px",
-      tier: 2,
+      header: t("proxies.col.status"),
+      width: 80,
       cell: (key) =>
         isApiKeyExpired(key.expiresAt) ? (
           <Badge variant="failed">{t("apiKeys.expired")}</Badge>
@@ -72,8 +71,7 @@ export function useApiKeyColumns({
     {
       id: "expires",
       header: t("apiKeys.expirationColumn"),
-      width: "96px",
-      tier: 2,
+      width: 96,
       cell: (key) => (
         <span className="text-muted-foreground text-xs">
           {key.expiresAt ? formatDateField(key.expiresAt, "date") : t("apiKeys.expiresNever")}
@@ -82,9 +80,9 @@ export function useApiKeyColumns({
     },
     {
       id: "scopes",
-      header: t("apiKeys.permissionSummary"),
-      width: "minmax(112px,1.1fr)",
-      tier: 3,
+      header: t("roles.permissionsLabel"),
+      width: 112,
+      elastic: true,
       cell: (key) => {
         const summary = scopeSummary(key, availableScopes);
         if (summary.kind === "full") return <CellText>{t("apiKeys.fullAccess")}</CellText>;
@@ -98,27 +96,26 @@ export function useApiKeyColumns({
     {
       id: "lastUsed",
       header: t("apiKeys.lastUsedColumn"),
-      width: "104px",
+      width: 104,
       align: "end",
-      tier: 3,
       cell: (key) => <CellDate value={key.lastUsedAt} granularity="date" />,
     },
     {
       id: "createdBy",
       header: t("apiKeys.createdByColumn"),
-      width: "minmax(96px,1fr)",
-      tier: 3,
+      width: 96,
+      elastic: true,
       cell: (key) =>
         key.created_by_name ? <CellText>{key.created_by_name}</CellText> : <CellEmpty />,
     },
     rowActionsColumn((key) => (
       <TableRowActions
-        menuLabel={t("apiKeys.moreActions", { name: key.name })}
+        menuLabel={t("providers.moreActions", { name: key.name })}
         isPending={revokingKeyId === key.id}
         actions={[
           {
             id: "revoke",
-            label: t("apiKeys.revoke"),
+            label: t("devices.revoke"),
             icon: Trash2,
             onSelect: () => onRevoke?.(key),
             destructive: true,

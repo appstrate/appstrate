@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceEntry } from "./types";
-import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./types";
 import {
@@ -15,52 +14,36 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import {
-  AFPS_SCHEMA_URLS,
-  AFPS_SCHEMA_VERSION,
-  dropRetiredRuntimeTools,
-} from "@appstrate/core/validation";
-import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
-import {
-  dropRetiredDependencyKeys,
-  parseManifestIntegrations,
-  writeManifestIntegrations,
-} from "@appstrate/core/dependencies";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
 
 // ─── Version ranges ─────────────────────────────────────────
 
-/**
- * Range form stored in agent manifests. Mirrors `npm install foo` (no
- * `--save-exact`), which writes `^X.Y.Z` — auto-receive non-breaking
- * fixes within the current major, opt-in major bumps. For exact pinning,
- * the user can hand-edit the raw manifest; the backend resolver
- * (`resolveVersionFromCatalog`) accepts every semver range form.
- */
+/** Range stored in agent manifests, as `npm install foo` writes it. Exact pins are a raw-manifest edit. */
 export function caretRange(version: string): string {
   return `^${version}`;
 }
 
-// ─── Default state ──────────────────────────────────────────
+// ─── Default manifests ──────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorState {
+export function defaultAgentManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
   return {
-    manifest: {
-      $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: AFPS_SCHEMA_VERSION,
-      type: "agent",
-      name: orgSlug ? `@${orgSlug}/` : "",
-      version: "1.0.0",
-      display_name: "",
-      description: "",
-      author: userEmail ?? "",
-      timeout: 300,
-      dependencies: {},
-    },
-    operations: [{ op: "write", path: "prompt.md", text: "" }],
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
+    type: "agent",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    timeout: 300,
+    dependencies: {},
   };
 }
-
-// ─── Default manifests for skill/tool ───────────────────────
 
 export function defaultSkillManifest(
   orgSlug?: string,
@@ -78,19 +61,9 @@ export function defaultSkillManifest(
   };
 }
 
-/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
-export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
-
 // ─── Default manifest for integration ───────────────────────
 
-/**
- * Minimal valid AFPS integration skeleton for the "new" editor. Uses a
- * `remote` Streamable-HTTP source (no mcp-server bundle dependency, authorable
- * end-to-end via the editor) + a single api_key auth that injects the key as a
- * Bearer header. The author edits the URL, auth, and tools from here — the raw
- * JSON tab exposes the full manifest for the fields the structured form doesn't
- * cover yet.
- */
+/** Minimal valid integration skeleton: a `remote` Streamable-HTTP source and one api_key auth sent as a Bearer header. */
 export function defaultIntegrationManifest(
   orgSlug?: string,
   userEmail?: string,
@@ -117,7 +90,7 @@ export function defaultIntegrationManifest(
             type: "object",
             required: ["api_key"],
             properties: {
-              api_key: { type: "string", description: "API key for this integration." },
+              api_key: { type: "string" },
             },
           },
         },
@@ -134,84 +107,6 @@ export function defaultIntegrationManifest(
   };
 }
 
-// ─── Runtime tools (manifest.runtime_tools) ──────────────────
-
-/**
- * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
- * the built-in runtime tools the agent author opted into (all opt-in,
- * `output` included). Tolerates a missing or malformed field by returning an
- * empty array. Ids the platform no longer offers (a retired tool such as the
- * removed `report`, or a hand-typed mistake in the raw-JSON tab) are dropped
- * so they can never render as a phantom checkbox nor block a later save.
- */
-export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtime_tools;
-  return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
-}
-
-/**
- * Return the manifest with every piece of vocabulary the platform retired
- * removed, applied ONCE when an existing agent is loaded into the editor:
- *
- *   - `runtime_tools` reduced to the ids the platform still offers, so a
- *     retired id persisted long ago (e.g. `report`) silently disappears on the
- *     next save instead of round-tripping forever;
- *   - the retired AFPS 1.x `dependencies` keys (`tools` → `mcp_servers`,
- *     `providers` → `integrations`) dropped, for the same reason — a draft can
- *     acquire one by importing a bundle assembled from a legacy published
- *     version, and the author-direction save rejects it.
- *
- * In both cases the user would otherwise be shown an error for a field the
- * editor cannot even display, with no way to clear it. Typing either into the
- * raw-JSON tab still surfaces the rejection — this normalises on LOAD only.
- *
- * Both halves delegate to `@appstrate/core` — `dropRetiredRuntimeTools` is the
- * SAME function the publish path runs (`services/package-versions.ts`). A
- * second implementation here would drift on the empty case, and an agent whose
- * only tool is retired would serialise differently depending on which path
- * saved it. One implementation, one byte sequence. Core is type-gated
- * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
- * invokes it only in the agent branch.
- *
- * One function rather than a chain the call site composes, so a future
- * retirement is added here and cannot be forgotten at the call site.
- *
- * Returns the same reference when there is nothing to drop.
- */
-export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
-}
-
-/**
- * Write the selected runtime tool ids back into the manifest. An empty
- * selection drops the field entirely so the manifest stays minimal — the same
- * empty-case convention `dropRetiredRuntimeTools` follows, so a manifest is
- * byte-identical whichever of the two last touched it. Neither writer ever
- * mints `runtime_tools: []`; core deliberately preserves that spelling when an
- * author supplied it, but no platform path produces it.
- */
-export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
-  if (tools.length > 0) {
-    m.runtime_tools = tools;
-  } else {
-    delete m.runtime_tools;
-  }
-}
-
-/**
- * An agent that declares an output schema must be able to return its result: the server
- * refuses a manifest whose schema has no `output` runtime tool. Declaring the schema turns the
- * tool on, so the author never meets that refusal. Returns the same reference when the tool
- * is already there.
- */
-export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
-  const tools = getRuntimeTools(m);
-  if (tools.includes("output")) return m;
-  const next = { ...m };
-  setRuntimeTools(next, [...tools, "output"]);
-  return next;
-}
-
 // ─── Manifest accessors ─────────────────────────────────────
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {
@@ -220,16 +115,9 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object — the fields common to every
- * package type. Editor-specific manifest fields (e.g. the agent `timeout`)
- * are bound directly to manifest state by their editor and rendered through
- * MetadataSection's children slot.
- *
- * `author` accepts both the AFPS §3.1 bare-string form and the structured
- * `{ name, email?, url? }` object form: the editor's metadata UI is a single
- * text input, so the object form is rendered as its `name` field. Saving
- * collapses the object to a string — round-tripping the object shape
- * end-to-end would require an editor UI change.
+/**
+ * `author` accepts the bare-string and the `{ name, email?, url? }` forms (AFPS §3.1); the single
+ * text input shows the object's `name`, and saving collapses it to a string.
  */
 export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   const { scope, id } = getManifestName(m);
@@ -251,10 +139,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   };
 }
 
-/** Apply MetadataState changes back into a manifest patch.
- *
- * Emits canonical AFPS snake_case (`display_name`).
- */
+/** Emits canonical AFPS snake_case (`display_name`). */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
@@ -264,6 +149,27 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
     author: m.author,
     keywords: m.keywords,
   };
+}
+
+/**
+ * The platform's own integration is offered by every agent the editor shows:
+ * its row is always there, and removing it is not an action. A manifest that
+ * does not declare it reads as this entry — declared, no tool selected — and an
+ * entry left that way is not written, so the manifest names the integration
+ * only once the author picks a tool of it.
+ */
+export function isPlatformEntry(entry: Pick<ResourceEntry, "id">): boolean {
+  return entry.id === PLATFORM_INTEGRATION_ID;
+}
+
+const UNSELECTED_PLATFORM_ENTRY: ResourceEntry = {
+  id: PLATFORM_INTEGRATION_ID,
+  version: PLATFORM_INTEGRATION_RANGE,
+  tools: [],
+};
+
+function selectsNoTool(entry: ResourceEntry): boolean {
+  return Array.isArray(entry.tools) && entry.tools.length === 0;
 }
 
 function getDeps(m: Record<string, unknown>): Record<string, unknown> {
@@ -276,7 +182,10 @@ export function getResourceEntries(
 ): ResourceEntry[] {
   // Integrations: version from `dependencies.integrations` (§4.1), selection from
   // `integrations_configuration` (§4.4); entries pass through whole, so no key is lost on save.
-  if (type === "integrations") return parseManifestIntegrations(m);
+  if (type === "integrations") {
+    const entries = parseManifestIntegrations(m);
+    return entries.some(isPlatformEntry) ? entries : [UNSELECTED_PLATFORM_ENTRY, ...entries];
+  }
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -287,12 +196,12 @@ export function setResourceEntries(
   type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
-  if (!m.dependencies) m.dependencies = {};
-  const deps = m.dependencies as Record<string, unknown>;
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
-      entries.map((e) => ({ ...e, version: e.version ?? "*" })),
+      entries
+        .filter((e) => !(isPlatformEntry(e) && selectsNoTool(e)))
+        .map((e) => ({ ...e, version: e.version ?? "*" })),
     );
     return;
   }
@@ -301,21 +210,13 @@ export function setResourceEntries(
     if (e.id) record[e.id] = e.version ?? "*";
   }
   if (Object.keys(record).length > 0) {
-    deps[type] = record;
-  } else {
-    delete deps[type];
+    if (!m.dependencies) m.dependencies = {};
+    (m.dependencies as Record<string, unknown>)[type] = record;
+  } else if (m.dependencies) {
+    // An empty group writes nothing: a manifest that declares no
+    // `dependencies` stays that way, so the editor does not read as dirty.
+    delete (m.dependencies as Record<string, unknown>)[type];
   }
-}
-
-// ─── Resource entry helper ──────────────────────────────────
-
-export function toResourceEntry(r: {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}): ResourceEntry {
-  return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
 }
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
@@ -537,7 +438,7 @@ export function itemsEnumText(prop: JSONSchema7): TextValue {
 
 // ─── Manifest wrapper ⇄ fields ──────────────────────────────
 
-export function schemaToFields(
+function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output",
   wrapper?: {
@@ -550,7 +451,7 @@ export function schemaToFields(
   const requiredSet = new Set(schema.required || []);
   return getOrderedKeys(schema, wrapper?.property_order).map((key) => {
     const prop = schema.properties[key]!;
-    const base = { _id: crypto.randomUUID(), key, required: requiredSet.has(key), prop };
+    const base = { key, required: requiredSet.has(key), prop };
     if (mode !== "input") return base;
     if (isFileField(prop)) {
       const constraint = wrapper?.file_constraints?.[key];
@@ -565,14 +466,7 @@ export function schemaToFields(
   });
 }
 
-/**
- * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
- *
- * Emits only canonical snake_case keys (`schema`, `file_constraints`,
- * `ui_hints`, `property_order`). The caller replaces the wrapper wholesale
- * (`updateManifest({ input: wrapper })`), which drops any non-canonical
- * camelCase keys carried by the previous wrapper value.
- */
+/** Emits only canonical snake_case keys; the caller replaces the wrapper wholesale, dropping non-canonical ones. */
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output",

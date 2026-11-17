@@ -37,7 +37,7 @@ function PlanCard({
       className={cn(
         // h-56, not h-52: the fixed height has to hold price + credits +
         // storage without the entitlement lines wrapping into the description.
-        "relative flex h-56 flex-col items-start rounded-xl border p-5 text-left transition-colors",
+        "relative flex h-56 flex-col items-start rounded-lg border p-5 text-left transition-colors",
         isCurrent
           ? "border-primary bg-primary/5"
           : isUpgrade

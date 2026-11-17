@@ -34,7 +34,11 @@ describe("provisionDefaultAgentForOrg", () => {
     const versions = await listPackageVersions(packageId);
     expect(versions.map((v) => v.version)).toEqual(["1.0.0"]);
     expect(versions[0]!.created_by).toBe(ctx.user.id);
-    expect(validateManifest(await getExactVersionManifest(packageId, "1.0.0")).valid).toBe(true);
+    const manifest = await getExactVersionManifest(packageId, "1.0.0");
+    expect(validateManifest(manifest).valid).toBe(true);
+    expect(manifest).toMatchObject({
+      dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+    });
 
     const agent = await getPackage(packageId, ctx.orgId);
     expect((await resolveAgentRunVersion(agent!, undefined)).overrideVersionLabel).toBe("1.0.0");

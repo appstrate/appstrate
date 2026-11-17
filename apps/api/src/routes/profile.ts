@@ -12,7 +12,7 @@ import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { conflict, forbidden, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { getErrorMessage } from "@appstrate/core/errors";

@@ -507,6 +507,56 @@ describe("Schedules API", () => {
       expect(body).toHaveProperty("actor_name");
     });
 
+    it("stamps an ETag and refuses a stale If-Match with 412, writing nothing", async () => {
+      const fid = agentId("etag-agent");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        name: "Before",
+      });
+      const patch = (body: Record<string, unknown>, ifMatch?: string) =>
+        app.request(`/api/schedules/${schedule.id}`, {
+          method: "PATCH",
+          headers: {
+            ...authHeaders(ctx),
+            "Content-Type": "application/json",
+            ...(ifMatch ? { "If-Match": ifMatch } : {}),
+          },
+          body: JSON.stringify(body),
+        });
+
+      const read = await app.request(`/api/schedules/${schedule.id}`, {
+        headers: authHeaders(ctx),
+      });
+      const etag = read.headers.get("ETag")!;
+      expect(etag).toMatch(/^"\d+"$/);
+
+      const first = await patch({ name: "First" }, etag);
+      expect(first.status).toBe(200);
+      const next = first.headers.get("ETag")!;
+      expect(next).not.toBe(etag);
+
+      // The tag the first write consumed is stale now.
+      const stale = await patch({ name: "Second" }, etag);
+      expect(stale.status).toBe(412);
+      expect(stale.headers.get("ETag")).toBe(next);
+      expect(
+        (
+          (await (
+            await app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) })
+          ).json()) as { name: string }
+        ).name,
+      ).toBe("First");
+
+      expect((await patch({ name: "Second" }, next)).status).toBe(200);
+      // Without the header, last write wins as before.
+      expect((await patch({ name: "Third" })).status).toBe(200);
+    });
+
     it("merges (RFC 7396): an absent field is kept, `null` clears a nullable one", async () => {
       const { agent, integration, ids } = await agentWithConnections("merge-agent", 1);
       // Disabled: armed, clearing the set would leave the actor's one connection unnamed (409).

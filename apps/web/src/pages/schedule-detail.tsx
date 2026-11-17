@@ -1,25 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Alert } from "@appstrate/ui/components/alert";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import {
-  DetailTabs,
-  DetailTabBar,
-  DetailTabPanel,
-  type DetailTab,
-} from "../components/detail-tabs";
+import { AlertDescription } from "@appstrate/ui/components/alert";
+import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
-import { PageHeader } from "../components/page-header";
+import { DetailBar } from "../components/detail-bar";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { ResourceErrorState, EmptyState } from "../components/page-states";
 import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
@@ -27,15 +24,13 @@ import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { isQueryInFlight } from "../lib/query-state";
-import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
 import {
@@ -46,11 +41,19 @@ import {
 import { formatDateField } from "../lib/format-date";
 import { parseCron } from "../lib/cron-frequency";
 import { describeFrequency } from "../lib/frequency-summary";
-import { scheduleDetailPath } from "../lib/package-paths";
-import { Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
+import {
+  Pause,
+  Clock,
+  CalendarClock,
+  FileInput,
+  CirclePlay,
+  LayoutGrid,
+  Play,
+  Settings2,
+} from "lucide-react";
 
-type ScheduleTab = "details" | "runs" | "settings";
-const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
+type ScheduleTab = "overview" | "runs" | "settings";
+const SCHEDULE_TABS: readonly ScheduleTab[] = ["overview", "runs", "settings"];
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -66,15 +69,15 @@ export function ScheduleDetailPage() {
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   // The tab stays for every role; without the permission its content says so.
   const readsRuns = canReadRuns(can);
-  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
+  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "overview");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
-    { value: "details", label: t("detail.overview.summary") },
-    { value: "runs", label: t("schedule.tabRuns") },
-    { value: "settings", label: t("schedule.tabSettings") },
+    { value: "overview", label: t("detail.overview.summary"), icon: LayoutGrid },
+    { value: "runs", label: t("common:nav.runs"), icon: Play },
+    { value: "settings", label: t("common:nav.settings"), icon: Settings2 },
   ];
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
@@ -83,26 +86,18 @@ export function ScheduleDetailPage() {
   return (
     <div>
       <DetailTabs value={activeTab} onChange={setActiveTab}>
-        <PageHeader
+        <DetailBar
           title={schedule.name || t("schedule.unnamed")}
-          titleClassName="text-xl"
-          wrapActions
           icon={
             <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
               <CalendarClock className="size-5" aria-hidden />
             </span>
           }
-          breadcrumbs={[
-            { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            {
-              label: schedule.name || t("schedule.unnamed"),
-              href: scheduleDetailPath(schedule.id),
-            },
-            { label: tabs.find((item) => item.value === activeTab)?.label ?? activeTab },
-          ]}
+          badge={<ScheduleStatusBadge schedule={schedule} />}
+          trail={[{ label: t("common:nav.schedules"), href: "/schedules" }]}
+          tabs={tabs}
           actions={
             <>
-              <ScheduleStatusBadge schedule={schedule} />
               {/* A schedule running as ANOTHER member is an org owner/admin
                   act: the page deed stays where it always is, disabled,
                   and says why. */}
@@ -126,25 +121,26 @@ export function ScheduleDetailPage() {
             blocks it. A lost connection is repaired in the form's connection
             choice, so the alert opens it. */}
         {disabledReason && (
-          <Alert variant="warning" className="mb-4">
-            <Pause aria-hidden />
-            <AlertDescription className="flex items-start justify-between gap-3">
-              <span className="min-w-0">{disabledReason}</span>
-              {mayWrite && schedule.disabled_reason?.startsWith("connection_") && (
+          <Alert
+            variant="warning"
+            icon={Pause}
+            className="mb-4"
+            action={
+              mayWrite &&
+              schedule.disabled_reason?.startsWith("connection_") && (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="-my-1.5 shrink-0"
                   onClick={() => navigate(scheduleSettingsHref(schedule.id, "connections"))}
                 >
                   {t("schedule.chooseConnections")}
                 </Button>
-              )}
-            </AlertDescription>
+              )
+            }
+          >
+            <AlertDescription>{disabledReason}</AlertDescription>
           </Alert>
         )}
-        <DetailTabBar tabs={tabs} />
-
         <DetailTabPanel value="runs">
           {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
@@ -153,11 +149,11 @@ export function ScheduleDetailPage() {
           )}
         </DetailTabPanel>
 
-        <DetailTabPanel value="details">
+        <DetailTabPanel value="overview">
           <ScheduleParams schedule={schedule} />
         </DetailTabPanel>
 
-        <DetailTabPanel value="settings" flush>
+        <DetailTabPanel value="settings" framed>
           {/* The settings seed their fields once: never from a list row that may be stale. */}
           {scheduleQuery.isPlaceholderData ? (
             <div className="p-6">
@@ -173,13 +169,14 @@ export function ScheduleDetailPage() {
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title={t("schedule.deleteTitle")}
-        confirmLabel={t("schedule.delete")}
+        confirmLabel={t("common:btn.delete")}
         description={t("schedule.deleteConfirm")}
         isPending={deleteSchedule.isPending}
         onConfirm={() => {
           deleteSchedule.mutate(schedule.id, {
             onSuccess: () => {
               setConfirmOpen(false);
+              toast.success(t("schedule.deleted"));
               navigate("/schedules");
             },
           });
@@ -197,14 +194,10 @@ function ScheduleParams({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents"]);
-  const agentsQuery = useAgents();
-  const { data: agents } = agentsQuery;
-  const agentsPending = isQueryInFlight(agentsQuery);
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
-  const agentDisplayName =
-    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
+  const agentDisplayName = schedule.agent_name;
   const input = schedule.input;
   const navigate = useNavigate();
   const open = (section: ScheduleSettingsSection) => ({
@@ -220,10 +213,8 @@ function ScheduleParams({
         headerAction={open("execution")}
       >
         <FactGrid columns={2}>
-          <Fact label={t("schedule.paramAgent")}>
-            {agentsPending ? (
-              <Skeleton className="h-4 w-32" />
-            ) : canReach(agentPath) ? (
+          <Fact label={t("schedule.agent")}>
+            {canReach(agentPath) ? (
               <Link className="text-primary hover:underline" to={agentPath}>
                 {agentDisplayName}
               </Link>
@@ -259,7 +250,7 @@ function ScheduleParams({
         </FactGrid>
       </DetailSectionCard>
       <DetailSectionCard
-        title={t("schedule.timing")}
+        title={t("schedule.settings.recurrence")}
         icon={CalendarClock}
         headerAction={open("recurrence")}
       >
@@ -270,7 +261,7 @@ function ScheduleParams({
               value:
                 describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
             },
-            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
+            { labelKey: "schedule.timezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value: nextRunAt
@@ -287,7 +278,7 @@ function ScheduleParams({
         />
       </DetailSectionCard>
       <DetailSectionCard
-        title={t("schedule.tabInput")}
+        title={t("detail.configuration.inputsShort")}
         icon={FileInput}
         headerAction={open("inputs")}
         className="lg:col-span-2"
@@ -311,20 +302,14 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: agents } = useAgents();
-  const agentName =
-    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
+  const agentName = schedule.agent_name;
 
   const isActive = schedule.enabled;
 
-  // The same query ScopedRunList makes for its first page (12 rows), so React
-  // Query serves both from one fetch.
+  // The same query ScopedRunList makes (default page size), so React Query
+  // serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const runsQuery = usePaginatedRuns({
-    scheduleId: schedule.id,
-    limit: 12,
-    offset: 0,
-  });
+  const runsQuery = useFirstRunsPage({ scheduleId: schedule.id });
   const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 

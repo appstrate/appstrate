@@ -3,10 +3,9 @@
 /**
  * The file explorer's pure core.
  *
- * Everything asserted here is what a rendered test cannot reach: the tree is
- * virtualized, so a DOM-less render emits zero rows and the ARIA bookkeeping
- * (`aria-level` / `aria-setsize` / `aria-posinset`, all computed by hand
- * precisely BECAUSE rows are windowed) would go unverified.
+ * Everything asserted here is what a DOM-less render cannot reach: the tree shape,
+ * the ARIA bookkeeping (`aria-level` / `aria-setsize` / `aria-posinset`) and the
+ * keyboard model.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -548,7 +547,7 @@ describe("isPinnedEntry", () => {
 
   it("pins the manifest, which the write route answers `reserved_entry` for", () => {
     expect(isPinnedEntry("skill", "manifest.json")).toBe(true);
-    expect(isPinnedEntry("mcp-server", "manifest.json")).toBe(true);
+    expect(isPinnedEntry("integration", "manifest.json")).toBe(true);
   });
 
   it("leaves every other file free, including one type's entry under another type", () => {

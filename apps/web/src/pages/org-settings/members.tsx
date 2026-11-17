@@ -6,12 +6,15 @@ import type { components } from "../../api/client";
 import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
-import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
+import { ListFooter, ListToolbar } from "../../components/list-toolbar";
+import { useListParams } from "../../lib/list-params";
+import { useSearchPlaceholder } from "../../lib/search-placeholder";
+import { matchesSearch } from "../../lib/strings";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import type { MenuAction } from "../../lib/menu-action";
 import { InvitationsTable } from "../../components/invitations-table";
@@ -25,13 +28,16 @@ import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstr
 
 type OrgMember = components["schemas"]["OrgMember"];
 
+/** The search is this page's only list parameter. */
+const NO_FILTERS: readonly string[] = [];
+
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const { can, orgRole } = usePermissions();
   const orgId = currentOrg?.id;
-  const invite = useModalParam("invite");
+  const [inviting, setInviting] = useState(false);
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -48,8 +54,13 @@ export function OrgSettingsMembersPage() {
 
   const { data: orgData, isLoading, error } = useOrgDetail();
 
-  const members = orgData?.members ?? [];
-  const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
+  const allMembers = orgData?.members ?? [];
+  const list = useListParams(NO_FILTERS);
+  const searchPlaceholder = useSearchPlaceholder(t("orgSettings.tabMembers"));
+  const members = allMembers.filter((member) =>
+    matchesSearch(list.search, [memberLabel(member), member.email]),
+  );
+  const memberParam = useUrlModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
   const removeMemberMutation = useRemoveMember();
@@ -81,11 +92,9 @@ export function OrgSettingsMembersPage() {
     changeRole(member.userId, newRole);
   };
 
-  // Which spaces a person reaches, and as what: one shared query set for the
-  // column and for the detail, so opening a person costs nothing more.
+  // Which spaces a person reaches, and as what, comes with the member itself:
+  // the column and the detail read the same rows.
   const seesEverySpace = hasFullOrgAccess(orgRole);
-  const { byUser: spacesByUser, isLoading: spacesLoading } =
-    useSpaceMembershipsByUser(seesEverySpace);
 
   const assignableRoles = (member: OrgMember) =>
     orgRole && canChangeRole
@@ -110,10 +119,7 @@ export function OrgSettingsMembersPage() {
     isRemoving: removeMemberMutation.isPending,
     onChangeRole: handleRoleChange,
     onRemove: handleRemove,
-    spaces: seesEverySpace
-      ? (member) => (spacesByUser.get(member.userId) ?? []).map(({ space }) => space.name)
-      : undefined,
-    spacesLoading,
+    spaces: seesEverySpace ? (member) => member.spaces.map((space) => space.name) : undefined,
   });
 
   const openedUser = memberParam.target;
@@ -121,7 +127,7 @@ export function OrgSettingsMembersPage() {
     id: "invite",
     icon: Plus,
     label: t("orgSettings.inviteMember"),
-    onSelect: () => invite.open(),
+    onSelect: () => setInviting(true),
     hidden: !canInvite,
   };
 
@@ -132,29 +138,34 @@ export function OrgSettingsMembersPage() {
       {/* The invitation is one form wherever it is made: the org role, then the
           spaces it opens and the role in each — which is what a guest needs,
           having no implicit access anywhere. */}
-      {canInvite && orgId && (
+      {canInvite && orgId && inviting && (
         <Modal
-          open={invite.value !== null}
-          onClose={invite.close}
+          onClose={() => setInviting(false)}
           title={t("orgSettings.inviteMember")}
           className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
         >
           <OrgInvitationForm
-            key={`${orgId}:${invite.value}`}
+            key={orgId}
             orgId={orgId}
             allowGuest
-            onSuccess={invite.close}
-            onCancel={invite.close}
+            onSuccess={() => setInviting(false)}
+            onCancel={() => setInviting(false)}
           />
         </Modal>
       )}
 
-      {/* No `empty` prop on purpose: this page has TWO lists and one shared
-          empty state below, for when neither members nor invitations exist. A
-          per-list empty sentence here would fire while invitations are pending
-          and say the page is empty when it is not. */}
+      <ListToolbar
+        search={{
+          value: list.search,
+          onChange: list.setSearch,
+          placeholder: searchPlaceholder,
+        }}
+      />
+
+      {/* This page has TWO lists: the members' own empty state fires only when no
+          invitation is pending either, or it would say the page is empty when it is not. */}
       <DataTable
-        tableId="members"
+        tableId="org-members"
         label={t("orgSettings.tabMembers")}
         columns={memberColumns}
         rows={members}
@@ -163,15 +174,32 @@ export function OrgSettingsMembersPage() {
         rowLabel={memberLabel}
         isLoading={isLoading}
         failure={error}
+        empty={
+          list.search ? (
+            <NoMatchState message={t("orgSettings.noMatchingMembers")} onReset={list.reset} />
+          ) : invitations.length === 0 ? (
+            <EmptyState
+              message={t("orgSettings.noMembers")}
+              hint={t("orgSettings.noMembersHint")}
+              icon={Users}
+              compact
+            >
+              <EmptyStateAction action={inviteAction} />
+            </EmptyState>
+          ) : undefined
+        }
+      />
+      <ListFooter
+        count={
+          isLoading || error ? undefined : t("list.count", { ns: "agents", count: members.length })
+        }
       />
 
       {openedUser && (
         <UserDetailModal
           key={openedUser.userId}
           member={openedUser}
-          memberships={spacesByUser.get(openedUser.userId) ?? []}
           showSpaces={seesEverySpace}
-          spacesLoading={spacesLoading}
           assignableRoles={assignableRoles(openedUser)}
           isChangingOrgRole={changeRoleMutation.isPending}
           onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
@@ -179,28 +207,17 @@ export function OrgSettingsMembersPage() {
         />
       )}
 
-      {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
-
-      {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
-        <EmptyState
-          message={t("orgSettings.noMembers")}
-          hint={t("orgSettings.noMembersHint")}
-          icon={Users}
-          compact
-        >
-          <EmptyStateAction action={inviteAction} />
-        </EmptyState>
-      )}
+      {orgId && <InvitationsTable orgId={orgId} invitations={orgData?.invitations} />}
 
       <ConfirmModal
         open={!!roleChange}
         onClose={() => setRoleChange(null)}
         title={t(
           roleChange?.role === "owner"
-            ? "orgSettings.promoteOwnerTitle"
+            ? "orgSettings.promoteOwner"
             : roleChange?.from === "owner"
               ? "orgSettings.demoteOwnerTitle"
-              : "orgSettings.demoteTitle",
+              : "orgSettings.demote",
         )}
         description={
           !roleChange

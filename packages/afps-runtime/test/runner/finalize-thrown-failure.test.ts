@@ -29,7 +29,7 @@ function harness() {
     emit: async (event: RunEvent) => {
       emitted.push(event);
     },
-    drainAndEmit: async () => {
+    settlePending: async () => {
       drainCount += 1;
     },
     eventSink: {
@@ -55,7 +55,7 @@ describe("finalizeThrownFailure", () => {
         runId: "run_1",
         now: () => 1000,
         emit: h.emit,
-        drainAndEmit: h.drainAndEmit,
+        settlePending: h.settlePending,
         eventSink: h.eventSink,
         usage: USAGE,
       }),
@@ -75,7 +75,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_2",
       now: () => 4242,
       emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
+      settlePending: h.settlePending,
       eventSink: h.eventSink,
       usage: USAGE,
     });
@@ -106,7 +106,7 @@ describe("finalizeThrownFailure", () => {
       emit: async () => {
         order.push("emit");
       },
-      drainAndEmit: async () => {
+      settlePending: async () => {
         order.push("drain");
       },
       eventSink: {
@@ -128,7 +128,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_3",
       now: () => 1,
       emit: h.emit,
-      drainAndEmit: async () => {
+      settlePending: async () => {
         throw new Error("drain blew up");
       },
       eventSink: h.eventSink,
@@ -147,7 +147,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_5",
       now: () => 9000,
       emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
+      settlePending: h.settlePending,
       eventSink: h.eventSink,
       usage: USAGE,
       stamp: (result) => {
@@ -171,7 +171,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_timeout",
       now: () => 1,
       emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
+      settlePending: h.settlePending,
       eventSink: h.eventSink,
       usage: USAGE,
       terminalStatus: "timeout",
@@ -199,7 +199,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_default",
       now: () => 1,
       emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
+      settlePending: h.settlePending,
       eventSink: h.eventSink,
       usage: USAGE,
     });
@@ -215,7 +215,7 @@ describe("finalizeThrownFailure", () => {
       runId: "run_6",
       now: () => 1,
       emit: h.emit,
-      drainAndEmit: h.drainAndEmit,
+      settlePending: h.settlePending,
       eventSink: h.eventSink,
       usage: { input_tokens: 0, output_tokens: 0 },
     });

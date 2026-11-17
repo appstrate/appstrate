@@ -31,10 +31,10 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Whether a root re-imported from ANOTHER home space is placed here with its
-   * offer, as `POST /api/packages/import-bundle` decides; `false` → `root_active: false`.
+   * Who places a root re-imported from ANOTHER home space here, as
+   * `POST /api/packages/import-bundle` decides; `null` → `root_active: false`.
    */
-  mayShareRoot: (packageId: string) => Promise<boolean>;
+  placeRootAs: Parameters<typeof handleImportBundle>[4];
 }
 
 interface PackageFileBytes {
@@ -230,7 +230,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         ctx.scope,
         ctx.actor.id,
         ctx.authorizeBundle,
-        ctx.mayShareRoot,
+        ctx.placeRootAs,
       );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",
@@ -264,16 +264,18 @@ function runtimeManifestTemplate(runtime: (typeof MCP_SERVER_RUNTIMES)[number]) 
     ? [...capability.manifestArgsBeforeEntryPoint, entryPoint]
     : [];
   return {
-    manifest_version: capability.manifestVersion,
     schema_version: AFPS_SCHEMA_VERSION,
-    type: "mcp-server",
+    type: "integration",
     name: "@<organization-scope>/<package-name>",
     version: "1.0.0",
     display_name: "<human-readable-name>",
-    server: {
-      type: capability.manifestServerType,
-      entry_point: entryPoint,
-      mcp_config: { command, args },
+    source: {
+      kind: "local",
+      server: {
+        type: capability.manifestServerType,
+        entry_point: entryPoint,
+        mcp_config: { command, args },
+      },
     },
     ...(runtime === "bun"
       ? {
@@ -292,7 +294,8 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     name: "get_runtime_capabilities",
     description:
       "Return the executable MCP-server runtimes this Appstrate build supports and an exact " +
-      "minimal manifest template for each. Call this before authoring a local MCP package.",
+      "minimal local-integration manifest template for each. Call this before authoring a " +
+      "local MCP integration.",
     annotations: {
       title: "Get MCP runtime capabilities",
       readOnlyHint: true,
@@ -307,10 +310,9 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
       package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
       schema_version: AFPS_SCHEMA_VERSION,
       entry_point_must_exist: true,
-      required_archive_files: ["manifest.json", "<server.entry_point>"],
+      required_archive_files: ["manifest.json", "<source.server.entry_point>"],
       runtimes: MCP_SERVER_RUNTIMES.map((runtime) => ({
         runtime,
-        manifest_version: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].manifestVersion,
         server_type: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].manifestServerType,
         entry_point: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].entryPoint,
         manifest_template: runtimeManifestTemplate(runtime),

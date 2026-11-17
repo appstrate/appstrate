@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the user has to do once a connection's credentials were MINTED by the
- * platform rather than pasted by them. The server sends an ordered list of
- * typed steps, so nothing here knows what SSH is. Label and note are read from
- * the bundle by step `id`, falling back to the server's English; shell blocks
- * and values are rendered verbatim.
+ * Steps to do once credentials were MINTED by the platform. Server-sent typed steps; label and
+ * note come from the bundle by step `id` (server English fallback), shell/values verbatim.
  */
 
 import { useTranslation } from "react-i18next";
@@ -52,12 +49,12 @@ function Step({ step, index }: { step: HandoffStep; index: number }) {
             {t("integration.connect.handoffPanel.deferredHint")}
           </span>
         </summary>
-        <div className="mt-2 space-y-2">{body}</div>
+        <div className="mt-2 flex flex-col gap-2">{body}</div>
       </details>
     );
   }
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <span className="block text-xs font-semibold">{label}</span>
       {body}
     </div>
@@ -67,7 +64,7 @@ function Step({ step, index }: { step: HandoffStep; index: number }) {
 export function HandoffSteps({ steps }: { steps: readonly HandoffStep[] }) {
   if (steps.length === 0) return null;
   return (
-    <div className="space-y-5" data-testid="handoff-steps">
+    <div className="flex flex-col gap-5" data-testid="handoff-steps">
       {steps.map((step, i) => (
         <Step key={i} step={step} index={i} />
       ))}

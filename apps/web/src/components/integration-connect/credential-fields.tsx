@@ -2,23 +2,14 @@
 import { useTranslation } from "react-i18next";
 import { isSecretField } from "@appstrate/core/form";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
+import { cn } from "@appstrate/ui/cn";
+import { FormItem } from "../app-ui/form-item";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
 import { deriveFieldNames, fieldSchemas } from "./credential-schema";
 
-/**
- * Presentational credential-field renderer for non-OAuth integration auths
- * (api_key / basic / mtls / custom). Rendered by the standalone hosted connect
- * page — the single credential-entry surface, so there is exactly
- * ONE credential renderer with no per-surface drift.
- */
-
-// Fields whose value is multi-line by nature (PEM-encoded certs and keys,
-// certificate chains), detected by name so manifest-declared properties get the
-// right affordance. Key material matches by substring, since a single-line input
-// would strip a PEM's newlines; there is no generic `*_key` suffix, which also
-// matches single-line secrets like `api_key`. Masking is the manifest's to say.
+// Multi-line by nature (PEM certs/keys), detected by name. No generic `*_key` suffix: it would
+// also match single-line secrets like `api_key`. Masking is the manifest's to say.
 const MULTILINE_FIELD_PATTERN = /cert|private_key|public_key|^(?:client_key|key)$/i;
 
 interface CredentialFieldsProps {
@@ -37,25 +28,29 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
       {fields.map((field) => {
         const isMultiline = MULTILINE_FIELD_PATTERN.test(field);
         const schema = schemas[field];
-        // Three sources, most specific first: a localized override, then the
-        // manifest's own `title`, then the raw name.
-        const labelKey = `integration.connect.fields.${field}.label`;
-        const labelText = t(labelKey, { defaultValue: schema?.title ?? field });
+        // The manifest's `title` (the author's words), then a localized label for a
+        // conventional field name, then the raw name.
+        const labelText =
+          schema?.title ?? t(`integration.connect.fields.${field}.label`, { defaultValue: field });
         const description = schema?.description;
-        // Controlled by the caller alone: a declared default reaches the input
-        // through `initialCredentialValues`, which is also what submits it.
+        // Defaults reach the input through `initialCredentialValues`, which also submits them.
         const value = values[field] ?? "";
         return (
-          <div key={field} className="space-y-1">
-            <Label
-              htmlFor={`field-${field}`}
-              className={labelText === field ? "font-mono text-xs" : "text-xs"}
-            >
-              {labelText}
-            </Label>
+          <FormItem
+            key={field}
+            id={`field-${field}`}
+            className={cn("gap-1 [&_label]:text-xs", labelText === field && "[&_label]:font-mono")}
+            label={labelText}
+            hint={
+              description ? (
+                <span className="leading-snug" data-testid={`field-description-${field}`}>
+                  {description}
+                </span>
+              ) : undefined
+            }
+          >
             {isMultiline ? (
               <Textarea
-                id={`field-${field}`}
                 value={value}
                 onChange={(e) => onChange({ ...values, [field]: e.target.value })}
                 autoComplete="off"
@@ -65,7 +60,6 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
               />
             ) : (
               <Input
-                id={`field-${field}`}
                 type={schema && isSecretField(schema) ? "password" : "text"}
                 value={value}
                 onChange={(e) => onChange({ ...values, [field]: e.target.value })}
@@ -73,15 +67,7 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
                 data-testid={`field-input-${field}`}
               />
             )}
-            {description && (
-              <p
-                className="text-muted-foreground text-xs leading-snug"
-                data-testid={`field-description-${field}`}
-              >
-                {description}
-              </p>
-            )}
-          </div>
+          </FormItem>
         );
       })}
     </>

@@ -14,10 +14,7 @@ export interface CliSessionDisplay {
 
 export type UaCategory = "cli" | "github-action" | "unknown";
 
-// Any GitHub Action invocation surfaces here when the action authenticates
-// via the same `cli_refresh_tokens` family. We branch on the action's UA
-// first because its identifier is a strict substring of the broader CLI
-// category and would otherwise be swallowed.
+// The action's UA is tested first: its identifier is a substring of the broader CLI one.
 export function categorizeUserAgent(ua: string | null): UaCategory {
   if (!ua) return "unknown";
   const lower = ua.toLowerCase();
@@ -30,9 +27,7 @@ export function categorizeUserAgent(ua: string | null): UaCategory {
   return "unknown";
 }
 
-// Pre-fix rows persisted the literal `"unknown"` string when no IP was
-// available. Treat that as a falsy display value so the dashboard renders
-// nothing instead of the noise word — matches the post-fix NULL handling.
+// Older rows persisted the literal `"unknown"` when no IP was available: treat it as absent.
 export function displayIp(ip: string | null): string | null {
   if (!ip) return null;
   return ip === "unknown" ? null : ip;

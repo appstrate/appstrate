@@ -16,7 +16,8 @@ import {
   Trophy,
 } from "lucide-react";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
-import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
+import type { ModelErrorReason } from "@appstrate/core/model-error";
+import { extractFileIds } from "@appstrate/core/file-uri";
 import { RunTurnsDetail } from "./run-turns-detail";
 import { journalLevel, type RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
@@ -36,7 +37,7 @@ import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
 import { DetailSectionCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
 import { formatNumber } from "../../lib/format-number";
@@ -45,6 +46,8 @@ import { readRunContext } from "../run-context";
 import { ContextGaugeReadout } from "./run-context-gauge";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { OperationalStat } from "../operational-stat";
+import { SkeletonLine } from "../skeleton-line";
+import { cn } from "@appstrate/ui/cn";
 
 export function RunSnapshotInspector({
   run,
@@ -55,6 +58,7 @@ export function RunSnapshotInspector({
   memoryChangeCount,
   memoryLoading,
   modelFallback,
+  errorReason,
   onOpenJournal,
   onOpenResults,
 }: {
@@ -69,11 +73,13 @@ export function RunSnapshotInspector({
   memoryLoading: boolean;
   /** The `model_fallback` marker of the run's journal, when it has one. */
   modelFallback: RunModelFallback | null;
+  /** The structured reason of the run's model refusal, read off its journal, when it names one. */
+  errorReason: ModelErrorReason | null;
   onOpenJournal: (filter?: JournalOverviewFilter) => void;
   onOpenResults: () => void;
 }) {
   const { t } = useTranslation("agents");
-  const turnsParam = useModalParam("turns");
+  const turnsParam = useUrlModal("turns");
   // The run's whole file container (the query the Results tab reads too): its
   // inputs are what it consumed, uploads and files chained in from earlier runs.
   const filesQuery = useFiles({ runId: run.id, limit: 100 });
@@ -100,38 +106,46 @@ export function RunSnapshotInspector({
   // problem, so it opens the overview as a neutral card of its own.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
   const cancelled = run.status === "cancelled";
-  const statSkeleton = <Skeleton className="h-6 w-10" />;
+  // A count the run never reported stays absent; a reported zero is shown.
+  const tokenFacts = [
+    { label: t("run.usageInputTokens"), count: usage?.input_tokens },
+    { label: t("run.usageOutputTokens"), count: usage?.output_tokens },
+    { label: t("run.usageCacheCreation"), count: usage?.cache_creation_input_tokens },
+    { label: t("run.usageCacheRead"), count: usage?.cache_read_input_tokens },
+  ];
+  const ending = problem
+    ? {
+        title: t("run.overview.problem"),
+        tone: "blocking",
+        itemTitle: runErrorText(run, t, errorReason),
+        actions: (
+          <HealthAction onClick={() => onOpenJournal("errors")}>
+            {t("run.overview.problemJournal")}
+          </HealthAction>
+        ),
+      }
+    : cancelled
+      ? {
+          title: t("run.overview.cancelled"),
+          tone: "neutral",
+          // The run keeps no name for who stopped it: the platform's reason and the time do.
+          itemTitle: run.error ? runErrorText(run, t) : t("run.cancelledByUser"),
+          description: run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined,
+          actions: null,
+        }
+      : null;
 
   return (
     <>
       <div data-run-snapshot>
-        {problem && (
+        {ending && (
           <div className="mb-6">
-            <HealthCard title={t("run.overview.problem")} tone="blocking" badge={null}>
+            <HealthCard title={ending.title} tone={ending.tone} badge={null}>
               <ul className="px-4">
                 <HealthCardItem
-                  title={runErrorText(run, t)}
-                  actions={
-                    <HealthAction onClick={() => onOpenJournal("errors")}>
-                      {t("run.overview.problemJournal")}
-                    </HealthAction>
-                  }
-                />
-              </ul>
-            </HealthCard>
-          </div>
-        )}
-        {cancelled && (
-          <div className="mb-6">
-            <HealthCard title={t("run.overview.cancelled")} tone="neutral" badge={null}>
-              <ul className="px-4">
-                {/* The run keeps no name for who stopped it: the platform's reason and the time do. */}
-                <HealthCardItem
-                  title={run.error ? runErrorText(run, t) : t("run.cancelledByUser")}
-                  description={
-                    run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined
-                  }
-                  actions={null}
+                  title={ending.itemTitle}
+                  description={ending.description}
+                  actions={ending.actions}
                 />
               </ul>
             </HealthCard>
@@ -205,33 +219,15 @@ export function RunSnapshotInspector({
                   : undefined
               }
             >
-              <dl className="grid grid-cols-2">
-                <OperationalStat
-                  className="border-border border-r border-b"
-                  label={t("run.overview.logEvents")}
-                  value={logsLoading ? statSkeleton : formatNumber(logs.length)}
-                  target={logs.length > 0 ? { onClick: () => onOpenJournal() } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-b"
-                  label={t("run.overview.toolCalls")}
-                  value={logsLoading ? statSkeleton : formatNumber(toolCallCount)}
-                  target={toolCallCount > 0 ? { onClick: () => onOpenJournal("tools") } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-r"
-                  label={t("run.overview.warnings")}
-                  value={logsLoading ? statSkeleton : formatNumber(warningCount)}
-                  target={
-                    warningCount > 0 ? { onClick: () => onOpenJournal("warnings") } : undefined
-                  }
-                />
-                <OperationalStat
-                  label={t("run.overview.errors")}
-                  value={logsLoading ? statSkeleton : formatNumber(errorCount)}
-                  target={errorCount > 0 ? { onClick: () => onOpenJournal("errors") } : undefined}
-                />
-              </dl>
+              <StatGrid
+                loading={logsLoading}
+                stats={[
+                  [t("run.overview.logEvents"), logs.length, () => onOpenJournal()],
+                  [t("run.overview.toolCalls"), toolCallCount, () => onOpenJournal("tools")],
+                  [t("run.overview.warnings"), warningCount, () => onOpenJournal("warnings")],
+                  [t("run.overview.errors"), errorCount, () => onOpenJournal("errors")],
+                ]}
+              />
             </DetailSectionCard>
 
             <DetailSectionCard
@@ -247,26 +243,23 @@ export function RunSnapshotInspector({
                   : undefined
               }
             >
-              <dl className="grid grid-cols-2">
-                <OperationalStat
-                  className="border-border border-r border-b"
-                  label={t("run.overview.outputFiles")}
-                  value={formatNumber(run.file_counts.output)}
-                  target={run.file_counts.output > 0 ? { onClick: onOpenResults } : undefined}
-                />
-                <OperationalStat
-                  className="border-border border-b"
-                  label={t("run.overview.structuredFields")}
-                  value={logsLoading ? statSkeleton : formatNumber(structuredFieldCount)}
-                  target={structuredFieldCount > 0 ? { onClick: onOpenResults } : undefined}
-                />
-                <OperationalStat
-                  className="col-span-2"
-                  label={t("run.overview.memoryChanges")}
-                  value={memoryLoading ? statSkeleton : formatNumber(memoryChangeCount)}
-                  target={memoryChangeCount > 0 ? { onClick: onOpenResults } : undefined}
-                />
-              </dl>
+              <StatGrid
+                stats={[
+                  [t("run.overview.outputFiles"), run.file_counts.output, onOpenResults],
+                  [
+                    t("run.overview.structuredFields"),
+                    structuredFieldCount,
+                    onOpenResults,
+                    logsLoading,
+                  ],
+                  [
+                    t("run.overview.memoryChanges"),
+                    memoryChangeCount,
+                    onOpenResults,
+                    memoryLoading,
+                  ],
+                ]}
+              />
             </DetailSectionCard>
           </div>
 
@@ -291,29 +284,17 @@ export function RunSnapshotInspector({
                     </Fact>
                   )}
                   {run.model_label && <Fact label={t("run.usageModel")}>{run.model_label}</Fact>}
-                  {usage?.input_tokens != null && (
-                    <Fact label={t("run.usageInputTokens")}>
-                      {formatNumber(usage.input_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.output_tokens != null && (
-                    <Fact label={t("run.usageOutputTokens")}>
-                      {formatNumber(usage.output_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.cache_creation_input_tokens != null && (
-                    <Fact label={t("run.usageCacheCreation")}>
-                      {formatNumber(usage.cache_creation_input_tokens)}
-                    </Fact>
-                  )}
-                  {usage?.cache_read_input_tokens != null && (
-                    <Fact label={t("run.usageCacheRead")}>
-                      {formatNumber(usage.cache_read_input_tokens)}
-                    </Fact>
+                  {tokenFacts.map(
+                    ({ label, count }) =>
+                      count != null && (
+                        <Fact key={label} label={label}>
+                          {formatNumber(count)}
+                        </Fact>
+                      ),
                   )}
                   {logsLoading ? (
                     <Fact label={t("run.usageContext")}>
-                      <Skeleton className="h-4 w-24" />
+                      <SkeletonLine className="w-24" />
                     </Fact>
                   ) : (
                     readRunContext(turns) && (
@@ -421,15 +402,39 @@ export function RunSnapshotInspector({
         </div>
       </div>
 
-      <Modal
-        open={turnsParam.value !== null}
-        onClose={turnsParam.close}
-        title={t("run.turnsTitle")}
-        className="max-h-[85vh] max-w-4xl overflow-y-auto"
-      >
-        <RunTurnsDetail turns={turns} />
-      </Modal>
+      {turnsParam.value !== null && (
+        <Modal
+          onClose={turnsParam.close}
+          title={t("run.turnsTitle")}
+          className="max-h-[85vh] max-w-4xl overflow-y-auto"
+        >
+          <RunTurnsDetail turns={turns} />
+        </Modal>
+      )}
     </>
+  );
+}
+
+/** A figure and where it leads; `loading` overrides the grid's own while its source is read. */
+type Stat = [label: string, count: number, onClick: () => void, loading?: boolean];
+
+function StatGrid({ stats, loading = false }: { stats: Stat[]; loading?: boolean }) {
+  return (
+    <dl className="grid grid-cols-2">
+      {stats.map(([label, count, onClick, busy = loading], i) => (
+        <OperationalStat
+          key={label}
+          className={cn(
+            i % 2 === 0 && i + 1 < stats.length && "border-border border-r",
+            Math.floor(i / 2) < Math.floor((stats.length - 1) / 2) && "border-border border-b",
+            i % 2 === 0 && i === stats.length - 1 && "col-span-2",
+          )}
+          label={label}
+          value={busy ? <SkeletonLine className="w-10" /> : formatNumber(count)}
+          target={count > 0 ? { onClick } : undefined}
+        />
+      ))}
+    </dl>
   );
 }
 
@@ -460,9 +465,10 @@ export function RunInputFacts({
   const inputDocuments = files.filter((file) => runFileDirection(file, run.id) === "input");
   const input = (run.input as Record<string, unknown> | null) ?? null;
   const inputEntries = input ? Object.entries(input) : [];
-  const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
-  const inputDocumentEntries = inputEntries.filter(([, value]) => hasDocumentReference(value));
-  const inputFileCount = Math.max(run.file_counts.input, countDocumentReferences(input));
+  const isDocumentEntry = ([, value]: [string, unknown]) => extractFileIds(value).length > 0;
+  const inputValueEntries = inputEntries.filter((entry) => !isDocumentEntry(entry));
+  const inputDocumentEntries = inputEntries.filter(isDocumentEntry);
+  const inputFileCount = run.file_counts.input;
   const inputDocumentLabel =
     inputDocumentEntries.length === 1
       ? humanizeInputKey(inputDocumentEntries[0]![0])
@@ -470,7 +476,8 @@ export function RunInputFacts({
   // `hasMore` describes the whole container: the inputs are cut only when
   // fewer of them arrived than the run says it consumed.
   const inputsCut = hasMore && inputDocuments.length < inputFileCount;
-  const showFiles = inputFileCount > 0 || inputDocuments.length > 0 || isLoading || Boolean(error);
+  // The run already says how many input files it consumed: a run with none has no files row to wait for.
+  const showFiles = inputFileCount > 0 || inputDocuments.length > 0 || Boolean(error);
 
   if (inputValueEntries.length === 0 && !showFiles) {
     return <p className="text-muted-foreground text-sm">{t("run.snapshotNoInput")}</p>;
@@ -519,36 +526,6 @@ function humanizeInputKey(key: string): string {
   return label ? label.charAt(0).toLocaleUpperCase() + label.slice(1) : key;
 }
 
-function hasDocumentReference(value: unknown): boolean {
-  if (typeof value === "string") return value.startsWith(FILE_URI_PREFIX);
-  if (Array.isArray(value)) return value.some(hasDocumentReference);
-  if (value && typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).some(hasDocumentReference);
-  }
-  return false;
-}
-
-function countDocumentReferences(value: unknown): number {
-  const references = new Set<string>();
-
-  const visit = (candidate: unknown) => {
-    if (typeof candidate === "string") {
-      if (candidate.startsWith(FILE_URI_PREFIX)) references.add(candidate);
-      return;
-    }
-    if (Array.isArray(candidate)) {
-      candidate.forEach(visit);
-      return;
-    }
-    if (candidate && typeof candidate === "object") {
-      Object.values(candidate as Record<string, unknown>).forEach(visit);
-    }
-  };
-
-  visit(value);
-  return references.size;
-}
-
 /**
  * The version a run executed: a concrete semver, or the draft — named with the
  * published version it was edited from, when there is one.
@@ -567,4 +544,82 @@ function snapshotValue(value: unknown): ReactNode {
   }
   if (value == null) return "—";
   return <JsonView data={value} />;
+}
+
+/**
+ * The run's overview while it loads (`RunDetailSkeleton`), for the common case
+ * — a finished run someone started: the cards of `RunSnapshotInspector` drawn by
+ * the same components, labels included. A run id (`run_` + a UUID) breaks over
+ * three lines in a quarter of the card.
+ */
+export function RunOverviewSkeleton() {
+  const { t } = useTranslation("agents");
+  const fact = (labelKey: string, width: string) => (
+    <Fact label={t(labelKey)}>
+      <SkeletonLine className={width} />
+    </Fact>
+  );
+  const noop = () => {};
+  return (
+    <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
+      <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
+        <DetailSectionCard
+          title={t("run.infoExecution")}
+          icon={CirclePlay}
+          className="lg:col-span-2"
+        >
+          <FactGrid columns={4}>
+            {fact("run.sourceAgent", "w-24")}
+            {fact("run.infoVersion", "w-12")}
+            {fact("run.infoTriggerType", "w-16")}
+            {fact("run.infoTriggeredBy", "w-24")}
+            {fact("run.infoRunner", "w-20")}
+            {fact("run.infoStartedAt", "w-28")}
+            {fact("run.infoCompletedAt", "w-28")}
+            {fact("run.infoDuration", "w-12")}
+            <Fact label={t("run.infoRunId")}>
+              <SkeletonLine className="w-full" inline="font-mono" />
+              <SkeletonLine className="w-full" inline="font-mono" />
+              <SkeletonLine className="w-1/2" inline="font-mono" />
+            </Fact>
+          </FactGrid>
+        </DetailSectionCard>
+        <DetailSectionCard title={t("run.overview.activity")} icon={Activity} bodyClassName="p-0">
+          <StatGrid
+            loading
+            stats={[
+              [t("run.overview.logEvents"), 0, noop],
+              [t("run.overview.toolCalls"), 0, noop],
+              [t("run.overview.warnings"), 0, noop],
+              [t("run.overview.errors"), 0, noop],
+            ]}
+          />
+        </DetailSectionCard>
+        <DetailSectionCard title={t("run.overview.results")} icon={Trophy} bodyClassName="p-0">
+          <StatGrid
+            loading
+            stats={[
+              [t("run.overview.outputFiles"), 0, noop],
+              [t("run.overview.structuredFields"), 0, noop],
+              [t("run.overview.memoryChanges"), 0, noop],
+            ]}
+          />
+        </DetailSectionCard>
+      </div>
+      <div className="grid min-w-0 content-start gap-6">
+        <DetailSectionCard
+          title={t("run.infoUsage")}
+          icon={ChartNoAxesCombined}
+          bodyClassName="flex flex-col p-0"
+        >
+          <div className="flex-1 p-4">
+            <FactGrid columns={2}>{fact("run.usageModel", "w-28")}</FactGrid>
+          </div>
+        </DetailSectionCard>
+        <DetailSectionCard title={t("run.infoInput")} icon={FileInput}>
+          <SkeletonLine className="w-48 text-sm" />
+        </DetailSectionCard>
+      </div>
+    </div>
+  );
 }

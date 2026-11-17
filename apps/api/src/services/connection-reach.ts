@@ -16,15 +16,12 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
-  packageShares,
-  packages,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
 import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { Permission } from "../lib/permissions.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 function orgOf(spaceId: string): SQL {
   return sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`;
@@ -56,13 +53,11 @@ function spacesWhere(
   return sql<string[]>`array_remove(ARRAY[${cases}], NULL)`;
 }
 
-/** Read off a PLACEMENT row only: an orphan `space_packages` row is nobody's decision here. */
+/** The space's own `space_packages` row locks members' connections to the integration. */
 export function userConnectionsBlocked(spaceId: string, integrationId: SQLWrapper | string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${spacePackages}
-    INNER JOIN ${packages} ON ${packages.id} = ${spacePackages.packageId}
-    LEFT JOIN ${packageShares} ON ${placementShareJoin(spacePackages.packageId, spaceId)}
     WHERE ${spacePackages.spaceId} = ${spaceId} AND ${spacePackages.packageId} = ${integrationId}
-    AND ${spacePackages.blockUserConnections} AND ${placementReadFilter(spaceId)!})`;
+    AND ${spacePackages.blockUserConnections})`;
 }
 
 /** An own row the actor may bind in `spaceId`: unblocked there, or made there. */
@@ -128,6 +123,8 @@ export interface ConnectionCaller {
   spaceId: string | null;
   /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
+  /** The credential permits org-wide consent; role and ownership are checked per row. */
+  canShareAllSpaces?: (orgId: string) => boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
   /** The caller's permissions in one space of `orgId` (empty outside it). */
@@ -150,6 +147,7 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
   return spacesWhere(t.spaceIds, (spaceId) =>
     and(
       connectionInSpace(spaceId),
+      sql`EXISTS (SELECT 1 FROM ${spaces} WHERE ${spaces.id} = ${spaceId} AND ${spaces.ownerUserId} IS NULL)`,
       t.configures.has(spaceId) ? sql`TRUE` : not(userConnectionsBlocked(spaceId, c.integrationId)),
     )!,
   );
@@ -162,16 +160,26 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  * into it. Sharing is the owner's consent: a governor never shares.
  */
 export function connectionActions(
-  row: { userId: string | null; endUserId: string | null; spaceId: string | null },
+  row: { orgId: string; userId: string | null; endUserId: string | null; spaceId: string | null },
   caller: ConnectionCaller,
   sharedHere: boolean,
+  orgRole?: OrgRole | null,
 ): ConnectionAction[] {
   if (!caller.canConnect) return [];
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
     const bound = boundSpaceOf(caller.principal);
     if (bound === null || row.spaceId === bound) actions.push("rename");
-    if (row.userId !== null) actions.push("share");
+    if (row.userId !== null) {
+      actions.push("share");
+      if (
+        row.spaceId === null &&
+        caller.canShareAllSpaces?.(row.orgId) &&
+        caller.principal.kind === "person" &&
+        (orgRole === "owner" || orgRole === "admin")
+      )
+        actions.push("share_all_spaces");
+    }
     return actions;
   }
   if (!caller.governs || caller.spaceId === null) return actions;

@@ -198,3 +198,42 @@ describe("createMcpServer — registration validation", () => {
     ).toThrow(/inputSchema with \{ type: "object" \}/);
   });
 });
+
+describe("createMcpServer — prompts", () => {
+  const prompts = {
+    list: () => [{ name: "run-demo", description: "Demo", arguments: [{ name: "request" }] }],
+    get: (name: string, args: Record<string, string>) => {
+      if (name !== "run-demo") throw new McpError(ErrorCode.InvalidParams, "Unknown prompt");
+      return {
+        messages: [
+          { role: "user" as const, content: { type: "text" as const, text: args.request ?? "" } },
+        ],
+      };
+    },
+  };
+
+  it("advertises the prompts capability and serves prompts/list and prompts/get", async () => {
+    const pair = await createInProcessPair([echoTool()], { prompts });
+    try {
+      expect(pair.client.getServerCapabilities()?.prompts).toEqual({ listChanged: false });
+      const listed = await pair.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toEqual(["run-demo"]);
+      const got = await pair.client.getPrompt({ name: "run-demo", arguments: { request: "hi" } });
+      expect(got.messages[0]!.content).toEqual({ type: "text", text: "hi" });
+      const error = await pair.client.getPrompt({ name: "run-other" }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(McpError);
+      expect((error as McpError).code).toBe(ErrorCode.InvalidParams);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("advertises no prompts capability without a provider", async () => {
+    const pair = await createInProcessPair([echoTool()]);
+    try {
+      expect(pair.client.getServerCapabilities()?.prompts).toBeUndefined();
+    } finally {
+      await pair.close();
+    }
+  });
+});

@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../../hooks/use-app-form";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
-import { toast } from "sonner";
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { ApiError } from "../../api/client";
 import {
   dependentsLabel,
   lockedReads,
   withRequiredReads,
 } from "../../lib/role-permission-dependencies";
+import { useQueryTab } from "../../hooks/use-query-tab";
+import { useRolesView } from "../../stores/list-view-store";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -42,8 +42,8 @@ import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
-import { CollectionTabs } from "../../components/collection-tabs";
-import { ViewToggle } from "../../components/view-toggle";
+import { CollectionTabs } from "../../components/detail-tabs";
+import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
   groupPermissionsByResource,
@@ -52,10 +52,9 @@ import {
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
-import { parseViewAsPreset, viewAsPresetParam } from "../../lib/view-as-preset";
+import type { ViewAsPreset } from "../../lib/view-as-preset";
 
-type RoleView = "list" | "matrix";
-type RoleTab = "org" | "space";
+const ROLE_TABS = ["org", "space"] as const;
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -63,24 +62,15 @@ export function OrgSettingsRolesPage() {
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
   const canPreview = useCanPreviewRole();
-  // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   // `?role=<key>` is only ever an existing role: `new` is a valid role key.
-  const roleParam = useModalTarget("role", roles, (role) => role.key);
-  const newRole = useModalParam("newRole");
-  const viewAsParam = useModalParam("viewAs");
-  // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
-  // and Back undoes a switch. Each defaults to its first option, which is
-  // then left out of the URL.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
-  const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
-  const setParam = (name: "tab" | "view", value: string, fallback: string) =>
-    setSearchParams((prev) => {
-      const out = new URLSearchParams(prev);
-      if (value === fallback) out.delete(name);
-      else out.set(name, value);
-      return out;
-    });
+  const roleParam = useUrlModalTarget("role", roles, (role) => role.key);
+  const [creating, setCreating] = useState(false);
+  // The preview dialog, open on a preset or on none.
+  const [preview, setPreview] = useState<{ preset?: ViewAsPreset } | null>(null);
+  // The tab is a place (`?tab=space`, Back undoes a switch); list-or-matrix is a presentation of
+  // the same roles, a preference like every list's cards-or-table.
+  const [tab, setTab] = useQueryTab("tab", ROLE_TABS);
+  const [view, setView] = useRolesView();
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -93,12 +83,12 @@ export function OrgSettingsRolesPage() {
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
   const custom = (roles ?? []).filter((r) => r.kind === "custom");
 
-  // A row previews its own role: the dialog opens pre-filled, at an address.
+  // A row previews its own role: the dialog opens pre-filled.
   const previewSpaceRole = deeds.includes("view-as")
-    ? (role: RoleObject) => viewAsParam.open(viewAsPresetParam({ kind: "space", key: role.key }))
+    ? (role: RoleObject) => setPreview({ preset: { kind: "space", key: role.key } })
     : undefined;
   const previewOrgRole = deeds.includes("view-as")
-    ? (role: ViewAsOrgRole) => viewAsParam.open(viewAsPresetParam({ kind: "org", role }))
+    ? (role: ViewAsOrgRole) => setPreview({ preset: { kind: "org", role } })
     : undefined;
   const presetColumns = useRoleColumns({
     onPreview: previewSpaceRole,
@@ -122,10 +112,7 @@ export function OrgSettingsRolesPage() {
     deleteRole.mutate(
       { params: { path: { id: role.id } } },
       {
-        onSuccess: () => {
-          setConfirmDelete(null);
-          toast.success(t("roles.deleted", { name: role.name }));
-        },
+        onSuccess: () => setConfirmDelete(null),
         onError: (err) => {
           // 409 `role_in_use` reports two holders — live memberships and
           // PENDING invitations that assign the role. Reporting only the first
@@ -160,7 +147,7 @@ export function OrgSettingsRolesPage() {
     icon: Plus,
     testId: "create-role-button",
     label: t("roles.create"),
-    onSelect: () => newRole.open(),
+    onSelect: () => setCreating(true),
     hidden: !deeds.includes("create"),
   };
   const viewAs: MenuAction = {
@@ -168,7 +155,7 @@ export function OrgSettingsRolesPage() {
     icon: Eye,
     testId: "view-as-button",
     label: t("viewAs.trigger"),
-    onSelect: () => viewAsParam.open(),
+    onSelect: () => setPreview({}),
     hidden: !deeds.includes("view-as"),
   };
   const tableState = {
@@ -184,20 +171,22 @@ export function OrgSettingsRolesPage() {
         <CollectionTabs
           value={tab}
           label={t("roles.tabTitle")}
-          onChange={(next) => setParam("tab", next, "org")}
+          onChange={setTab}
           options={[
             { value: "org", label: t("roles.tabOrg") },
             { value: "space", label: t("roles.tabSpace") },
           ]}
         />
-        <ViewToggle
-          value={view}
-          onChange={(next) => setParam("view", next, "list")}
-          options={[
-            { id: "list", icon: Rows3, label: t("roles.viewList") },
-            { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
-          ]}
-        />
+        <Tabs value={view} onValueChange={(next) => setView(next === "matrix" ? "matrix" : "list")}>
+          <TabsList className="h-8 shrink-0 p-0.5">
+            <TabsTrigger value="list" aria-label={t("roles.viewList")}>
+              <Rows3 className="size-4" />
+            </TabsTrigger>
+            <TabsTrigger value="matrix" aria-label={t("roles.viewMatrix")}>
+              <Grid3x3 className="size-4" />
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
       {tab === "org" &&
         (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
@@ -253,16 +242,16 @@ export function OrgSettingsRolesPage() {
         </>
       )}
 
-      {newRole.value !== null && canWrite && (
-        <RoleFormModal key="new" role={null} onClose={newRole.close} />
+      {creating && canWrite && (
+        <RoleFormModal key="new" role={null} onClose={() => setCreating(false)} />
       )}
       {target && editable && (
         <RoleFormModal key={target.key} role={target} onClose={roleParam.close} />
       )}
       {target && !editable && <RoleViewModal role={target} onClose={roleParam.close} />}
 
-      {viewAsParam.value !== null && canPreview && (
-        <ViewAsDialog preset={parseViewAsPreset(viewAsParam.value)} onClose={viewAsParam.close} />
+      {preview && canPreview && (
+        <ViewAsDialog preset={preview.preset} onClose={() => setPreview(null)} />
       )}
 
       <ConfirmModal
@@ -289,7 +278,6 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={spaceRoleLabel(role, t) ?? role.name}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
@@ -309,7 +297,7 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
                 >
                   <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
                   <dd>
-                    <ul className="text-muted-foreground space-y-0.5 text-sm">
+                    <ul className="text-muted-foreground flex flex-col gap-0.5 text-sm">
                       {permissions.map((permission) => (
                         <li key={permission} title={permission}>
                           {permissionLabel(permission, t)}
@@ -355,8 +343,9 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   const {
     register,
     handleSubmit,
+    showError,
     formState: { errors },
-  } = useForm({
+  } = useAppForm({
     defaultValues: {
       key: role?.key ?? "",
       name: role?.name ?? "",
@@ -418,7 +407,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   return (
     <FormModal
       onClose={onClose}
-      title={role ? t("roles.editTitle") : t("roles.createTitle")}
+      title={role ? t("roles.editTitle") : t("roles.create")}
       className="sm:max-w-lg"
       onSubmit={handleSubmit(submit)}
       isPending={isPending}
@@ -426,7 +415,11 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       error={formError}
       formProps={{ noValidate: true, onChange: () => setFormError(null) }}
     >
-      <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
+      <FormItem
+        id="role-name"
+        label={t("spaces.nameLabel")}
+        error={showError("name") ? errors.name?.message : undefined}
+      >
         <Input
           maxLength={100}
           disabled={isPending}
@@ -441,7 +434,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         id="role-key"
         label={t("roles.keyLabel")}
         hint={t("roles.keyHint")}
-        error={errors.key?.message}
+        error={showError("key") ? errors.key?.message : undefined}
       >
         <Input
           maxLength={64}
@@ -456,14 +449,20 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       <FormItem id="role-description" label={t("roles.descriptionLabel")}>
         <Input maxLength={500} disabled={isPending} {...register("description")} />
       </FormItem>
-      <div className="space-y-2">
-        <Label>{t("roles.permissionsLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("roles.permissionsLabel")}</Label>
         {isLoading ? (
           <TextSkeleton lines={5} />
         ) : vocabularyError ? (
-          <div role="alert" className="space-y-2">
+          <div role="alert" className="flex flex-col gap-2">
             <ErrorState error={vocabularyError} compact />
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => void refetch()}
+            >
               {t("common:btn.retry")}
             </Button>
           </div>

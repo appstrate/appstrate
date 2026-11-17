@@ -65,8 +65,10 @@ describe("resolvesToUsableModel", () => {
 function agent(over: Partial<AgentDetail> = {}): AgentDetail {
   return {
     id: "@acme/worker",
+    icon: null,
+    color: null,
     source: "local",
-    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+    dependencies: { skills: [], integrations: [] },
     input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
     running_runs: 0,
     last_run: null,

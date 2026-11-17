@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { WEBHOOK_EVENTS } from "../hooks/use-webhooks";
 
@@ -25,9 +25,9 @@ export function WebhookFormFields({
 
   return (
     <>
-      <div className="space-y-2">
-        <Label>{t("webhooks.eventsLabel")}</Label>
-        <div className="space-y-2">
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("webhooks.eventsLabel")}</Label>
+        <div className="flex flex-col gap-2">
           {WEBHOOK_EVENTS.map((event) => (
             <CheckboxField
               key={event}
@@ -40,8 +40,8 @@ export function WebhookFormFields({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("webhooks.payloadModeLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("webhooks.payloadModeLabel")}</Label>
         <RadioGroup
           value={payloadMode}
           onValueChange={(v) => onPayloadModeChange(v as "full" | "summary")}

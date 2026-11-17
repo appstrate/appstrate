@@ -14,7 +14,6 @@ import { db } from "./db.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
-  packageShares,
   spacePackages,
   runs,
   runLogs,
@@ -32,9 +31,9 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
-import { mcpServerManifest } from "./integration-manifests.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import * as storage from "@appstrate/db/storage";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
 import { extractKeyPrefix, generateApiKey, hashApiKey } from "../../src/services/api-keys.ts";
@@ -101,9 +100,10 @@ export async function seedPackage(
 export const seedAgent = seedPackage;
 
 /**
- * Install (activate) a package in a space — creates the
- * `space_packages` row the runtime gate requires for a package to be
- * usable in that space. Idempotent.
+ * Place a package in a space, switched ON unless `overrides` says otherwise —
+ * the `space_packages` row the runtime gate requires for a package to be usable
+ * in that space. Idempotent: on an existing row it switches it on and applies
+ * the overrides.
  */
 export async function seedSpacePackage(
   spaceId: string,
@@ -112,54 +112,29 @@ export async function seedSpacePackage(
 ): Promise<void> {
   await db
     .insert(spacePackages)
-    .values({ spaceId, packageId, ...overrides })
+    .values({ spaceId, packageId, enabled: true, ...overrides })
     .onConflictDoUpdate({
       target: [spacePackages.spaceId, spacePackages.packageId],
-      // Apply overrides on conflict so callers can flip e.g. `enabled` on a
-      // package the space already holds a row for; no-op write when there are
-      // none.
-      set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
+      set: { enabled: true, ...overrides },
     });
 }
 
 /**
- * The state the activation door leaves behind for a package the space does NOT
- * home: the OFFER that places it, plus the `space_packages` row that switches
- * it on. Two writes, because they are two facts — and a row without the offer
- * behind it is an ORPHAN, which the platform reads as nothing at all
- * (`services/package-activation.ts`).
+ * Place a package in a space switched OFF — what `POST …/shares` leaves behind
+ * when the sharer may not activate in the target (RBAC spec §6.9, §6.10).
  *
- * Reach for this whenever a fixture means "this space runs that package" and
- * the package lives somewhere else. {@link seedSpacePackage} stays the raw row,
- * for the cases that assert what an orphan gets — and for a package the space
- * already homes, where the home IS the placement.
- */
-export async function seedPlacedPackage(
-  spaceId: string,
-  packageId: string,
-  overrides?: Partial<InferInsertModel<typeof spacePackages>>,
-): Promise<void> {
-  await seedPackageShare(spaceId, packageId);
-  await seedSpacePackage(spaceId, packageId, overrides);
-}
-
-/**
- * Offer a package to a space (`package_shares`) — the PLACEMENT that makes it
- * readable and installable there (RBAC spec §6.9, §6.10).
- *
- * A fixture for the sharer's act, not for the recipient's: it writes the offer
- * and nothing else, so a test can set up "this space was offered the package"
- * without going through `POST …/shares` and its authority checks. Pair it with
- * {@link seedSpacePackage} when the space should also have taken it up.
- * `sharedBy` is nullable for the same reason `scripts/migration/0016` leaves it
- * null: nobody in particular made this offer.
+ * A fixture for the sharer's act, without going through `POST …/shares` and its
+ * authority checks. An existing row is left as it stands.
  */
 export async function seedPackageShare(
   spaceId: string,
   packageId: string,
   sharedBy: string | null = null,
 ): Promise<void> {
-  await db.insert(packageShares).values({ spaceId, packageId, sharedBy }).onConflictDoNothing();
+  await db
+    .insert(spacePackages)
+    .values({ spaceId, packageId, enabled: false, sharedBy })
+    .onConflictDoNothing();
 }
 
 /**
@@ -183,7 +158,10 @@ export async function loseVersionArchive(packageId: string, version: string): Pr
  *
  * The manifest and content default to the package's own draft, which is what
  * "the author published what they have" looks like and keeps a suite's
- * assertions about the draft true of the published version too.
+ * assertions about the draft true of the published version too. The content
+ * lands in the type's own content entry (`PACKAGE_CONTENT_ENTRY`); an OPTIONAL
+ * entry (an integration's `INTEGRATION.md`) is written only from an explicit
+ * `content`, since the draft column there may hold no documentation at all.
  */
 export async function seedPublishedVersion(
   packageId: string,
@@ -198,10 +176,13 @@ export async function seedPublishedVersion(
     version,
     type: pkg.type,
   };
-  const content = opts?.content ?? pkg.draftContent ?? "content";
+  const entry = PACKAGE_CONTENT_ENTRY[pkg.type];
+  const content = entry?.required
+    ? (opts?.content ?? pkg.draftContent ?? "content")
+    : opts?.content;
   const zip = zipArtifact({
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
-    [pkg.type === "skill" ? "SKILL.md" : "prompt.md"]: new TextEncoder().encode(content),
+    ...(entry && content !== undefined ? { [entry.path]: new TextEncoder().encode(content) } : {}),
   });
   await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(packageId, version), zip);
   const row = await seedPackageVersion({
@@ -241,44 +222,6 @@ export async function seedPackageVersion(
     })
     .returning();
   return version!;
-}
-
-// ─── MCP Servers ──────────────────────────────────────────
-
-type McpServerInsert = {
-  /** Scoped AFPS id (`@scope/name`) an integration's `server_name` references. */
-  id: string;
-  orgId: string | null;
-  version?: string;
-  serverType?: "node" | "python" | "binary" | "uv";
-  entryPoint?: string;
-  /** The space that HOMES it — one of the two placements. */
-  homeSpaceId?: string;
-};
-
-/**
- * Seed an `mcp-server` package AND the published version that goes with it —
- * the pair the integration spawn resolver needs to turn a `server_name`
- * reference into a spawn spec. Seeding only the package leaves the reference
- * unresolvable, which is a different (and easy to seed by accident) fixture.
- */
-export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
-  const version = overrides.version ?? "1.0.0";
-  const manifest = mcpServerManifest({
-    name: overrides.id,
-    version,
-    serverType: overrides.serverType ?? "node",
-    entryPoint: overrides.entryPoint ?? "./server.js",
-  });
-  await seedPackage({
-    id: overrides.id,
-    orgId: overrides.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: manifest,
-    ...(overrides.homeSpaceId ? { homeSpaceId: overrides.homeSpaceId } : {}),
-  });
-  await seedPackageVersion({ packageId: overrides.id, version, manifest });
 }
 
 // ─── Runs ─────────────────────────────────────────────────
@@ -414,6 +357,22 @@ export async function seedSpaceMember(
     .values({ presetRole: "viewer", ...overrides })
     .returning();
   return row!;
+}
+
+/** Grant `userId` a custom space role holding exactly `permissions` in `spaceId`. */
+export async function seedSpaceGrant(args: {
+  orgId: string;
+  spaceId: string;
+  userId: string;
+  permissions: string[];
+}): Promise<void> {
+  const role = await seedSpaceRole({ orgId: args.orgId, permissions: args.permissions });
+  await seedSpaceMember({
+    spaceId: args.spaceId,
+    userId: args.userId,
+    presetRole: null,
+    customRoleId: role.id,
+  });
 }
 
 // ─── End Users ────────────────────────────────────────────

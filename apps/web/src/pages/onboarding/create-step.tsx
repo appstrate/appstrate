@@ -8,7 +8,8 @@ import { useWatch } from "react-hook-form";
 import { useAppForm } from "../../hooks/use-app-form";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
@@ -97,9 +98,10 @@ export function OnboardingCreateStep() {
     },
     onError: (err) => {
       const message = errorMessage(err);
-      // A taken slug, or a slug the body validation refused: the field is folded by default.
+      // A taken or reserved slug, or a slug the body validation refused: the field is folded by default.
       const aboutSlug =
-        (err instanceof ApiError && err.code === "slug_taken") || errorField(err) === "slug";
+        (err instanceof ApiError && (err.code === "slug_taken" || err.code === "slug_reserved")) ||
+        errorField(err) === "slug";
       if (aboutSlug) {
         setSlugOpen(true);
         setError("slug", { message });
@@ -138,13 +140,13 @@ export function OnboardingCreateStep() {
       onNext={handleSubmit(onSubmit)}
       nextDisabled={!nameValue.trim() || !slugValue.trim()}
       nextPending={createMutation.isPending}
-      nextLabel={t("onboarding.createAction")}
+      nextLabel={t("common:btn.create")}
     >
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-4">
           <FormItem
             id="org-name"
-            label={t("createOrg.name")}
+            label={t("spaces.nameLabel")}
             error={showError("name") ? errors.name?.message : undefined}
           >
             <Input
@@ -206,7 +208,7 @@ export function OnboardingCreateStep() {
                   className="h-auto p-0"
                   onClick={() => setSlugOpen(true)}
                 >
-                  {t("createOrg.slugEdit")}
+                  {t("common:btn.edit")}
                 </Button>
               </div>
             )}

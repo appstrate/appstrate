@@ -3,7 +3,7 @@
 /**
  * Integration draft content holds either INTEGRATION.md or the manifest when
  * that optional file is absent. Manifest-shaped PUT.content values and restores
- * must preserve real documentation in both the file explorer and agent prompts.
+ * must preserve real documentation in both `draft_content` and the file explorer.
  */
 
 import { etagVersion, ifMatch } from "../../helpers/etag.ts";
@@ -25,8 +25,11 @@ import {
   uploadPackageFiles,
   downloadPackageFiles,
 } from "../../../src/services/package-items/storage.ts";
-import { uploadPackageZip } from "../../../src/services/package-storage.ts";
-import { fetchIntegrationPromptDocs } from "../../../src/services/integration-service.ts";
+import { uploadPackageZip, buildAgentPackage } from "../../../src/services/package-storage.ts";
+import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
+import { freezeRunSpawnDependencies } from "../../../src/services/run-pipeline.ts";
+import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import type { AgentManifest, LoadedPackage } from "../../../src/types/index.ts";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -175,16 +178,6 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(doc!.inline!.trimStart().startsWith("{")).toBe(false);
     });
 
-    it("keeps feeding the platform prompt its agent-facing docs after a save", async () => {
-      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
-        200,
-      );
-
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry).toBeDefined();
-      expect(entry!.doc).toBe(DOC);
-    });
-
     it("still writes the editor's manifest to the stored manifest.json", async () => {
       // The DB column is guarded; the storage sink is NOT. `manifest.json` is
       // where an integration editor's `content` legitimately belongs, and
@@ -196,6 +189,22 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(stored).toBeDefined();
       expect(JSON.parse(stored!)).toMatchObject({ version: "2.0.0", type: "integration" });
       expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(DOC);
+    });
+
+    it("stores the doc of THIS save, not the previous one, where publish reads it", async () => {
+      const next = "# Gmail\n\nList labels first.\n";
+      const res = await app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
+        body: JSON.stringify({ content: next }),
+      });
+      expect(res.status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
     });
 
     it("does not let a manifest-only PUT write the docs into manifest.json", async () => {
@@ -282,16 +291,6 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         version: "4.3.0",
       });
     });
-
-    it("reports no prompt doc — a manifest copy is not documentation", async () => {
-      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
-        200,
-      );
-
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry!.doc).toBeUndefined();
-      expect(entry!.description).toBe("A remote HTTP MCP integration");
-    });
   });
 
   // ─── The second door: version restore ─────────────────────────────────────
@@ -341,11 +340,162 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(res.status).toBe(200);
 
       expect(await draftContentOf(id)).toBe(VERSIONED_DOC);
-      const [entry] = await fetchIntegrationPromptDocs([id]);
-      expect(entry!.doc).toBe(VERSIONED_DOC);
       expect((await listFiles(ctx, id)).find((e) => e.path === "INTEGRATION.md")!.inline).toBe(
         VERSIONED_DOC,
       );
+    });
+  });
+
+  // ─── The JSON `content` field: the stored tree publish freezes ─────────────
+
+  describe("an integration documented through the JSON content field", () => {
+    const id = "@intdocs/authored";
+
+    async function create(version = "1.0.0"): Promise<Response> {
+      return app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: integrationManifest(id, version), content: DOC }),
+      });
+    }
+
+    async function saveContent(
+      content: string,
+      version: string,
+      operations?: Array<Record<string, unknown>>,
+    ): Promise<Response> {
+      return app.request(`/api/packages/integrations/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
+        body: JSON.stringify({
+          manifest: integrationManifest(id, version),
+          content,
+          ...(operations ? { operations } : {}),
+        }),
+      });
+    }
+
+    async function publish(version: string): Promise<void> {
+      const res = await app.request(`/api/packages/integrations/${id}/versions`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ version }),
+      });
+      expect(res.status).toBe(201);
+    }
+
+    async function frozenDoc(version: string): Promise<string | undefined> {
+      const res = await app.request(`/api/packages/${id}/${version}/download`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const bytes = unzipPackageArchive(new Uint8Array(await res.arrayBuffer()))["INTEGRATION.md"];
+      return bytes ? decoder.decode(bytes) : undefined;
+    }
+
+    it("stores INTEGRATION.md and freezes it into the version minted at creation", async () => {
+      expect((await create()).status).toBe(201);
+
+      expect(await draftContentOf(id)).toBe(DOC);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(DOC);
+      expect(await frozenDoc("1.0.0")).toBe(DOC);
+    });
+
+    it("freezes the doc of the LAST save into a published version", async () => {
+      expect((await create()).status).toBe(201);
+      const next = "# Gmail\n\nRevised after review.\n";
+      expect((await saveContent(next, "1.1.0")).status).toBe(200);
+
+      // The draft overlay hands the save the PREVIOUS column; the stored copy
+      // must follow this save, not trail it by one.
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBe(next);
+    });
+
+    it("an emptied content removes the doc from the stored tree and the next version", async () => {
+      expect((await create()).status).toBe(201);
+      expect((await saveContent("", "1.1.0")).status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe("");
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      expect((await listFiles(ctx, id)).some((e) => e.path === "INTEGRATION.md")).toBe(false);
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBeUndefined();
+    });
+
+    it("applies content before operations saved alongside it, as for a skill", async () => {
+      expect((await create()).status).toBe(201);
+      const next = "# Gmail\n\nRevised with a note.\n";
+      const notes = [{ op: "write", path: "notes.txt", text: "a note" }];
+      expect((await saveContent(next, "1.1.0", notes)).status).toBe(200);
+
+      expect(await draftContentOf(id)).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(next);
+      expect(await storedFile(ctx.orgId, id, "notes.txt")).toBe("a note");
+      await publish("1.1.0");
+      expect(await frozenDoc("1.1.0")).toBe(next);
+
+      expect((await saveContent("", "1.2.0", notes)).status).toBe(200);
+      expect(await draftContentOf(id)).toBe("");
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      await publish("1.2.0");
+      expect(await frozenDoc("1.2.0")).toBeUndefined();
+    });
+
+    it("an operation writing INTEGRATION.md wins over the content saved with it", async () => {
+      expect((await create()).status).toBe(201);
+      const byOperation = "# Gmail\n\nWritten by the operation.\n";
+      const res = await saveContent("# ignored\n", "1.1.0", [
+        { op: "write", path: "INTEGRATION.md", text: byOperation },
+      ]);
+      expect(res.status).toBe(200);
+      expect(await draftContentOf(id)).toBe(byOperation);
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBe(byOperation);
+    });
+
+    it("writes no INTEGRATION.md for the manifest-text value the dashboard sends", async () => {
+      const manifest = integrationManifest(id);
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest, content: JSON.stringify(manifest, null, 2) }),
+      });
+      expect(res.status).toBe(201);
+
+      expect(await storedFile(ctx.orgId, id, "INTEGRATION.md")).toBeUndefined();
+      expect(await frozenDoc("1.0.0")).toBeUndefined();
+    });
+
+    it("hands the published doc to a run bundle pinning that version", async () => {
+      expect((await create()).status).toBe(201);
+      const manifest = {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@intdocs/agent",
+        version: "1.0.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [id]: "^1.0.0" } },
+        integrations_configuration: { [id]: {} },
+      };
+      const agent: LoadedPackage = {
+        id: manifest.name,
+        manifest: manifest as unknown as AgentManifest,
+        prompt: "Do the thing.",
+        source: "local",
+      };
+
+      const integrationVersions = await freezeRunSpawnDependencies({ agent, orgId: ctx.orgId });
+      expect(integrationVersions[id]).toEqual({ version: "1.0.0", source: "version" });
+      const { zip } = await buildAgentPackage(agent, ctx.orgId, { integrationVersions });
+      const member = [...readBundleFromBuffer(new Uint8Array(zip)).packages.values()].find(
+        (p) => p.identity === `${id}@1.0.0`,
+      );
+      expect(member).toBeDefined();
+      expect(decoder.decode(member!.files.get("INTEGRATION.md"))).toBe(DOC);
     });
   });
 

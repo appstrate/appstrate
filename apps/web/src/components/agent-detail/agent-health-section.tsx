@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useLocation } from "react-router-dom";
+import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Badge as StatusPill } from "@appstrate/ui/components/badge";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { AgentDiagnosticsDialog, AgentDiagnosticsIssueBadge } from "./agent-diagnostics-dialog";
 import {
   agentDiagnosticCorrectionTarget,
@@ -27,7 +27,8 @@ export function AgentHealthSection({
   const location = useLocation();
   const diagnostics = useAgentDiagnostics(packageId, version);
   const result = diagnostics.data;
-  const issues = useModalParam("agentIssues");
+  const navigate = useNavigate();
+  const [issuesOpen, setIssuesOpen] = useState(false);
 
   if (diagnostics.isLoading) {
     return (
@@ -58,7 +59,7 @@ export function AgentHealthSection({
         tone={tone}
         badge={
           result ? (
-            <button type="button" onClick={() => issues.open()}>
+            <button type="button" onClick={() => setIssuesOpen(true)}>
               <AgentDiagnosticsIssueBadge result={result} />
             </button>
           ) : (
@@ -100,17 +101,22 @@ export function AgentHealthSection({
           )}
         </div>
         {result && result.diagnostics.length > 3 && (
-          <OverviewCardAction target={{ onClick: () => issues.open() }}>
+          <OverviewCardAction target={{ onClick: () => setIssuesOpen(true) }}>
             {t("detail.diagnostics.seeAll")}
           </OverviewCardAction>
         )}
       </HealthCard>
-      <AgentDiagnosticsDialog
-        result={result}
-        open={issues.value !== null}
-        onClose={issues.close}
-        onLeave={issues.leave}
-      />
+      {issuesOpen && (
+        <AgentDiagnosticsDialog
+          result={result}
+          onClose={() => setIssuesOpen(false)}
+          onLeave={(to) => {
+            // The correction is on this same page: close first, the page stays mounted.
+            setIssuesOpen(false);
+            navigate(to);
+          }}
+        />
+      )}
     </>
   );
 }

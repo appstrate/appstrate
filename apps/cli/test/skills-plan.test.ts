@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `lib/skills-sync/plan.ts` — catalogue reading, version pinning, slug
- * assignment (skills and agent commands) and the verified download.
+ * `lib/skills-sync/plan.ts` — catalogue reading (`GET /api/packages/skills/served`),
+ * pinning by served digests, slug assignment and the verified download
+ * (`GET /api/packages/skills/served/archive`).
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -11,25 +12,22 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { SKILL_MAX_FILES, SKILL_MAX_TOTAL_BYTES } from "@appstrate/core/skill-uri";
+import { zipArtifact } from "@appstrate/core/zip";
 import {
   assignSlugs,
   fetchSkillFiles,
-  listSyncableAgents,
   listSyncableSkills,
-  resolveAgent,
   resolveSkill,
-  type PlannedEntry,
   type ResolvedSkill,
 } from "../src/lib/skills-sync/plan.ts";
-import { treeIntegrity, type AgentLaunchView } from "../src/lib/skills-sync/materialize.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
   useTempConfigHome,
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
-import { createSkillServer, skillMd, type AgentFixture } from "./helpers/skills-server.ts";
-import { formatError } from "../src/lib/ui.ts";
+import { createSkillServer, skillMd } from "./helpers/skills-server.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-skills-plan-");
 let keyring: FakeKeyringInstall;
@@ -49,143 +47,189 @@ afterEach(async () => {
 
 function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): ResolvedSkill {
   return {
+    spaceId: "spc_1",
     version: "1.0.0",
-    integrity: "sha256-x",
+    integrity: "sha256:x",
     frontmatterName: "",
+    entry: { uri: "", frontmatter: { name: "", description: "" }, resources: [] },
     ...overrides,
   };
 }
 
+const DIGEST = `sha256:${"0".repeat(64)}`;
+
+const ids = (entries: { uri: string }[]) => entries.map((entry) => entry.uri.split("/")[4]);
+
+/** The single entry the space lists at `source`. */
+async function onlyEntry(source: "published" | "draft") {
+  const [entry, ...rest] = await listSyncableSkills("default", "spc_1", source);
+  expect(rest).toHaveLength(0);
+  return entry!;
+}
+
 describe("listSyncableSkills", () => {
-  it("unwraps the list envelope, drops system packages and sorts by id", async () => {
+  it("reads the space's list and drops system packages", async () => {
     createSkillServer([
       { id: "@acme/zebra", skillMd: skillMd("zebra") },
-      { id: "@appstrate/builtin", skillMd: skillMd("builtin"), source: "system" },
+      { id: "@appstrate/builtin", skillMd: skillMd("builtin") },
       { id: "@acme/alpha", skillMd: skillMd("alpha") },
     ]).install();
 
-    expect(await listSyncableSkills("default")).toEqual(["@acme/alpha", "@acme/zebra"]);
+    expect(ids(await listSyncableSkills("default", "spc_1", "published"))).toEqual([
+      "zebra",
+      "alpha",
+    ]);
   });
 
   // The sync reads what the space OFFERS, which is the ACTIVE set: a skill
   // somebody switched off in the space is not written into the local Claude
   // Code checkout, or the switch would mean nothing outside the dashboard.
-  // The stub narrows unconditionally, like the route: a sync that read a wider
-  // listing than the index turns this red.
   it("reads the ACTIVE set — a skill switched off in the space is not syncable", async () => {
     createSkillServer([
       { id: "@acme/on", skillMd: skillMd("on") },
       { id: "@acme/off", skillMd: skillMd("off"), inactive: true },
     ]).install();
 
-    expect(await listSyncableSkills("default")).toEqual(["@acme/on"]);
+    expect(ids(await listSyncableSkills("default", "spc_1", "published"))).toEqual(["on"]);
+  });
+
+  it("lists the drafts the caller may read for --source draft, published or not", async () => {
+    createSkillServer([
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), draft: { skillMd: skillMd("pdf-next") } },
+      { id: "@acme/new", skillMd: skillMd("new"), unpublished: true, draft: {} },
+      { id: "@acme/theirs", skillMd: skillMd("theirs"), draft: { notWritable: true } },
+    ]).install();
+
+    const drafts = await listSyncableSkills("default", "spc_1", "draft");
+    expect(drafts.map((entry) => entry.uri)).toEqual([
+      "skill://spc_1/acme/pdf@draft/pdf-next/SKILL.md",
+      "skill://spc_1/acme/new@draft/new/SKILL.md",
+    ]);
   });
 });
 
 describe("resolveSkill", () => {
-  it("pins the latest published version and reads the frontmatter name", async () => {
+  it("labels a published skill with its served metadata.version and pins its digests", async () => {
     createSkillServer([
-      { id: "@acme/pdf", skillMd: skillMd("PDF Tools", "Work with PDFs."), version: "2.3.1" },
+      { id: "@acme/pdf", skillMd: skillMd("pdf-tools", "Work with PDFs."), version: "2.3.1" },
     ]).install();
 
-    const skill = await resolveSkill("default", "@acme/pdf", "published");
-    expect(skill?.version).toBe("2.3.1");
-    expect(skill?.frontmatterName).toBe("PDF Tools");
-    expect(skill?.integrity).toMatch(/^sha256-/);
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(skill.packageId).toBe("@acme/pdf");
+    expect(skill.spaceId).toBe("spc_1");
+    expect(skill.version).toBe("2.3.1");
+    expect(skill.frontmatterName).toBe("pdf-tools");
+    expect(skill.integrity).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it("returns null — not an error — when the skill was never published", async () => {
+  it("changes the pin when a served digest changes, not when the version label does", async () => {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), version: "1.0.0" }]).install();
+    const first = resolveSkill(await onlyEntry("published"));
     createSkillServer([
-      { id: "@acme/draft-only", skillMd: skillMd("draft-only"), unpublished: true },
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles: { "a.md": "a" }, version: "1.0.0" },
     ]).install();
-
-    expect(await resolveSkill("default", "@acme/draft-only", "published")).toBeNull();
+    const second = resolveSkill(await onlyEntry("published"));
+    expect(second.integrity).not.toBe(first.integrity);
   });
-});
 
-describe("resolveSkill — the draft is NAMED, never left to the route's default", () => {
-  // Without `?version=draft` the detail and file routes alike serve the
-  // definition the detail page renders, which for anyone who cannot write the
-  // package is the PUBLISHED version. A sync that omitted the selector on
-  // either request would still succeed — and would write published bytes under
-  // a ledger entry that calls them a draft. The stub answers an unnamed
-  // selector with the published snapshot for exactly that reason, so these
-  // assertions fail on content, not on an absent request.
-  it("reads the working copy and tokenizes it with the draft index ETag", async () => {
+  it('labels a draft "draft"', async () => {
     createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools", "Published."),
-        extraFiles: { "reference/notes.md": "published notes" },
-        draft: {
-          skillMd: skillMd("pdf-tools-draft", "Working copy."),
-          etag: "idx-9",
-          files: { "reference/notes.md": "draft notes" },
-        },
-      },
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), draft: { skillMd: skillMd("pdf-next") } },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "draft"))!;
+    const skill = resolveSkill(await onlyEntry("draft"));
     expect(skill.version).toBe("draft");
-    expect(skill.integrity).toBe('draft:"1":"idx-9"');
-    // The two fixtures carry DIFFERENT frontmatter names, so this pins the
-    // selector on the detail request the same way the bytes below pin it on
-    // the file routes: unnamed, the stub answers with the published metadata.
-    expect(skill.frontmatterName).toBe("pdf-tools-draft");
-
-    const files = await fetchSkillFiles("default", skill, "draft");
-    const decoder = new TextDecoder();
-    expect(decoder.decode(files["SKILL.md"]!)).toContain("Working copy.");
-    // Only the draft archive carries this text: the published one says otherwise.
-    expect(decoder.decode(files["reference/notes.md"]!)).toBe("draft notes");
+    expect(skill.frontmatterName).toBe("pdf-next");
   });
 
-  it("says whose copy it is when the caller may not write the skill", async () => {
-    createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools"),
-        draft: { skillMd: skillMd("PDF Tools", "Working copy."), notWritable: true },
-      },
-    ]).install();
-
-    const err = await resolveSkill("default", "@acme/pdf", "draft").then(
-      () => null,
-      (e: unknown) => e,
-    );
-    const rendered = formatError(err);
-    expect(rendered).toContain("@acme/pdf");
-    expect(rendered).toContain("author's working copy");
-    expect(rendered).toContain("skills:write");
-    expect(rendered).toContain("--source published");
-    // The status code alone would send the reader hunting for a permission on
-    // the sync command itself.
-    expect(rendered).not.toContain("HTTP 403");
+  it("refuses a published entry without metadata.version", () => {
+    const uri = "skill://spc_1/acme/pdf/pdf/SKILL.md";
+    const entry = {
+      uri,
+      frontmatter: { name: "pdf", description: "d" },
+      resources: [{ uri, digest: DIGEST, size: 1 }],
+    };
+    expect(() => resolveSkill(entry)).toThrow(/metadata\.version/);
   });
 
-  it("explains the same refusal when it lands on the draft archive", async () => {
-    // Resolution and download are separate requests: a grant revoked between
-    // them refuses the second one, and that refusal must read the same way.
-    createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools"),
-        draft: { skillMd: skillMd("PDF Tools"), notWritable: true },
-      },
-    ]).install();
-
-    const skill = resolved({
-      packageId: "@acme/pdf",
-      version: "draft",
-      integrity: 'draft:1:"idx-1"',
+  it("refuses an entry naming a path outside its directory, a duplicate or an invalid name", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const file = (uri: string) => ({ uri, digest: DIGEST, size: 1 });
+    const entry = (uri: string, name: string, extra: string[]) => ({
+      uri,
+      frontmatter: { name, description: "d" },
+      resources: [file(uri), ...extra.map(file)],
     });
-    const err = await fetchSkillFiles("default", skill, "draft").then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(formatError(err)).toContain("author's working copy");
-    expect(formatError(err)).toContain("skills:write");
-    expect(formatError(err)).toContain("--source published");
+    for (const hostile of [
+      entry(skillMdUri, "pdf", [`${dir}/../../x`]),
+      entry(skillMdUri, "pdf", [`${dir}/%2E%2E/x`]),
+      entry(skillMdUri, "pdf", [`${dir}/refs%2F..%2F..%2Fx`]),
+      entry(skillMdUri, "pdf", [`${dir}/%2Fetc/passwd`]),
+      entry(skillMdUri, "pdf", [`${dir}/refs/`]),
+      entry(skillMdUri, "pdf", [skillMdUri]),
+      entry(skillMdUri, "pdf", ["skill://spc_1/acme/other@draft/pdf/a.md"]),
+      entry(skillMdUri, "pdf", ["skill://spc_2/acme/pdf@draft/pdf/a.md"]),
+      entry(skillMdUri, "../pdf", []),
+      entry("skill://spc_1/acme/pdf@draft/Pdf/SKILL.md", "Pdf", []),
+      entry(`${dir}/a.md`, "pdf", []),
+    ]) {
+      expect(() => resolveSkill(hostile)).toThrow(/Malformed skill entry/);
+    }
+    expect(resolveSkill(entry(skillMdUri, "pdf", [`${dir}/refs/a%20b.md`])).version).toBe("draft");
+  });
+
+  // The sizes bound the archive download: each must be a byte count, and the
+  // whole within the SEP-2640 limits, before the CLI relies on them.
+  it("refuses sizes and digests that are not usable, and an entry over the SEP-2640 limits", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const entry = (resources: { uri: string; digest: unknown; size: unknown }[]) =>
+      ({
+        uri: skillMdUri,
+        frontmatter: { name: "pdf", description: "d" },
+        resources: [{ uri: skillMdUri, digest: DIGEST, size: 1 }, ...resources],
+      }) as Parameters<typeof resolveSkill>[0];
+    const file = (size: unknown, digest: unknown = DIGEST) => ({
+      uri: `${dir}/a.md`,
+      digest,
+      size,
+    });
+    for (const hostile of [
+      entry([file("1")]),
+      entry([file(-1)]),
+      entry([file(1.5)]),
+      entry([file(Number.MAX_SAFE_INTEGER + 1)]),
+      entry([file(1, "sha256:00")]),
+      entry([file(1, `sha256:${"A".repeat(64)}`)]),
+      entry([file(1, 42)]),
+      entry([file(SKILL_MAX_TOTAL_BYTES)]),
+      entry(
+        Array.from({ length: SKILL_MAX_FILES }, (_, i) => ({
+          uri: `${dir}/f${i}.md`,
+          digest: DIGEST,
+          size: 1,
+        })),
+      ),
+    ]) {
+      expect(() => resolveSkill(hostile)).toThrow(/Malformed skill entry/);
+    }
+    expect(resolveSkill(entry([file(SKILL_MAX_TOTAL_BYTES - 1)])).version).toBe("draft");
+  });
+
+  it("refuses two paths that are one file on a case- or normalization-insensitive disk", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const entry = (paths: string[]) => ({
+      uri: skillMdUri,
+      frontmatter: { name: "pdf", description: "d" },
+      resources: [skillMdUri, ...paths.map((path) => `${dir}/${encodeURIComponent(path)}`)].map(
+        (uri) => ({ uri, digest: DIGEST, size: 1 }),
+      ),
+    });
+    expect(() => resolveSkill(entry(["skill.md"]))).toThrow(/listed twice/);
+    expect(() => resolveSkill(entry(["caf\u00e9.md", "cafe\u0301.md"]))).toThrow(/listed twice/);
+    expect(resolveSkill(entry(["notes.md"])).version).toBe("draft");
   });
 });
 
@@ -226,153 +270,16 @@ describe("assignSlugs", () => {
     expect(slugs).toEqual(["acme-foo", "foo", "acme-foo-2"]);
     expect(new Set(slugs).size).toBe(slugs.length);
   });
-
-  it("falls back to the package name segment when the frontmatter name is absent", () => {
-    const { planned } = assignSlugs([resolved({ packageId: "@acme/weekly-report" })]);
-    expect(planned[0]?.slug).toBe("weekly-report");
-  });
 });
 
-// Platform-shaped: the command writes it, and refuses any other shape.
-const SPACE = "spc_00000000-0000-4000-8000-000000000001";
-const SECOND = "spc_00000000-0000-4000-8000-000000000002";
-
-function view(packageId: string, spaceId = SPACE, spaceName = "Space One"): AgentLaunchView {
-  return {
-    packageId,
-    spaceId,
-    spaceName,
-    version: "1.0.0",
-    title: packageId,
-    description: "Does a thing.",
-    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
-  };
+/** A ledger's `slug → holder`. */
+function holding(pairs: [string, string][]) {
+  return new Map(pairs.map(([slug, packageId]) => [slug, { packageId }]));
 }
-
-/** A ledger's `slug → claimant`: an agent entry records its space, a skill entry none. */
-function holding(pairs: [string, string][], spaceId?: string) {
-  return new Map(
-    pairs.map(([slug, packageId]) => [slug, spaceId ? { packageId, spaceId } : { packageId }]),
-  );
-}
-
-describe("assignSlugs — agent commands (D23)", () => {
-  it("prefixes an agent with run- and renders its tree, hashed as rendered", () => {
-    const { planned, failed } = assignSlugs([], [view("@acme/report")]);
-
-    expect(failed).toEqual([]);
-    const agent = planned[0]!;
-    expect(agent.slug).toBe("run-report");
-    expect(agent.kind).toBe("agent");
-    if (agent.kind !== "agent") throw new Error("expected an agent entry");
-    expect(Object.keys(agent.files).sort()).toEqual(["SKILL.md", "input.json"]);
-    expect(agent.integrity).toBe(treeIntegrity(agent.files));
-  });
-
-  it("assigns every skill before any agent, so an agent never renames a skill", () => {
-    // The agent sorts first by package id, and still loses `run-foo` to the skill.
-    const { planned } = assignSlugs(
-      [
-        resolved({ packageId: "@zed/foo", frontmatterName: "foo" }),
-        resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" }),
-      ],
-      [view("@acme/foo")],
-    );
-
-    expect(planned.map((entry) => [entry.packageId, entry.slug, entry.renamedFrom])).toEqual([
-      ["@zed/foo", "foo", undefined],
-      ["@zed/run-foo", "run-foo", undefined],
-      ["@acme/foo", "run-acme-foo", "run-foo"],
-    ]);
-  });
-
-  it("keeps the run- prefix through the counter when the fallback collides too", () => {
-    const { planned } = assignSlugs(
-      [resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" })],
-      [view("@acme/foo"), view("@other/acme-foo")],
-      holding([["run-acme-foo", "@gone/unresolved"]], SPACE),
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual([
-      "run-foo",
-      "run-acme-foo-2",
-      "run-other-acme-foo",
-    ]);
-  });
-
-  it("reports an agent that fails to render and leaves its name to the next claimant", () => {
-    const { planned, failed } = assignSlugs(
-      [],
-      [{ ...view("@acme/foo"), version: "not-semver" }, view("@zed/foo")],
-    );
-
-    expect(failed.map((f) => f.view.packageId)).toEqual(["@acme/foo"]);
-    expect(planned.map((entry) => [entry.packageId, entry.slug])).toEqual([
-      ["@zed/foo", "run-foo"],
-    ]);
-  });
-});
 
 describe("assignSlugs — an installed name stays with its package", () => {
   const slugsOf = (planned: { packageId: string; slug: string }[]) =>
     Object.fromEntries(planned.map((entry) => [entry.packageId, entry.slug]));
-
-  it("keeps an agent on its name when a newcomer sorts first", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@alpha/report"), view("@zeta/report")],
-      holding([["run-report", "@zeta/report"]], SPACE),
-    );
-
-    expect(slugsOf(planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-  });
-
-  it("keeps an agent on its fallback, even once the name's holder left", () => {
-    const agents = [view("@alpha/report"), view("@zeta/report")];
-    const both = holding(
-      [
-        ["run-report", "@zeta/report"],
-        ["run-alpha-report", "@alpha/report"],
-      ],
-      SPACE,
-    );
-    expect(slugsOf(assignSlugs([], agents, both).planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-
-    // An agent's command is never renamed under it: `/appstrate:run-alpha-report` keeps working.
-    const left = holding([["run-alpha-report", "@alpha/report"]], SPACE);
-    expect(slugsOf(assignSlugs([], [view("@alpha/report")], left).planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-    });
-    // A newcomer, holding nothing, takes the freed name.
-    expect(slugsOf(assignSlugs([], [view("@alpha/report")]).planned)).toEqual({
-      "@alpha/report": "run-report",
-    });
-  });
-
-  // A newcomer whose PREFERRED slug is somebody's installed fallback.
-  const held = holding(
-    [
-      ["run-report", "@zeta/report"],
-      ["run-alpha-report", "@alpha/report"],
-    ],
-    SPACE,
-  );
-
-  it("never hands a held fallback to a newcomer that prefers it", () => {
-    const agents = [view("@a/alpha-report"), view("@alpha/report"), view("@zeta/report")];
-
-    expect(slugsOf(assignSlugs([], agents, held).planned)).toEqual({
-      "@a/alpha-report": "run-a-alpha-report",
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-  });
 
   it("leaves a cycle where it is", () => {
     // Each holds the other's preferred name.
@@ -381,7 +288,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/one", frontmatterName: "one" }),
         resolved({ packageId: "@acme/two", frontmatterName: "two" }),
       ],
-      [],
       holding([
         ["two", "@acme/one"],
         ["one", "@acme/two"],
@@ -398,7 +304,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
-      [],
       holding([["pdf", "@zed/tools"]]),
     );
 
@@ -410,7 +315,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
-      [],
       holding([
         ["acme-pdf", "@acme/pdf"],
         ["tools", "@zed/tools"],
@@ -420,191 +324,137 @@ describe("assignSlugs — an installed name stays with its package", () => {
   });
 });
 
-describe("assignSlugs — one agent active in several spaces (#1972)", () => {
-  const spacesOf = (planned: PlannedEntry[]) =>
-    planned.map((entry) => [entry.kind === "agent" ? entry.spaceId : "", entry.slug]);
-
-  it("names the first claimant run-<name> and the next run-<space>-<name>", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab Team")],
-    );
-
-    expect(spacesOf(planned)).toEqual([
-      [SPACE, "run-report"],
-      [SECOND, "run-lab-team-report"],
-    ]);
-    expect(planned[1]!.renamedFrom).toBe("run-report");
-  });
-
-  it("keeps run-<name> with the space that holds it, whichever space comes first", () => {
-    const held = new Map([["run-report", { packageId: "@acme/report", spaceId: SECOND }]]);
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
-      held,
-    );
-
-    expect(spacesOf(planned)).toEqual([
-      [SPACE, "run-space-one-report"],
-      [SECOND, "run-report"],
-    ]);
-  });
-
-  it("counts on when the space fallback is taken, and keeps run-<scope>-<name> for another package", () => {
-    const { planned } = assignSlugs(
-      [resolved({ packageId: "@zed/run-lab-report", frontmatterName: "run-lab-report" })],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab"), view("@other/report")],
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual([
-      "run-lab-report",
-      "run-report",
-      "run-lab-report-2",
-      "run-other-report",
-    ]);
-  });
-});
-
-describe("assignSlugs — the space fallback", () => {
-  it("names the second space's command after its space when another package holds run-<name>", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
-      holding([["run-report", "@zeta/report"]], SPACE),
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual(["run-acme-report", "run-lab-report"]);
-  });
-
-  it("cuts a long space name, never the agent's name", () => {
-    const space = "a".repeat(60);
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/weekly-report"), view("@acme/weekly-report", SECOND, space)],
-    );
-
-    const slug = planned[1]!.slug;
-    expect(slug.length).toBeLessThanOrEqual(64);
-    expect(slug.startsWith("run-aaaa")).toBe(true);
-    expect(slug.endsWith("-weekly-report")).toBe(true);
-  });
-});
-
-describe("listSyncableAgents", () => {
-  const agents: AgentFixture[] = [
-    { id: "@acme/zebra", activeIn: ["spc_2"] },
-    { id: "@appstrate/builtin", source: "system", activeIn: ["spc_2"] },
-    { id: "@acme/alpha", activeIn: ["spc_2"] },
-    { id: "@acme/elsewhere", activeIn: ["spc_1"] },
-  ];
-
-  it("lists the ACTIVE agents of the space it names, system ones included, sorted", async () => {
-    // The profile pins spc_1: only the header can bring spc_2's agents back.
-    createSkillServer([], undefined, agents).install();
-
-    expect(await listSyncableAgents("default", "spc_2")).toEqual([
-      { packageId: "@acme/alpha", system: false },
-      { packageId: "@acme/zebra", system: false },
-      { packageId: "@appstrate/builtin", system: true },
-    ]);
-  });
-});
-
-describe("resolveAgent", () => {
-  const ONE = { id: "spc_1", name: "One" };
-
-  it("pins the latest published version and carries the space's input layer", async () => {
-    createSkillServer([], undefined, [
-      {
-        id: "@acme/report",
-        display_name: "Weekly report",
-        description: "Writes the report.",
-        versions: ["1.0.0", "1.2.0"],
-        input: { schema: { type: "object", properties: { topic: { type: "string" } } } },
-        values: { topic: "sales" },
-        locked_fields: ["topic"],
-      },
-    ]).install();
-
-    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toEqual({
-      packageId: "@acme/report",
-      spaceId: "spc_1",
-      spaceName: "One",
-      version: "1.2.0",
-      title: "Weekly report",
-      description: "Writes the report.",
-      input: {
-        schema: { type: "object", properties: { topic: { type: "string" } } },
-        values: { topic: "sales" },
-        locked_fields: ["topic"],
-      },
-    });
-  });
-
-  it("titles an agent with no display name by its package id", async () => {
-    createSkillServer([], undefined, [{ id: "@acme/report", display_name: " " }]).install();
-
-    const agent = (await resolveAgent("default", "@acme/report", "published", ONE))!;
-    expect(agent.title).toBe("@acme/report");
-  });
-
-  it("returns null — not an error — when the agent was never published", async () => {
-    createSkillServer([], undefined, [{ id: "@acme/report", versions: [] }]).install();
-
-    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toBeNull();
-  });
-
-  it("names the draft and pins the command to it", async () => {
-    createSkillServer([], undefined, [
-      { id: "@acme/report", description: "Published.", draft: { description: "Working copy." } },
-    ]).install();
-
-    const agent = (await resolveAgent("default", "@acme/report", "draft", ONE))!;
-    expect(agent.version).toBe("draft");
-    expect(agent.description).toBe("Working copy.");
-  });
-
-  it("says whose copy it is when the caller may not write the agent", async () => {
-    createSkillServer([], undefined, [
-      { id: "@acme/report", draft: { notWritable: true } },
-    ]).install();
-
-    const err = await resolveAgent("default", "@acme/report", "draft", ONE).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    const rendered = formatError(err);
-    expect(rendered).toContain("@acme/report");
-    expect(rendered).toContain("author's working copy");
-    expect(rendered).toContain("agents:write");
-    expect(rendered).toContain("--source published");
-  });
-});
-
 describe("fetchSkillFiles", () => {
-  it("returns the archive entries of a published skill", async () => {
+  it("returns every served file, by path inside the skill directory", async () => {
     createSkillServer([
       {
         id: "@acme/pdf",
         skillMd: skillMd("pdf"),
         extraFiles: { "reference/notes.md": "notes" },
+        draft: { files: { "reference/notes.md": "draft notes" } },
       },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
-    const files = await fetchSkillFiles("default", skill, "published");
-    expect(Object.keys(files).sort()).toEqual(["SKILL.md", "manifest.json", "reference/notes.md"]);
+    const files = await fetchSkillFiles("default", resolveSkill(await onlyEntry("published")));
+    expect(Object.keys(files).sort()).toEqual(["SKILL.md", "reference/notes.md"]);
+    expect(new TextDecoder().decode(files["reference/notes.md"]!)).toBe("notes");
+
+    const draft = await fetchSkillFiles("default", resolveSkill(await onlyEntry("draft")));
+    expect(new TextDecoder().decode(draft["reference/notes.md"]!)).toBe("draft notes");
   });
 
-  it("refuses bytes that do not match the advertised integrity", async () => {
+  it("reads a skill of more than 50 files in one request", async () => {
+    const extraFiles: Record<string, string> = {};
+    for (let i = 0; i < 60; i += 1) extraFiles[`refs/${i}.md`] = `file ${i}`;
+    const server = createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles }]);
+    server.install();
+    const served = globalThis.fetch;
+    let archiveReads = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/packages/skills/served/archive")
+        archiveReads += 1;
+      return served(input, init);
+    }) as unknown as typeof fetch;
+
+    const files = await fetchSkillFiles("default", resolveSkill(await onlyEntry("published")));
+    expect(Object.keys(files)).toHaveLength(61);
+    expect(new TextDecoder().decode(files["refs/59.md"]!)).toBe("file 59");
+    expect(archiveReads).toBe(1);
+  });
+
+  it("refuses an archive that does not hold exactly the entry's files", async () => {
+    createSkillServer([
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles: { "notes.md": "notes" } },
+    ]).install();
+    const skill = resolveSkill(await onlyEntry("published"));
+    const served = globalThis.fetch;
+    const original = await fetchSkillFiles("default", skill);
+    const serveArchive = (files: Record<string, Uint8Array>) => {
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+        new URL(String(input)).pathname === "/api/packages/skills/served/archive"
+          ? new Response(new Uint8Array(zipArtifact(files)), {
+              headers: { "Content-Type": "application/zip" },
+            })
+          : served(input, init)) as unknown as typeof fetch;
+    };
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const hostiles: Record<string, Uint8Array>[] = [
+      { ...original, "extra.md": encode("x") },
+      { "SKILL.md": original["SKILL.md"]!, "../notes.md": original["notes.md"]! },
+      { ...original, "notes.md": encode("notes, longer than listed") },
+      { ...original, "notes.md": encode("n") },
+    ];
+    for (const hostile of hostiles) {
+      serveArchive(hostile);
+      await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
+        /does not match its served digests/,
+      );
+    }
+  });
+
+  it("refuses bytes that do not match the served digest", async () => {
     createSkillServer([
       { id: "@acme/pdf", skillMd: skillMd("pdf"), corruptDownload: true },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
-    await expect(fetchSkillFiles("default", skill, "published")).rejects.toThrow(
-      /Integrity mismatch/,
+    const skill = resolveSkill(await onlyEntry("published"));
+    await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
+      /does not match its served digest/,
     );
+  });
+
+  it("refuses a SKILL.md whose frontmatter differs from its entry's", async () => {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), version: "1.0.0" }]).install();
+
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(Object.keys(await fetchSkillFiles("default", skill))).toContain("SKILL.md");
+    const altered = { ...skill.entry.frontmatter, description: "Something else." };
+    await expect(
+      fetchSkillFiles("default", { ...skill, entry: { ...skill.entry, frontmatter: altered } }),
+    ).rejects.toThrow(/does not match the frontmatter of its entry/);
+  });
+
+  // The entry reaches the CLI as JSON, which has no spelling for these YAML values.
+  it("accepts frontmatter values that JSON spells differently (.inf, .nan, -0)", async () => {
+    const md = "---\nname: pdf\ndescription: d\nx-max: .inf\nx-nan: .nan\nx-zero: -0\n---\nBody.\n";
+    createSkillServer([{ id: "@acme/pdf", skillMd: md }]).install();
+
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(Object.keys(await fetchSkillFiles("default", skill))).toContain("SKILL.md");
+  });
+});
+
+describe("listSyncableSkills — what the list route answers", () => {
+  function serveList(response: () => Response): void {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf") }]).install();
+    const served = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/packages/skills/served"
+        ? response()
+        : served(input, init)) as unknown as typeof fetch;
+  }
+
+  // Kept so that it reaches `resolveSkill` and is reported as refused, which
+  // keeps the skill its package installed, instead of vanishing from the catalogue.
+  it("keeps an entry whose URI does not parse but names a package", async () => {
+    const uri = "skill://spc_1/acme/pdf/Not_Valid/SKILL.md";
+    const entry = { uri, frontmatter: { name: "Not_Valid", description: "d" }, resources: [] };
+    serveList(() => Response.json({ object: "list", data: [entry], hasMore: false }));
+
+    const [listed] = await listSyncableSkills("default", "spc_1", "published");
+    expect(listed!.uri).toBe(uri);
+    expect(() => resolveSkill(listed!)).toThrow(/Malformed skill entry/);
+  });
+
+  it("explains a 404: the instance may not serve the route", async () => {
+    serveList(() =>
+      Response.json({ code: "not_found", detail: "API endpoint not found" }, { status: 404 }),
+    );
+
+    await expect(listSyncableSkills("default", "spc_1", "published")).rejects.toThrow(
+      /answered 404/,
+    );
+    const error = await listSyncableSkills("default", "spc_1", "published").catch((e) => e);
+    expect((error as { hint?: string }).hint).toMatch(/does not serve this route/);
   });
 });

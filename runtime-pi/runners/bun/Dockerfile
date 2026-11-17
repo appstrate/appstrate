@@ -41,7 +41,7 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Bun)" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
 # ca-certificates — TLS trust store for outbound API calls. Bun ships in
-# the base image. git + openssh-client cover bun mcp-servers that shell
+# the base image. git + openssh-client cover local bun MCP servers that shell
 # out to `git` for working-tree operations (clone, branch, commit, push)
 # — adds ~25MB on alpine, dwarfed by the bun runtime itself. /bundle is
 # the conventional mount point — the sidecar `docker cp`s the extracted
@@ -51,7 +51,7 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Bun)" \
 # image (`runtime-pi/Dockerfile` L143-144) so the per-run shared
 # workspace volume (chowned 1001:1001 at boundary create time, see
 # docker-orchestrator.createIsolationBoundary) is writable by every
-# party that touches it. Without this alignment, a mcp-server runner
+# party that touches it. Without this alignment, a local-server runner
 # running as `nobody:nobody` (UID 65534) cannot mkdir / write into a
 # workspace whose top dir is owned by 1001 — every workspace-enabled
 # tool (`clone`, `commit`, `push`) fails with `Permission denied`.

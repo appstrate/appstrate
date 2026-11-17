@@ -5,7 +5,7 @@
  * known {@link TEST_SIDECAR_AUTH_TOKEN}, and an `app.request` that stamps it.
  *
  * The sidecar's control surface denies by default, so without this every suite
- * covering `/llm/*`, `/mcp`, `/integrations/boot-report` or `/runtime-events`
+ * covering `/llm/*`, `/mcp` or `/integrations/boot-report`
  * would be asserting against a wall of 401s. Stamping it here keeps each of
  * those suites about ITS OWN subject rather than about authentication —
  * authentication itself is covered on the real, unwrapped `createApp` in

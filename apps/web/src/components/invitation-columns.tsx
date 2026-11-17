@@ -9,8 +9,6 @@
  * Editing is what a click on the row does, and it is the menu's first entry;
  * copying the link and cancelling follow, cancelling last because it is
  * destructive.
- *
- * Out of the table component so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import { Link2, Pencil, Trash2 } from "lucide-react";
@@ -49,21 +47,22 @@ export function useInvitationColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(120px,1.4fr)",
+      width: 120,
+      elastic: true,
       cell: (invitation) => <CellText strong>{invitation.email}</CellText>,
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "minmax(100px,1fr)",
-      tier: 2,
+      width: 100,
+      elastic: true,
       cell: (invitation) => <CellText>{t(roleI18nKey(invitation.role))}</CellText>,
     },
     {
       id: "spaces",
       header: t("orgSettings.inviteSpacesLabel"),
-      width: "minmax(80px,1.3fr)",
-      tier: 2,
+      width: 80,
+      elastic: true,
       cell: (invitation) =>
         assignmentsLoading ? (
           <Skeleton className="h-4 w-40" />
@@ -74,9 +73,8 @@ export function useInvitationColumns({
     {
       id: "expires",
       header: t("orgSettings.expiresColumn"),
-      width: "92px",
+      width: 92,
       align: "end",
-      tier: 2,
       cell: (invitation) => <CellDate value={invitation.expiresAt} granularity="date" />,
     },
     rowActionsColumn((invitation) => (

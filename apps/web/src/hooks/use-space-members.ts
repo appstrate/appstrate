@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { $api, type components } from "../api/client";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { spaceRoleAssignment, useInvalidateRoles, type SpaceRoleOption } from "./use-roles";
+import { spaceRoleAssignment, useInvalidateRoles } from "./use-roles";
 
 export type SpaceMemberObject = components["schemas"]["SpaceMemberObject"];
+/** What a seat control reads of a person in a space: who, how they reach it, and as what. */
+export type SpaceSeat = Pick<SpaceMemberObject, "userId" | "org_role" | "source" | "role">;
 
-/**
- * Everyone who actually reaches the space: explicit rows, org owners/admins
- * (`source: "org_role"`) and, in an `open` space, every org member
- * (`source: "open_space"`).
- */
+/** Everyone who reaches the space: explicit rows, org owners/admins (`org_role`) and, in an `open` space, every org member (`open_space`). */
 export function useSpaceMembers(spaceId: string, enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
@@ -39,40 +35,21 @@ function useUpdateSpaceMember() {
   return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", { onSuccess: invalidate });
 }
 
-/**
- * Gives a person a role in a space from one control, two routes: an explicit
- * seat is PATCHed, an implicit member (open space) has no row yet, so picking
- * a role CREATES one — `PATCH` 404s without a row, so the branch is the API's.
- * Toasts the result under `name`, the space's or the person's.
- */
-export function useAssignSpaceRole(roleOptions: SpaceRoleOption[]) {
-  const { t } = useTranslation("settings");
+/** One control, two routes: an explicit seat is PATCHed; an implicit member (open space) has no row, and `PATCH` 404s without one, so picking a role CREATES it. */
+export function useAssignSpaceRole() {
   const addMember = useAddSpaceMember();
   const updateMember = useUpdateSpaceMember();
 
-  const assign = (
-    { spaceId, member, name }: { spaceId: string; member: SpaceMemberObject; name: string },
-    value: string,
-  ) => {
+  const assign = ({ spaceId, member }: { spaceId: string; member: SpaceSeat }, value: string) => {
     const body = spaceRoleAssignment(value);
-    const onSuccess = () =>
-      toast.success(
-        t("spaceMembers.roleUpdated", {
-          name,
-          role: roleOptions.find((option) => option.value === value)?.label ?? value,
-        }),
-      );
     if (member.source === "explicit") {
-      updateMember.mutate(
-        { params: { path: { id: spaceId, userId: member.userId } }, body },
-        { onSuccess },
-      );
+      updateMember.mutate({ params: { path: { id: spaceId, userId: member.userId } }, body });
       return;
     }
-    addMember.mutate(
-      { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
-      { onSuccess },
-    );
+    addMember.mutate({
+      params: { path: { id: spaceId } },
+      body: { userId: member.userId, ...body },
+    });
   };
 
   return { assign, isPending: addMember.isPending || updateMember.isPending };

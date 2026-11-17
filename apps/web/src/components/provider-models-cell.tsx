@@ -72,7 +72,7 @@ export function ModelsCell({
     );
   }
   return (
-    <div className="min-w-0 space-y-1" title={title}>
+    <div className="flex min-w-0 flex-col gap-1" title={title}>
       {serviceIds.map((id) => (
         <div key={id} className="flex min-w-0 items-baseline gap-2">
           <span className="text-muted-foreground w-20 shrink-0 truncate text-xs">

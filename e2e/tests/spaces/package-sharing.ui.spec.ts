@@ -6,9 +6,10 @@
  * What a route test cannot show: that the two halves of the flow actually meet
  * in the SPA. An administrator shares an agent from the package page's own
  * dialog, and the guest — an external identity with no reach into any space —
- * finds it in their own space's package list as a PLACEMENT nobody has switched
- * on yet ("Proposé"), and switches it on with the same `POST
- * /api/spaces/{spaceId}/packages` an admin uses from the library, because there
+ * finds it in their own space's package list as a PLACEMENT switched off (the
+ * admin cannot activate in someone else's personal space), and switches it on
+ * with the same `POST
+ * /api/spaces/{id}/packages` an admin uses from the library, because there
  * is only one door. Only then does the platform let them launch it, and the
  * administrator still cannot see inside that space.
  *
@@ -20,7 +21,7 @@
  * nothing here reaches the provider — the run fails in the background.
  */
 
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
@@ -40,6 +41,18 @@ async function personalSpaceOf(
   );
   expect(own).toHaveLength(1);
   return own[0]!.id;
+}
+
+/**
+ * A Découvrir card, by the package's display name: the innermost block holding
+ * both its title and its add button (cards carry no role of their own).
+ */
+function catalogueCard(page: Page, displayName: string): Locator {
+  return page
+    .locator("div")
+    .filter({ has: page.getByRole("button", { name: displayName, exact: true }) })
+    .filter({ has: page.getByRole("button", { name: /^Ajouter à / }) })
+    .last();
 }
 
 test("an admin shares an agent with a guest, who adds it to their space and may then run it", async ({
@@ -125,7 +138,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
         response.request().method() === "POST" && response.url().includes("/shares") === true,
     );
     await adminPage.getByRole("button", { name: /^(Partager|Share)$/ }).click();
-    expect((await shared).status()).toBe(200);
+    expect((await shared).status()).toBe(201);
   } finally {
     await adminPage.context().close();
   }
@@ -142,9 +155,10 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     await createAuthedContext(browser, guest, orgId, guestSpaceId)
   ).newPage();
   try {
-    expect((await guestClient.get("/library")).status()).toBe(403);
+    // The organization library answers every member, graded by what they read.
+    expect((await guestClient.get("/library")).status()).toBe(200);
 
-    // The index lists what RUNS here, and an offer nobody took up runs nowhere
+    // The index lists what RUNS here, and a placement switched off runs nowhere
     // — so it is not on it. The absence is read after the list response lands,
     // not against a loading page.
     const indexRead = guestPage.waitForResponse(
@@ -155,11 +169,11 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     expect((await indexRead).status()).toBe(200);
     await expect(guestPage.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
-    // THE door is `POST /api/spaces/{spaceId}/packages`, the same route the
+    // THE door is `POST /api/spaces/{id}/packages`, the same route the
     // catalogue's switches call for a team space. A guest holds no
     // `agents:configure` anywhere; owning the space is the authorization (RBAC
     // spec §3.6). The door is driven over the API here; the guest test further
-    // down takes the same offer up from the catalogue.
+    // down switches the same kind of placement on from the catalogue.
     const activated = await guestClient.post(`/spaces/${guestSpaceId}/packages`, {
       packageId: `${scope}/${name}`,
     });
@@ -233,17 +247,18 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
 });
 
 /**
- * An offer is taken up from the catalogue, and the index follows.
+ * A placement shared OFF is switched on from the catalogue, and the index follows.
  *
- * The recipient never meets the offer on the index — that page is the active
- * set — so the catalogue is both where they learn a package was sent to them
- * (the sidebar's Catalogue entry carries the count, and opens the offer itself
- * when it is the only one) and where they switch it on. What this drives from
- * the browser, and no route test can, is the cache seam behind that split: the
- * index visited BEFORE the activation must show the agent AFTER it, in the same
- * SPA session, because the activation invalidates the list it was absent from.
+ * The author cannot activate in another member's personal space, so the share
+ * lands there switched off: placed, readable, not running. The recipient never
+ * meets it on the index — that page is the active set — so the catalogue is
+ * where they find it (its card says who shared it) and where they switch it
+ * on. What this drives from the browser, and no route test can, is the cache
+ * seam behind that split: the index visited BEFORE the activation must show the
+ * agent AFTER it, in the same SPA session, because the activation invalidates
+ * the list it was absent from.
  */
-test("an offer is taken up from the catalogue and lands on an already visited index", async ({
+test("a placement shared OFF is switched on from the catalogue and lands on an already visited index", async ({
   request,
   browser,
   browserCtx,
@@ -251,7 +266,7 @@ test("an offer is taken up from the catalogue and lands on an already visited in
 }) => {
   const orgId = browserCtx.org.orgId;
   const scope = `@${browserCtx.org.orgSlug}`;
-  const name = `offered-${Date.now().toString(36)}`;
+  const name = `shared-off-${Date.now().toString(36)}`;
   const homeId = await personalSpaceOf(request, browserCtx.auth.cookie, orgId);
   const authorClient = createApiClient(request, {
     cookie: browserCtx.auth.cookie,
@@ -273,12 +288,26 @@ test("an offer is taken up from the catalogue and lands on an already visited in
   const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
     target: { kind: "user", userId: member.userId },
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
+
+  // Landed OFF: a row in the member's space, switched off.
+  const memberClient = createApiClient(request, {
+    cookie: member.cookie,
+    orgId,
+    spaceId: personalId,
+  });
+  const placed = await memberClient.get(`/spaces/${personalId}/packages`);
+  expect(placed.status()).toBe(200);
+  expect(
+    ((await placed.json()).data as { packageId: string; enabled?: boolean }[]).find(
+      (row) => row.packageId === `${scope}/${name}`,
+    )?.enabled,
+  ).toBe(false);
 
   const page = await (await createAuthedContext(browser, member, orgId, personalId)).newPage();
   try {
-    // The index is visited FIRST and is empty of it: the offer is a placement
-    // nobody switched on, so nothing on this page can run and nothing is shown.
+    // The index is visited FIRST and is empty of it: a switched-off placement
+    // runs nowhere, so nothing on this page shows it.
     const indexRead = page.waitForResponse(
       (response) =>
         response.request().method() === "GET" && new URL(response.url()).pathname === "/api/agents",
@@ -288,27 +317,18 @@ test("an offer is taken up from the catalogue and lands on an already visited in
     await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
     // Stay in one SPA session from here: a reload would discard the cache
-    // under test. The catalogue is reached from the sidebar, which opens the
-    // one pending offer itself — and reads it in THIS space: the detail of an
-    // untaken offer reads, which is what makes the decision an informed one.
-    const detailResponse = page.waitForResponse((response) =>
-      response.url().includes(`/api/packages/agents/${scope}/${name}`),
-    );
+    // under test. The sidebar opens the catalogue, whose card names the sharer
+    // for THIS space and adds it here in one click.
     await page.getByRole("link", { name: /^Catalogue/ }).click();
-    const detail = await detailResponse;
-    expect(detail.status()).toBe(200);
-    expect(detail.request().headers()["x-space-id"]).toBe(personalId);
-    await expect(
-      page.getByRole("heading", { name: `Test Agent ${name}`, exact: true }),
-    ).toBeVisible();
-
-    // And switched on there.
+    const card = catalogueCard(page, `Test Agent ${name}`);
+    await expect(card.getByText(`Partagé par ${browserCtx.auth.name}`)).toBeVisible();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${personalId}/packages`),
     );
-    await page.getByRole("button", { name: "Activer dans Mon espace", exact: true }).click();
+    await card.getByRole("button", { name: "Ajouter à Mon espace", exact: true }).click();
+    // 201: this call is what switched the existing placement on.
     expect((await activated).status()).toBe(201);
 
     // And now it is on the index that was visited before any of this — without
@@ -324,8 +344,9 @@ test("an offer is taken up from the catalogue and lands on an already visited in
 // A GUEST in their own personal space holds no `<type>:activate` grant there, yet the server lets
 // the owner of a personal space activate (RBAC spec §3.6, and the API test above). The catalogue
 // (`catalogueKinds`) reads the same verdict as every activation control, so its entry is there and
-// the offer a guest is sent can be taken up. Members hold the grant (the test before).
-test("a guest finds an offer in the catalogue and switches it on", async ({
+// the placement a guest is sent switched off can be switched on. Members hold the grant (the test
+// before).
+test("a guest finds a placement shared OFF in the catalogue and switches it on", async ({
   request,
   browser,
   browserCtx,
@@ -334,7 +355,7 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
 }) => {
   const orgId = browserCtx.org.orgId;
   const scope = `@${browserCtx.org.orgSlug}`;
-  const name = `guest-offer-${Date.now().toString(36)}`;
+  const name = `guest-shared-${Date.now().toString(36)}`;
   await createAgent(apiClient, scope, name);
   const guest = await registerUser(request);
   const invited = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
@@ -351,26 +372,29 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
   const shared = await apiClient.post(`/packages/${scope}/${name}/shares`, {
     target: { kind: "user", userId: guest.userId },
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
 
   const page = await (await createAuthedContext(browser, guest, orgId, guestSpaceId)).newPage();
   try {
     await page.goto("/agents");
     await page.getByRole("link", { name: /^Catalogue/ }).click({ timeout: 5_000 });
+    const card = catalogueCard(page, `Test Agent ${name}`);
+    await expect(card.getByText(/^Partagé par /)).toBeVisible();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
-    await page.getByRole("button", { name: "Activer dans Mon espace", exact: true }).click();
+    await card.getByRole("button", { name: "Ajouter à Mon espace", exact: true }).click();
     expect((await activated).status()).toBe(201);
 
     // Off again from the space's switch, and back on. Deactivating keeps the placement: the
     // switch stays, unchecked, and switching it back on is another 201.
-    const toggle = page.getByRole("switch", {
-      name: `Activer Test Agent ${name} dans Mon espace`,
-      exact: true,
-    });
+    await page.getByRole("tab", { name: "Par espace", exact: true }).click();
+    const toggle = page
+      .getByRole("row")
+      .filter({ hasText: `Test Agent ${name}` })
+      .getByRole("switch", { name: `Activer Test Agent ${name} dans Mon espace`, exact: true });
     await expect(toggle).toBeChecked();
     const deactivated = page.waitForResponse(
       (response) =>
@@ -451,11 +475,11 @@ test("a draft-only agent is published from the share dialog itself, then offered
       (response) =>
         response.request().method() === "POST" &&
         response.url().includes("/shares") &&
-        response.status() === 200,
+        response.status() === 201,
     );
     await page.getByRole("button", { name: /Publier et partager|Publish and share/ }).click();
     expect((await published).status()).toBe(201);
-    expect((await offered).status()).toBe(200);
+    expect((await offered).status()).toBe(201);
     await expect(page.getByTestId("share-needs-version")).toHaveCount(0);
   } finally {
     await page.context().close();
@@ -475,7 +499,7 @@ test("a draft-only agent is published from the share dialog itself, then offered
   expect(added.status(), await added.text()).toBe(201);
 });
 
-test("a non-admin builder switches a team offer on and off from the space package view", async ({
+test("a non-admin builder switches a team placement off and on from the space package view", async ({
   request,
   browser,
   browserCtx,
@@ -511,20 +535,31 @@ test("a non-admin builder switches a team offer on and off from the space packag
         target: { kind: "space", spaceId },
       })
     ).status(),
-  ).toBe(200);
+  ).toBe(201);
   const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
   try {
-    await page.goto("/catalogue/placed/agent");
-    // One row, one switch: the offer and the packages already running here sit
-    // in the same list, told apart by a mark in the space's cell (« Partagé »)
-    // rather than by a second section with a button of its own.
+    await page.goto("/catalogue/agent?view=spaces");
+    // One row, one switch: a placement shared here sits in the same list as the
+    // packages authored here. The author holds the activation grant in this
+    // space, so the share landed ON.
     const displayName = `Test Agent ${name}`;
     const row = page.getByRole("row").filter({ hasText: displayName });
-    await expect(row.getByText(/Partagé|Shared/)).toBeVisible();
     const toggle = row.getByRole("switch", {
       name: `Activer ${displayName} dans Default`,
       exact: true,
     });
+    await expect(toggle).toBeChecked();
+    const deactivated = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes(`/spaces/${spaceId}/packages/${scope}/${name}`),
+    );
+    await toggle.click();
+    expect((await deactivated).status()).toBe(204);
+    // The row survives the switch — deactivating is not a removal.
+    await expect(toggle).not.toBeChecked();
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Inactif", { exact: true })).toBeVisible();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -533,16 +568,6 @@ test("a non-admin builder switches a team offer on and off from the space packag
     await toggle.click();
     expect((await activated).status()).toBe(201);
     await expect(toggle).toBeChecked();
-    const removed = page.waitForResponse(
-      (response) =>
-        response.request().method() === "DELETE" &&
-        response.url().includes(`/packages/${scope}/${name}`),
-    );
-    await toggle.click();
-    expect((await removed).status()).toBe(204);
-    // The row survives the switch — deactivating is not a removal.
-    await expect(toggle).not.toBeChecked();
-    await expect(row).toBeVisible();
   } finally {
     await page.context().close();
   }

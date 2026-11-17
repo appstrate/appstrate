@@ -1,21 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Pure tool-selection transforms for the agent editor's integration picker.
- *
- * Kept out of the component (and out of `@appstrate/core`, which is published
- * and has no business carrying editor-state helpers) so the rules can be
- * unit-tested without a DOM.
- */
+/** Pure tool-selection transforms for the integration picker, kept DOM-free for unit tests. */
 
 import { apiUploadToolNameFor } from "@appstrate/core/integration";
 
-/**
- * Replace the native-tool slice while preserving only currently visible
- * synthetic selections. Unknown/stale names are deliberately dropped: a bulk
- * action must not keep capabilities the current catalog can no longer show or
- * revoke.
- */
+/** Stale names are dropped on purpose: a bulk action must not keep capabilities the catalog can no longer show. */
 export function replaceNativeToolSelection(
   selection: readonly string[],
   nativeToolNames: readonly string[],
@@ -38,16 +27,9 @@ export function isApiCallToolSelectionEnabled(
 }
 
 /**
- * Add or remove an api_call tool AND its `api_upload` companion as one unit,
- * returning the next tool selection. The companion joins the move only when the
- * visible synthetic companion set contains it (the auth declared
- * `upload_protocols` and `hidden_tools` did not remove it) — never write a
- * native or hidden tool merely because it shares the `api_upload` name.
- *
- * The pairing mirrors the spawn resolver, which grants both from either name:
- * upload chunks are dispatched through the sibling api_call tool, so a
- * half-selection is either a broken tool or a capability the manifest hides.
- * Order is preserved and the result is duplicate-free.
+ * Toggles an api_call tool and its `api_upload` companion as one unit, mirroring the spawn resolver
+ * (which grants both from either name). The companion joins only when it is in the visible synthetic
+ * set — never write a native or hidden tool merely because it shares the `api_upload` name.
  */
 export function toggleApiCallToolSelection(
   selection: readonly string[],
@@ -58,9 +40,7 @@ export function toggleApiCallToolSelection(
   const pair = syntheticUploadToolNames.has(companion)
     ? [apiCallToolName, companion]
     : [apiCallToolName];
-  // The runtime grants the pair from either member. Treat legacy/hand-edited
-  // half-selections as ON as well, so the checkbox reflects effective access
-  // and its next click reliably revokes the whole capability.
+  // A hand-edited half-selection counts as ON, so the next click revokes the whole capability.
   if (pair.some((name) => selection.includes(name))) {
     return selection.filter((t) => !pair.includes(t));
   }

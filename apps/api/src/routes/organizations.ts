@@ -8,6 +8,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { resolveListingViewAs } from "../lib/view-as.ts";
+import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -27,7 +28,7 @@ import {
   orgSettingsPatchSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -35,7 +36,7 @@ import {
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import {
   createInvitation,
   InvitationAlreadyPendingError,
@@ -50,21 +51,14 @@ import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
 import { createDefaultSpace } from "../services/spaces.ts";
+import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
-import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
-import {
-  isWebp,
-  logoImageVersion,
-  orgLogoWire,
-  readOrgLogoImage,
-  setOrgLogo,
-} from "../services/org-logo.ts";
-import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
+import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
 export const createOrgSchema = z
   .object({
@@ -73,36 +67,39 @@ export const createOrgSchema = z
   })
   .strict();
 
-/** Enough for any single emoji: the longest ZWJ sequences hold about ten code points. */
-const MAX_EMOJI_CODE_POINTS = 16;
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-/** Exactly one emoji. An image is uploaded by `PUT /:orgId/logo`. */
-function isOneEmoji(emoji: string): boolean {
-  return (
-    [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
-    [...graphemes.segment(emoji)].length === 1 &&
-    /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
-  );
-}
-
 export const updateOrgSchema = z
   .object({
     name: z.string().min(1).optional(),
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
-    logo: z
-      .object({
-        kind: z.literal("emoji", {
-          error:
-            "Only an emoji logo is written here; upload an image with PUT /api/orgs/{orgId}/logo",
-        }),
-        emoji: z.string().refine(isOneEmoji, "Logo must be exactly one emoji"),
-      })
-      .strict()
-      .nullable()
-      .optional(),
+    icon: appearanceIconSchema(["lucide", "emoji", "image"]).nullable().optional(),
+    color: appearanceColorSchema.nullable().optional(),
   })
   .strict();
+
+/**
+ * An organization's slug is the scope its uploads, forks and starter agent are
+ * created under (`@<slug>/…`), so a slug must be neither one
+ * the platform owns (`isReservedScope`) nor another organization's. Checked on
+ * create and on rename — the only two doors that write a slug.
+ */
+async function assertSlugClaimable(slug: string): Promise<void> {
+  if (isReservedScope(slug)) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_reserved",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is reserved by the platform`,
+    });
+  }
+  if (!(await isSlugAvailable(slug))) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+    });
+  }
+}
 
 export const addMemberSchema = z
   .object({
@@ -129,6 +126,15 @@ export const updateInvitationSchema = z
     space_assignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
+
+/**
+ * An icon as the audit log records it: an uploaded image (a `data:` URI, whatever its type) by
+ * the first 16 hex digits of its SHA-256 digest, never its bytes.
+ */
+function auditedIcon(icon: string): string {
+  if (!icon.startsWith("data:")) return icon;
+  return `sha256:${new Bun.CryptoHasher("sha256").update(icon).digest("hex").slice(0, 16)}`;
+}
 
 /** The service re-reads the actor's role under its lock; only the transport is passed. */
 function memberActor(c: Context<AppEnv>) {
@@ -167,7 +173,8 @@ router.get("/", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
-            logo: orgLogoWire(o.id, o.logo),
+            icon: o.icon,
+            color: o.color,
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
@@ -204,14 +211,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
-    });
-  }
+  await assertSlugClaimable(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -245,7 +245,8 @@ router.post("/", async (c) => {
       id: org.id,
       name: org.name,
       slug: org.slug,
-      logo: orgLogoWire(org.id, org.logo),
+      icon: org.icon,
+      color: org.color,
       role: "owner",
       createdAt: org.createdAt,
     },
@@ -255,14 +256,36 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
+/**
+ * The spaces each org member reaches, among those whose member list the caller
+ * may read: `GET /api/spaces/{id}/members`'s own guard, applied per space —
+ * `space-members:read` there opens the explicit rows, `members:read` on top the
+ * implicit ones — over the spaces the caller reaches, the one a pinned
+ * credential is bound to only. So the member payload discloses no more than the
+ * per-space reads it replaces.
+ */
+async function memberSpacesForCaller(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<Map<string, OrganizationMemberSpace[]>> {
+  const readable = (await callerReachableSpaces(c, orgId)).flatMap(({ id, permissions }) =>
+    permissions.has("space-members:read")
+      ? [{ spaceId: id, includeImplicit: permissions.has("members:read") }]
+      : [],
+  );
+  return listSpacesOfMembers(orgId, readable);
+}
+
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
-  const [org, members, invitations] = await Promise.all([
+  const readsMembers = permissions?.has("members:read") ?? false;
+  const [org, members, invitations, memberSpaces] = await Promise.all([
     getOrgById(orgId),
-    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
+    readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -282,7 +305,8 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    logo: orgLogoWire(org.id, org.logo),
+    icon: org.icon,
+    color: org.color,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
     storage: {
@@ -296,6 +320,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       joinedAt: m.joinedAt,
       displayName: m.displayName,
       email: m.email,
+      spaces: memberSpaces.get(m.userId) ?? [],
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -321,94 +346,30 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(c, orgId));
 });
 
-// PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+// PATCH /api/orgs/:orgId — update name/slug/icon/color (org routes skip org context)
 router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) {
-    if (!(await isSlugAvailable(data.slug))) {
-      throw new ApiError({
-        status: 400,
-        code: "slug_taken",
-        title: "Bad Request",
-        detail: `Slug '${data.slug}' is already in use`,
-      });
-    }
-  }
+  if (data.slug) await assertSlugClaimable(data.slug);
 
-  const { logo, ...renamed } = data;
-  if (renamed.name?.trim() || renamed.slug) {
-    await updateOrganization(orgId, {
-      ...(renamed.name?.trim() ? { name: renamed.name.trim() } : {}),
-      ...(renamed.slug ? { slug: renamed.slug } : {}),
-    });
-  }
-  if (logo !== undefined) {
-    await setOrgLogo(orgId, logo ? { emoji: logo.emoji } : null);
-  }
+  const updates = {
+    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+    ...(data.slug ? { slug: data.slug } : {}),
+    ...(data.icon !== undefined ? { icon: data.icon } : {}),
+    ...(data.color !== undefined ? { color: data.color } : {}),
+  };
+  if (Object.keys(updates).length > 0) await updateOrganization(orgId, updates);
 
   await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data,
+    after: { ...data, ...(data.icon ? { icon: auditedIcon(data.icon) } : {}) },
     orgIdOverride: orgId,
   });
 
   // Bare updated resource — same OrgDetail serializer as GET /:orgId.
-  return c.json(await buildOrgDetail(c, orgId));
-});
-
-// GET /api/orgs/:orgId/logo — the logo image, revalidated by its version
-router.get("/:orgId/logo", async (c) => {
-  const orgId = c.req.param("orgId")!;
-  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
-
-  const version = logoImageVersion((await getOrgById(orgId))?.logo ?? null);
-  const bytes = version ? await readOrgLogoImage(orgId) : null;
-  if (!version || !bytes) throw notFound("Organization has no logo image");
-
-  const etag = `"${version}"`;
-  c.header("ETag", etag);
-  // A URL naming the current version never changes content; any other URL revalidates.
-  c.header(
-    "Cache-Control",
-    c.req.query("v") === version ? "private, max-age=31536000, immutable" : "private, no-cache",
-  );
-  if (ifNoneMatchSatisfied(c.req.header("If-None-Match"), etag)) return c.body(null, 304);
-  c.header("Content-Type", "image/webp");
-  c.header("X-Content-Type-Options", "nosniff");
-  return c.body(new Uint8Array(bytes));
-});
-
-// PUT /api/orgs/:orgId/logo — replace the logo with a WebP image (raw bytes)
-router.put("/:orgId/logo", requirePermission("org", "update"), async (c) => {
-  const orgId = c.req.param("orgId")!;
-  if (c.req.header("Content-Type")?.split(";")[0]?.trim() !== "image/webp") {
-    throw invalidRequest("Logo must be sent as image/webp", "body");
-  }
-  if (Number(c.req.header("Content-Length") ?? 0) > ORG_LOGO_MAX_BYTES) {
-    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
-  }
-  const image = new Uint8Array(await c.req.arrayBuffer());
-  if (image.length > ORG_LOGO_MAX_BYTES) {
-    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
-  }
-  if (!isWebp(image)) throw invalidRequest("Logo must be a WebP image", "body");
-
-  await setOrgLogo(orgId, { image });
-
-  // An image is recorded by its version, never by its bytes.
-  const org = await getOrgById(orgId);
-  await recordAuditFromContext(c, {
-    action: "org.updated",
-    resourceType: "org",
-    resourceId: orgId,
-    after: { logo: { kind: "image", version: logoImageVersion(org?.logo ?? null) } },
-    orgIdOverride: orgId,
-  });
-
   return c.json(await buildOrgDetail(c, orgId));
 });
 
@@ -668,12 +629,14 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
   if (!updated) {
     throw notFound("Member not found");
   }
+  const memberSpaces = await memberSpacesForCaller(c, orgId);
   return c.json({
     userId: updated.userId,
     role: updated.role,
     joinedAt: updated.joinedAt,
     displayName: updated.displayName,
     email: updated.email,
+    spaces: memberSpaces.get(targetUserId) ?? [],
   });
 });
 

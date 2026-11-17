@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { beforeEach, expect, it } from "bun:test";
+import { eq, sql } from "drizzle-orm";
+import { db, toRows } from "@appstrate/db/client";
+import {
+  integrationConnections as c,
+  integrationConnectionShares as shares,
+  spaces,
+} from "@appstrate/db/schema";
+import { prefixedId } from "@appstrate/db/ids";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
+import { lockOrganizationRow } from "../../../src/lib/db-helpers.ts";
+import { shareConnectionsWithNewSpace } from "../../../src/services/connection-all-spaces-shares.ts";
+import {
+  setConnectionShareAllSpaces,
+  unshareConnection,
+} from "../../../src/services/connection-shares.ts";
+import { createSpace } from "../../../src/services/spaces.ts";
+
+describeRequiresPostgres("all-spaces connection sharing serializes with space creation", () => {
+  let ctx: TestContext;
+  let connectionId: string;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "all-spaces-lock" });
+    await seedPackage({ id: "@all-spaces-lock/svc", orgId: ctx.orgId, type: "integration" });
+    const [row] = await db
+      .insert(c)
+      .values({
+        integrationId: "@all-spaces-lock/svc",
+        authKey: "key",
+        orgId: ctx.orgId,
+        spaceId: null,
+        userId: ctx.user.id,
+        accountId: "acct",
+        label: "Shared",
+        credentialsEncrypted: "x",
+      })
+      .returning({ id: c.id });
+    connectionId = row!.id;
+  });
+
+  /** Some lock request of another backend waits on `blockerPid`. */
+  async function waitsOn(blockerPid: number) {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const rows = toRows<{ waiting: boolean }>(
+        await db.execute(
+          sql`SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE NOT granted AND ${blockerPid} = ANY(pg_blocking_pids(pid))
+          ) AS waiting`,
+        ),
+      );
+      if (rows[0]!.waiting) return;
+      await Bun.sleep(10);
+    }
+    throw new Error("the concurrent write never waited on the blocker");
+  }
+
+  it("a new space sees the policy that commits while its creation is waiting", async () => {
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const policy = db.transaction(async (tx) => {
+      await lockOrganizationRow(tx, ctx.orgId);
+      await tx.update(c).set({ shareAllSpaces: true }).where(eq(c.id, connectionId));
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const creating = createSpace(ctx.orgId, { name: "Concurrent" });
+    try {
+      await waitsOn(blockerPid);
+    } finally {
+      release.resolve();
+      await policy;
+    }
+    const space = await creating;
+    expect(await db.select().from(shares).where(eq(shares.connectionId, connectionId))).toEqual([
+      expect.objectContaining({ spaceId: space.id }),
+    ]);
+  });
+
+  it("enabling the policy sees a space that commits while consent is waiting", async () => {
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const spaceId = prefixedId("spc");
+    const creating = db.transaction(async (tx) => {
+      await lockOrganizationRow(tx, ctx.orgId);
+      await tx.insert(spaces).values({ id: spaceId, orgId: ctx.orgId, name: "Concurrent" });
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const policy = setConnectionShareAllSpaces({
+      connectionId,
+      integrationId: "@all-spaces-lock/svc",
+      enabled: true,
+      caller: testCaller(
+        { kind: "person", actor: { type: "user", id: ctx.user.id } },
+        { canShareAllSpaces: () => true },
+      ),
+    });
+    try {
+      await waitsOn(blockerPid);
+    } finally {
+      release.resolve();
+      await creating;
+    }
+    await policy;
+    expect(
+      await db.select().from(shares).where(eq(shares.connectionId, connectionId)),
+    ).toContainEqual(expect.objectContaining({ spaceId }));
+  });
+  // A withdrawal takes no org lock: the connection row orders it with space creation.
+  it("a withdrawal waiting behind a space creation keeps that share and stops later ones", async () => {
+    const caller = testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { canShareAllSpaces: () => true },
+    );
+    const input = { connectionId, integrationId: "@all-spaces-lock/svc", caller };
+    await setConnectionShareAllSpaces({ ...input, enabled: true });
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    const concurrentId = prefixedId("spc");
+    // `createSpace` held open after materializing: it holds the connection row lock.
+    const creating = db.transaction(async (tx) => {
+      await lockOrganizationRow(tx, ctx.orgId);
+      await tx.insert(spaces).values({ id: concurrentId, orgId: ctx.orgId, name: "Concurrent" });
+      expect(await shareConnectionsWithNewSpace(tx, ctx.orgId, concurrentId)).toEqual([
+        connectionId,
+      ]);
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const withdrawal = unshareConnection({ ...input, spaceId: ctx.defaultSpaceId });
+    try {
+      await waitsOn(blockerPid);
+    } finally {
+      release.resolve();
+      await creating;
+    }
+    expect((await withdrawal).connection.shareAllSpaces).toBe(false);
+    const later = await createSpace(ctx.orgId, { name: "After withdrawal" });
+    const remaining = await db.select().from(shares).where(eq(shares.connectionId, connectionId));
+    expect(remaining.map((row) => row.spaceId)).toEqual([concurrentId]);
+    expect(remaining.some((row) => row.spaceId === later.id)).toBe(false);
+  });
+
+  it("a space creation waiting behind a withdrawal re-reads specific-space mode", async () => {
+    const caller = testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { canShareAllSpaces: () => true },
+    );
+    await setConnectionShareAllSpaces({
+      connectionId,
+      integrationId: "@all-spaces-lock/svc",
+      caller,
+      enabled: true,
+    });
+    const locked = Promise.withResolvers<number>();
+    const release = Promise.withResolvers<void>();
+    // `unshareConnection` held open after its writes: the row lock, no org lock.
+    const withdrawing = db.transaction(async (tx) => {
+      await tx.select({ id: c.id }).from(c).where(eq(c.id, connectionId)).for("update");
+      await tx.delete(shares).where(eq(shares.connectionId, connectionId));
+      await tx.update(c).set({ shareAllSpaces: false }).where(eq(c.id, connectionId));
+      locked.resolve(
+        toRows<{ pid: number }>(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))[0]!.pid,
+      );
+      await release.promise;
+    });
+    const blockerPid = await locked.promise;
+    const creating = createSpace(ctx.orgId, { name: "After withdrawal" });
+    try {
+      await waitsOn(blockerPid);
+    } finally {
+      release.resolve();
+      await withdrawing;
+    }
+    await creating;
+    expect(await db.select().from(shares).where(eq(shares.connectionId, connectionId))).toEqual([]);
+  });
+});

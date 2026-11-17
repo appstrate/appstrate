@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Guards on the three request patterns this codebase removed, each of which is
+ * Guards on the request patterns this codebase removed, each of which is
  * a one-line edit away from coming back:
  *
  *  1. the dashboard mounting `<RunList>` under a run query it already made
  *     (two `GET /api/runs` per page view, two `COUNT`s, for the same rows);
- *  2. the schedule CARD fetching a schedule's runs to count three numbers
- *     (N cards → N requests);
- *  3. the notification queries polling every 30s, which is only safe to slow
+ *  2. the notification queries polling every 30s, which is only safe to slow
  *     down while the realtime stream reconciles them on reconnect — the SSE
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
- *  4. the reconciliation running on the FIRST connect too, which issued every
+ *  3. the reconciliation running on the FIRST connect too, which issued every
  *     notification and chat-session query twice on every page load;
- *  5. the agent page fetching the agent's runs a second time, unpaginated and
+ *  4. the agent page fetching the agent's runs a second time, unpaginated and
  *     under a key of its own, to learn whether there is any;
- *  6. a launch refetching the run lists of the page it is leaving;
- *  7. a skill or MCP-server page reading the lists only an agent page shows.
+ *  5. a launch refetching the run lists of the page it is leaving;
+ *  6. a skill or integration page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -66,14 +64,13 @@ const code = (source: string) =>
     .replace(/^\s*\/\/.*$/gm, "");
 
 const DASHBOARD = read("../../pages/dashboard.tsx");
-const SCHEDULE_CARD = read("../schedule-card.tsx");
-const SCHEDULE_STATE = read("../schedule-status-badge.tsx");
 const RUN_LIST = read("../run-list.tsx");
 const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
 const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
+const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
@@ -88,7 +85,7 @@ describe("dashboard reuses its own runs", () => {
   });
 
   it("keeps exactly one run query on the page", () => {
-    expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
+    expect([...DASHBOARD.matchAll(/useFirstRunsPage\(/g)]).toHaveLength(1);
   });
 
   it("keeps the table free of queries, and the fetching list exported", () => {
@@ -99,28 +96,15 @@ describe("dashboard reuses its own runs", () => {
     expect(RUN_LIST).toContain("export function RunList(");
     expect(RUNS_TABLE).toContain("export function RunsTable(");
     expect(code(RUNS_TABLE)).not.toContain("useQuery");
-    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
-  });
-});
-
-describe("schedule cards read their counters from the schedule", () => {
-  it("does not fetch a schedule's runs per card", () => {
-    expect(code(SCHEDULE_CARD)).not.toContain("useScheduleRuns");
-    expect(code(SCHEDULE_CARD)).not.toContain("/runs");
-  });
-
-  it("reads the counters served with the list payload", () => {
-    // The card draws them through ScheduleStateBadges, off the row it is handed.
-    expect(SCHEDULE_CARD).toContain("<ScheduleStateBadges schedule={schedule} />");
-    expect(SCHEDULE_STATE).toContain("schedule.running_runs");
-    expect(SCHEDULE_STATE).toContain("schedule.unread_count");
+    expect(code(RUNS_TABLE)).not.toContain("useRuns");
   });
 });
 
 describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
-    expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
-    expect(AGENT_ACTIONS).toContain("hasRuns={detail.last_run !== null}");
+    expect(code(AGENT_ACTIONS)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
+    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(FirstRunsPage|Runs)\(/);
+    expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {
@@ -153,7 +137,7 @@ describe("notification freshness", () => {
     const intervals = [...NOTIFICATIONS.matchAll(/refetchInterval:\s*([^,\n]+)/g)].map(
       (m) => m[1]!,
     );
-    expect(intervals).toHaveLength(3);
+    expect(intervals).toHaveLength(2);
     expect(intervals.every((v) => v === "NOTIFICATION_POLL_INTERVAL_MS")).toBe(true);
   });
 
@@ -166,9 +150,9 @@ describe("notification freshness", () => {
     stream.connected(1_000);
     expect(keys()).toContain('["get","/api/notifications"]');
     expect(keys()).toContain('["get","/api/notifications/unread-count"]');
-    expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
   });
 
+  // A failed run lands in the bell, so a terminal frame re-reads the feed.
   it("still invalidates them on a terminal run seen live", () => {
     expect(GLOBAL_SYNC).toContain("TERMINAL_RUN_STATUSES.has(status)");
     expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)].length).toBeGreaterThan(1);
@@ -309,7 +293,7 @@ describe("run cache reconciliation on reconnect", () => {
       '["packages","agents","org_1"]',
       '["get","/api/runs"]',
       // A finished run moves the agent overview's 30-day counts.
-      '["agent-run-activity","org_1"]',
+      '["get","/api/agents/{scope}/{name}/run-activity"]',
     ]);
     // The run-detail page appends live frames into the log cache; refetching
     // it would drop the per-turn breadcrumbs it holds.

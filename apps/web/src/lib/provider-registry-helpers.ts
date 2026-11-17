@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Registry-driven provider/model lookup helpers. Every lookup is a function
- * over `ProviderRegistryEntry[]` (what `useProvidersRegistry()` resolves to);
- * no provider constant lives in the client.
- */
+// Registry-driven lookups over `ProviderRegistryEntry[]`; no provider constant lives in the client.
 
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 
-/**
- * Picker value of the single "custom endpoint" row every `baseUrlOverridable`
- * entry collapses into. Picker-only: the form always holds a real `providerId`.
- */
+/** Picker value of the one "custom endpoint" row every `baseUrlOverridable` entry collapses into; picker-only. */
 export const CUSTOM_ENDPOINT_ID = "__custom_endpoint__";
 
 type ProviderPickerRow<T> =
@@ -30,7 +23,6 @@ export function buildProviderPickerRows<
   return rows;
 }
 
-/** The `providerId` a picker value stands for: the custom row opens on the first overridable entry. */
 export function pickedProviderId<T extends { providerId: string; baseUrlOverridable: boolean }>(
   picked: string,
   entries: readonly T[],
@@ -59,11 +51,7 @@ export function getProviderById(
   return registry.find((p) => p.providerId === id);
 }
 
-/**
- * The registry entry behind a saved row. `providerId` answers for any endpoint,
- * a custom URL included; the `(apiShape, base_url)` match is the fallback for
- * rows whose binding is hidden (built-in credentials, aliased models).
- */
+/** The registry entry behind a saved row: `providerId` first, else the `(apiShape, base_url)` match for rows with a hidden binding (built-in credentials, aliased models). */
 export function resolveProviderEntry(
   row: { providerId?: string | null; apiShape: string | null; base_url: string | null },
   registry: readonly ProviderRegistryEntry[],
@@ -95,7 +83,6 @@ export function resolveProviderId(
   return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.base_url, registry)?.providerId ?? "";
 }
 
-/** The providers the quick-connect offers: the subscription (OAuth) ones. */
 export function quickConnectProviders(
   registry: readonly ProviderRegistryEntry[] | undefined,
 ): ProviderRegistryEntry[] {

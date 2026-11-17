@@ -57,8 +57,10 @@ import {
 } from "./integration-manifest-helpers.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
-// system client or the `integration_oauth_clients.id` (UUID) of a custom client.
-// No prefix/sentinel scheme: resolution is system-first then DB-by-id, mirroring
+// system client, the `integration_oauth_clients.id` (UUID) of a custom client, or
+// the URL of this instance's client metadata document (`^[\w.-]+$` admits no `:`
+// or `/`, so none of the three can take another's value). No prefix/sentinel
+// scheme: resolution is system-first, then document URL, then DB-by-id, mirroring
 // the model-provider credential pattern (`loadInferenceCredentials`).
 
 /**
@@ -341,25 +343,10 @@ function ensureInitialized(): {
 }
 
 /**
- * `true` when the integration is OFFERED by the deployment — listed in
- * `SYSTEM_INTEGRATIONS`, regardless of whether it ships a shared OAuth client.
- * This is the "auto-active" predicate: a system integration is on by default —
- * usable out of the box — until an org explicitly opts out. Evaluated per
- * package id, not per auth key, because activation lives on
- * `space_packages` (per package). Boot-loaded, so present without any
- * prior user action (unlike DCR `auto_provisioned` clients, which only exist
- * after a first connect). DCR remote MCP integrations are offered with NO
- * client and still return `true` here.
- */
-export function isSystemIntegration(integrationId: string): boolean {
-  return ensureInitialized().ids.has(integrationId);
-}
-
-/**
- * Every integration id the deployment OFFERS, in declaration order. Same
- * predicate as {@link isSystemIntegration}, as a list — the SQL half of the
- * activation rule (`services/package-activation.ts`) needs the set itself,
- * because a query cannot call a function per row.
+ * Every integration id the deployment OFFERS — listed in `SYSTEM_INTEGRATIONS`,
+ * with or without a shared OAuth client (a DCR remote MCP integration has
+ * none) — in declaration order. Boot-loaded; the activation rule
+ * (`services/package-activation.ts`) switches these on by default.
  */
 export function listSystemIntegrationIds(): string[] {
   return [...ensureInitialized().ids];

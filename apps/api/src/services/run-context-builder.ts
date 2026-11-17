@@ -17,7 +17,6 @@ import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { clampToBackingLevel, requireBoundModel, type ModelCascade } from "./org-models.ts";
-import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
@@ -27,7 +26,10 @@ import {
   getPlatformRunLimits,
   resolveAgentResources,
 } from "./run-limits.ts";
-import type { IntegrationManifestCache } from "./integration-service.ts";
+import type {
+  IntegrationManifestCache,
+  ResolvedIntegrationVersionMap,
+} from "./integration-service.ts";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import { getAgentResourceHints } from "@appstrate/core/validation";
@@ -110,6 +112,11 @@ export async function buildRunContext(params: {
    */
   dependencyOverrides?: Record<string, string> | null;
   /**
+   * The integration versions this run FROZE (`freezeRunSpawnDependencies`).
+   * The bundle carries each integration at exactly this version.
+   */
+  resolvedIntegrationVersions: ResolvedIntegrationVersionMap;
+  /**
    * W3C `traceparent` of the spawning request — forwarded into the
    * runtime so its outbound HTTP traffic becomes child spans of the
    * platform's trace. Optional: callers from background workers
@@ -172,11 +179,11 @@ export async function buildRunContext(params: {
   // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
-    orgId,
     spaceId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
     resolvedConnections: params.resolvedConnections ?? null,
+    integrationVersions: params.resolvedIntegrationVersions,
     ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
   // Guard against an unhandled rejection when a step below throws before
@@ -190,7 +197,11 @@ export async function buildRunContext(params: {
     await Promise.all([
       skipSettingsFetch ? null : getSpacePackageSettings({ orgId, spaceId }, agent.id),
       getCheckpoint(agent.id, spaceId, persistenceScope),
-      buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
+      buildAgentPackage(agent, orgId, {
+        integrationVersions: params.resolvedIntegrationVersions,
+        ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+        dependencyOverrides: params.dependencyOverrides ?? null,
+      }),
       params.overrideVersionLabel
         ? null
         : agent.source !== "system"
@@ -314,22 +325,6 @@ export async function buildRunContext(params: {
   // Converge the integration spawn resolution kicked off at entry.
   const { specs: integrationSpawns, dropped: droppedIntegrations } = await integrationSpawnsPromise;
 
-  // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
-  // here would silently drop every author's runtime-tool selection.
-  //
-  // Read it off the BUNDLE root manifest, not `agent.manifest`: the stored
-  // manifest may name an id the platform no longer builds, and
-  // `buildAgentPackage` strips those on the way into the bundle. That bundle
-  // is the exact byte stream the container loads and gates its tool
-  // registration on, so deriving the plan from the same bytes is what keeps
-  // the platform-side plan and the container-side gate from disagreeing about
-  // which tools the agent has.
-  const bundleRootManifest = bundle.packages.get(bundle.root)?.manifest as
-    { runtime_tools?: unknown } | undefined;
-  const manifestRuntimeTools = bundleRootManifest?.runtime_tools;
-  const runtimeTools = Array.isArray(manifestRuntimeTools)
-    ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
-    : undefined;
   const resourceHints = getAgentResourceHints(agent.manifest);
   const resources = resolveAgentResources(
     resourceHints,
@@ -340,8 +335,6 @@ export async function buildRunContext(params: {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
-    outputSchema: extractManifestOutputSchema(agent.manifest),
-    ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
     generationConfig: clampToBackingLevel(modelResult, generationConfig),
     runToken: signRunToken(runId),

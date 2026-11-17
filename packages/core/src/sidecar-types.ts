@@ -23,7 +23,7 @@ export type ManifestDeliveryHttp = NonNullable<
 
 /**
  * Header the AGENT container stamps on every request to its sidecar's control
- * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
+ * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`),
  * carrying {@link SidecarConfig.sidecarAuthToken}.
  *
  * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
@@ -125,24 +125,6 @@ export interface SidecarLaunchSpec {
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
   /**
-   * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * any of `output` / `log` / `note` / `pin`. The sidecar hosts
-   * the selected ones as in-process MCP tools on the agent-facing `/mcp`
-   * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with
-   * the integration tools instead of being Pi-SDK-specific extensions.
-   * Empty / omitted = none. Serialised as the `RUNTIME_TOOLS_JSON` env var.
-   */
-  runtimeTools?: readonly string[];
-  /**
-   * Output JSON Schema (`manifest.output.schema`). Forwarded so the
-   * sidecar's `output` runtime tool exposes it as the `data` argument
-   * schema (visible to the model in the tool definition) and AJV-validates
-   * calls against it.
-   * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
-   * declares no output schema.
-   */
-  outputSchema?: Record<string, unknown>;
-  /**
    * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
    * "connect mode": it boots the SINGLE integration carried in `integrations`,
    * runs its `login` MCP tool exactly once (`runConnectOnce`), emits the
@@ -181,8 +163,8 @@ export interface SidecarLaunchSpec {
  * Bundle bytes are NOT inlined — they would blow past the Linux env
  * size limit (~1 MB) on real-world servers (the Gmail MCP server
  * + its npm deps is ~5 MB). For local-source integrations the sidecar
- * fetches the referenced mcp-server package's bundle at boot from
- * `GET /internal/mcp-server-bundle/:scope/:name` using the same
+ * fetches the integration's own archive (it carries the server payload) at boot from
+ * `GET /internal/integration-bundle/:scope/:name` using the same
  * Bearer run-token as the credentials surface.
  */
 /**
@@ -253,7 +235,8 @@ export interface IntegrationSpawnSpec {
   namespace: string;
   /**
    * The bound connection this spec serves (N specs of one integration share the
-   * namespace); `label` is the `connection` selector value. Absent only on a connect run.
+   * namespace); `label` is the `connection` selector value. Absent on a connect run and for an
+   * unauthenticated integration (AFPS §7.2), which injects nothing.
    */
   connection?: { id: string; label: string; accountId: string | null };
   /**
@@ -263,13 +246,13 @@ export interface IntegrationSpawnSpec {
    * `integrations-boot.ts`.
    *
    * Lives at the spawn-spec top level (not on `manifest.server.type`) to
-   * keep `manifest.server.type` aligned with the AFPS `mcpServerTypeEnum`
-   * (`node|python|binary|uv`) — the previous `manifest.server.type = "http"`
-   * sentinel collided with that enum and was an Appstrate-internal protocol
-   * field that never appears in a real manifest.
+   * keep `manifest.server.type` aligned with the AFPS `source.server.type`
+   * enum (`node|python|binary|uv`) — an `"http"` sentinel there would collide
+   * with that enum and be an Appstrate-internal protocol field that never
+   * appears in a real manifest.
    *
-   *   - `"local"`  → spawn a runner container/subprocess from a referenced
-   *                  mcp-server bundle.
+   *   - `"local"`  → spawn a runner container/subprocess from the
+   *                  integration's own archive (server payload).
    *   - `"remote"` → open a Streamable HTTP MCP client against
    *                  `manifest.server.url`; no bundle, no MITM.
    *   - `"none"`   → no MCP backing; the sidecar skips spawn. The only tools
@@ -291,67 +274,51 @@ export interface IntegrationSpawnSpec {
      * no `server`), which expose only their `api_call` tool(s) (if any). The
      * sidecar skips spawn entirely for such specs.
      *
-     * NOTE: `server.type` here carries the AFPS `mcpServerTypeEnum` value
+     * NOTE: `server.type` here carries the AFPS `source.server.type` value
      * (`node|python|binary|uv`) for local sources only. For remote sources
      * (`sourceKind === "remote"`) it is omitted — the spawn-mode dispatch
      * uses {@link IntegrationSpawnSpec.sourceKind}, NOT `server.type`.
      */
     server?: {
       /**
-       * Runner type, sourced from the referenced mcp-server's
-       * `server.type` (AFPS `mcpServerTypeEnum`: `node|python|binary|uv`)
-       * or the Appstrate `_meta` runtime override. Omitted for remote
+       * Runner type, sourced from the integration's `source.server.type`
+       * (`node|python|binary|uv`) or the Appstrate `_meta` runtime override. Omitted for remote
        * sources.
        */
       type?: string;
       /**
        * Path (relative to bundle root) of the spawned server's entry. AFPS
-       * §7.4 / MCPB calls this field `entry_point` — snake_case on the
-       * wire and on the spawn spec to avoid a per-type translation hop
-       * (the prior `entryPoint` camelCase was a churn-only divergence
-       * from the manifest the spawn-resolver reads).
+       * §7.1 calls this field `entry_point` — snake_case on the wire and on
+       * the spawn spec, as in the manifest the spawn-resolver reads.
        */
       entry_point?: string;
       /**
-       * AFPS — the SEPARATE `mcp-server` package id this integration's
-       * `source.kind: "local"` references (`source.server.name`). The sidecar
-       * fetches THIS package's `.afps` bundle (the runnable server code) from
-       * `GET /internal/mcp-server-bundle/:scope/:name`, NOT the integration's
-       * own bundle. Set for local sources; omitted for remote and serverless
-       * integrations.
-       */
-      packageId?: string;
-      /**
-       * AFPS — the CONCRETE published version of {@link packageId} that
-       * this run resolved at kickoff (from `source.server.version`, via
-       * exact → dist-tag → semver-range resolution). The sidecar forwards it
-       * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
+       * The CONCRETE integration version this run froze at kickoff. The
+       * sidecar forwards it to
+       * `GET /internal/integration-bundle/:scope/:name?version=…` so the
        * runnable BYTES come from the SAME version as the manifest the
-       * spawn-resolver read — eliminating the manifest/bytes version skew and
-       * the "publish ≠ deploy" footgun. Omitted for system
-       * mcp-servers — the byte route serves those from the in-memory boot
-       * registry by id alone — and for remote/serverless integrations.
+       * spawn-resolver read — no manifest/bytes version skew. Omitted for
+       * system integrations — the byte route serves those from the in-memory
+       * boot registry by id alone — for a run or connect on an unpublished draft (no frozen
+       * version exists; the bytes come from the draft) — and for remote/serverless integrations.
        */
       version?: string;
       /**
-       * AFPS §7.1 — build-provenance flag. `true` means the referenced
-       * mcp-server's source is vendored into the integration's own bundle
-       * rather than fetched as an independent package (reproducibility +
-       * supply-chain audit). Propagated verbatim from
-       * `manifest.source.server.vendored` for local sources; omitted for
-       * remote and serverless integrations. Surfaced on the sidecar's
-       * `IntegrationBootReport.spawned[].vendored` so operators can audit
-       * "this run used a vendored foreign package".
-       */
-      vendored?: boolean;
-      /**
        * Remote MCP endpoint URL. Required when
-       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
+       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`, unless the
+       * integration is bound to the runtime ({@link platformEndpoint}). The sidecar
        * opens a Streamable HTTP MCP client against this URL instead of
        * spawning a runner. Mutually exclusive with `entry_point` (enforced
        * by `integrationManifestSchema`).
        */
       url?: string;
+      /**
+       * Set for an integration bound to the runtime that executes the run
+       * (`isRuntimeBoundIntegration`, `@appstrate/core/integration`), in place
+       * of {@link url}: the sidecar opens the platform's run MCP server
+       * (`{platformApiUrl}/internal/mcp`) and authenticates with the run token.
+       */
+      platformEndpoint?: true;
       /**
        * AFPS §7.1 — remote MCP transport selector, mirroring the manifest's
        * `source.remote.transport` enum. REQUIRED for remote sources: the
@@ -506,9 +473,9 @@ export interface IntegrationSpawnSpec {
     reauthOn?: number[];
   };
   /**
-   * Per-run shared workspace mount declared on the referenced
-   * mcp-server's `_meta["dev.appstrate/workspace"]`. Opt-in: omitted
-   * when the mcp-server didn't declare it (the runner has no access
+   * Per-run shared workspace mount declared on the local integration's
+   * `_meta["dev.appstrate/workspace"]`. Opt-in: omitted
+   * when the integration didn't declare it (the runner has no access
    * to the agent's filesystem — the historical default and current
    * behaviour for every system integration).
    *
@@ -792,19 +759,13 @@ export interface IntegrationBootReport {
   declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
-  /**
-   * Per-connection success — one entry per spawn spec.
-   * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
-   * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
-   * only for local sources; omitted otherwise).
-   */
+  /** Per-connection success — one entry per spawn spec. */
   spawned: Array<{
     integrationId: string;
     namespace: string;
     /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
-    vendored?: boolean;
   }>;
   /**
    * Per-connection failure — the error that prevented spawn/connect/register,

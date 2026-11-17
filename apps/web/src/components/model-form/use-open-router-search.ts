@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Debounced OpenRouter model search used inside the model-form modal.
- * Keeps the 300 ms debounce + the gated query enabled together so the
- * combobox host doesn't have to wire two pieces of state.
- *
- * The query stays disabled when the selected provider is not OpenRouter
- * — passing `enabled=false` lets the host skip the network roundtrip on
- * every provider change.
- */
+/** Debounced OpenRouter search; `enabled=false` (other provider) skips the network roundtrip. */
 
 import { useCallback, useState } from "react";
 import { useDebouncedValue } from "../../hooks/use-debounced-value";

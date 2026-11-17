@@ -15,8 +15,6 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { useViewAsHeader } from "../stores/view-as-store";
 import { patchRunDetail } from "./use-global-run-sync";
 
-// Re-export so existing consumers (run-detail.tsx) keep importing the metric
-// event type from here; the source of truth is the shared Zod schema.
 export type { RunLogEvent, RunMetricEvent } from "@appstrate/shared-types";
 
 interface RunRealtimeHandlers {
@@ -34,17 +32,12 @@ function safeJsonParse(text: string): unknown {
 }
 
 /**
- * Subscribe to log inserts and/or live metric updates for a single run via a
- * single SSE connection. Pass any subset of handlers — the connection
- * dispatches by event type and skips channels with no listener attached.
- *
- * `run_update` is dispatched here rather than by a caller: the route answers
- * every connection with a status snapshot, applied to the same run cache key
- * the global stream writes — closing the gap when that stream missed a frame.
+ * Subscribe to log inserts and/or live metric updates for one run over a single SSE connection.
+ * `run_update` is applied here too: the route opens every connection with a status snapshot,
+ * closing the gap when the global stream missed a frame.
  */
 export function useRunRealtime(runId: string | null | undefined, handlers: RunRealtimeHandlers) {
-  // A dependency, not a convenience: `EventSource` reads its URL once, so
-  // entering or leaving a preview has to close this stream and open a new one.
+  // A dependency: `EventSource` reads its URL once, so entering/leaving a preview must reopen it.
   const viewAs = useViewAsHeader();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -57,11 +50,8 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
   useEffect(() => {
     if (!runId || !orgId || !spaceId) return;
 
-    // Only the three run channels dispatched below are declared: the per-run
-    // stream would otherwise also carry `connection_update` (every connection
-    // row the caller owns) and `chat_session_update` for a page that listens
-    // to neither. `verbose` is still required — it is what keeps
-    // `run_log.data` in the payload.
+    // Declare only the dispatched channels, or the stream also carries `connection_update` and
+    // `chat_session_update`. `verbose` keeps `run_log.data` in the payload.
     const es = new EventSource(
       realtimeRunsUrl({
         orgId,

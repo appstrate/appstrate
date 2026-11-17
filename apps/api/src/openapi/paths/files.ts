@@ -2,6 +2,7 @@
 
 import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { ORG_READ_REACH } from "../parameters.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`, `runId`,
@@ -165,6 +166,93 @@ const pipelineResponses = {
   "404": { $ref: "#/components/responses/NotFound" },
 } as const;
 
+/** The query of both galleries (`parseListFilesQuery`, `lib/list-query.ts`). */
+const fileListQueryParameters = [
+  {
+    name: "purpose",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: [...filePurposeValues] },
+    description: "Filter by file purpose.",
+  },
+  {
+    name: "runId",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Filter to files anchored to this run.",
+  },
+  {
+    name: "packageId",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Filter to files produced by this agent package.",
+  },
+  {
+    name: "chat_session_id",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Filter to files anchored to this chat session.",
+  },
+  {
+    name: "context_chat_session_id",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session.",
+  },
+  {
+    name: "q",
+    in: "query",
+    required: false,
+    schema: { type: "string", maxLength: 200 },
+    description:
+      "Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`.",
+  },
+  {
+    name: "startingAfter",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Keyset cursor — file id to page after (newest-first order).",
+  },
+  {
+    name: "limit",
+    in: "query",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    description: "Page size (1–100, default 20).",
+  },
+];
+
+/** The page both galleries answer. */
+const fileListResponses = {
+  "200": {
+    description: "A page of files.",
+    headers: STD_RESPONSE_HEADERS,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["object", "data", "hasMore"],
+          properties: {
+            object: { type: "string", enum: ["list"] },
+            data: { type: "array", items: fileSchema },
+            hasMore: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "429": { $ref: "#/components/responses/RateLimited" },
+};
+
 export const filesPaths = {
   "/api/files": {
     get: {
@@ -184,88 +272,22 @@ export const filesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "purpose",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: [...filePurposeValues] },
-          description: "Filter by file purpose.",
-        },
-        {
-          name: "runId",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Filter to files anchored to this run.",
-        },
-        {
-          name: "packageId",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Filter to files produced by this agent package.",
-        },
-        {
-          name: "chat_session_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Filter to files anchored to this chat session.",
-        },
-        {
-          name: "context_chat_session_id",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description:
-            "Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session.",
-        },
-        {
-          name: "q",
-          in: "query",
-          required: false,
-          schema: { type: "string", maxLength: 200 },
-          description:
-            "Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`.",
-        },
-        {
-          name: "startingAfter",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Keyset cursor — file id to page after (newest-first order).",
-        },
-        {
-          name: "limit",
-          in: "query",
-          required: false,
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
-          description: "Page size (1–100, default 20).",
-        },
+        ...fileListQueryParameters,
       ],
-      responses: {
-        "200": {
-          description: "A page of files.",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: fileSchema },
-                  hasMore: { type: "boolean" },
-                  limit: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        ...pipelineResponses,
-        "429": { $ref: "#/components/responses/RateLimited" },
-      },
+      // 404: a `private` space the caller is not in (`X-Space-Id`).
+      responses: { ...fileListResponses, "404": { $ref: "#/components/responses/NotFound" } },
+    },
+  },
+  "/api/orgs/{orgId}/files": {
+    get: {
+      operationId: "listOrgFiles",
+      tags: ["Files"],
+      summary: "List files across the organization's spaces",
+      description:
+        "Read-only gallery of every space of the organization where the caller holds `files:read`, newest first, paginated with `startingAfter` + `limit` across the spaces. Each row follows the rules of its own space: the files of every run there where the caller holds `runs:read-all` (and the deliverables those runs left behind), otherwise the files of the runs they launched — plus their own chat and container-less files; `capabilities.keep` / `capabilities.delete` follow `files:delete` in the row's space. Each row carries its `spaceId`; map it to a name with `GET /api/spaces`. Takes the filters of `GET /api/files`; a `runId` or `context_chat_session_id` resolves only inside the listed spaces. " +
+        ORG_READ_REACH,
+      parameters: [{ $ref: "#/components/parameters/OrgIdPath" }, ...fileListQueryParameters],
+      responses: fileListResponses,
     },
   },
   "/api/files/{id}": {

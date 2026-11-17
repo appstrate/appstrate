@@ -24,11 +24,7 @@ const VALID_MANIFEST = {
   dependencies: {
     integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    mcp_servers: { "@appstrate/web-search": "*" },
   },
-  // Declares an output schema below, so the `output` runtime tool must be
-  // enabled (enforced by agentManifestSchema's superRefine).
-  runtime_tools: ["output"],
   input: {
     schema: {
       type: "object",
@@ -94,6 +90,16 @@ const OUTPUT_SCHEMA: JSONSchemaObject = {
 // =====================================================
 
 describe("validateManifest", () => {
+  it("structures a rule failure as an issue without an own code", () => {
+    const badVersion = validateManifest({ ...VALID_MANIFEST, version: 12 });
+    expect(badVersion.valid).toBe(false);
+    if (badVersion.valid) return;
+    expect(badVersion.issues).toEqual([expect.objectContaining({ path: "version" })]);
+    expect(badVersion.issues![0]).not.toHaveProperty("code");
+    // The strings still say the same failures.
+    expect(badVersion.errors).toEqual(["version: " + badVersion.issues![0]!.message]);
+  });
+
   it("accepts a valid manifest with JSON Schema format", () => {
     const result = validateManifest(VALID_MANIFEST);
     expect(result.valid).toBe(true);

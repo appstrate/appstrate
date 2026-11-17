@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the integration tool on tool events (#2233)
+
+- `buildToolStartProgress` and `buildToolResultProgress` take an optional `integration`
+  (`{ id, tool, title? }`) and put it in `data`: the integration's package id, the tool's name on
+  its server and, when the server gives one, its title. The Pi runner passes it for every tool an
+  integration serves; a harness tool (`output`, `publish_file`) carries none.
+- `readApiCallSurfaces(bundle, refs)` and `apiCallToolName(meta)` are exported from
+  `@appstrate/afps-runtime/resolvers`: the api_call surfaces of a run under their run-unique
+  namespaces, and the name each resolved tool carries. Both resolvers build their tools from
+  them, and the Pi runner pairs a resolved tool with its integration by that name.
+
+### Removed — the stdout bridge (#2199)
+
+- **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`
+  module are removed. Nothing writes a canonical event to stdout: the runner emits every
+  event, `output.emitted` and `file.published` included, into the run's sink, and reduces
+  them itself.
+
+### Removed — memories, pinned slots and logs leave `RunResult` (#2199)
+
+- **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
+  are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
+  aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
+  called.
+- **BREAKING:** `RunResult.logs`, `LogEntry` and `LogLevel` are removed: the server that serves
+  the `log` tool writes the log line when the tool is called.
+- **BREAKING:** the canonical-events module is removed, with `CanonicalRunEvent`,
+  `CANONICAL_EVENT_TYPES`, `CANONICAL_CONSTRAINTS`, `isCanonicalRunEvent` and the per-event types
+  (`MemoryAddedEvent`, `PinnedSetEvent`, `LogWrittenEvent`, `AppstrateProgressEvent`,
+  `AppstrateErrorEvent`, `AppstrateMetricEvent`, …). It validated events read from a process's
+  stdout; every event the reducer folds is emitted by the runner itself, and `foldEvent` reads
+  `output.emitted` only. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
+  L4.3 checks `output` only.
+
+### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
+
+- `buildPlatformPromptInputs` derives `outputSchema` with `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`): an empty `output.schema` (`{}`) yields none, the
+  same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
+  `## Output Format` for every `outputSchema` it receives.
+
+### Removed — the `mcp-server` package type (BREAKING, #2220, `@afps-spec/schema` `^0.13.0`)
+
+- A bundle has no `mcp-server` members: a `local` integration member carries its own server
+  payload (`source.server`, entry point present in its archive — `checkCompanionFiles` now judges
+  a local integration and no longer an `mcp-server`). `DependencySection` is `"skills" |
+"integrations"` (the default `depTypes` of `buildBundleFromCatalog` follows), `validateBundle`
+  dispatches `agent | skill | integration`, and `LOCAL_SERVER_MISSING_ENTRY_POINT` replaces
+  `MCP_SERVER_MISSING_ENTRY_POINT`.
+- `UNAVAILABLE_INTEGRATION_REASONS`: `local_server_ref_missing`, `mcp_server_unresolved` and
+  `mcp_server_not_runnable` are replaced by `local_server_not_runnable`.
+- The `afps bundle` command is deleted with `@appstrate/core/mcp-server-bundle` it drove.
+- The conformance cases L1.12 / L1.13 use the inline local-integration shape.
+
+### Changed — `fetchApiCall` refuses a target carrying userinfo (#2222)
+
+- A URL whose authority carries userinfo (`https://user:pass@host/…`, even an empty
+  `https://@host/`) throws `ApiCallRefusedError("not_authorized", …)` before anything is resolved
+  or sent, where its userinfo used to be dropped without a word. The message never echoes the URL.
+
+### Added — `templateTarget` (#2222)
+
+- `templateTarget(template)` names a URL template as a message or log echoes it: origin and
+  normalised path, each `{{key}}` kept literal, userinfo, query and fragment dropped. Shares
+  `templateHost`'s parsing.
+
+### Changed — `fetchApiCall` returns a redirect off the allowlist (#2154)
+
+- When gated (no `allowAllUris`), a 3xx whose `Location` matches no `authorizedUris` entry is
+  returned unfollowed (status, `Location`, body, `hops` of the hop that answered it) instead of
+  throwing `ApiCallRefusedError("not_authorized", "Redirect blocked (unauthorized): …", true)`.
+  Nothing is resolved or sent for that hop. A call with non-empty `credentialFields` (it
+  substitutes a credential) still throws that refusal.
+
+### Changed — `truncateToolResult` summarises image blocks
+
+- Every image block (`{ type: "image", data }`, at any depth) is logged as
+  `{ type: "image", mimeType, bytes }` instead of its base64, which used to fill
+  the 2 KB preview and hide the text after it (the spill pointer). (#2123)
+
+### Changed — `@afps-spec/schema` `^0.12.0`
+
+- An integration manifest may omit `auths` (AFPS §7.2, unauthenticated integrations). (#2075)
+
+### Added — `API_CALL_BODY_FROM_FILE_RULE`
+
+- The request-body rule both `api_call` surfaces state: write the complete body
+  to a workspace file and pass `{ fromFile }`, never re-type it into the
+  arguments. `apiCallRequestSchema`'s `body` description carries it.
+
+### Changed — catalogs resolve per dependency section (#2005, BREAKING)
+
+- `PackageCatalog.resolve(name, versionSpec, section)` takes a required third
+  parameter, the `dependencies.*` section the request comes from, typed by the
+  new exported `DependencySection` (`"skills" | "mcp_servers" |
+"integrations"`), so a catalog can resolve each package type from its own
+  source of truth. Every `PackageCatalog` implementation must accept it.
+
+### Added — dependency sections a bundle may skip (#2005)
+
+- `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
+  `resolve` returns `null` for, or whose `fetch` throws, is reported through
+  `onWarn` and left out of the bundle instead of failing the build. An
+  `INTEGRITY_MISMATCH` from `fetch` is the exception: it fails the build as it
+  does for any other section, aggregated with the others into one error.
+  A member of such a section is a leaf: it is bundled alone, and its own
+  `dependencies.*` are neither resolved nor fetched.
+
+### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
+
+- `renderPlatformPrompt` renders the integrations as a `### Integrations`
+  catalog (`<available_integrations>`, one `<integration>` with `<name>`,
+  optional `<description>` and `<location>`), instead of one
+  `## Integration: <id>` section with the `INTEGRATION.md` text inlined under
+  `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+- The `### Skills` section is gone: Pi announces the bundled skills itself
+  (`<available_skills>`, from each `SKILL.md` frontmatter), and the second list,
+  built from the manifests, could describe them differently.
+  `PlatformPromptOptions.availableSkills` and the `PlatformPromptTool` type are
+  removed.
+- `PlatformPromptIntegration.doc` is removed; pass `location` (the
+  workspace-relative path of `INTEGRATION.md`) instead.
+- `buildPlatformPromptInputs` derives `integrations` from the bundle: one
+  entry per integration the root manifest declares in
+  `dependencies.integrations`, in declaration order, with the member's
+  `description` and `location` (`.pi/integrations/<packageId>/INTEGRATION.md`)
+  when the bundle carries it. The new override `availableIntegrationIds`
+  keeps only the integrations the run starts (none when absent); the
+  `integrations` override is removed.
+
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 
 - `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and

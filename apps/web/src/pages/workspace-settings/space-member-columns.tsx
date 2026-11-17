@@ -10,8 +10,6 @@
  * Removing an explicit seat is the one deed, and it lives in the menu: for a
  * member of an open space it restores the default role rather than cutting
  * access, and the menu says which.
- *
- * Out of the page so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import { RotateCcw, Trash2 } from "lucide-react";
@@ -62,7 +60,8 @@ export function useSpaceMemberColumns({
     {
       id: "member",
       header: t("spaceMembers.colMember"),
-      width: "minmax(100px,1.4fr)",
+      width: 100,
+      elastic: true,
       cell: (member) => (
         <CellText strong title={memberLabel(member)}>
           {memberLabel(member)}
@@ -72,8 +71,8 @@ export function useSpaceMemberColumns({
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(100px,1.3fr)",
-      tier: 2,
+      width: 100,
+      elastic: true,
       cell: (member) =>
         member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
@@ -83,7 +82,7 @@ export function useSpaceMemberColumns({
       if (!kind) return null;
       return (
         <TableRowActions
-          menuLabel={t("spaceMembers.moreActions", { name: memberLabel(member) })}
+          menuLabel={t("providers.moreActions", { name: memberLabel(member) })}
           isPending={isRemoving}
           actions={[
             {

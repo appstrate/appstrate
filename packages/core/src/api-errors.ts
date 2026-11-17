@@ -39,6 +39,9 @@ export interface ValidationFieldError {
    * machine code. Optional — Zod-originated entries don't carry one.
    */
   title?: string;
+  /** 1-based position in the offending file, when the validator knows one (a YAML syntax error). */
+  line?: number;
+  column?: number;
 }
 
 /**
@@ -88,7 +91,10 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * (reconnect, or a chosen upgrade); a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the dep's `auth_key` (AFPS §4.1). */
+  /**
+   * `auth_key_mismatch` / `auth_key_serves_no_selected_tool` /
+   * `auth_key_on_unauthenticated_integration` — the dep's `auth_key` (AFPS §4.1).
+   */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
@@ -194,6 +200,29 @@ export class ApiError extends Error {
     this.fieldErrors = opts.errors;
     this.headers = opts.headers;
     this.extensions = opts.extensions;
+  }
+
+  /**
+   * This error with `changes` applied: every other member (status, code, title, param,
+   * `retryAfter`, field errors, headers, extensions, cause) carries over as it is.
+   */
+  with(
+    changes: Partial<
+      Pick<ConstructorParameters<typeof ApiError>[0], "detail" | "errors" | "extensions" | "cause">
+    >,
+  ): ApiError {
+    return new ApiError({
+      status: this.status,
+      code: this.code,
+      title: this.title,
+      detail: changes.detail ?? this.message,
+      param: this.param,
+      retryAfter: this.retryAfter,
+      errors: changes.errors ?? this.fieldErrors,
+      headers: this.headers,
+      extensions: changes.extensions ?? this.extensions,
+      cause: "cause" in changes ? changes.cause : this.cause,
+    });
   }
 
   /** Serialise to RFC 9457 Problem Details body. */

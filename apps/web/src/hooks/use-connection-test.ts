@@ -8,11 +8,7 @@ import { refusalMessage, toastError } from "../lib/mutation-error";
 
 export type TestResult = components["schemas"]["TestResult"];
 
-/**
- * Structural subset of the typed `$api.useMutation` result for the
- * `POST .../{id}/test` endpoints (models, proxies, credentials) — variables
- * follow the openapi-react-query `{ params: { path: { id } } }` shape.
- */
+/** Structural subset of the typed `$api.useMutation` result for the `POST .../{id}/test` endpoints (models, proxies, credentials). */
 interface TestMutation {
   mutateAsync: (variables: { params: { path: { id: string } } }) => Promise<TestResult>;
 }
@@ -43,9 +39,7 @@ export function useConnectionTest(mutation: TestMutation) {
   const handleTest = async (id: string) => {
     setTestingIds((prev) => new Set(prev).add(id));
     try {
-      // `mutateAsync` gives every concurrent call its own promise lifecycle.
-      // Per-call callbacks passed to `mutate` only remain attached to the most
-      // recent observer, which can strand an earlier row in its pending state.
+      // `mutateAsync` (not `mutate` callbacks, kept only on the latest observer) so concurrent rows never strand pending.
       const result = await mutation.mutateAsync({ params: { path: { id } } });
       // Named by its code when it has a sentence, as `TestResultSpan` does.
       if (!result.ok) {

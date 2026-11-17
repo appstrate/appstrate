@@ -41,6 +41,7 @@ import {
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
+  type DependencySection,
   type PackageCatalog,
   type PackageIdentity,
   type ResolvedPackage,
@@ -49,26 +50,40 @@ import {
 export interface BuildBundleOptions {
   metadata?: BundleMetadata;
   limits?: Partial<BundleLimits>;
-  /** Called with a human-readable message for non-fatal conditions (cycles). */
+  /**
+   * Called with a human-readable message for non-fatal conditions (cycles,
+   * skipped optional dependencies).
+   */
   onWarn?: (msg: string) => void;
   /**
    * Which `dependencies.*` sections to walk into the bundle graph. Defaults to
-   * all bundleable sections. Run-bundle builders pass `["skills"]`: an agent's
-   * integrations and mcp-servers are not bundle members — they are spawned /
-   * fetched separately by the sidecar at runtime — so they must not be walked
-   * into (and fetched for) the agent bundle.
+   * every section. A section left out is neither resolved nor fetched, so the
+   * caller decides which package types are bundle members.
    */
-  depTypes?: DepRequest["type"][];
+  depTypes?: DependencySection[];
+  /**
+   * Sections whose entries may be left out: an entry that `catalog.resolve`
+   * returns `null` for, or whose `catalog.fetch` throws, is skipped with an
+   * `onWarn` message instead of failing the build. An `INTEGRITY_MISMATCH`
+   * from `fetch` stays fatal: stored bytes that no longer match their
+   * published hash are tampering or corruption, not an absent member.
+   * An optional member contributes only itself: its own `dependencies.*`
+   * are not walked.
+   */
+  optionalDepTypes?: DependencySection[];
 }
 
 /**
  * Walk the root's transitive dependency graph via `catalog`, dedupe by
  * identity, and return the assembled Bundle.
  *
- * Walks `manifest.dependencies.{skills, mcp_servers, integrations}` recursively.
+ * Walks `manifest.dependencies.{skills, integrations}` recursively.
  * Cycles are tolerated (each identity is fetched once); the caller gets
- * a warning via `opts.onWarn`. Dep resolution failures are collected
- * and surfaced as a single `DEPENDENCY_UNRESOLVED` with `details.missing`.
+ * a warning via `opts.onWarn`. Dep resolution failures outside
+ * `opts.optionalDepTypes` are collected and surfaced as a single
+ * `DEPENDENCY_UNRESOLVED` with `details.missing`; resolution and fetch
+ * failures inside them are warned about and skipped, except an integrity
+ * mismatch, which fails the build in every section.
  */
 export async function buildBundleFromCatalog(
   root: BundlePackage,
@@ -77,12 +92,13 @@ export async function buildBundleFromCatalog(
 ): Promise<Bundle> {
   const limits = resolveBundleLimits(opts.limits);
   const onWarn = opts.onWarn ?? (() => {});
-  const depTypes = opts.depTypes ?? ["skills", "mcp_servers", "integrations"];
+  const depTypes = opts.depTypes ?? ["skills", "integrations"];
+  const optionalDepTypes = new Set(opts.optionalDepTypes ?? []);
   const packages = new Map<PackageIdentity, BundlePackage>();
   const visiting = new Set<PackageIdentity>();
   const missing: Array<{ from: PackageIdentity; name: string; versionSpec: string }> = [];
 
-  async function walk(pkg: BundlePackage): Promise<void> {
+  async function walk(pkg: BundlePackage, leaf = false): Promise<void> {
     if (packages.has(pkg.identity)) {
       onWarn(`cycle detected at ${pkg.identity}`);
       return;
@@ -104,25 +120,31 @@ export async function buildBundleFromCatalog(
       );
     }
 
-    const deps = extractDependencies(pkg.manifest, depTypes);
+    const deps = leaf ? [] : extractDependencies(pkg.manifest, depTypes);
 
     // Resolve every direct dep in parallel — resolution is a read-only
     // catalog lookup with no inter-dep ordering requirement. Results are
     // folded back in declaration order so `missing` keeps a deterministic
     // order regardless of resolution completion order.
     const resolutions = await Promise.all(
-      deps.map(({ name, versionSpec }) => catalog.resolve(name, versionSpec)),
+      deps.map(({ name, versionSpec, type }) => catalog.resolve(name, versionSpec, type)),
     );
 
     // Dedupe synchronously against the already-loaded set AND within this
     // level (two siblings may declare the same dep), so the parallel fetch
     // below never fetches one identity twice.
-    const toFetch: ResolvedPackage[] = [];
+    const toFetch: Array<{ resolved: ResolvedPackage; section: DependencySection }> = [];
     const claimedThisLevel = new Set<PackageIdentity>();
     for (let i = 0; i < deps.length; i++) {
-      const { name, versionSpec } = deps[i]!;
+      const { name, versionSpec, type } = deps[i]!;
       const resolved = resolutions[i];
       if (!resolved) {
+        if (optionalDepTypes.has(type)) {
+          onWarn(
+            `optional ${type} dependency ${name}@${versionSpec} of ${pkg.identity} is unresolved — skipped`,
+          );
+          continue;
+        }
         missing.push({ from: pkg.identity, name, versionSpec });
         continue;
       }
@@ -135,7 +157,7 @@ export async function buildBundleFromCatalog(
         continue;
       }
       claimedThisLevel.add(resolved.identity);
-      toFetch.push(resolved);
+      toFetch.push({ resolved, section: type });
     }
 
     // Fetch the deduped level in parallel — fetch is read-only against the
@@ -149,7 +171,7 @@ export async function buildBundleFromCatalog(
     // are folded back in declaration order, and integrity failures are
     // aggregated so one error names every corrupted package at once.
     const settled = await Promise.allSettled(
-      toFetch.map(async (resolved) => {
+      toFetch.map(async ({ resolved }) => {
         const depPkg = await catalog.fetch(resolved.identity);
         if (depPkg.identity !== resolved.identity) {
           throw new BundleError(
@@ -163,19 +185,24 @@ export async function buildBundleFromCatalog(
     );
 
     const failures: Array<{ identity: PackageIdentity; reason: unknown }> = [];
-    const fetched: BundlePackage[] = [];
+    const fetched: Array<{ depPkg: BundlePackage; leaf: boolean }> = [];
     for (let i = 0; i < settled.length; i++) {
       const outcome = settled[i]!;
+      const { resolved, section } = toFetch[i]!;
       if (outcome.status === "fulfilled") {
-        fetched.push(outcome.value);
+        fetched.push({ depPkg: outcome.value, leaf: optionalDepTypes.has(section) });
+      } else if (optionalDepTypes.has(section) && !isIntegrityMismatch(outcome.reason)) {
+        const reason =
+          outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        onWarn(
+          `optional ${section} dependency ${resolved.identity} of ${pkg.identity} failed to fetch (${reason}) — skipped`,
+        );
       } else {
-        failures.push({ identity: toFetch[i]!.identity, reason: outcome.reason });
+        failures.push({ identity: resolved.identity, reason: outcome.reason });
       }
     }
     if (failures.length > 0) {
-      const mismatches = failures.filter(
-        (f) => f.reason instanceof BundleError && f.reason.code === "INTEGRITY_MISMATCH",
-      );
+      const mismatches = failures.filter((f) => isIntegrityMismatch(f.reason));
       if (mismatches.length > 0) {
         const identities = mismatches.map((f) => f.identity);
         throw new BundleError(
@@ -191,14 +218,14 @@ export async function buildBundleFromCatalog(
     // they must not interleave. A deeper walk may have loaded a sibling's
     // identity by the time we reach it; skip it silently (diamond), warning
     // only when it is a structural cycle (still on the walk stack).
-    for (const depPkg of fetched) {
+    for (const { depPkg, leaf: depLeaf } of fetched) {
       if (packages.has(depPkg.identity)) {
         if (visiting.has(depPkg.identity)) {
           onWarn(`cycle detected: ${pkg.identity} -> ${depPkg.identity}`);
         }
         continue;
       }
-      await walk(depPkg);
+      await walk(depPkg, depLeaf);
     }
 
     visiting.delete(pkg.identity);
@@ -333,28 +360,20 @@ export function extractRootFromAfps(
 
   const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
-  // AFPS (§3.4 / §11.2) lifted the mcp-server scoped identity to the
-  // manifest root, so every package type — including mcp-server — now
-  // declares its `@scope/name` identity at the top-level `name`. The previous
-  // `_meta["dev.afps/mcp-server"].name` slot is gone.
-  const isMcpServer = manifest.type === "mcp-server";
+  // Every package type declares its `@scope/name` identity at the top-level `name`.
   const rawName = typeof manifest.name === "string" ? manifest.name : undefined;
   const name = rawName ?? null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      isMcpServer
-        ? `mcp-server manifest must declare a scoped root name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`
-        : `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
+      `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
     );
   }
   if (!name.startsWith("@") || !name.includes("/")) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      isMcpServer
-        ? `mcp-server identity name must be scoped (@scope/name), got ${name}`
-        : `manifest.name must be scoped (@scope/name), got ${name}`,
+      `manifest.name must be scoped (@scope/name), got ${name}`,
     );
   }
   const identity = formatPackageIdentity(name as `@${string}/${string}`, version);
@@ -363,9 +382,9 @@ export function extractRootFromAfps(
   // with the platform's ZIP-import path (`@appstrate/core/zip:parsePackageZip`
   // via `@appstrate/afps-shared/companion-files`). Both paths reject the same
   // inputs: agent prompt.md non-empty, skill SKILL.md + frontmatter name,
-  // mcp-server server.entry_point payload present.
+  // a local integration's source.server.entry_point payload present.
   assertCompanionFiles(
-    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    manifest as { type?: unknown; source?: unknown } & Record<string, unknown>,
     entries,
   );
 
@@ -379,10 +398,10 @@ export function extractRootFromAfps(
 interface DepRequest {
   name: string;
   versionSpec: string;
-  type: "skills" | "mcp_servers" | "integrations";
+  type: DependencySection;
 }
 
-function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"][]): DepRequest[] {
+function extractDependencies(manifest: AfpsManifest, depTypes: DependencySection[]): DepRequest[] {
   const out: DepRequest[] = [];
   const deps = manifest.dependencies;
   if (!deps || typeof deps !== "object") return out;
@@ -401,4 +420,8 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"
     }
   }
   return out;
+}
+
+function isIntegrityMismatch(reason: unknown): boolean {
+  return reason instanceof BundleError && reason.code === "INTEGRITY_MISMATCH";
 }

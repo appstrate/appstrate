@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `PATCH /api/spaces/{id}` body for one setting of a space's General page.
- *
- * Each control commits on its own, so the body carries that control's field
- * and nothing else. Sending the others would not be neutral: the route refuses
- * `visibility` and `default_role` on a personal space whatever their value
- * (409 `personal_space_immutable`), so a rename that carried them would fail.
+ * `PATCH /api/spaces/{id}` bodies. The space form sends its text fields, only the edited
+ * ones; visibility, default role, icon and colour are single choices written on their own.
+ * The route refuses all four on a personal space (409 `personal_space_immutable`), so a
+ * rename never carries them.
  */
 
+import type { AppearanceColor } from "@appstrate/core/appearance";
 import type { components, paths } from "../api/client";
 
 type SpaceUpdateBody = NonNullable<
@@ -16,18 +15,10 @@ type SpaceUpdateBody = NonNullable<
 >["content"]["application/json"];
 type SpaceObject = components["schemas"]["SpaceObject"];
 
-export type SpaceSettingChange =
-  | { field: "name"; value: string }
-  | { field: "domains"; value: string[] }
-  | { field: "visibility"; value: SpaceObject["visibility"] }
-  | { field: "defaultRole"; value: SpaceObject["default_role"] };
-
-/** A domain list as stored: an empty row is the residue of editing, not a domain. */
 function cleanDomains(domains: readonly string[]): string[] {
   return domains.map((domain) => domain.trim()).filter(Boolean);
 }
 
-/** Whether `next` would store anything other than `stored`: leaving an untouched field writes nothing. */
 export function domainsChanged(stored: readonly string[], next: readonly string[]): boolean {
   const before = cleanDomains(stored);
   const after = cleanDomains(next);
@@ -45,15 +36,28 @@ export function visibilityChangeNeedsConfirmation(
   return from === "open" && to !== "open";
 }
 
-export function spaceUpdateBody(change: SpaceSettingChange): SpaceUpdateBody {
-  switch (change.field) {
-    case "name":
-      return { name: change.value.trim() };
-    case "domains":
-      return { settings: { allowedRedirectDomains: cleanDomains(change.value) } };
-    case "visibility":
-      return { visibility: change.value };
-    case "defaultRole":
-      return { default_role: change.value };
-  }
+export interface SpaceSettingsDraft {
+  name: string;
+  domains: string[];
+}
+
+/** Compare with the edit baseline, never with a refetch that may contain another admin's changes. */
+export function spaceSettingsUpdate(
+  baseline: SpaceSettingsDraft,
+  next: SpaceSettingsDraft,
+): SpaceUpdateBody {
+  return {
+    ...(next.name !== baseline.name ? { name: next.name.trim() } : {}),
+    ...(domainsChanged(baseline.domains, next.domains)
+      ? { settings: { allowedRedirectDomains: cleanDomains(next.domains) } }
+      : {}),
+  };
+}
+
+export type SpaceAppearanceChange =
+  { field: "icon"; value: string | null } | { field: "color"; value: AppearanceColor | null };
+
+/** The icon or the colour alone; `null` clears it. */
+export function spaceAppearanceBody(change: SpaceAppearanceChange): SpaceUpdateBody {
+  return change.field === "icon" ? { icon: change.value } : { color: change.value };
 }

@@ -54,7 +54,14 @@ function apiKeyManifest(name = "@myorg/gmail"): IntegrationManifest {
     display_name: "Gmail",
     description: "Gmail integration",
     icon: "logos:google-gmail",
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       api: {
         type: "api_key",
@@ -327,7 +334,14 @@ function oauthManifest(name = "@myorg/gsuite"): IntegrationManifest {
     display_name: "Google Workspace",
     description: "Google Workspace integration",
     icon: "logos:google",
-    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
+    source: {
+      kind: "local",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
     auths: {
       google: {
         type: "oauth2",
@@ -455,19 +469,16 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
   it("keeps the auto-provisioning failure's own prose off a remote MCP popup", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
+    // Its `.invalid` authorization server does not answer: an outage, not a refusal (502).
     const res = await startConnect(token);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(502);
     const html = await res.text();
-    expect(html).toContain("Ask an administrator");
-    // This click burns the link (next case), so reopening it answers 410: the
-    // only advice that works is a re-mint.
-    expect(html).toContain("request a new connection link");
-    expect(html).not.toContain("open this link again");
+    expect(html).toContain("Could not start the connection");
     // This `detail` embeds the authorization server's OWN message verbatim
-    // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
+    // (the provisioning refusal renders the failing step's reason as-is), so
     // it is upstream-controlled text on a session-less page. Log only.
     expect(html).not.toContain("Could not automatically provision an OAuth client");
-    expect(html).not.toContain("dynamic client registration");
+    expect(html).not.toContain("RFC 8414");
   });
 
   it("burns a remote MCP link: its refusal follows a registration attempt (issue #1344)", async () => {
@@ -479,7 +490,7 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     // that on every click, for its whole TTL, on a route with no session.
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
-    expect((await startConnect(token)).status).toBe(403);
+    expect((await startConnect(token)).status).toBe(502);
 
     const again = await startConnect(token);
     expect(again.status).toBe(410);
@@ -680,9 +691,8 @@ async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
   if (!dir) throw new Error("no integration-ssh-* source directory found");
   const manifest = JSON.parse(
     await readFile(join(sources, dir, "manifest.json"), "utf8"),
-  ) as IntegrationManifest & { source: { server: { name: string } } };
+  ) as IntegrationManifest;
   manifest.name = name;
-  manifest.source.server.name = `${name}-mcp`;
   return manifest;
 }
 

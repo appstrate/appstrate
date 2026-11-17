@@ -16,14 +16,13 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   envDelivery,
   filesDelivery,
   httpHeaderDelivery,
@@ -31,7 +30,6 @@ import {
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/session-integ";
-const SERVER = "@orga/session-server";
 
 type Auth = Parameters<typeof localIntegrationManifest>[0]["auths"][string];
 
@@ -39,7 +37,6 @@ function integManifest(auth: Auth): IntegrationManifest {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
-    serverName: SERVER,
     auths: { main: auth },
     tools_policy: { fetch: {} },
   });
@@ -90,21 +87,7 @@ async function resolveWith(
     source: "local",
     draftManifest: manifest,
   });
-  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-  const serverManifest = mcpServerManifest({
-    name: SERVER,
-    version: "0.1.0",
-    serverType: "python",
-    entryPoint: "./server.py",
-  });
-  await seedPackage({
-    id: SERVER,
-    orgId: ctx.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: serverManifest,
-  });
-  await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
+  await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
     authKey: "main",
@@ -124,7 +107,6 @@ async function resolveWith(
   });
 
   const { specs } = await resolveIntegrationSpawns({
-    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(),

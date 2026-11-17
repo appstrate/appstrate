@@ -36,11 +36,9 @@ export function useSpaceLabelOf(): (id: string | null | undefined) => string | u
 }
 
 /**
- * Start the listing at boot (`main.tsx`): every space-scoped request waits on it,
- * so waiting for the layout to mount would cost each a round trip. Keyed on the
- * remembered org, and only once the boot org list still names it: a caller
- * removed from that org would otherwise open the app on a 403. A failure is not
- * cached, `useSpaces` refetches on mount.
+ * Start the listing at boot (`main.tsx`): every space-scoped request waits on it. Only once the
+ * boot org list still names the remembered org (a removed caller would open the app on a 403).
+ * A failure is not cached; `useSpaces` refetches on mount.
  */
 export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
   orgs.then(
@@ -73,17 +71,14 @@ export function useSpace(spaceId: string) {
   );
 }
 
-/**
- * List and detail live under different path strings, so both are invalidated
- * after a write; visibility and the default role determine implicit member rows
- * and roles.
- */
+/** List and detail are different path strings; visibility and the default role determine implicit member rows, which each org member also carries (`/api/orgs/{orgId}`). */
 const useInvalidateSpaces = () =>
   useInvalidatePaths(
     "/api/spaces",
     "/api/spaces/{id}",
     "/api/spaces/{id}/roles",
     "/api/spaces/{id}/members",
+    "/api/orgs/{orgId}",
   );
 
 export function useCreateSpace() {
@@ -112,7 +107,8 @@ export function useDeleteSpace() {
   return $api.useMutation("delete", "/api/spaces/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: () => {
-      void invalidatePaths(qc, ["/api/spaces"]);
+      // Each org member lists the spaces they reach.
+      void invalidatePaths(qc, ["/api/spaces", "/api/orgs/{orgId}"]);
       // The page still showing the deleted space would re-read it, a 404: stale only.
       void invalidatePaths(
         qc,

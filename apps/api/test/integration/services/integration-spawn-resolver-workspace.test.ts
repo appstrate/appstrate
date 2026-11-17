@@ -3,16 +3,16 @@
 /**
  * Spawn resolver — `_meta["dev.appstrate/workspace"]` walker.
  *
- * Verifies that a local-source integration whose referenced mcp-server
+ * Verifies that a local-source integration whose `_meta`
  * opts into the shared workspace surfaces the mount on
  * `IntegrationSpawnSpec.workspaceMount`. Coverage:
  *
- *   - Opt-in: mcp-server with `_meta.workspace` → spec carries `workspaceMount`
- *   - Default: mcp-server without the meta → spec OMITS `workspaceMount`
+ *   - Opt-in: integration with `_meta.workspace` → spec carries `workspaceMount`
+ *   - Default: integration without the meta → spec OMITS `workspaceMount`
  *   - Defaults: missing `access` defaults to `"ro"`, missing `mount`
  *     defaults to `/workspace`
  *   - Remote source: workspace mount is NEVER emitted, regardless of
- *     mcp-server meta (remote MCPs have no runner to mount into)
+ *     workspace meta (remote MCPs have no runner to mount into)
  *   - Malformed meta: integration spawns without `workspaceMount`
  *     (logged warning) rather than aborting the run
  */
@@ -21,25 +21,23 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/clone-integ";
-const SERVER = "@orga/clone-server";
 
-function integrationManifest() {
+function integrationManifest(workspace?: { mount?: string; access?: "ro" | "rw" }) {
   return localIntegrationManifest({
     name: INTEG,
     version: "1.0.0",
-    serverName: SERVER,
+    server: workspace ? { workspace } : {},
     auths: {
       oauth: {
         type: "api_key",
@@ -84,27 +82,6 @@ async function seedConnection(ctx: TestContext) {
   });
 }
 
-async function seedMcpServer(
-  ctx: TestContext,
-  workspace?: { mount?: string; access?: "ro" | "rw" },
-) {
-  const manifest = mcpServerManifest({
-    name: SERVER,
-    version: "1.0.0",
-    serverType: "node",
-    entryPoint: "./server.js",
-    ...(workspace ? { workspace } : {}),
-  });
-  await seedPackage({
-    id: SERVER,
-    orgId: ctx.orgId,
-    type: "mcp-server",
-    source: "local",
-    draftManifest: manifest,
-  });
-  await seedPackageVersion({ packageId: SERVER, version: "1.0.0", manifest });
-}
-
 describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
   let ctx: TestContext;
 
@@ -113,20 +90,18 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("propagates mcp-server _meta.workspace to spec.workspaceMount", async () => {
+  it("propagates the integration's _meta.workspace to spec.workspaceMount", async () => {
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integrationManifest(),
+      draftManifest: integrationManifest({ mount: "/workspace", access: "rw" }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -136,7 +111,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     expect(specs[0]!.workspaceMount).toEqual({ mount: "/workspace", access: "rw" });
   });
 
-  it("OMITS workspaceMount when mcp-server has no _meta.workspace (default — no workspace access)", async () => {
+  it("OMITS workspaceMount when the integration has no _meta.workspace (default — no workspace access)", async () => {
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -144,12 +119,10 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    await seedMcpServer(ctx); // no workspace declaration
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -165,14 +138,12 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integrationManifest(),
+      draftManifest: integrationManifest({ mount: "/scratch" }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    await seedMcpServer(ctx, { mount: "/scratch" });
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -185,8 +156,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     // Remote-source integrations open an HTTP MCP client against the
     // declared `source.remote.url` — there is no runner container/process
     // to bind a volume into, so the spawn spec must never carry
-    // `workspaceMount` even if a mcp-server with the same scoped name
-    // happens to exist in the registry and declares workspace.
+    // `workspaceMount`, even with a workspace declaration in its `_meta`.
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
@@ -206,14 +176,10 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
         tools_policy: { clone_repo: {} },
       }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    // Seed an mcp-server with the SAME name + a workspace declaration —
-    // a remote integration must not consult it.
-    await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -229,14 +195,12 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: integrationManifest(),
+      draftManifest: integrationManifest({ access: "rw" }),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    await seedMcpServer(ctx, { access: "rw" });
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),

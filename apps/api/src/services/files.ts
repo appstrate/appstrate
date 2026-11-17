@@ -54,10 +54,11 @@ import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
+import type { SpaceGrant } from "../lib/permissions.ts";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import { likeContains } from "../lib/like-pattern.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
@@ -1363,15 +1364,18 @@ export interface ListFilesFilters {
  * or another run). So the filter is the union: rows anchored to the run, OR rows
  * whose id is referenced by the run's input JSONB.
  *
- * The run lookup is `getRun(scope, runId)` — the SAME org+space scoping every other
- * run read uses — so a run id from another org/space resolves to null and its input
- * refs never widen the result (no cross-tenant leak; the referenced-id `inArray`
- * is AND-ed with the caller's org/space/actor scope on `files` regardless).
- * When the run has no input or no file refs, this collapses to the original
- * plain `run_id =` equality — behavior unchanged.
+ * The run is looked up in the listed spaces only, so a run of another org or
+ * of a space outside the list resolves to nothing and its input refs never
+ * widen the result (the referenced-id `inArray` is AND-ed with each row's own
+ * space visibility on `files` regardless). When the run has no input or no
+ * file refs, this collapses to the plain `run_id =` equality.
  */
-async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL> {
-  const run = await getRun(scope, runId);
+async function runContainerFilter(orgId: string, spaceIds: string[], runId: string): Promise<SQL> {
+  const [run] = await db
+    .select({ input: runs.input })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId), inArray(runs.spaceId, spaceIds)))
+    .limit(1);
   const inputDocIds = run ? extractFileIds(run.input) : [];
   if (inputDocIds.length === 0) return eq(files.runId, runId);
   return or(eq(files.runId, runId), inArray(files.id, inputDocIds))!;
@@ -1384,24 +1388,25 @@ async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL
  * even for a member holding `runs:read-all`, who reads the space-wide run list.
  */
 async function chatContextFileFilter(
-  scope: SpaceScope,
+  orgId: string,
+  spaceIds: string[],
   actor: Actor,
   chatSessionId: string,
 ): Promise<SQL> {
   if (actor.type !== "user") return sql`false`;
 
   // Sessions are space-scoped rows (RBAC spec §5), so the space is part of
-  // ownership: the same user in another space must not resolve this
-  // conversation's files. Someone else's session resolves nothing rather than
+  // ownership: only a session of a listed space resolves, and its runs are read
+  // in ITS space. Someone else's session resolves nothing rather than
   // erroring, so this can never become a probe for which session ids exist.
   const [session] = await db
-    .select({ id: chatSessions.id })
+    .select({ spaceId: chatSessions.spaceId })
     .from(chatSessions)
     .where(
       and(
         eq(chatSessions.id, chatSessionId),
-        eq(chatSessions.orgId, scope.orgId),
-        eq(chatSessions.spaceId, scope.spaceId),
+        eq(chatSessions.orgId, orgId),
+        inArray(chatSessions.spaceId, spaceIds),
         eq(chatSessions.userId, actor.id),
       ),
     )
@@ -1417,8 +1422,8 @@ async function chatContextFileFilter(
         .where(
           and(
             eq(files.runId, runs.id),
-            eq(runs.orgId, scope.orgId),
-            eq(runs.spaceId, scope.spaceId),
+            eq(runs.orgId, orgId),
+            eq(runs.spaceId, session.spaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1431,9 +1436,9 @@ async function chatContextFileFilter(
         .where(
           and(
             eq(fileLinks.fileId, files.id),
-            eq(fileLinks.orgId, scope.orgId),
-            eq(runs.orgId, scope.orgId),
-            eq(runs.spaceId, scope.spaceId),
+            eq(fileLinks.orgId, orgId),
+            eq(runs.orgId, orgId),
+            eq(runs.spaceId, session.spaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1442,8 +1447,12 @@ async function chatContextFileFilter(
 }
 
 /**
- * Org+space-scoped file gallery, with container-inherited visibility (D7 —
- * consistent with `getFileForActor`):
+ * The file gallery of `orgId` across the spaces of `grants`, with
+ * container-inherited visibility (D7 — consistent with `getFileForActor`),
+ * decided per row by its space's grant: `runs:read-all` there opens the
+ * supervision arms, `files:delete` there the `keep` / `delete` capabilities.
+ * Powers `GET /api/files` (one grant, the request's space) and
+ * `GET /api/orgs/{orgId}/files`.
  *
  *  - A dashboard `user` (member) sees the run-contained files of the runs it may
  *    read — the whole space with `runs:read-all`, else its own runs — plus
@@ -1453,24 +1462,29 @@ async function chatContextFileFilter(
  *  - An `end_user` sees only their own rows (`actorScopeFilter`).
  *
  * Keyset pagination on `(createdAt, id)` DESC — the same stable tuple cursor as
- * the end-users list.
+ * the end-users list, global across the spaces.
  *
  * `opts.creatorCanManage` is the same credential ceiling {@link getFileForActor}
  * applies, so a list row's `capabilities` and its enforcement agree.
  */
 export async function listFilesForActor(
-  scope: SpaceScope,
+  orgId: string,
+  grants: readonly SpaceGrant[],
   actor: Actor,
   filters: ListFilesFilters,
-  permissions: ReadonlySet<string>,
   opts: { creatorCanManage?: boolean } = {},
 ): Promise<ListEnvelope<FileDto>> {
   const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
+  if (grants.length === 0) return listResponse([], { hasMore: false });
   const fetchLimit = limit + 1;
+  const spaceIds = grants.map((g) => g.spaceId);
+  const supervised = grants.filter((g) => canReadEveryRun(g.permissions)).map((g) => g.spaceId);
 
-  const conditions: SQL[] = [
-    eq(files.orgId, scope.orgId),
-    eq(files.spaceId, scope.spaceId),
+  // The rows the caller may read — and so the rows a cursor may name: a file it
+  // cannot read is no pivot, as for the run lists.
+  const visible = and(
+    eq(files.orgId, orgId),
+    inArray(files.spaceId, spaceIds),
     actor.type === "end_user"
       ? actorScopeFilter(actor, { userId: files.userId, endUserId: files.endUserId })
       : // Members — the supervision arms, then ownership. Losing a container
@@ -1479,10 +1493,11 @@ export async function listFilesForActor(
         // as readable as it was inside its run):
         //   1. every run-contained (run_id set) row, and
         //   2. every DETACHED `agent_output` — the two supervision arms, and
-        //      `runs:read-all` is the whole of both. A teardown NULLs `run_id`
-        //      but leaves the attribution, so a detached deliverable is still
-        //      one member's; only the grant that reads every member's runs
-        //      reads it. Without that grant these arms drop out entirely.
+        //      `runs:read-all` in the row's space is the whole of both. A
+        //      teardown NULLs `run_id` but leaves the attribution, so a detached
+        //      deliverable is still one member's; only the grant that reads
+        //      every member's runs reads it. Without that grant these arms drop
+        //      out for that space.
         //   3. own rows (user_id = me) → own run outputs + own chat docs + own
         //      detached rows, attached or not: a published file copies its run's
         //      attribution (the mirroring invariant in `lib/run-visibility.ts`),
@@ -1490,25 +1505,33 @@ export async function listFilesForActor(
         // A chat-contained doc (chat_session_id set, run_id null) is covered by
         // arm 3 only — unchanged owner-only visibility.
         or(
-          ...(canReadEveryRun(permissions)
+          ...(supervised.length
             ? [
-                isNotNull(files.runId),
                 and(
-                  isNull(files.runId),
-                  isNull(files.chatSessionId),
-                  eq(files.purpose, "agent_output"),
+                  inArray(files.spaceId, supervised),
+                  or(
+                    isNotNull(files.runId),
+                    and(
+                      isNull(files.runId),
+                      isNull(files.chatSessionId),
+                      eq(files.purpose, "agent_output"),
+                    ),
+                  ),
                 )!,
               ]
             : []),
           eq(files.userId, actor.id),
         )!,
-  ];
+  )!;
+  const conditions: SQL[] = [visible];
   if (filters.purpose) conditions.push(eq(files.purpose, filters.purpose));
   if (filters.packageId) conditions.push(eq(files.packageId, filters.packageId));
-  if (filters.runId) conditions.push(await runContainerFilter(scope, filters.runId));
+  if (filters.runId) conditions.push(await runContainerFilter(orgId, spaceIds, filters.runId));
   if (filters.chatSessionId) conditions.push(eq(files.chatSessionId, filters.chatSessionId));
   if (filters.contextChatSessionId) {
-    conditions.push(await chatContextFileFilter(scope, actor, filters.contextChatSessionId));
+    conditions.push(
+      await chatContextFileFilter(orgId, spaceIds, actor, filters.contextChatSessionId),
+    );
   }
   if (filters.search) conditions.push(ilike(files.name, likeContains(filters.search)));
 
@@ -1516,17 +1539,11 @@ export async function listFilesForActor(
     const [cursor] = await db
       .select({ createdAt: files.createdAt, id: files.id })
       .from(files)
-      .where(
-        and(
-          eq(files.id, filters.startingAfter),
-          eq(files.orgId, scope.orgId),
-          eq(files.spaceId, scope.spaceId),
-        ),
-      )
+      .where(and(eq(files.id, filters.startingAfter), visible))
       .limit(1);
     // Next page (older rows), DESC order: (createdAt, id) < (cursor.createdAt, cursor.id).
-    // A cursor id that no longer exists drops its clause — the page just starts
-    // at the head rather than erroring.
+    // A cursor id that no longer exists, or that the caller cannot read, drops
+    // its clause — the page just starts at the head rather than erroring.
     if (cursor) {
       conditions.push(
         or(
@@ -1544,7 +1561,9 @@ export async function listFilesForActor(
     .orderBy(desc(files.createdAt), desc(files.id))
     .limit(fetchLimit);
 
-  const canManage = permissions.has("files:delete");
+  const managed = new Set(
+    grants.filter((g) => g.permissions.has("files:delete")).map((g) => g.spaceId),
+  );
   const { creatorCanManage } = opts;
   const hasMore = rows.length > limit;
   const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => {
@@ -1554,12 +1573,12 @@ export async function listFilesForActor(
     // minted on the single-file GET.
     const capabilities = getFileCapabilities(row, actor, {
       visible: true,
-      canManage,
+      canManage: managed.has(row.spaceId),
       creatorCanManage,
     });
     return toFileDto(row, actor, capabilities);
   });
-  return { ...listResponse(data, { hasMore }), limit };
+  return listResponse(data, { hasMore });
 }
 
 // ---------------------------------------------------------------------------

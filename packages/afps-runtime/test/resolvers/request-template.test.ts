@@ -25,6 +25,9 @@ describe("substituteRequest — URL", () => {
     expect(url("{{base_url}}/x?y={{v}}", { base_url: "https://h.example/app", v: "a&b=c" })).toBe(
       "https://h.example/app/x?y=a%26b%3Dc",
     );
+    expect(
+      url("{{base_url}}?d={{v}}#{{v}}", { base_url: "https://h.example/feed", v: "a&b#" }),
+    ).toBe("https://h.example/feed?d=a%26b%23#a%26b%23");
   });
 
   it("a port or userinfo value is encoded", () => {
@@ -70,6 +73,14 @@ describe("substituteRequest — URL", () => {
     expect(url("https://h.example/a/x{{v}}y", { v: ".." })).toBe("https://h.example/a/x..y");
     expect(url("https://h.example/v{{seg}}/x", { seg: "1.2" })).toBe("https://h.example/v1.2/x");
     expect(url("https://h.example/a/{{v}}.json", { v: "" })).toBe("https://h.example/a/.json");
+  });
+
+  it("treats a backslash like a slash: the segment checks apply after it", () => {
+    for (const seg of [".", "..", ""]) {
+      expect(() => url("https://h.example\\{{seg}}", { seg })).toThrow(UnencodableInputError);
+      expect(() => url("https://h.example/a\\{{seg}}/b", { seg })).toThrow(UnencodableInputError);
+    }
+    expect(url("https://h.example\\{{seg}}", { seg: "x" })).toBe("https://h.example\\x");
   });
 
   it("a host or port placeholder is no path segment", () => {

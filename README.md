@@ -20,17 +20,16 @@ Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format 
                 │  prompt.md + manifest.json    │  Runs autonomously in a container.
                 ├───────────────────────────────┤
   Capability    │  Skill       (declarative)    │  Reusable instructions (SKILL.md).
-                │  MCP server  (executable)     │  Packaged MCP Bundle exposing tools.
                 ├───────────────────────────────┤
   Connection    │  Integration                  │  OAuth 2.0, API key, basic, mTLS,
-                │                               │  or custom auth for external services.
+                │                               │  or custom auth for external services;
+                │                               │  may carry its own local MCP server.
                 └───────────────────────────────┘
 ```
 
-- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, mcp-servers, integrations), and its input/output schemas. There is no separate `config` schema: migration `0040_config_into_input` folded that second parameter namespace into `input`, leaving one. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
+- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, integrations), and its input/output schemas. There is no separate `config` schema: migration `0040_config_into_input` folded that second parameter namespace into `input`, leaving one. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
 - A **skill** adds knowledge — reusable instructions the agent follows during a run (`SKILL.md` + the [Anthropic Agent Skills](https://agentskills.io/) format).
-- An **mcp-server** adds runnable tools. A packaged MCP Bundle (MCPB-vocabulary `server` / `tools` / `user_config`) that runs as a subprocess and speaks JSON-RPC. The agent calls its tools through the sidecar. `server.type ∈ { node, python, binary, uv }` with an optional `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override for Bun-native servers.
-- An **integration** adds authenticated access to an external service. Declares a `source` (local mcp-server, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
+- An **integration** adds authenticated access to an external service. Declares a `source` (local MCP server shipped inside the integration archive, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
 
 Agents are **prompt-driven**: the AI coding agent inside the container interprets the goal and writes its own execution code. Change the prompt, change the behavior — no node graphs, no pre-scripted steps.
 
@@ -42,8 +41,8 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Hardware-isolated execution** (opt-in) — Run each agent in a dedicated [Firecracker](https://firecracker-microvm.github.io/) microVM for a KVM hardware boundary around the whole run, instead of a shared-kernel container. A workload escape compromises a throwaway guest kernel, not the host. See [Firecracker architecture](./docs/architecture/FIRECRACKER.md)
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
-- **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
-- **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
+- **Package import** — Import agents, skills, and integrations from ZIP/AFPS files
+- **Skills & local MCP servers** — Extend agent capabilities with SKILL.md instructions and local integrations that carry their MCP server inline (`server.type ∈ node | python | binary | uv`)
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
 - **API keys** — Programmatic access via `apst_*` prefixed API keys
@@ -205,12 +204,12 @@ appstrate/
 │   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
-├── system-packages/           # System package `.afps` archives — integrations + one mcp-server, loaded at boot
+├── system-packages/           # System package `.afps` archives — integrations (a local integration carries its MCP server), loaded at boot
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
 │   ├── runners/              # Per-runtime MCP runner images (node, bun, python, uv, binary)
-│   └── sidecar/server.ts     # Credential-isolating MCP server — first-party tools (run_history, recall_memory) + per-integration {ns}__api_call (+ optional {ns}__api_upload)
+│   └── sidecar/server.ts     # Credential-isolating MCP server — every tool of the run's integrations as {ns}__{tool}, incl. per-integration {ns}__api_call (+ optional {ns}__api_upload)
 │
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint + Zod ↔ spec + Code ⊆ Spec)
 ```
@@ -222,7 +221,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | Domain                  | Description                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | **Auth**                | Better Auth email/password + cookie sessions                                                                                    |
-| **Agents**              | Agent CRUD, input settings, skills/mcp-servers/integrations binding, versions, bundle export                                    |
+| **Agents**              | Agent CRUD, input settings, skills/integrations binding, versions, bundle export                                                |
 | **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension                             |
 | **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                                                    |
 | **Schedules**           | Cron-based agent scheduling                                                                                                     |
@@ -239,7 +238,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Profile**             | User profile management                                                                                                         |
 | **Invitations**         | Magic link invitation acceptance                                                                                                |
 | **Welcome**             | Post-invite profile setup                                                                                                       |
-| **Internal**            | Container-to-host routes (credentials, run history)                                                                             |
+| **Internal**            | Container-to-host routes (credentials, the run MCP server of the `@appstrate/platform` tools)                                   |
 | **Meta**                | OpenAPI spec + Swagger UI                                                                                                       |
 | **Models**              | Org-level LLM model configuration and testing                                                                                   |
 | **Health**              | Health check                                                                                                                    |
@@ -254,14 +253,15 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 
 ### Agent runtime — MCP-only
 
-Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. First-party tools cover platform capabilities; per-integration tools cover outbound service access:
+Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. Every tool of the run's integrations is exposed as `{ns}__{tool}`:
 
-- `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
-- `recall_memory({ query?, limit? })` — search the agent's archive memories written via the `note(content)` built-in runtime tool.
+- The `@appstrate/platform` system integration serves the platform's own tools from the platform's run MCP server, exposed as `appstrate_platform__<tool>` to an agent that declares it; its tools and `default_tools` are in its manifest (`scripts/system-packages/integration-platform-1.0.0/manifest.json`).
 - Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`.
 - Integrations backed by an MCP server (`source.kind = local` or `remote`) additionally surface their own tools under the same `{ns}__{tool}` prefix.
 
-The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
+The runner itself registers the harness tools: `output` when the agent declares an `output.schema`, and `publish_file` on every platform run.
+
+The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
 
 ### API Documentation
 

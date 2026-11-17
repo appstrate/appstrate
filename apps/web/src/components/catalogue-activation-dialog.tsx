@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one question switching an agent on can raise.
- *
- * Activating a package activates that package alone. An agent's SKILLS travel
- * with it — they are judged from its home space — but its INTEGRATIONS are
- * judged in the space that launches, and a missing one refuses the run with
- * `integration_not_active`. So an agent can be switched on in a space and still
- * be unable to start, which is what this says before writing anything.
- *
- * Two answers, both legitimate: activate everything the run needs, or activate
- * the agent alone and deal with its integrations later. An integration the
- * caller may not switch on is named without a button, because the route would
- * refuse it.
+ * The one question switching an agent on can raise: its SKILLS travel with it, but its
+ * INTEGRATIONS are judged in the launching space (`integration_not_active`), so the agent
+ * could be on and unable to start. Activate everything, or the agent alone. An
+ * integration the caller may not switch on is named without a button (the route refuses it).
  */
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Modal } from "./modal";
@@ -43,7 +36,6 @@ export function ActivationClosureDialog({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={t("catalogue.closureTitle", { name: packageName })}
       actions={
@@ -55,14 +47,14 @@ export function ActivationClosureDialog({
             {t("catalogue.closureAgentOnly")}
           </Button>
           {canActivateAll && (
-            <Button onClick={onActivateAll} pending={isPending}>
+            <PendingButton onClick={onActivateAll} pending={isPending}>
               {t("catalogue.closureActivateAll")}
-            </Button>
+            </PendingButton>
           )}
         </>
       }
     >
-      <div className="space-y-3 text-sm">
+      <div className="flex flex-col gap-3 text-sm">
         <p>{t("catalogue.closureBody", { space: spaceName })}</p>
         <ul className="border-border divide-border divide-y rounded-lg border">
           {missing.map((entry) => (

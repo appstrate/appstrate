@@ -31,12 +31,11 @@
  * that lets a tokenless client start the OAuth flow against the right resource.
  */
 
-import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
+import { authorizeBundlePackages, heldPlacementAuthority } from "../../lib/package-access.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `createInsufficientScopeError` marks the error it returns in a module-level
 // WeakSet, and `createResourceServerChallenge` recognises it by asking
@@ -58,15 +57,19 @@ import { APIError } from "better-auth/api";
 import {
   createMcpServer,
   parseMcpPost,
-  serveStatelessPost,
+  serveAuthenticatedStatelessPost,
+  type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import {
+  INLINE_MANIFEST_RULE,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+} from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
-import { isBearerOnlyCaller } from "../../lib/bearer-only.ts";
+import { bearerCaller, isBearerOnlyCaller } from "../../lib/bearer-only.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -77,6 +80,9 @@ import { registerProtectedResourceFamily } from "../../lib/protected-resources.t
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
+import { ceilingAllows } from "../../lib/permissions.ts";
+import { followRunLogs } from "../../services/realtime-access.ts";
+import type { RunLogEvent } from "@appstrate/shared-types";
 import {
   MCP_RESOURCE_PREFIX,
   deriveMcpResourceUri,
@@ -87,11 +93,13 @@ import {
 } from "../../lib/audiences.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { ensureMcpResourceMintable } from "./oauth-resources.ts";
+import { buildAgentPromptProvider } from "./agent-prompts.ts";
 import {
   buildMcpTools,
   buildFileResourceProvider,
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
+  INLINE_LOG_INSTRUCTION,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   WARNING_CODES_PHRASE,
   type Dispatch,
@@ -99,7 +107,9 @@ import {
   type McpSurface,
 } from "./tools.ts";
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
-import { skillReaderFor } from "./skill-tools.ts";
+import { buildSkillServer } from "./skills.ts";
+import { servedSkillsContext } from "../../services/served-skills.ts";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
   listReachableSpaces,
   pinnedSpaceIds,
@@ -212,13 +222,11 @@ export function buildServerInstructions(
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  const inlineShortcut = inline
-    ? " For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate, `runtime_tools` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so `runtime_tools: []` stays empty. You may override every field with a complete deterministic manifest; a strict `output.schema` requires an explicit runtime tool selection containing `output`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected."
-    : "";
+  const inlineShortcut = inline ? ` ${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION}` : "";
   // Authoring a package means an inline run writing it; without that grant
   // only the validation half of the bullet is true.
   const packageFiles = inline
-    ? "MCP package authoring — call `get_runtime_capabilities` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
+    ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
@@ -227,7 +235,7 @@ export function buildServerInstructions(
 `
     : "";
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
   const integrationListing = listsIntegrations
@@ -277,8 +285,8 @@ export function buildServerInstructions(
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${WARNING_CODES_PHRASE}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A schedule write answers \`warnings: null\` when it judged nothing (disabled, no resolution-affecting change, or written for another member, whose connections it never reveals) and \`[]\` only when it judged and found nothing to report. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery}${insufficientScopes} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\`, \`needs_reconnection\`, \`scopes_granted\` and \`missing_scopes\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, tell the user to reconnect it. Prefer a candidate whose \`missing_scopes\` is empty, the one granting least among them: one with missing scopes answers \`insufficient_scopes\`. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters. An enabled schedule write answers this code for the user's one connection too: name the candidate in the schedule's own \`connection_overrides\`.${pinChoice}
 - Code \`auth_serves_no_selected_tool\` on \`integrations.<id>\` is not a connect problem either: the connection its \`connection_id\` names was explicitly bound (your \`connection_overrides\`, or a pin or default) and was made on an auth that exposes none of the agent's selected tools, so reconnecting it changes nothing. When you passed \`connection_overrides\`, retry without that id; when a pin or default binds it, tell the user which connection to take out of the set.
-- Code \`auth_key_serves_no_selected_tool\` on \`integrations.<id>\` is not a connection problem at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
-- Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration and is refused (400) for a required one.`
+- Codes \`auth_key_serves_no_selected_tool\` and \`auth_key_on_unauthenticated_integration\` on \`integrations.<id>\` are not connection problems at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, or one of an integration that declares no auth method, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
+- Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration, and for a required one answers \`required_integration_unbound\` unless an admin imposes a set; connections an admin imposes on the integration (an admin pin or an enforced org default) stay bound whatever you pass, so the override only adds to them (\`[]\` adds nothing) and a connection outside a set that allows no additions answers \`override_outranked\`.`
     : "";
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
 
@@ -339,19 +347,18 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
     proxies: any("proxies"),
+    proxiesClosed: any("proxiesClosed"),
   };
 }
 
 /**
  * Whether the credential proxy accepts the credential this request carries.
  * The proxy is bearer-only (`isBearerOnlyCaller`) and its tools re-enter it
- * with that same credential, so a cookie session or the chat's loopback bearer
- * is offered neither of them.
+ * with that same credential, so a cookie session is offered neither of them;
+ * the chat's server-minted MCP bearer is, like any MCP client's bearer.
  */
 function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
-  return isBearerOnlyCaller(c.get("authMethod"), {
-    firstPartyLoopback: c.get("firstPartyLoopback"),
-  });
+  return isBearerOnlyCaller(bearerCaller(c), "credential-proxy");
 }
 
 /**
@@ -517,10 +524,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
     const proxied = proxyAcceptsCredential(c);
-    const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
-      ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
-    }));
+    const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
+      deriveMcpSurface(permissions, ceiling, actor, proxied, space),
+    );
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
     if (!chosen) {
@@ -534,7 +540,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
+      surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -581,9 +587,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
-    // Dispatched calls re-enter the space this request entered.
+    // Dispatched calls re-enter the space this request entered — and, on the
+    // endpoint pinned to it, stay confined to it whatever the credential pins:
+    // the caller's reach is then that space only, for the lists spanning spaces
+    // and for the package home authority alike.
     authHeaders.set("x-space-id", scope.spaceId);
-    const dispatch: Dispatch = dispatchInProcess;
+    const dispatch: Dispatch = orgSpaces
+      ? dispatchInProcess
+      : (request) => dispatchInProcess(request, scope.spaceId);
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
@@ -648,9 +659,19 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the forwarded auth headers. The index is scoped to the caller's role.
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
-      mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
-      readSkill: skillReaderFor(c, scope),
+      placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
       requestId: c.get("requestId"),
+      followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
+        followRunLogs(
+          {
+            scope,
+            actor,
+            permissions,
+            ceilingAllows: (permission) => ceilingAllows(c, permission),
+          },
+          runId,
+          onLog,
+        ),
       origin,
       permissions,
       ceiling,
@@ -664,12 +685,35 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
+      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c), c.get("space")!);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
-    const resources = buildFileResourceProvider(toolCtx);
+    const files = buildFileResourceProvider(toolCtx);
+    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
+    // connection reaches, each read with the caller's permissions in that space.
+    const skills = buildSkillServer(
+      servedSkillsContext(
+        c,
+        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
+          orgId: org,
+          spaceId: space.id,
+          permissions: space.permissions,
+        })),
+      ),
+    );
+    const resources: AppstrateResourceProvider = {
+      read: (uri, extra) =>
+        uri.startsWith(SKILL_URI_PREFIX) ? skills.read(uri) : files.read(uri, extra),
+    };
+    // One launch prompt per runnable agent, in every space this connection reaches.
+    const prompts = buildAgentPromptProvider({
+      origin,
+      authHeaders,
+      dispatch,
+      spaces: orgSpaces?.reachable ?? [{ id: scope.spaceId, name: c.get("space")!.name, surface }],
+    });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
@@ -682,29 +726,21 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           orgSpaces,
         ),
         resources,
+        skills: skills.provider,
+        prompts,
       },
     );
-    const raw = c.req.raw;
-    const body = await c.req.arrayBuffer();
-    // `null`: the SDK reads the bytes itself and answers its own parse error.
-    const post = c.get("mcpPost") ?? null;
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: !post?.requestsProgress,
-      // Disabled deliberately: the SDK's Host-header allowlist would reject
-      // legitimate reverse-proxied hosts, and the rebinding threat it guards
-      // (a browser tricked into POSTing to a localhost MCP server) doesn't
-      // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
-      // or a SameSite session cookie), so a cross-site page cannot drive it.
-      enableDnsRebindingProtection: false,
-    });
-
-    // The SDK reads these bytes only when they did not parse here.
-    const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
-
-    // Any audit insert the tool layer triggered is already tracked (see
-    // `observe` above) and flushed at shutdown, not here.
-    return serveStatelessPost(server, transport, forwarded, post);
+    // `/api/mcp/o/:org` requires platform auth (Bearer/API key, or a SameSite
+    // session cookie), so a cross-site page cannot drive it. `null` post: the
+    // SDK reads the bytes itself and answers its own parse error. Any audit
+    // insert the tool layer triggered is already tracked (see `observe` above)
+    // and flushed at shutdown, not here.
+    return serveAuthenticatedStatelessPost(
+      server,
+      c.req.raw,
+      await c.req.arrayBuffer(),
+      c.get("mcpPost") ?? null,
+    );
   };
   app.post(MCP_PATH, serveMcp);
   app.post(MCP_SPACE_PATH, serveMcp);

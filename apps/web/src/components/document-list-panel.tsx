@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared documents panel — loading/error/empty states, the three bodies
- * (cards, table, compact list), and the delete + preview modals. Used by the
+ * Shared documents panel — loading/error/empty states, the two bodies
+ * (table, cards, compact list), and the delete + preview modals. Used by the
  * gallery page and the run page. Data fetching and pagination stay with the
  * caller; this component is fed an already-resolved list and owns only the
  * delete/preview interaction (download + delete gating live here since they
@@ -11,23 +11,24 @@
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
-import { EmptyState } from "./page-states";
+import { EmptyState, NoMatchState } from "./page-states";
 import { CardGrid } from "./card-grid";
+import { FileTile, FileTileSkeleton } from "./file-tile";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import type { ColumnMenuSpec } from "./list-toolbar";
-import { FileTile } from "./file-tile";
 import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { runFileDirection } from "../lib/files";
-import { useModalParam } from "../hooks/use-modal-param";
+import { useUrlModal } from "../hooks/use-url-modal";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { useCurrentOrgId } from "../hooks/use-org";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { fileContextHeader, fileReaderPath, otherSpaceFileContext } from "../lib/file-link";
 
 export function DocumentListPanel({
   documents,
@@ -35,49 +36,55 @@ export function DocumentListPanel({
   error,
   empty,
   showRunLink,
-  runId,
   footer,
-  display = "cards",
+  display = "table",
   toolbar,
   tableLabel,
-  tableColumnMode = "tiered",
-  tableSurface = "framed",
+  spanning = false,
 }: {
   documents: FileDto[];
   isLoading: boolean;
   error: unknown;
-  empty: { message: string; hint?: string; compact?: boolean };
-  /** Gallery tiles link to the producing run. */
-  showRunLink?: boolean;
-  /**
-   * Run-tab only: the run this panel belongs to. When set, each tile shows an
-   * input/output badge, read through `runFileDirection`: only this run's own
-   * `agent_output` is an output; an upload made for it or a file chained in
-   * from an earlier run is an input the run consumed.
-   */
-  runId?: string;
-  /** Rendered after the list: the gallery's "Load more", a run's truncation notice. */
+  /** `onReset` marks a filtered list that found nothing: the state offers to clear the filters. */
+  empty: { message: string; hint?: string; compact?: boolean; onReset?: () => void };
+  /** Whether a row links to the run that produced it (the gallery's). */
+  showRunLink?: (doc: FileDto) => boolean;
+  /** Rendered after the list: the gallery's load-more footer, a run's truncation notice. */
   footer?: ReactNode;
-  /** The main Documents page offers cards and table; the run overview lists compactly. */
+  /** The gallery offers cards or table; run surfaces keep their table or compact list. */
   display?: "cards" | "table" | "compact";
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Level-one collections keep every reader-selected column reachable. */
-  tableColumnMode?: "tiered" | "scroll";
-  /** Integrated rails already provide the surrounding surface. */
-  tableSurface?: "framed" | "integrated";
+  /** The list spans several spaces: each row names its own. */
+  spanning?: boolean;
 }) {
   const { t } = useTranslation("files");
   const download = useFileDownload();
   const deleteDoc = useDeleteFile();
   const keepDoc = useKeepFile();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
-  const visibility = useColumnVisibility("documents");
+  const navigate = useNavigate();
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+
+  // A file of another space is read, kept and deleted in its own, named on the request
+  // (`?org=…&space=…` for the reader), without switching. Its `capabilities` are already its
+  // space's: the server judges each row by the grant of the row's space.
+  const contextOf = (doc: FileDto) => otherSpaceFileContext(doc.spaceId, orgId, currentSpaceId);
+  const readerHref = (doc: FileDto) => {
+    const context = contextOf(doc);
+    return context && doc.capabilities.preview ? fileReaderPath(doc.id, context) : undefined;
+  };
+  const openPreview = (doc: FileDto) => {
+    const href = readerHref(doc);
+    if (href) navigate(href);
+    else preview.open(doc.id);
+  };
 
   // A deep-linked doc may be outside the currently loaded page, so an empty name
   // is fine — the preview modal falls back to the fetched DTO's name.
-  const preview = useModalParam("preview");
+  const preview = useUrlModal("preview");
   const previewDoc = preview.value
     ? { id: preview.value, name: documents.find((d) => d.id === preview.value)?.name ?? "" }
     : null;
@@ -89,49 +96,66 @@ export function DocumentListPanel({
 
   // Keep ("pin") — clears the document's expiry.
   const onKeep = (doc: FileDto) =>
-    keepDoc.mutate(
-      { params: { path: { id: doc.id } } },
-      {
-        onSuccess: () => {
-          toast.success(t("keep.success"));
-        },
-      },
-    );
+    keepDoc.mutate({
+      params: { path: { id: doc.id }, header: fileContextHeader(contextOf(doc)) },
+    });
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
     const id = pendingDelete.id;
     deleteDoc.mutate(
-      { params: { path: { id } } },
+      { params: { path: { id }, header: fileContextHeader(contextOf(pendingDelete)) } },
       {
-        onSuccess: () => {
-          toast.success(t("delete.success"));
-          setPendingDelete(null);
-        },
+        onSuccess: () => setPendingDelete(null),
       },
     );
   };
 
   const pendingKeepId = keepDoc.isPending ? (keepDoc.variables?.params.path.id ?? null) : null;
-  const onDownload = (doc: FileDto) => void download(doc.id, doc.name);
+  const onDownload = (doc: FileDto) => void download(doc.id, doc.name, contextOf(doc));
   const allColumns = useDocumentColumns({
     pendingKeepId,
     showRunLink,
     onDownload,
     onKeep,
     onDelete,
+    spanning,
   });
-  const columns = visibleColumns(allColumns, visibility.hidden);
-  const emptyState = (
+  const { columns, menu } = useColumnVisibility("documents", allColumns);
+  const emptyState = empty.onReset ? (
+    <NoMatchState message={empty.message} onReset={empty.onReset} />
+  ) : (
     <EmptyState message={empty.message} hint={empty.hint} compact={empty.compact} icon={FileText} />
   );
 
   return (
     <>
-      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
+      {toolbar?.({ columns: menu })}
 
       <div className="flex flex-col gap-3">
-        {display === "compact" ? (
+        {display === "cards" ? (
+          <CardGrid
+            items={documents}
+            itemKey={(doc) => doc.id}
+            min="12rem"
+            placeholder={<FileTileSkeleton />}
+            isLoading={isLoading && documents.length === 0}
+            failure={error}
+            empty={emptyState}
+            renderCard={(doc) => (
+              <FileTile
+                file={doc}
+                isKeepPending={pendingKeepId === doc.id}
+                showRunLink={showRunLink?.(doc)}
+                showSpace={spanning}
+                onPreview={openPreview}
+                onDownload={onDownload}
+                onKeep={onKeep}
+                onDelete={onDelete}
+              />
+            )}
+          />
+        ) : display === "compact" ? (
           <ItemList
             items={documents}
             itemKey={(doc) => doc.id}
@@ -146,8 +170,8 @@ export function DocumentListPanel({
                 <DocumentRowActions
                   doc={doc}
                   isPending={pendingKeepId === doc.id}
-                  showRunLink={showRunLink}
-                  onPreview={(d) => preview.open(d.id)}
+                  showRunLink={showRunLink?.(doc)}
+                  onPreview={openPreview}
                   onDownload={onDownload}
                   onKeep={onKeep}
                   onDelete={onDelete}
@@ -155,43 +179,21 @@ export function DocumentListPanel({
               </div>
             )}
           />
-        ) : display === "table" ? (
+        ) : (
           <DataTable
             tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            columnMode={tableColumnMode}
-            surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}
+            rowHref={readerHref}
             rowAction={(doc) => preview.open(doc.id)}
-            rowActionable={(doc) => doc.capabilities.preview}
+            // The in-place preview reads in the current space; another space's row links instead.
+            rowActionable={(doc) => doc.capabilities.preview && !contextOf(doc)}
             rowLabel={(doc) => doc.name}
             isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
-          />
-        ) : (
-          /* The same real tiles serve the main card view and compact run tabs. */
-          <CardGrid
-            items={documents}
-            min="10rem"
-            itemKey={(doc) => doc.id}
-            isLoading={isLoading && documents.length === 0}
-            failure={error}
-            empty={emptyState}
-            renderCard={(doc) => (
-              <FileTile
-                file={doc}
-                isKeepPending={pendingKeepId === doc.id}
-                onDownload={onDownload}
-                onDelete={onDelete}
-                onKeep={onKeep}
-                onPreview={(d) => preview.open(d.id)}
-                showRunLink={showRunLink}
-                direction={runId ? runFileDirection(doc, runId) : undefined}
-              />
-            )}
           />
         )}
         {footer}
@@ -203,7 +205,7 @@ export function DocumentListPanel({
         onConfirm={confirmDelete}
         title={t("delete.title")}
         description={t("delete.description", { name: pendingDelete?.name ?? "" })}
-        confirmLabel={t("row.delete")}
+        confirmLabel={t("common:btn.delete")}
         isPending={deleteDoc.isPending}
       />
 

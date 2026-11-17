@@ -1,31 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One package, read inside the catalogue rather than instead of it.
+ * One package, read inside the catalogue rather than on its own page (which would drop
+ * the panel and claim the current space for a package that may not be in it).
  *
- * A row does not link to the package's own page: that would throw away the
- * panel, the space you were in and the list you were reading — and land on a
- * page whose breadcrumb claims the current space for a package that is not in
- * it. This reads in place: the rail stays, Back comes straight back.
- *
- * It answers the three questions a reader opens it with, in their order:
- *
- * 1. **What is it?** Name, version, description, where it comes from.
- * 2. **Where is it, and what may I do there?** Its state in each space within
- *    reach, the switch on the same line, graded by the reader's rights
- *    (`lib/catalogue-sheet.ts`). An offer waiting on the reader heads the
- *    sheet, because it is the one line that asks them for a decision.
- * 3. **What does it need?** For an agent, its integrations, skills and inputs,
- *    and per space the integrations that space does not run yet. Skills travel
- *    with the agent (judged from its home) and are named, never linked: a skill
- *    not shared to the reader's space would open on a 404.
- *
- * A skill carries one more per-space fact beside its switch: whether that
- * space IMPOSES it on every chat conversation held there (`chat_enforced`).
- *
- * Runs, versions, files and settings stay on the package's own page, one link
- * away.
+ * Answers what it is, where it is and what the reader may do there (graded by their
+ * rights, `lib/catalogue-sheet.ts`), and what it needs. Skills are named, never linked:
+ * one not shared to the reader's space would 404. A skill also carries a per-space
+ * `chat_enforced` switch.
  */
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -34,19 +18,16 @@ import { useTranslation } from "react-i18next";
 import {
   Boxes,
   Clock,
-  Hammer,
   Hash,
+  History,
   House,
-  Inbox,
   Layers,
   Plug,
   ShieldCheck,
   TextCursorInput,
   Wrench,
 } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
-import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -65,19 +46,22 @@ import {
   type LibraryPackageItem,
   type LibrarySpace,
 } from "../hooks/use-library";
-import { fetchPackageDetail } from "../hooks/use-packages";
+import { ApiError } from "../api/errors";
+import { fetchPackageDetail, useVersionInfo } from "../hooks/use-packages";
 import { TextSkeleton } from "./loading-skeletons";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useHereSpaceId } from "../hooks/use-overview-mode";
 import { missingIntegrations } from "../lib/activation-closure";
+import type { IntegrationSource } from "../lib/integration-collection";
+import { IntegrationSourceLabel } from "./integration-source-label";
 import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import { toastError } from "../lib/mutation-error";
 import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement";
 import { ACTIVATION_REFUSAL_KEY, type ActivationGate } from "../lib/catalogue-gates";
 import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import {
+  pinnedVersionState,
   sheetChatEnforce,
-  sheetOffers,
   sheetSpaceMode,
   sheetSpaceRows,
   type SheetSpaceRow,
@@ -86,7 +70,20 @@ import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
 import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
+import { ManifestOverview } from "./package-manifest/manifest-overview";
 import { SettingsHeading } from "./settings/settings-heading";
+
+/** The alert's words per state, spelled out so the locale test sees every key. */
+const PINNED_ALERT_KEYS = {
+  missing: {
+    title: "catalogue.sheet.pinned.missingTitle",
+    body: "catalogue.sheet.pinned.missingBody",
+  },
+  behind: {
+    title: "catalogue.sheet.pinned.behindTitle",
+    body: "catalogue.sheet.pinned.behindBody",
+  },
+} as const;
 
 /** The input fields an agent asks for, by the title a launch form shows. */
 function inputNames(detail: AgentDetail): string[] {
@@ -97,12 +94,7 @@ function inputNames(detail: AgentDetail): string[] {
   return order.map((key) => properties[key]?.title ?? key);
 }
 
-/**
- * One fact about the package: its icon and label on the left, its value on the
- * right, the way a page of properties reads. The same row serves what the
- * package USES and what it IS, so the sheet speaks one vocabulary below the
- * title.
- */
+/** One fact about the package: icon and label on the left, value on the right. */
 function PropertyRow({
   icon: Icon,
   label,
@@ -116,10 +108,7 @@ function PropertyRow({
   children: ReactNode;
 }) {
   return (
-    // One line, always: every row is the same height, so the list reads as a
-    // block rather than a ragged column. A long value is truncated with its
-    // full text in `title`, and the rule that explains it sits at the END of
-    // the same line rather than under it.
+    // One line, always (same height): a long value is truncated with its text in `title`.
     <div className="flex h-10 items-center gap-4">
       <dt className="text-muted-foreground flex w-40 shrink-0 items-center gap-2 text-sm">
         <Icon className="size-3.5 shrink-0" aria-hidden />
@@ -151,8 +140,11 @@ export function CataloguePreview({
   mayConfigureIn,
   integrations,
   agents,
-  protocol,
+  source,
   actionsMenu,
+  icon,
+  pinnedVersion,
+  onUnpin,
   busy,
   onSetActive,
 }: {
@@ -163,20 +155,26 @@ export function CataloguePreview({
   placement: CataloguePlacement;
   /** The reader's verdict for switching it on (`next: true`) or off in a space. */
   gateOf: (spaceId: string, next: boolean) => ActivationGate;
-  /**
-   * The reader's verdict for changing how a space runs a placed package (the
-   * placement PATCH's `configure` gate), which is what imposing a skill on that
-   * space's chat asks. No personal-space exemption, unlike activation.
-   */
+  /** The placement PATCH's `configure` gate (what imposing a skill on a space's chat asks); no personal-space exemption. */
   mayConfigureIn: (spaceId: string) => boolean;
   /** The library's integrations: what an agent's switch-on would still need. */
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
   agents: LibraryPackageItem[];
-  /** An integration's protocol, when the catalogue knows it. */
-  protocol?: string;
+  /** An integration's source (API, remote or local MCP), when the catalogue knows it. */
+  source?: IntegrationSource;
   /** The package's Actions menu, built by the catalogue that owns its dialogs. */
   actionsMenu?: ReactNode;
+  /** The package's tile, the one its card draws. */
+  icon: ReactNode;
+  /**
+   * The published version the address asked to read. The sheet then draws that
+   * version's content; its spaces and switches are the package's, which run the
+   * latest published version whatever is read here.
+   */
+  pinnedVersion?: string;
+  /** Reads the package as the reader would see it again (drops the pinned version). */
+  onUnpin?: () => void;
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
   onSetActive: (spaceId: string, next: boolean) => void;
@@ -184,27 +182,37 @@ export function CataloguePreview({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
   const orgId = useCurrentOrgId();
-  const currentSpaceId = useCurrentSpaceId();
+  const currentSpaceId = useHereSpaceId();
   const from = detailSpace(placement, spaces, currentSpaceId);
-  const { data: detail, isLoading: detailLoading } = useQuery({
+  const {
+    data: detail,
+    isLoading: detailLoading,
+    error: detailError,
+  } = useQuery({
     queryKey: packageKeys.detail(
       PACKAGE_TYPE_ROUTE_SEGMENT[type],
       orgId,
       from ?? null,
       item.id,
-      null,
+      pinnedVersion ?? null,
     ),
-    queryFn: () => fetchPackageDetail(type, item.id, undefined, from),
+    queryFn: () => fetchPackageDetail(type, item.id, pinnedVersion, from),
     enabled: !!orgId && !!from,
     // The sheet reads without the detail; a refusal is not worth a retry.
     retry: false,
+  });
+  // A pinned version the server answers 404 for was deleted since the link was made.
+  const { data: versionInfo } = useVersionInfo(type, pinnedVersion ? item.id : undefined);
+  const pinState = pinnedVersionState({
+    pinned: pinnedVersion,
+    missing: detailError instanceof ApiError && detailError.status === 404,
+    latestPublished: versionInfo?.latest_published_version,
   });
   const agent = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
   const rows = sheetSpaceRows(placement, spaces, gateOf, currentSpaceId);
   const mode = sheetSpaceMode(rows);
-  const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
   const integrationName = (id: string) => integrations.find((row) => row.id === id)?.name || id;
   /** What this space would still have to switch on for the agent to start. */
@@ -219,20 +227,24 @@ export function CataloguePreview({
     item.source === "system"
       ? t("catalogue.sourceSystem")
       : t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" });
-  const version = detail?.version;
-  const updatedAt = agent?.updatedAt ?? other?.updatedAt;
+  const version = detail?.version ?? pinnedVersion;
+  // The package's own timestamp: it dates no version, so a pinned sheet shows none.
+  const updatedAt = pinnedVersion ? undefined : (agent?.updatedAt ?? other?.updatedAt);
+  // A version carries its own description; the row's is the current one's.
+  const description = (pinnedVersion ? detail?.description : undefined) || item.description;
 
   const stateLabel = (row: SheetSpaceRow) => {
     const base =
       row.state === "active"
         ? t("catalogue.filter.active")
         : row.state === "inactive"
-          ? t("catalogue.filter.inactive")
-          : row.state === "offered"
-            ? row.offeredBy
-              ? t("catalogue.sheet.offeredBy", { name: row.offeredBy })
-              : t("catalogue.offeredHere")
-            : t("catalogue.sheet.absent");
+          ? [
+              t("catalogue.filter.inactive"),
+              row.sharedBy && t("catalogue.sheet.sharedBy", { name: row.sharedBy }),
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : t("catalogue.sheet.absent");
     return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
   };
   const switchFor = (row: SheetSpaceRow) => (
@@ -240,7 +252,13 @@ export function CataloguePreview({
       checked={row.state === "active"}
       disabled={busy || !row.mayToggle}
       aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
-      title={row.refusal ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" }) : undefined}
+      title={
+        row.refusal
+          ? t(ACTIVATION_REFUSAL_KEY[row.refusal], { ns: "common" })
+          : row.shared
+            ? t("catalogue.sheet.offerCredentials")
+            : undefined
+      }
       onCheckedChange={(next) => onSetActive(row.id, next === true)}
     />
   );
@@ -284,8 +302,7 @@ export function CataloguePreview({
               : undefined
         }
         onCheckedChange={(next) => {
-          // Imposing discloses the content to every member who chats there:
-          // it is confirmed first. Releasing discloses nothing.
+          // Imposing discloses the content to every member who chats there: confirm first.
           if (next) setConfirmEnforce(row);
           else
             setChatEnforced.mutate(
@@ -304,66 +321,33 @@ export function CataloguePreview({
     return names.length > 0 ? t("catalogue.sheet.missing", { names: names.join(", ") }) : null;
   };
 
-  // The column exists only when a space is actually missing something: a
-  // column of dashes asks the reader what it would have meant.
   const missingAnywhere = rows.some((row) => missingIn(row.id).length > 0);
-  /**
-   * The agents that use this package — narrowed to the ones this reader's OWN
-   * library carries. `getOrgItem` counts dependents across the organization
-   * (`findDependentPackages`, no placement predicate), so naming them all
-   * would publish agents homed in spaces this reader cannot enter.
-   */
+  // Narrowed to the reader's OWN library: `getOrgItem` counts dependents org-wide
+  // (`findDependentPackages`), which would name agents homed in spaces they cannot enter.
   const usedBy = (other?.agents ?? []).filter((entry) => agents.some((row) => row.id === entry.id));
   const agentSkills = agent?.dependencies.skills ?? [];
   const agentInputs = agent ? inputNames(agent) : [];
-  const runtimeTools = Array.isArray(agent?.manifest?.runtime_tools)
-    ? (agent.manifest.runtime_tools as unknown[]).length
-    : 0;
 
   return (
     <div>
-      {/* The one line that asks the reader for a decision, at the TOP like
-          every other alert in the product: above the first block rather than
-          beside the table, since its button names the space it acts on. It
-          goes through the catalogue's own activation, which asks about the
-          agent's integrations before writing. */}
-      {offers.map((offer) => (
-        <Alert key={offer.id} variant="info" className="mb-5">
-          <Inbox className="h-4 w-4" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <AlertTitle>
-                {offer.offeredBy
-                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
-                  : t("catalogue.sheet.offer", { space: offer.name })}
-              </AlertTitle>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
-              </p>
-            </div>
-            {offer.mayToggle && (
-              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
-                {t("catalogue.sheet.activateIn", { space: offer.name })}
-              </Button>
-            )}
-          </div>
-        </Alert>
-      ))}
-
-      {/* The title's line carries the one Actions menu, the same items as the
-          matrix row's "…" (`CatalogueMenuItems`), opening with the package's
-          own page. Switching it on here is the Espaces table's first row: a
-          second switch up here was the same gesture twice. */}
-      <div className="flex items-start justify-between gap-4">
-        <SettingsHeading className="mb-2" title={item.name || item.id} />
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          {icon}
+          <SettingsHeading className="mb-0 min-w-0" title={item.name || item.id} />
+        </div>
         <div className="flex shrink-0 items-center gap-3">{actionsMenu}</div>
       </div>
-      {/* What the package IS, in the badges the package's own header uses. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="secondary">{t(CATALOGUE_TYPE_LABEL_KEY[type])}</Badge>
         {version && (
           <Badge variant="secondary" className="font-mono">
             v{version}
+          </Badge>
+        )}
+        {pinState && (
+          <Badge variant="secondary" className="gap-1.5">
+            <History className="size-3" aria-hidden />
+            {t("catalogue.sheet.pinned.badge")}
           </Badge>
         )}
         <Badge variant="secondary" className="gap-1.5">
@@ -372,20 +356,40 @@ export function CataloguePreview({
         </Badge>
       </div>
 
-      {item.description && <p className="mt-4 text-sm">{item.description}</p>}
-      {/* The package's properties, in blocks each under a heading of its own —
-          the same heading "Espaces" carries below. A gap alone had to carry the
-          split and read as an accident of spacing instead. A list rather than
-          cards: these are not a content of their own, and a frame around a
-          property list draws a border that answers to nothing.
-          "À propos" comes FIRST, and in the same order, because every type
-          answers it: a reader moving from an agent to a skill to an integration
-          finds the same facts in the same place. What varies by type follows. */}
-      <SettingsGroup title={t("catalogue.sheet.about")} className="mt-6 mb-6">
+      {/* A version read by address is not the one the spaces run: say so, and
+          offer the way back, rather than leave the reader to infer it from a badge. */}
+      {(pinState === "missing" || pinState === "behind") && (
+        <Alert
+          variant={pinState === "missing" ? "warning" : "info"}
+          icon={History}
+          className="mt-4"
+          action={
+            onUnpin && (
+              <Button variant="outline" size="sm" onClick={onUnpin}>
+                {t("catalogue.sheet.pinned.unpin")}
+              </Button>
+            )
+          }
+        >
+          <AlertTitle>
+            {t(PINNED_ALERT_KEYS[pinState].title, { version: pinnedVersion })}
+          </AlertTitle>
+          <AlertDescription>
+            {t(PINNED_ALERT_KEYS[pinState].body, {
+              version: pinnedVersion,
+              latest: versionInfo?.latest_published_version,
+            })}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {description && <p className="mt-4 text-sm">{description}</p>}
+      {/* "À propos" comes FIRST, in the same order for every type; what varies by type follows. */}
+      <SettingsGroup title={t("orgSettings.tabGeneral")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
-          {protocol && (
-            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-              {protocol}
+          {source && (
+            <PropertyRow icon={Plug} label={t("integrations.col.source")}>
+              <IntegrationSourceLabel source={source} />
             </PropertyRow>
           )}
           {usedBy.length > 0 && (
@@ -394,7 +398,6 @@ export function CataloguePreview({
             </PropertyRow>
           )}
           {home && (
-            // Where the package lives, which is where it is edited.
             <PropertyRow
               icon={House}
               label={t("catalogue.homeSpace")}
@@ -411,21 +414,12 @@ export function CataloguePreview({
           <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
             <span className="font-mono text-xs break-all">{item.id}</span>
           </PropertyRow>
-          {/* What the agent ASKS at launch, and what the runtime gives it:
-              neither is a dependency — they are facts about the package, so
-              they sit here, after the rows every type carries. */}
           {agentInputs.length > 0 && (
             <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
               {agentInputs.join(", ")}
             </PropertyRow>
           )}
-          {runtimeTools > 0 && (
-            <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-              {t("catalogue.sheet.toolCount", { count: runtimeTools })}
-            </PropertyRow>
-          )}
-          {/* The rows only the detail answers, held at their height so the
-              groups below do not move when it lands. */}
+          {/* Held at their height so the groups below do not move when the detail lands. */}
           {detailLoading &&
             [0, 1].map((row) => (
               <div key={row} className="flex h-10 items-center">
@@ -435,8 +429,6 @@ export function CataloguePreview({
         </dl>
       </SettingsGroup>
 
-      {/* The manifest's own word, and only what it covers: an integration or a
-          skill the agent declares. */}
       {detailLoading && type === "agent" && (
         <SettingsGroup title={t("catalogue.sheet.dependencies")} className="mb-6">
           <TextSkeleton lines={2} />
@@ -447,7 +439,7 @@ export function CataloguePreview({
           <dl className="divide-border divide-y border-t">
             <PropertyRow
               icon={Boxes}
-              label={t("catalogue.sheet.integrations")}
+              label={t("common:nav.integrations")}
               hint={
                 agent.dependencies.integrations.length > 0
                   ? t("catalogue.sheet.integrationsHint")
@@ -463,11 +455,9 @@ export function CataloguePreview({
             {agentSkills.length > 0 && (
               <PropertyRow
                 icon={Wrench}
-                label={t("catalogue.sheet.skills")}
+                label={t("common:nav.skills")}
                 hint={t("catalogue.sheet.skillsHint")}
               >
-                {/* Named, never linked: a skill not shared to the reader's
-                    space opens on a 404, and it needs nothing there anyway. */}
                 {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
               </PropertyRow>
             )}
@@ -475,7 +465,9 @@ export function CataloguePreview({
         </SettingsGroup>
       )}
 
-      <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8 mb-0">
+      <ManifestOverview manifest={(agent ?? other)?.manifest} />
+
+      <SettingsGroup title={t("orgSettings.inviteSpacesLabel")} className="mt-8 mb-0">
         {mode === "readonly" && (
           <p className="text-sm">
             {placement.activeIn.length > 0
@@ -499,12 +491,7 @@ export function CataloguePreview({
           </p>
         )}
         {mode === "single" && rows[0] && (
-          <div
-            className={cn(
-              "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
-              rows[0].state === "offered" && "bg-primary/5",
-            )}
-          >
+          <div className="border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
             <div className="min-w-0">
               <p>
                 <span className="font-medium">{rows[0].name}</span>
@@ -518,8 +505,6 @@ export function CataloguePreview({
           </div>
         )}
         {singleEnforce && (
-          // Its own line under the space's, the same shape: the space line
-          // says whether it runs there, this one whether its chat imposes it.
           <label className="border-border mt-2 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
             <span>{t("library.column.chatEnforced", { ns: "common" })}</span>
             {singleEnforce}
@@ -530,12 +515,9 @@ export function CataloguePreview({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t("catalogue.filter.space")}</TableHead>
-                  <TableHead>{t("catalogue.filter.state")}</TableHead>
-                  {/* Only an agent has a dependency another space must hold. */}
+                  <TableHead>{t("source.space")}</TableHead>
+                  <TableHead>{t("providers.col.state")}</TableHead>
                   {missingAnywhere && <TableHead>{t("catalogue.sheet.missingColumn")}</TableHead>}
-                  {/* No wrap: a two-line header over a one-switch column reads as
-                      two columns. The width follows the label. */}
                   <TableHead className="w-px text-right whitespace-nowrap">
                     {t("catalogue.filter.active")}
                   </TableHead>
@@ -548,9 +530,7 @@ export function CataloguePreview({
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  // The alert above names a space; this is that space. Same
-                  // tint as the alert, so the eye carries one to the other.
-                  <TableRow key={row.id} className={row.state === "offered" ? "bg-primary/5" : ""}>
+                  <TableRow key={row.id}>
                     <TableCell className="font-medium">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate">{row.name}</span>

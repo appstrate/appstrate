@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from "react-router-dom";
+import { useStore } from "zustand";
 import { useOverlayPath } from "../lib/modal-route";
+import { navEntryActive, navLocation } from "../lib/nav-active";
+import { breadcrumbStore } from "../stores/breadcrumb-store";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -14,13 +17,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { useUnreadCount } from "../hooks/use-notifications";
+import { useUnreadRunCount } from "../hooks/use-run-reads";
 import { useAgents } from "../hooks/use-packages";
 import { CountBadge } from "./count-badge";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage } from "../hooks/use-paginated-runs";
 import type { RoutePath } from "../lib/route-access";
+import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useCanReach, useReachReady } from "../hooks/use-can-reach";
-import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -32,35 +35,48 @@ import {
 } from "@appstrate/ui/components/sidebar";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
+/**
+ * Whether a run is in flight in the working space, asked only while `enabled`. Inline runs live
+ * on ephemeral shadow packages that are not in `agents`, so they do not count in `running_runs`:
+ * they are asked separately.
+ */
+function useWorkingSpaceRunning(enabled: boolean): boolean {
+  const { data: agents } = useAgents({ enabled });
+  const { data: runningInline } = useFirstRunsPage({
+    kind: "inline",
+    status: ["running"],
+    limit: 1,
+    enabled,
+  });
+  return (
+    enabled &&
+    ((agents?.some((agent) => agent.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0)
+  );
+}
+
 type NavItem = {
   path: RoutePath;
   label: string;
   icon: LucideIcon;
-  badge?: number;
 };
 
 export function NavOrg() {
   const { t } = useTranslation();
-  // Behind an open overlay no entry is active: the dashboard drawn under a
-  // cold settings link is not where the user is.
+  // The entry the header trail roots the page under (`navLocation`), so the two never disagree;
+  // behind an open overlay none: the dashboard drawn under a cold settings link is not where the
+  // user is.
   const { pathname } = useLocation();
-  const visiblePathname = useOverlayPath() ?? pathname;
-  const { data: unreadCount } = useUnreadCount();
-  const { data: agents } = useAgents();
+  const overlayPath = useOverlayPath();
+  const trailRootHref = useStore(breadcrumbStore, (s) => s.page.entries[0]?.href);
+  const location = navLocation({ overlayPath, trailRootHref, pathname });
+  // The badge and the running spinner are the working space's: « Tous les espaces » neither
+  // shows nor asks what feeds them (no list it already holds counts every space's unread and
+  // running runs, inline ones included).
+  const { on: overview } = useOverviewMode();
+  const unread = useUnreadRunCount({ enabled: !overview });
+  const hasRunning = useWorkingSpaceRunning(!overview);
   const canReach = useCanReach();
   const ready = useReachReady();
-
-  // Inline runs live on ephemeral shadow packages that are not in `agents`,
-  // so they don't contribute to `runningRuns`. Check them separately.
-  const { data: runningInline } = usePaginatedRuns({
-    kind: "inline",
-    status: ["running"],
-    limit: 1,
-    offset: 0,
-  });
-  const hasRunning =
-    (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
-  const unread = unreadCount ?? 0;
 
   // Two groups, split by what you are DOING rather than by object type:
   // Activité is what happened (dashboard, runs, files), Construire is what you
@@ -69,7 +85,8 @@ export function NavOrg() {
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
-  // may hold none of them, so no entry is assumed reachable.
+  // may hold none of them, so no entry is assumed reachable. In « Tous les espaces » the
+  // same entries, each opened where some space admits it (`overviewListVerdict`).
   const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
 
   const activityItems = reachable([
@@ -87,22 +104,15 @@ export function NavOrg() {
   ]);
 
   const renderItems = (items: NavItem[]) =>
-    items.map((item) => (
-      <SidebarNavLink
-        key={item.path}
-        to={item.path}
-        icon={item.icon}
-        label={item.label}
-        isActive={
-          item.path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(item.path)
-        }
-      >
-        {item.badge && item.badge > 0 ? (
-          <SidebarMenuBadge>
-            <CountBadge count={item.badge} label={item.label} />
-          </SidebarMenuBadge>
-        ) : null}
-      </SidebarNavLink>
+    items.map(({ path, label, icon: Icon }) => (
+      <SidebarMenuItem key={path}>
+        <SidebarMenuButton asChild isActive={navEntryActive(path, location)} tooltip={label}>
+          <Link to={path}>
+            <Icon />
+            <span>{label}</span>
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
     ));
 
   const canReachRuns = canReach("/runs");
@@ -144,7 +154,7 @@ export function NavOrg() {
               <SidebarMenuItem className="relative">
                 <SidebarMenuButton
                   asChild
-                  isActive={visiblePathname.startsWith("/runs")}
+                  isActive={navEntryActive("/runs", location)}
                   tooltip={t("nav.runs")}
                 >
                   <Link to="/runs">
@@ -154,7 +164,7 @@ export function NavOrg() {
                     <span>{t("nav.runs")}</span>
                   </Link>
                 </SidebarMenuButton>
-                {unread > 0 && (
+                {!overview && unread > 0 && (
                   <SidebarMenuBadge>
                     <CountBadge
                       count={unread}

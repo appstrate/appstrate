@@ -2,11 +2,7 @@
 
 export { toSlug } from "@appstrate/core/naming";
 
-/**
- * Like {@link toSlug} but keeps trailing hyphens — use during typing, finalize
- * with `toSlug` on blur, so a user typing "my agent" is not fighting a slug
- * that eats the separator the moment they type it.
- */
+/** Like {@link toSlug} but keeps trailing hyphens: use while typing, finalize with `toSlug` on blur. */
 export function toLiveSlug(value: string): string {
   return value
     .toLowerCase()
@@ -21,11 +17,7 @@ export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v) => b.includes(v));
 }
 
-/**
- * A list's search box: whether one of a row's texts holds `search`, ignoring
- * case and surrounding blanks. An empty search matches every row; a missing
- * text matches none.
- */
+/** A list's search box: case-insensitive, trimmed; an empty search matches every row, a missing text none. */
 export function matchesSearch(
   search: string,
   texts: readonly (string | null | undefined | readonly string[])[],

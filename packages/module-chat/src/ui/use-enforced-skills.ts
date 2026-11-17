@@ -2,18 +2,19 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchEnforcedSkills } from "./chat-skills.ts";
-import type { GetHeaders } from "./runtime-context.ts";
+import type { ChatTransport } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /**
- * Shared by the picker and the read-only indicator. Default staleness: each
- * mount refetches, so a library toggle shows without a cross-module invalidation.
+ * Shared by the picker and the composer's skill chips. Default staleness (30 s):
+ * a library toggle shows on the next mount past it, without a cross-module
+ * invalidation.
  */
-export function useEnforcedSkills(getHeaders: GetHeaders | undefined) {
-  const spaceId = spaceIdFromHeaders(getHeaders);
+export function useEnforcedSkills(transport: ChatTransport | undefined) {
+  const spaceId = spaceIdFromHeaders(transport?.getHeaders);
   return useQuery({
     queryKey: ["chat", "enforced-skills", spaceId],
-    queryFn: () => fetchEnforcedSkills(getHeaders),
-    enabled: !!spaceId,
+    queryFn: () => fetchEnforcedSkills(transport!.request),
+    enabled: !!spaceId && !!transport,
   });
 }

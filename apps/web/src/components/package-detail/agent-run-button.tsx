@@ -18,7 +18,7 @@ export function AgentRunButton({
   versionLabel: string | undefined;
   /** Set while the page holds unsaved definition edits a run would not carry. */
   unsavedReason?: string;
-} & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className" | "inputDialog">) {
+} & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className">) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
   const blocker = useAgentRunBlocker(packageId, detail);

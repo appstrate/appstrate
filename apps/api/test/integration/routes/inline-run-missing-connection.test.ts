@@ -51,7 +51,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
@@ -337,28 +337,31 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
     });
 
-    it.each(["/api/runs/inline", "/api/runs/inline/validate"])(
-      "400s on %s when the integration is required",
-      async (path) => {
-        await seedIntegration(INTEGRATION);
-        await seedConnection(INTEGRATION);
+    // Not a static refusal of the key: resolution judges `[]` (under an imposed set it adds
+    // nothing), so both doors answer the resolver's verdict, the launch as its 409.
+    it.each([
+      ["/api/runs/inline", 409, "missing_integration_connection"],
+      ["/api/runs/inline/validate", 400, "validation_failed"],
+    ])("refuses on %s when the integration is required (%i)", async (path, status, code) => {
+      await seedIntegration(INTEGRATION);
+      await seedConnection(INTEGRATION);
 
-        const res = await post(path, {
-          manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
-          prompt: "do the thing",
-          connection_overrides: { [INTEGRATION]: [] },
-        });
+      const res = await post(path, {
+        manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+        connection_overrides: { [INTEGRATION]: [] },
+      });
 
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as ProblemDetails;
-        // One item, fail-fast or accumulated: readiness judges the launch without the refused key.
-        expect(body.code).toBe("validation_failed");
-        expect(body.errors!.map((e) => [e.field, e.code])).toEqual([
-          [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
-        ]);
-        expect(await db.select().from(runs)).toHaveLength(0);
-      },
-    );
+      expect(res.status).toBe(status);
+      const body = (await res.json()) as Omit<ProblemDetails, "errors"> & {
+        errors: { field: string; code: string; source?: string }[];
+      };
+      expect(body.code).toBe(code);
+      expect(body.errors.map((e) => [e.field, e.code, e.source])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound", "run_override"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
@@ -427,7 +430,6 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     function oauthManifest() {
       return localIntegrationManifest({
         name: OAUTH_INTEGRATION,
-        serverName: `${OAUTH_INTEGRATION}-server`,
         version: "1.0.0",
         auths: {
           primary: {
@@ -450,11 +452,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         source: "local",
         draftManifest: oauthManifest(),
       });
-      await seedPackageVersion({
-        packageId: OAUTH_INTEGRATION,
-        version: "1.0.0",
-        manifest: oauthManifest(),
-      });
+      await seedPublishedVersion(OAUTH_INTEGRATION, "1.0.0", { manifest: oauthManifest() });
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 

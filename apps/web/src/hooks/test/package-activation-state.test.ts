@@ -24,7 +24,7 @@ function placement(state: LibraryPlacement["state"]): LibraryPlacement {
 }
 
 function libraryWith(agents: LibraryPackageItem[]): Pick<LibraryResponse, "packages"> {
-  return { packages: { agent: agents, skill: [], "mcp-server": [], integration: [] } };
+  return { packages: { agent: agents, skill: [], integration: [] } };
 }
 
 function agentRow(placements: LibraryPlacement[]): LibraryPackageItem {
@@ -39,6 +39,7 @@ function agentRow(placements: LibraryPlacement[]): LibraryPackageItem {
     home_shareable: false,
     home_deletable: false,
     published: true,
+    activation: [],
     placements,
   };
 }
@@ -58,7 +59,7 @@ describe("a package the library carries", () => {
   });
 
   it("is inactive when it is placed here with no local instance at all", () => {
-    // An untaken offer: listed, never switched on, and the run gate refuses it.
+    // Placed but never switched on: listed, and the run gate refuses it.
     expect(
       activationStateOf(libraryWith([agentRow([placement("none")])]), "@acme/worker", SPACE)
         .isActiveInCurrentSpace,

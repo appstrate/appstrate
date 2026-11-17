@@ -1,27 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { FormItem } from "@appstrate/ui/components/field";
+import type { ComponentProps, ReactNode } from "react";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Textarea } from "@appstrate/ui/components/textarea";
-
-type FormFieldType =
-  | "text"
-  | "number"
-  | "textarea"
-  | "email"
-  | "url"
-  | "date"
-  | "datetime-local"
-  | "time"
-  | "color"
-  | "password";
 
 interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;
-  type?: FormFieldType;
+  type?: ComponentProps<typeof Input>["type"] | "textarea";
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -32,6 +21,10 @@ interface FormFieldProps {
   enumLabel?: (value: string) => string;
   disabled?: boolean;
   min?: number;
+  /** Shown beside the label (e.g. a discovery provenance badge). */
+  badge?: ReactNode;
+  /** The field's error; nothing when it is valid. */
+  error?: ReactNode;
 }
 
 export function FormField({
@@ -48,6 +41,8 @@ export function FormField({
   enumLabel,
   disabled,
   min,
+  badge,
+  error,
 }: FormFieldProps) {
   const renderInput = () => {
     if (enumValues) {
@@ -77,20 +72,6 @@ export function FormField({
       );
     }
 
-    if (type === "color") {
-      return (
-        <Input
-          type="color"
-          value={value || "#000000"}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
-          disabled={disabled}
-          required={required}
-          className="h-10 w-20 cursor-pointer p-1"
-        />
-      );
-    }
-
     return (
       <Input
         type={type}
@@ -105,8 +86,23 @@ export function FormField({
     );
   };
 
+  const text = required ? `${label} *` : label;
   return (
-    <FormItem id={id} label={required ? `${label} *` : label} hint={description}>
+    <FormItem
+      id={id}
+      label={
+        badge ? (
+          <span className="inline-flex items-center gap-2">
+            {text}
+            {badge}
+          </span>
+        ) : (
+          text
+        )
+      }
+      hint={description}
+      error={error}
+    >
       {renderInput()}
     </FormItem>
   );

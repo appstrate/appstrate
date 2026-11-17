@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
@@ -11,14 +12,12 @@ import { SchedulesTable } from "../schedules-table";
 import { useScheduleColumns } from "../schedule-columns";
 import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play } from "lucide-react";
-import { EmptyState, EmptyStateAction } from "../page-states";
-import { TextSkeleton } from "../loading-skeletons";
+import { EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
-import { useModalParam } from "../../hooks/use-modal-param";
-import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
+import { NewScheduleModal } from "../new-schedule-modal";
 import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
@@ -38,8 +37,7 @@ export function AgentRunsTab({
       initialStatus={readList(requestedStatus, runStatusValues)}
       emptyState={
         <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-          {/* The header's launch control answers `?run`: this one only triggers it. */}
-          <AgentRunButton packageId={packageId} versionLabel={versionLabel} inputDialog={false} />
+          <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
         </EmptyState>
       }
     />
@@ -53,13 +51,11 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const schedules = schedulesQuery.data;
   const list = useLocalListParams();
   const states = list.values("state", ["active", "disabled"] as const);
-  const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
+  const columns = useScheduleColumns({ showAgentName: false });
   const { can } = usePermissions();
-  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
+  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
 
-  if (!detail) return <TextSkeleton lines={3} />;
-
-  if (schemaHasFileFields(detail.input?.schema)) {
+  if (detail && schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
 
@@ -89,7 +85,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   return (
     <>
       <ListToolbar
-        placement="panel"
         search={{
           value: list.search,
           onChange: list.setSearch,
@@ -101,19 +96,18 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       <SchedulesTable
         schedules={filteredSchedules}
         columns={columns}
-        surface="integrated"
-        isLoading={schedulesQuery.isPending}
+        isLoading={!detail || schedulesQuery.isPending}
         isError={schedulesQuery.isError}
         empty={
           hasSchedules ? (
-            <EmptyState message={t("detail.schedulesTable.noMatch")} icon={CalendarClock} compact />
+            <NoMatchState message={t("detail.schedulesTable.noMatch")} onReset={list.reset} />
           ) : (
             <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
               {can("schedules:write") && (
                 <EmptyStateAction
                   action={{
                     label: t("schedule.titleNew"),
-                    onSelect: () => newSchedule.open(packageId),
+                    onSelect: () => setNewScheduleOpen(true),
                   }}
                 />
               )}
@@ -121,6 +115,9 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
           )
         }
       />
+      {newScheduleOpen && (
+        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
+      )}
     </>
   );
 }

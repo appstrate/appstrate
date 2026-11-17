@@ -4,14 +4,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
+import { SelectItem } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { CopyBlock } from "../copy-block";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
 import { spaceLabel } from "../../lib/space-label";
 import { toSlug } from "../../lib/strings";
 import { useSpaces } from "../../hooks/use-spaces";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 
 interface McpClientConnectProps {
   orgId: string;
@@ -25,8 +26,8 @@ const ALL_SPACES = "all";
 function DeeplinkTab({ label, href, fallback }: { label: string; href: string; fallback: string }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="space-y-3">
-      <Button asChild variant="default" size="sm">
+    <div className="flex flex-col gap-3">
+      <Button asChild variant="default" size="sm" className="self-start">
         <a href={href}>
           <ExternalLink />
           {label}
@@ -61,7 +62,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
     : buildMcpClientConfig(`appstrate-${orgSlug}`, base);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div>
         <p className="text-muted-foreground mb-1 text-xs font-medium">
           {t("orgSettings.mcpScopeLabel")}
@@ -82,7 +83,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
       {/* Tier 1: the raw endpoint works in any spec-compliant client. */}
       <div>
         <p className="text-muted-foreground mb-1 text-xs font-medium">
-          {t("orgSettings.mcpEndpointLabel")}
+          {t("integration.structure.url")}
         </p>
         <CopyBlock value={cfg.url} multiline />
         <p className="text-muted-foreground mt-1 text-xs">{t("orgSettings.mcpEndpointHint")}</p>
@@ -111,12 +112,12 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="claude-code" className="space-y-2">
+        <TabsContent value="claude-code" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpClaudeCodeHint")}</p>
           <CopyBlock value={cfg.claudeCodeCommand} multiline />
         </TabsContent>
 
-        <TabsContent value="claude-desktop" className="space-y-2">
+        <TabsContent value="claude-desktop" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpJsonHint")}</p>
           <CopyBlock value={cfg.httpJson} multiline />
         </TabsContent>
@@ -137,12 +138,12 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
           />
         </TabsContent>
 
-        <TabsContent value="json" className="space-y-2">
+        <TabsContent value="json" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpGenericHint")}</p>
           <CopyBlock value={cfg.httpJson} multiline />
         </TabsContent>
 
-        <TabsContent value="mcp-remote" className="space-y-2">
+        <TabsContent value="mcp-remote" className="flex flex-col gap-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpRemoteHint")}</p>
           <CopyBlock value={cfg.mcpRemoteJson} multiline />
         </TabsContent>

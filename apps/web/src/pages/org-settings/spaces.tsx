@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../../hooks/use-unsaved-changes";
+
 /**
- * The organization's spaces, as one table.
- *
- * Beside team spaces it lists two kinds of row: a member's PERSONAL space, and
- * a personal space that has been ORPHANED — its owner left the organization, a
- * 30-day window is running, and an owner or admin decides between converting
- * it to a team space and sweeping it (RBAC spec §3.6).
- *
- * They are rows like the others: the state is a column, and the two acts an
- * orphan offers join the row's own Actions menu, because a list on this
- * surface is a table and a row carries one menu. Neither act is reversible, so
- * both go through a confirmation.
+ * The organization's spaces as one table. Personal and ORPHANED personal spaces
+ * (owner left, 30-day window, convert or sweep: RBAC spec §3.6) are ordinary
+ * rows whose acts join the row's Actions menu; both are irreversible, hence confirmed.
  */
 
 import { useState } from "react";
@@ -21,7 +15,8 @@ import { toast } from "sonner";
 import { AppWindow, Plus } from "lucide-react";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
-import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
+import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { spaceLabel } from "../../lib/space-label";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
@@ -29,13 +24,13 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import type { MenuAction } from "../../lib/menu-action";
 import { useSpaceColumns } from "./space-columns";
-import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SPACE_PARAM, SpaceCreateModal } from "../../components/space-create-modal";
+import { useUrlModal } from "../../hooks/use-url-modal";
 
 export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: spaces, isLoading, error } = useSpaces();
-  const newSpace = useModalParam(NEW_SPACE_PARAM);
+  const newSpace = useUrlModal(NEW_SPACE_PARAM);
   const [pending, setPending] = useState<{ id: string; action: "convert" | "sweep" } | null>(null);
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
@@ -45,8 +40,10 @@ export function OrgSettingsSpacesPage() {
   const busy = convert.isPending || sweep.isPending;
 
   const handleSpaceClick = (spaceId: string) => {
-    switchSpace(spaceId);
-    navigate("/workspace-settings/general");
+    requestScopeChange(() => {
+      switchSpace(spaceId);
+      navigate("/workspace-settings/general");
+    });
   };
 
   const runPending = () => {
@@ -54,10 +51,7 @@ export function OrgSettingsSpacesPage() {
     const params = { params: { path: { id: pending.id } } };
     if (pending.action === "convert") {
       convert.mutate(params, {
-        onSuccess: () => {
-          setPending(null);
-          toast.success(t("spaces.personal.converted"));
-        },
+        onSuccess: () => setPending(null),
       });
       return;
     }
@@ -75,7 +69,7 @@ export function OrgSettingsSpacesPage() {
   };
 
   const columns = useSpaceColumns({
-    defaultLabel: t("spaces.default"),
+    defaultLabel: t("models.default"),
     // Only an orphaned space offers them, each to the permission its route checks.
     onConvert: can("spaces:write") ? (id) => setPending({ id, action: "convert" }) : undefined,
     onSweep: can("spaces:delete") ? (id) => setPending({ id, action: "sweep" }) : undefined,
@@ -98,7 +92,7 @@ export function OrgSettingsSpacesPage() {
 
       <DataTable
         tableId="spaces"
-        label={t("spaces.pageTitle")}
+        label={t("common:switcher.workspacesColumn")}
         columns={columns}
         rows={spaces ?? []}
         rowKey={(space) => space.id}
@@ -108,13 +102,20 @@ export function OrgSettingsSpacesPage() {
         isLoading={isLoading}
         failure={error}
         empty={
-          <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
+          <EmptyState
+            message={t("spaces.empty")}
+            hint={t("spaces.emptyHint")}
+            icon={AppWindow}
+            compact
+          >
             <EmptyStateAction action={create} />
           </EmptyState>
         }
       />
 
-      {can("spaces:write") && <SpaceCreateModal />}
+      {newSpace.value !== null && can("spaces:write") && (
+        <SpaceCreateModal onClose={newSpace.close} />
+      )}
 
       <ConfirmModal
         open={pending !== null}

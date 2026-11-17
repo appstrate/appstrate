@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Which package, and which definition of it, a file-explorer read serves —
-// one answer for the files routes, the detail page and MCP `read_skill`.
+// one answer for the files routes, the detail page and MCP `skill://` reads.
 // Authorization (`<type>:read`) stays with each caller.
 
 import type { Context } from "hono";

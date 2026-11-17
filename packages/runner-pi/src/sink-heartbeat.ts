@@ -3,7 +3,7 @@
 /**
  * Runner-side liveness keep-alive.
  *
- * Posts to `POST /api/runs/:runId/events/heartbeat` on a jittered
+ * Posts to `POST /api/runs/:id/events/heartbeat` on a jittered
  * interval using the same Standard-Webhooks HMAC auth as event
  * ingestion — so platform containers (runSecret only, no user
  * principal) and remote CLIs share a single implementation. The server
@@ -30,7 +30,7 @@
  * lockstep after a shared network blip.
  */
 
-import { sign } from "@appstrate/afps-runtime/events";
+import { signFresh } from "@appstrate/afps-runtime/events";
 import { formatLogLine } from "@appstrate/core/log-line";
 
 export interface StartSinkHeartbeatOptions {
@@ -47,10 +47,6 @@ export interface StartSinkHeartbeatOptions {
   readonly jitter?: number;
   /** Low-level HTTP client (testing). Defaults to the global `fetch`. */
   readonly fetch?: typeof fetch;
-  /** Time source (testing). Defaults to `Date.now`. */
-  readonly now?: () => number;
-  /** Event-id generator (testing). Defaults to `crypto.randomUUID`. */
-  readonly generateId?: () => string;
   /**
    * Optional error sink — invoked instead of the default JSON-line
    * stderr writer so the host application can route heartbeat
@@ -98,8 +94,6 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
   const intervalMs = opts.intervalMs ?? 15_000;
   const jitter = opts.jitter ?? 0.15;
   const fetchImpl = opts.fetch ?? fetch;
-  const now = opts.now ?? Date.now;
-  const generateId = opts.generateId ?? (() => crypto.randomUUID());
   const onError = opts.onError ?? defaultErrorSink;
 
   let stopped = false;
@@ -153,9 +147,7 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
     // present the payload differently). `{}` keeps the bytes stable
     // across transports. The server's handler ignores the payload.
     const body = "{}";
-    const msgId = generateId();
-    const timestampSec = Math.floor(now() / 1000);
-    const headers = sign({ msgId, timestampSec, body, secret: opts.runSecret });
+    const headers = signFresh({ body, secret: opts.runSecret });
     // Two ways this request may be cut short, composed into one signal:
     // `attempt` is `stop()`'s handle on an in-flight POST, the timeout is the
     // per-tick deadline above. Nothing reads the response body, so a

@@ -10,20 +10,20 @@
  * spawn.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import {
   remoteIntegrationManifest,
   localIntegrationManifest,
   httpHeaderDelivery,
-  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 
 const INTEG = "@orga/remote-mcp";
 
@@ -72,7 +72,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
       source: "local",
       draftManifest: manifest(withRemote),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     // An api_key connection so resolveDeliveries finds a row and the resolver
     // proceeds to the source-discriminant block.
     await db.insert(integrationConnections).values({
@@ -102,7 +102,6 @@ describe("resolveIntegrationSpawns — remote source", () => {
   it("emits sourceKind=remote with a { url, transport } server spec and drops httpDeliveryAuths", async () => {
     await seed(true);
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -122,7 +121,6 @@ describe("resolveIntegrationSpawns — remote source", () => {
   it("yields no spawn when a remote source omits source.remote.url", async () => {
     await seed(false);
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
@@ -134,13 +132,12 @@ describe("resolveIntegrationSpawns — remote source", () => {
 
 describe("resolveIntegrationSpawns — local source error guards", () => {
   const LOCAL = "@orga/local-integ";
-  const MISSING_SERVER = "@orga/no-such-server";
   let ctx: TestContext;
 
-  function localManifest(serverName: string) {
+  function localManifest() {
     return localIntegrationManifest({
       name: LOCAL,
-      serverName,
+      server: { type: "node", entryPoint: "./server.ts", appstrateRuntime: "bun" },
       version: "0.1.0",
       auths: {
         primary: {
@@ -195,69 +192,139 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("yields no spawn when the referenced mcp-server package does not exist", async () => {
+  it("applies the integration _meta runtime override to the spawn spec server type", async () => {
     await seedPackage({
       id: LOCAL,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: localManifest(MISSING_SERVER),
+      draftManifest: localManifest(),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
+    await seedSpacePackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: localAgent(),
       resolvedConnections: await bindAllConnections(LOCAL),
-    });
-    expect(specs.length).toBe(0);
-  });
-
-  it("applies the mcp-server _meta runtime override to the spawn spec server type", async () => {
-    const SERVER = "@orga/bun-server";
-    await seedPackage({
-      id: LOCAL,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: localManifest(SERVER),
-    });
-    // The mcp-server keeps an MCPB-vocabulary server.type "node" and declares
-    // the real runtime under _meta — the resolver must surface `bun`, not `node`.
-    const serverManifest = mcpServerManifest({
-      name: SERVER,
-      version: "0.1.0",
-      serverType: "node",
-      entryPoint: "./server.ts",
-      appstrateRuntime: "bun",
-    });
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
-    await seedConnection();
-
-    const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      actor: { type: "user", id: ctx.user.id },
-      agentManifest: localAgent(),
-      resolvedConnections: await bindAllConnections(LOCAL),
+      integrationVersions: { [LOCAL]: { source: "version", version: "0.1.0" } },
     });
     expect(specs.length).toBe(1);
+    // The bytes are the integration's own, at the version the run froze.
     expect(specs[0]!.manifest.server).toEqual({
       type: "bun",
       entry_point: "./server.ts",
-      packageId: SERVER,
       version: "0.1.0",
     });
+  });
+});
+
+describe("resolveIntegrationSpawns — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN = "@orga/open-mcp";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  it("yields exactly one connectionless spec, nothing injected", async () => {
+    await seedPackage({
+      id: OPEN,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        type: "integration",
+        schema_version: "0.3",
+        name: OPEN,
+        version: "0.1.0",
+        display_name: "Open",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        tools_policy: { search: {} },
+      } as never,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, OPEN);
+
+    // The cascade binds nothing for it: the snapshot has no key.
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [OPEN]: "^0.1.0" } },
+        integrations_configuration: { [OPEN]: { tools: ["search"], required: true } },
+      },
+      resolvedConnections: {},
+    });
+    expect(dropped).toEqual([]);
+    expect(specs).toEqual([
+      {
+        integrationId: OPEN,
+        namespace: OPEN,
+        sourceKind: "remote",
+        manifest: {
+          name: OPEN,
+          version: "0.1.0",
+          server: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        spawnEnv: {},
+        toolAllowlist: ["search"],
+      },
+    ]);
+  });
+});
+
+describe("resolveIntegrationSpawns — integration bound to the runtime", () => {
+  const PLATFORM = "@appstrate/platform";
+  let ctx: TestContext;
+  let restore: () => void;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+    restore = await installRuntimeBoundSystemPackages();
+  });
+
+  afterEach(() => restore());
+
+  it("emits the platform-endpoint marker in place of the declared URL, active without a space row", async () => {
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [PLATFORM]: "^1.0.0" } },
+        integrations_configuration: { [PLATFORM]: { tools: ["log"] } },
+      },
+      resolvedConnections: {},
+    });
+    expect(dropped).toEqual([]);
+    expect(specs).toEqual([
+      {
+        integrationId: PLATFORM,
+        namespace: PLATFORM,
+        sourceKind: "remote",
+        manifest: {
+          name: PLATFORM,
+          version: "1.0.0",
+          server: { platformEndpoint: true, transport: "streamable-http" },
+        },
+        spawnEnv: {},
+        toolAllowlist: ["log"],
+      },
+    ]);
   });
 });

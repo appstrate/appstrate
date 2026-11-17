@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What to call the agent a run executed.
- *
- * Four fallbacks deep, because a run outlives its agent: the live display name
- * when the agent still exists, the manifest snapshot for an inline run (whose
- * shadow package id `@inline/r-…` means nothing to anyone), the denormalized
- * `agent_name` stamped at INSERT time when the source agent was deleted, and
- * the package id last.
- *
- * It ALWAYS returns a name. A surface that shows the agent in its title drops
- * the COLUMN — it does not blank the name, which is also what the row's
- * accessible label is built from: a blank name would leave every row
- * announcing "Run #42 —".
+ * What to call the agent a run executed. A run outlives its agent, hence the fallbacks: live
+ * display name, inline manifest snapshot, `agent_name` stamped at INSERT, package id.
+ * ALWAYS returns a name (it feeds the row's accessible label); a surface drops the column instead.
  */
 
 import { useTranslation } from "react-i18next";
@@ -22,7 +13,6 @@ import { useAgents } from "./use-packages";
 import { inlineRunDisplayName } from "../lib/run-title";
 
 export interface RunAgentNaming {
-  /** Display name per package id, from the agents the org can see. */
   byPackageId: Map<string, string>;
   /** The single agent every run of this surface belongs to, when it has one. */
   fixed?: string;
@@ -43,12 +33,15 @@ export function resolveRunAgentName(run: EnrichedRun, naming: RunAgentNaming): s
 }
 
 /**
- * `useAgents()` here is not an extra request: it is the same query key every
- * caller of this hook already holds, served from cache.
+ * `fixed`: the one name every run takes (a list of one agent's runs). `spanning`: the runs are
+ * every space's, named from the agents of every space (`useAgents`).
  */
-export function useRunAgentName(fixedAgentName?: string): (run: EnrichedRun) => string {
+export function useRunAgentName({
+  fixed: fixedAgentName,
+  spanning = false,
+}: { fixed?: string; spanning?: boolean } = {}): (run: EnrichedRun) => string {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
+  const { data: agents } = useAgents({ spanning });
 
   const byPackageId = new Map<string, string>();
   if (!fixedAgentName && agents) {

@@ -20,7 +20,6 @@ import {
   SETTINGS_PATH,
   SUCCESS_TOAST,
   closePairingModal,
-  credentialDialog,
   deleteCredential,
   helperRedeem,
   openModelToPersonalKeys,
@@ -81,10 +80,9 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     const { token } = await openPairingModal(page);
     expect(await readStore(page)).not.toBeNull();
 
-    // Hard reload — the modal is addressed by the URL, so it comes back empty;
-    // only the persisted pairing remains. Dismiss it to reach the page.
+    // Hard reload — the modal has no address, so it does not come back;
+    // only the persisted pairing remains.
     await page.reload();
-    await credentialDialog(page).getByRole("button", { name: "Annuler", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Mes clés de modèles" })).toBeVisible({
       timeout: 15_000,
     });

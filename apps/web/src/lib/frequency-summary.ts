@@ -1,22 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A schedule's frequency said as a sentence (« Tous les jours à 3:00 »), in the
- * interface's language. The composer reads back what is being composed with it,
- * and every list and overview says a stored schedule with it, so a schedule reads
- * the same wherever it appears.
- *
- * The times in the sentence are wall-clock times in the schedule's own zone (the
- * scheduler evaluates the expression there): whoever shows the sentence shows the
- * zone with it.
- */
+// A schedule's frequency as a sentence (« Tous les jours à 3:00 »). Times are wall-clock in the
+// schedule's own zone (the scheduler evaluates the expression there): show the zone with it.
 
 import i18n from "../i18n";
 import { type Frequency, type TimeOfDay, WEEK_ORDER, parseCron } from "./cron-frequency";
 
-/** The Intl formatters the sentence and the composer share. */
 export function frequencyFormats(lang: string = i18n.language) {
-  // The time of day as written, in no zone: formatting it in UTC keeps it as is.
+  // Formatting in UTC keeps the time of day as written.
   const time = (at: TimeOfDay) =>
     new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(
       Date.UTC(2000, 0, 1, at.hour, at.minute),
@@ -31,11 +22,7 @@ export function frequencyFormats(lang: string = i18n.language) {
   return { time, weekday, list };
 }
 
-/**
- * The sentence for a composed frequency; `null` for a `custom` expression, which
- * has no sentence and is shown as itself. A weekly frequency with no day yet is
- * the composer's to word.
- */
+/** `null` for a `custom` expression, shown as itself. A weekly frequency with no day yet is the composer's to word. */
 export function describeFrequency(frequency: Frequency): string | null {
   const t = i18n.getFixedT(i18n.language, "agents");
   const format = frequencyFormats();
@@ -70,10 +57,7 @@ export function describeFrequency(frequency: Frequency): string | null {
   }
 }
 
-/**
- * A schedule's recurrence and the zone its times are in: « Tous les jours à 3:00 (UTC) ».
- * An expression with no sentence is said as itself (`isCron`), still with its zone.
- */
+/** « Tous les jours à 3:00 (UTC) ». No sentence: the raw expression (`isCron`), still with its zone. */
 export function describeSchedule(schedule: { cron_expression: string; timezone: string }): {
   text: string;
   isCron: boolean;

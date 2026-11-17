@@ -1,14 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
-import { keysetPaging } from "../lib/keyset-paging";
+import { keysetPaging, pagedQueryKey } from "@appstrate/ui/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
-import { invalidateOrgDetail, invalidatePaths, invalidateRunDetails } from "../lib/query-keys";
-import { useOrgScope } from "./use-org-scope";
+import {
+  fileBlobKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunDetails,
+} from "../lib/query-keys";
+import { useListScope, useOrgScope } from "./use-org-scope";
+import { useCurrentOrgId } from "./use-org";
+import { useCurrentSpaceId } from "./use-current-space";
+import { fileContextHeader, otherSpaceFileContext, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
@@ -25,11 +38,7 @@ export interface FileListFilters {
   enabled?: boolean;
 }
 
-/**
- * List files (gallery + run tab). Org/app headers are passed explicitly so
- * they are part of the React Query key — an org/app switch refetches instead of
- * serving another scope's cached page (per the typed-client convention).
- */
+/** List files (gallery + run tab); scope headers ride in the query key. */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();
   // A run or a conversation shows its files incidentally; neither implies `files:read`.
@@ -53,57 +62,74 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/**
- * The gallery's files, keyset-paged (`startingAfter` = last id seen). The key keeps the
- * `[method, path]` prefix so the write invalidations reach it, and the extra segment keeps it
- * apart from `useFiles`'s plain pages; a refetch re-reads every loaded page.
- */
-export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose"> = {}) {
-  const scope = useOrgScope();
-  const { can } = usePermissions();
-  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
+/** The gallery's (or one run's) files, keyset-paged; `spanning`, every space's the reader reaches. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+export function useFilesPaged(
+  filters: Pick<FileListFilters, "search" | "purpose" | "runId" | "limit"> & {
+    spanning?: boolean;
+  } = {},
+) {
+  const spanning = !!filters.spanning;
+  const header = useOrgScope().header;
+  const scope = useListScope(spanning, usePermissions().can("files:read"));
+  const query = {
+    purpose: filters.purpose,
+    runId: filters.runId,
+    q: filters.search || undefined,
+    limit: filters.limit ?? 25,
+  };
   return useInfiniteQuery({
-    queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
-    queryFn: async ({ pageParam, signal }) => {
-      const { data } = await client.GET("/api/files", {
-        params: { query: { ...query, startingAfter: pageParam }, header: scope.header },
-        signal,
-      });
-      if (!data) throw new Error("empty response");
-      return data;
-    },
+    queryKey: spanning
+      ? pagedQueryKey("/api/orgs/{orgId}/files", {
+          params: { path: { orgId: scope.orgId }, query },
+        })
+      : pagedQueryKey("/api/files", { params: { header, query } }),
+    queryFn: ({ pageParam, signal }) =>
+      fetchFilePage(scope.acrossOrgId, { ...query, startingAfter: pageParam }, header, signal),
     ...keysetPaging,
-    enabled: can("files:read") && scope.enabled,
+    enabled: scope.enabled,
     // The previous result stays on screen while a new search or purpose loads.
     placeholderData: keepPreviousData,
+    refetchInterval: scope.refetchInterval,
   });
 }
 
-/**
- * Fetch a single file's metadata — including a freshly-minted `preview_url`
- * (its signed token is short-lived, so the preview modal refetches on each open
- * rather than reusing a token carried in a list page). The caller mounts the
- * preview only when it is open, so the fetch is scoped to that lifetime.
- */
-export function useFile(id: string) {
-  const scope = useOrgScope();
-  const { can } = usePermissions();
-  return $api.useQuery(
-    "get",
-    "/api/files/{id}",
-    { params: { path: { id }, header: scope.header } },
-    { enabled: can("files:read") && scope.enabled && !!id, staleTime: 0, gcTime: 0 },
-  );
+/** One page of the current space's files, or of every space's of `acrossOrgId`. Exported for its test. */
+export async function fetchFilePage(
+  acrossOrgId: string | null,
+  query: NonNullable<paths["/api/files"]["get"]["parameters"]["query"]>,
+  header: ReturnType<typeof useOrgScope>["header"],
+  signal?: AbortSignal,
+) {
+  const { data } = acrossOrgId
+    ? await client.GET("/api/orgs/{orgId}/files", {
+        params: { path: { orgId: acrossOrgId }, query },
+        signal,
+      })
+    : await client.GET("/api/files", { params: { query, header }, signal });
+  if (!data) throw new Error("empty response");
+  return data;
 }
 
 /**
- * openapi-react-query keys are `[method, path, init]` with the literal spec
- * path — invalidate the list and the single-file paths separately after a
- * write (they live under different path strings), plus the org detail that
- * carries the storage total.
+ * A single file's metadata with a freshly-minted `preview_url` (short-lived signed token): never
+ * cached, refetched on each open. An explicit `context` (a reader link) is asked in ITS space,
+ * which the server judges: the current space's grants do not gate it, and no store changes.
  */
+export function useFile(id: string, context?: FileContext) {
+  const scope = useOrgScope();
+  const { can } = usePermissions();
+  const enabled = !!id && (context !== undefined || (can("files:read") && scope.enabled));
+  return $api.useQuery(
+    "get",
+    "/api/files/{id}",
+    { params: { path: { id }, header: fileContextHeader(context) ?? scope.header } },
+    { enabled, staleTime: 0, gcTime: 0 },
+  );
+}
+
+/** Invalidate the list and single-file paths (different path strings) plus the org detail carrying the storage total. */
 function invalidateFiles(qc: ReturnType<typeof useQueryClient>) {
-  void invalidatePaths(qc, ["/api/files", "/api/files/{id}"]);
+  void invalidatePaths(qc, ["/api/files", "/api/orgs/{orgId}/files", "/api/files/{id}"]);
   void invalidateOrgDetail(qc);
 }
 
@@ -117,12 +143,7 @@ export function useDeleteFile() {
   });
 }
 
-/**
- * Keep ("pin") a file — clear its retention deadline so the expiry GC never
- * sweeps it. Same authorization as delete (creator or `files:delete`).
- * Invalidates the file queries on success so the pinned row reloads without
- * its expiry badge.
- */
+/** Keep ("pin") a file: clears its retention deadline so the expiry GC never sweeps it. Same authorization as delete. */
 export function useKeepFile() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/files/{id}/keep", {
@@ -131,33 +152,28 @@ export function useKeepFile() {
 }
 
 /**
- * Download a file's bytes. Uses the typed client with `parseAs: "blob"` so
- * the org/app scoping headers are injected by the client middleware (a bare
- * anchor navigation cannot send them) and the `307` to a presigned URL is
- * followed transparently by fetch — the same pattern as the package download.
- *
- * Handing the bytes to `downloadOrToast` (and so `triggerBlobDownload`) is what
- * keeps the inert type on this path in particular: the content route echoes the stored `row.mime`,
- * which is uploader-controlled and can be `text/html`.
+ * Download a file's bytes through the typed client (a bare anchor cannot send the scoping
+ * headers; fetch follows the `307` to a presigned URL). `downloadOrToast` keeps the inert type:
+ * the content route echoes the uploader-controlled `row.mime`, which can be `text/html`.
  */
-export function useFileDownload() {
+export function useFileDownload(context?: FileContext) {
   return useCallback(
-    (id: string, name: string) =>
+    // `fileContext`: a row of another space, read in its own (a list spanning spaces).
+    (id: string, name: string, fileContext = context) =>
       downloadOrToast(
-        () => client.GET("/api/files/{id}/content", { params: { path: { id } }, parseAs: "blob" }),
+        () =>
+          client.GET("/api/files/{id}/content", {
+            params: { path: { id }, header: fileContextHeader(fileContext) },
+            parseAs: "blob",
+          }),
         name,
       ),
-    [],
+    [context],
   );
 }
 
-/**
- * Copy a text file's content to the clipboard (the Artifact frame's "copy"):
- * the download's authenticated read, parsed as text, then `useCopyToClipboard`,
- * whose `copied` the caller shows. A failed read is said here; a refused
- * clipboard, there.
- */
-export function useFileTextCopy() {
+/** Copy a text file's content to the clipboard (the Artifact frame's "copy"). A failed read is toasted here; a refused clipboard, by `useCopyToClipboard`. */
+export function useFileTextCopy(context?: FileContext) {
   const { t } = useTranslation("files");
   const { copied, copy } = useCopyToClipboard();
   const copyFile = useCallback(
@@ -165,7 +181,7 @@ export function useFileTextCopy() {
       let text: string;
       try {
         const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
+          params: { path: { id }, header: fileContextHeader(context) },
           parseAs: "text",
         });
         text = data ?? "";
@@ -175,57 +191,49 @@ export function useFileTextCopy() {
       }
       await copy(text);
     },
-    [t, copy],
+    [t, copy, context],
   );
   return { copied, copy: copyFile };
 }
 
+/** Object URLs outlive a navigation: tiles and thumbnails remounting within this window reuse them. */
+const FILE_BLOB_GC_TIME = 5 * 60 * 1000;
+
 /**
- * Authenticated image preview: a stored file's bytes → an object URL for an
- * `<img src>`, revoked on unmount / id change. `undefined` while the bytes are
- * on their way, `null` when there is no preview (no grant, failed read), so a
- * caller draws a placeholder in the image's place first and its own fallback
- * only once the answer is no. Cookie auth alone is not enough — the content
- * route resolves the org/app context from the scoping headers, which the typed
- * client's middleware injects.
- *
- * THE single implementation for every image thumbnail in the app; the chat
- * module receives it through `ChatPage`'s injection seam instead of shipping
- * its own copy.
+ * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, held in
+ * the query cache (keyed by file id) so a remount reuses it instead of re-fetching, and revoked
+ * when the entry is removed (`lib/query-client.ts`). `undefined` while loading, `null` when there
+ * is no preview (no grant, failed read). THE single implementation for image thumbnails; chat
+ * gets it via `ChatPage`'s injection seam.
  */
-export function useFileImageSrc(id: string): string | null | undefined {
-  const [loaded, setLoaded] = useState<{ id: string; src: string | null } | null>(null);
+export function useFileImageSrc(id: string, spaceId?: string): string | null | undefined {
+  const scope = useOrgScope();
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
   const readsFiles = usePermissions().can("files:read");
-  useEffect(() => {
-    if (!readsFiles) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void (async () => {
-      try {
-        const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
-          parseAs: "blob",
-        });
-        // No await between this check and `createObjectURL`, so a cleanup that
-        // has already run can never miss the URL it would have to revoke.
-        if (cancelled) return;
-        if (!data) {
-          setLoaded({ id, src: null });
-          return;
-        }
-        objectUrl = URL.createObjectURL(data);
-        setLoaded({ id, src: objectUrl });
-      } catch {
-        // Fetch failure (403 on another member's upload, network) → no preview;
-        // it is decorative.
-        if (!cancelled) setLoaded({ id, src: null });
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [id, readsFiles]);
-  if (!readsFiles) return null;
-  return loaded?.id === id ? loaded.src : undefined;
+  // A file of another space (a list spanning spaces) is read in its own, which the server judges.
+  const elsewhere = otherSpaceFileContext(spaceId, orgId, currentSpaceId);
+  const header = fileContextHeader(elsewhere) ?? scope.header;
+  const query = useQuery({
+    queryKey: fileBlobKeys.detail(id, header),
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const { data } = await client.GET("/api/files/{id}/content", {
+        params: { path: { id }, header },
+        parseAs: "blob",
+        signal,
+      });
+      // A transport can finish after cache removal, even when it ignores cancellation.
+      signal.throwIfAborted();
+      return data ? URL.createObjectURL(data) : null;
+    },
+    enabled: !!elsewhere || (readsFiles && scope.enabled),
+    // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
+    // Only leaving the cache frees it (`lib/query-client.ts`).
+    staleTime: Infinity,
+    gcTime: FILE_BLOB_GC_TIME,
+    retry: false,
+  });
+  // Decorative failures have no preview, but remain errors so reopening retries them.
+  if ((!elsewhere && !readsFiles) || query.isError) return null;
+  return query.data;
 }

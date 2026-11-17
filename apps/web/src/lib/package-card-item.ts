@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The one row shape every package collection draws (cards and table alike),
- * and the builders that make it from what each list endpoint returns. A
- * surface that shows an agent, a skill or an MCP server builds its row here,
- * so the dashboard, the index pages and « Utilisé par » never map it by hand.
- */
+// The one row shape every package collection draws (cards and table), and its builders.
 
 import type { ReactNode } from "react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -13,6 +8,10 @@ import type { AgentListItem } from "@appstrate/shared-types";
 
 export interface CardItem {
   id: string;
+  /** Every space whose index lists it (`space_ids`): where its actions may act. Its link opens in the current one when listed there, else enters the first (`rowSpace`). Absent off an index (the catalogue). */
+  spaceIds?: string[];
+  /** The package's home space when the reader reaches it, `null` when withheld; undefined off an index (the catalogue). */
+  homeSpaceId?: string | null;
   displayName: string;
   description?: string | null;
   type: PackageType;
@@ -27,20 +26,21 @@ export interface CardItem {
   autoInstalled?: boolean;
   /** A tile drawn left of the title, instead of the one the type and identity give. */
   icon?: ReactNode;
-  /** An agent's chosen icon and colour: its identity tile, in the cards and the table alike. */
+  /** An agent's chosen icon and colour. */
   identity?: { icon?: string | null; color?: string | null };
-  /** An integration's logo (its manifest `icon`), next to its name. */
+  /** An integration's logo (its manifest `icon`). */
   logo?: string;
-  /** The card's state, top right: what a browsing reader looks for first. */
+  /** The card's state, top right. */
   status?: ReactNode;
-  /** One muted line under the description: who provides it, what it carries. */
+  /** One muted line under the description. */
   meta?: ReactNode;
 }
 
-/** An agent of the index (`useAgents`), with its unread runs when the surface counts them. */
-export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardItem {
+export function agentCardItem(agent: AgentListItem): CardItem {
   return {
     id: agent.id,
+    spaceIds: agent.space_ids,
+    homeSpaceId: agent.home_space_id,
     displayName: agent.display_name ?? agent.id,
     description: agent.description ?? null,
     type: "agent",
@@ -48,7 +48,7 @@ export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardI
     version: agent.version,
     runningRuns: agent.running_runs,
     keywords: agent.keywords,
-    unreadCount,
+    unreadCount: agent.unread_count,
     identity: { icon: agent.icon, color: agent.color },
   };
 }
@@ -56,6 +56,8 @@ export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardI
 /** What every package index row (`usePackageList`) carries, whatever its type. */
 interface PackageIndexRow {
   id: string;
+  space_ids: string[];
+  home_space_id?: string | null;
   name?: string | null;
   description?: string | null;
   source?: "system" | "local";
@@ -70,6 +72,8 @@ interface PackageIndexRow {
 export function packageCardItem(row: PackageIndexRow, type: PackageType): CardItem {
   return {
     id: row.id,
+    spaceIds: row.space_ids,
+    homeSpaceId: row.home_space_id,
     displayName: row.name || row.id,
     description: row.description ?? null,
     type,

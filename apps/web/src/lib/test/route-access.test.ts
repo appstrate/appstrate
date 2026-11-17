@@ -43,15 +43,16 @@ describe("route declarations", () => {
     "components/org-switcher.tsx",
     "components/notification-bell.tsx",
     "components/nav-user.tsx",
-    "components/app-sidebar.tsx",
-    "components/shell-frame.tsx",
+    "components/app-shell.tsx",
     "components/product-tabs.tsx",
     "components/shell-breadcrumb.tsx",
   ].map((file) => ({ file, text: source(`../../${file}`) }));
   /** Routes outside `MainLayout`, which no declaration covers. */
   const OUTSIDE_MAIN_LAYOUT = new Set(["/onboarding/create"]);
   const links = (text: string) => [...text.matchAll(/\bto(?:=|: )"([^"]+)"/g)].map((m) => m[1]!);
-  const reached = (text: string) => [...text.matchAll(/canReach\("([^"]+)"\)/g)].map((m) => m[1]!);
+  /** A route gated by its declaration: `canReach`, or `useSpaceAction`, which reads it per space in « Tous les espaces ». */
+  const reached = (text: string) =>
+    [...text.matchAll(/(?:canReach\(|useSpaceAction\(\{ route: )"([^"]+)"/g)].map((m) => m[1]!);
 
   it("points every shell link at a declared route", () => {
     const targets = SHELL.flatMap(({ text }) => [
@@ -65,12 +66,11 @@ describe("route declarations", () => {
     expect([...new Set(targets)].sort()).toEqual([
       "/",
       "/agents",
-      "/agents/:scope/:name/runs/:runId",
       "/catalogue",
-      "/catalogue/:reading/:type",
       "/chat",
       "/files",
       "/integrations",
+      "/onboarding/create",
       "/org-settings",
       "/preferences",
       "/runs",
@@ -152,6 +152,16 @@ describe("routeVerdict", () => {
   });
 });
 
+describe("file reader route", () => {
+  it("opens a reader link whatever the current space grants: the link's space judges the file", () => {
+    const none = () => false;
+    const reader = routeOf("/files/file_1?org=org_1&space=spc_1");
+    expect(reader).toBe("/files/:fileId");
+    expect(routeVerdict(reader!, none, {}, false)).toBe("granted");
+    expect(routeVerdict("/files", none, {}, false)).toBe("denied");
+  });
+});
+
 describe("overlay paths", () => {
   it("are the overlay prefixes, segment by segment", () => {
     expect(isOverlayPath("/org-settings")).toBe(true);
@@ -172,7 +182,13 @@ describe("overlay paths", () => {
 
   it("answer an unknown address under every overlay inside that overlay", () => {
     for (const prefix of OVERLAY_PREFIXES) {
-      expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
+      // One segment under a page that takes a parameter there (`/catalogue/:type`) is that
+      // page's to answer; anywhere else, and any deeper, it is the catch-all's.
+      const param = Object.keys(ROUTE_ACCESS).find((path) =>
+        new RegExp(`^${prefix}/:[^/]+$`).test(path),
+      );
+      expect(matched(`${prefix}/no-such-page`)).toBe(param ?? `${prefix}/*`);
+      expect(matched(`${prefix}/no-such/page`)).toBe(`${prefix}/*`);
     }
     // Below a declared page too: no prefix of it stands in.
     expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
@@ -183,7 +199,7 @@ describe("overlay paths", () => {
   it("leave every declared overlay page ahead of the not-found catch-all", () => {
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
-    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
+    expect(matched("/catalogue/agent")).toBe("/catalogue/:type");
     expect(matched("/preferences/x")).toBe("/preferences/*");
   });
 });
@@ -194,13 +210,13 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/agents/new")).toBe("/agents/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",
     );
-    expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/@acme/gmail#settings")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/new/mcp?package=@acme/gmail")).toBe("/integrations/new/mcp");
   });
 
   it("covers no URL outside the declarations", () => {

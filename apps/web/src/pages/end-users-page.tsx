@@ -4,7 +4,6 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
 import {
   useDeleteEndUser,
   useEndUser,
@@ -15,14 +14,14 @@ import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
-import { useModalParam } from "../hooks/use-modal-param";
+import { useUrlModal } from "../hooks/use-url-modal";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";
-import { columnMenu, visibleColumns } from "../lib/column-visibility";
-import { ListToolbar } from "../components/list-toolbar";
+import { KeysetListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import type { MenuAction } from "../lib/menu-action";
 import { useColumnVisibility } from "../stores/column-visibility-store";
@@ -30,7 +29,8 @@ import { endUserLabel } from "../lib/members";
 import { useEndUserColumns } from "./end-user-columns";
 
 const END_USER_PARAM = "endUser";
-const EDIT_END_USER_PARAM = "editEndUser";
+/** The search is the page's only list parameter; `?endUser=` is the open detail, not a filter. */
+const NO_FILTERS: readonly string[] = [];
 
 export function EndUsersPage() {
   // Remount on space switch so the loaded pages (and the rest of the page state)
@@ -45,19 +45,20 @@ function EndUsersPageContent() {
   const canWrite = can("end-users:write");
   const spaceId = useCurrentSpaceId();
 
-  const [search, setSearch] = useState("");
-  const newEndUser = useModalParam("newEndUser");
+  const list = useListParams(NO_FILTERS);
+  const search = list.search;
+  const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
   const query = useDebouncedValue(search).trim();
 
-  const { data, isLoading, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useEndUsersPaged({ search: query });
+  const endUsersQuery = useEndUsersPaged({ search: query });
+  const { data, isLoading, error } = endUsersQuery;
   const endUsers = useMemo(() => data?.pages.flatMap((page) => page.data) ?? [], [data]);
-  // The detail and the edition are two addresses of one modal: `?endUser=<id>`
-  // shows, `?editEndUser=<id>` edits, and switching hands one over to the other.
-  const detailParam = useModalParam(END_USER_PARAM);
-  const editParam = useModalParam(EDIT_END_USER_PARAM);
-  const selectedUserId = editParam.value ?? detailParam.value;
+  // The detail has an address (`?endUser=<id>`); the edition is a state of the page, and
+  // switching hands one over to the other.
+  const detailParam = useUrlModal(END_USER_PARAM);
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+  const selectedUserId = editUserId ?? detailParam.value;
   const {
     data: selectedUserDetail,
     isLoading: selectedUserLoading,
@@ -69,23 +70,22 @@ function EndUsersPageContent() {
     ? (selectedUserDetail ?? endUsers.find((user) => user.id === selectedUserId) ?? null)
     : null;
 
-  const closeUser = editParam.value !== null ? editParam.close : detailParam.close;
+  const closeUser = editUserId !== null ? () => setEditUserId(null) : detailParam.close;
 
   const allColumns = useEndUserColumns({
     deletingUserId: deleteMutation.isPending
       ? (deleteMutation.variables?.params.path.id ?? null)
       : null,
-    onEdit: (user) => editParam.open(user.id),
+    onEdit: (user) => setEditUserId(user.id),
     onDelete: setPendingDelete,
   });
-  const visibility = useColumnVisibility("end-users");
-  const columns = visibleColumns(allColumns, visibility.hidden);
+  const { columns, menu } = useColumnVisibility("end-users", allColumns);
 
   const create: MenuAction = {
     id: "create",
     icon: Plus,
     label: t("spaces.newEndUser"),
-    onSelect: () => newEndUser.open(),
+    onSelect: () => setCreating(true),
     hidden: !canWrite,
   };
 
@@ -100,10 +100,10 @@ function EndUsersPageContent() {
       <ListToolbar
         search={{
           value: search,
-          onChange: setSearch,
+          onChange: list.setSearch,
           placeholder: t("spaces.searchEndUsers"),
         }}
-        columns={columnMenu(allColumns, visibility)}
+        columns={menu}
       />
 
       <DataTable
@@ -122,7 +122,7 @@ function EndUsersPageContent() {
         failure={error}
         empty={
           query ? (
-            <NoMatchState message={t("spaces.noMatchingEndUsers")} />
+            <NoMatchState message={t("spaces.noMatchingEndUsers")} onReset={list.reset} />
           ) : (
             <EmptyState
               message={t("spaces.noEndUsers")}
@@ -136,32 +136,33 @@ function EndUsersPageContent() {
         }
       />
 
-      {hasNextPage && !isLoading && !error && (
-        <Button
-          variant="outline"
-          pending={isFetchingNextPage}
-          onClick={() => void fetchNextPage()}
-          className="mt-3 w-full"
-        >
-          {t("spaces.loadMore")}
-        </Button>
-      )}
+      <KeysetListFooter
+        query={endUsersQuery}
+        loaded={endUsers.length}
+        ready={!isLoading && !error}
+      />
 
-      {canWrite && newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
+      {canWrite && creating && <EndUserCreateModal onClose={() => setCreating(false)} />}
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal
           key={selectedUserId}
           onClose={closeUser}
           endUser={selectedUser}
-          editing={canWrite && editParam.value !== null}
-          onEdit={() => editParam.open(selectedUserId, END_USER_PARAM)}
-          onShowDetail={() => detailParam.open(selectedUserId, EDIT_END_USER_PARAM)}
+          editing={canWrite && editUserId !== null}
+          onEdit={() => {
+            detailParam.close();
+            setEditUserId(selectedUserId);
+          }}
+          onShowDetail={() => {
+            setEditUserId(null);
+            detailParam.open(selectedUserId);
+          }}
         />
       )}
 
       {selectedUserId && !selectedUser && (
-        <Modal open onClose={closeUser} title={t("spaces.endUserDetail")}>
+        <Modal onClose={closeUser} title={t("spaces.endUserDetail")}>
           {selectedUserLoading ? (
             <SettingsSkeleton />
           ) : (

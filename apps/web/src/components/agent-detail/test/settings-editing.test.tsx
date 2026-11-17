@@ -43,8 +43,10 @@ const VERSIONS = { canRestore: false, canDelete: false };
 function agent(over: Partial<AgentDetail> = {}): Versioned<AgentDetail> {
   return {
     id: "@acme/worker",
+    icon: null,
+    color: null,
     source: "local",
-    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+    dependencies: { skills: [], integrations: [] },
     input: {
       schema: { type: "object", properties: { current_field: { type: "string" } } },
       values: {},
@@ -128,15 +130,9 @@ describe("agent definition editing", () => {
 
 describe("skill definition editing", () => {
   const renderSkill = (detail: Versioned<OrgPackageItemDetail>) =>
-    render(
-      <PackageSettingsView
-        type="skill"
-        packageId={detail.id}
-        detail={detail}
-        versions={VERSIONS}
-      />,
-      { initialEntries: ["/skills/@acme/style?packageSettings=versions#settings"] },
-    );
+    render(<PackageSettingsView packageId={detail.id} detail={detail} versions={VERSIONS} />, {
+      initialEntries: ["/skills/@acme/style?packageSettings=versions#settings"],
+    });
 
   it("offers Identité to a home writer", () => {
     expect(

@@ -23,11 +23,11 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 
-import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/driveish";
@@ -106,10 +106,9 @@ async function seedAndResolve(
     source: "local",
     draftManifest: integManifest(opts),
   });
-  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+  await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   await seedConnection(ctx);
   const { specs } = await resolveIntegrationSpawns({
-    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(opts.tools),
@@ -219,10 +218,9 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, longAuthKey);
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([canonicalCall], longAuthKey),
@@ -270,10 +268,9 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, longAuthKey);
     const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([legacyCall], longAuthKey),

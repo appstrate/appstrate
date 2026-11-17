@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import { StringListInput } from "./string-list-input";
+import { StringListInput } from "../app-ui/string-list-input";
 
 /** A tool's `tools_policy.<tool>.required_scopes`: one scope list per auth. */
 export function RequiredScopesField({
@@ -16,8 +16,8 @@ export function RequiredScopesField({
 }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="space-y-2">
-      <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
       <p className="text-muted-foreground text-xs">
         {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
       </p>

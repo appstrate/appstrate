@@ -315,7 +315,9 @@ test.describe("View as role", () => {
     // Proof the persona travelled: the server marks every response it answered
     // under one, and only those.
     const previewedSpaces = page.waitForResponse(
-      (r) => r.url().includes("/api/spaces") && r.request().method() === "GET",
+      // Exactly the listing: `/api/spaces/{id}/library`, still in flight from the
+      // owner's load, would otherwise answer first, unmarked.
+      (r) => new URL(r.url()).pathname === "/api/spaces" && r.request().method() === "GET",
     );
     await page.goto(agentUrl);
     expect((await previewedSpaces).headers()["x-view-as-active"]).toBe("1");

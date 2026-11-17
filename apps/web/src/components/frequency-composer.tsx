@@ -1,23 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * When a schedule fires, composed as a phrase instead of typed as cron: a
- * rhythm (every N minutes or hours, every day, some weekdays, a day of the
- * month), its time, its zone, and the raw expression for anything else. What
- * was composed is always read back: a sentence and the next three fires,
- * computed by the parser the scheduler itself uses.
- *
- * Seeded by the expression: one the composer can say reopens as its phrase,
- * any other one as itself (`parseCron`). It reports `null` while what is
- * composed is incomplete or invalid (a week with no day, a bad expression).
+ * When a schedule fires, composed as a phrase instead of typed as cron (rhythm, time,
+ * zone, raw expression for anything else) and read back as a sentence plus the next three
+ * fires, from the scheduler's own parser. Seeded by the expression (`parseCron`); reports
+ * `null` while the composition is incomplete or invalid.
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Field, FieldDescription, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import {
   type Frequency,
@@ -41,7 +37,7 @@ const KIND_LABELS: Record<FrequencyKind, string> = {
   daily: "schedule.frequency.kind.daily",
   weekly: "schedule.frequency.kind.weekly",
   monthly: "schedule.frequency.kind.monthly",
-  custom: "schedule.frequency.kind.custom",
+  custom: "schedule.cronLabel",
 };
 const UNIT_LABELS = {
   minutes: "schedule.frequency.unit.minutes",
@@ -187,10 +183,8 @@ export function FrequencyComposer({
 
   return (
     <FieldGroup className="gap-5">
-      <Field>
-        <Label htmlFor="frequency-kind">{t("schedule.frequency.repeat")}</Label>
+      <FormItem id="frequency-kind" label={t("schedule.frequency.repeat")}>
         <OptionSelect
-          id="frequency-kind"
           value={frequency.kind}
           onValueChange={(kind) => update(switchKind(frequency, kind as FrequencyKind))}
           options={Object.entries(KIND_LABELS).map(([kind, label]) => ({
@@ -198,7 +192,7 @@ export function FrequencyComposer({
             label: t(label),
           }))}
         />
-      </Field>
+      </FormItem>
 
       {(frequency.kind === "minutes" || frequency.kind === "hours") && (
         <Field>
@@ -302,10 +296,9 @@ export function FrequencyComposer({
         </Field>
       )}
 
-      <Field>
-        <Label htmlFor="frequency-timezone">{t("schedule.timezone")}</Label>
-        <TimezoneSelect id="frequency-timezone" value={timezone} onChange={onTimezoneChange} />
-      </Field>
+      <FormItem id="frequency-timezone" label={t("schedule.timezone")}>
+        <TimezoneSelect value={timezone} onChange={onTimezoneChange} />
+      </FormItem>
 
       {/* What was composed, read back. */}
       <div

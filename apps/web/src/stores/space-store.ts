@@ -13,7 +13,6 @@ export function rememberedSpaceKey(userId: string, orgId: string): string {
   return `${userId}:${orgId}`;
 }
 
-/** Blocked storage keeps the choice for this tab only. */
 const persistedRemembered = persistedJson<Record<string, string>>(STORAGE_KEY, (value) =>
   isPlainObject(value) ? (value as Record<string, string>) : {},
 );
@@ -27,11 +26,7 @@ function writeRemembered(change: (map: Record<string, string>) => void): Record<
 }
 
 interface SpaceState {
-  /**
-   * The space every request is scoped to. Starts null: the persisted id may
-   * name a space the caller can no longer enter (removed, deleted, a persona
-   * without it), so only `useSpaceResolver` promotes it, once proven enterable.
-   */
+  /** The space every request is scoped to. Starts null: only `useSpaceResolver` promotes a remembered id once proven enterable. */
   id: string | null;
   /** Last space per account and org ({@link rememberedSpaceKey}): candidates, never a scope. */
   remembered: Record<string, string>;

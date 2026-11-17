@@ -33,12 +33,7 @@ export function getVersionRedirect(params: {
   return { isHistoricalVersion: !isLatest };
 }
 
-/**
- * Deterministic JSON serialization with recursively sorted object keys, so
- * two structurally-equal manifests that differ only in key insertion order
- * compare equal. Plain `JSON.stringify` is order-sensitive and would report a
- * spurious diff after a round-trip that reorders keys.
- */
+/** JSON with recursively sorted keys: plain `JSON.stringify` is order-sensitive and reports a spurious diff after a key-reordering round-trip. */
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(",")}]`;
@@ -52,7 +47,6 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Check whether there are real content differences between active state and a version. */
 export function hasActualChanges(
   latestVersion: VersionDetailResponse | undefined,
   currentManifest: Record<string, unknown> | undefined,

@@ -38,7 +38,10 @@ export const openApiInfo = {
       name: "Library",
       description: "Consolidated package catalog across an organization's spaces (UI-oriented).",
     },
-    { name: "Notifications", description: "Run notification management" },
+    {
+      name: "Notifications",
+      description: "The recipient's notification feed (the dashboard bell)",
+    },
     { name: "Organizations", description: "Organization and member management" },
     { name: "Profile", description: "User profile management" },
     { name: "Realtime", description: "Server-Sent Events (SSE) for real-time updates" },
@@ -47,6 +50,14 @@ export const openApiInfo = {
     { name: "Health", description: "Health check" },
     { name: "Internal", description: "Container-to-host internal routes" },
     { name: "Models", description: "LLM model configuration" },
+    {
+      name: "Model Provider Credentials",
+      description: "Connect model providers (API key or OAuth subscription) to an organization",
+    },
+    {
+      name: "Integrations",
+      description: "Connect, list and disconnect the third-party services an agent can use",
+    },
     { name: "Proxies", description: "Org-level HTTP proxy configuration" },
     { name: "Meta", description: "API documentation and specification" },
     { name: "Spaces", description: "Space management for headless API" },

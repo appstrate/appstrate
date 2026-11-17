@@ -45,9 +45,9 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
  * `integrations` — which SaaS the agent talks to — answers EVERY caller. A
  * runner holds `integrations:read`/`connect`/`disconnect` precisely so it can
  * hook its own accounts up to the agents it launches, and the run preflight
- * already names the missing ids back to it (`connection_missing`). `skills` and
- * `mcp_servers` are the composition — what the agent is built FROM — so a
- * summary read omits them, and with them the skills catalog lookup, a scope an
+ * already names the missing ids back to it (`connection_missing`). `skills` is
+ * the composition — what the agent is built FROM — so a
+ * summary read omits it, and with it the skills catalog lookup, a scope an
  * `agents:run`-only caller does not hold. An omitted group is absent, never an
  * empty array: `skills: []` would say the agent declares none, which is false.
  *
@@ -115,14 +115,6 @@ async function buildDependencyGroups(
   }));
   return {
     skills: skillDeps,
-    // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
-    // can declare these via an imported manifest even though the dashboard
-    // editor doesn't surface them — return them so the detail response is a
-    // faithful projection of the manifest.
-    mcp_servers: Object.entries(
-      (m as { dependencies?: { mcp_servers?: Record<string, string> } }).dependencies
-        ?.mcp_servers ?? {},
-    ).map(([id, version]) => ({ id, version })),
     integrations,
   };
 }

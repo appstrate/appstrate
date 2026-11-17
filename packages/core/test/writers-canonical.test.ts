@@ -25,7 +25,7 @@
  *
  * Banned non-canonical camelCase keys:
  *   displayName, schemaVersion, fileConstraints, uiHints, propertyOrder,
- *   maxSize, iconUrl, providersConfiguration, runtimeTools
+ *   maxSize, iconUrl, providersConfiguration
  */
 
 import { describe, it, expect } from "bun:test";
@@ -44,7 +44,6 @@ const BANNED_CAMEL_KEYS = [
   "maxSize",
   "iconUrl",
   "providersConfiguration",
-  "runtimeTools",
 ] as const;
 
 interface Violation {
@@ -133,10 +132,8 @@ describe("banned-key walker (test infrastructure)", () => {
       },
       dependencies: {
         skills: { "@x/s": "^1.0.0" },
-        mcp_servers: { "@x/m": "^1.0.0" },
         integrations: { "@x/i": "^1.0.0" },
       },
-      runtime_tools: ["output"],
     });
     expect(v).toEqual([]);
   });

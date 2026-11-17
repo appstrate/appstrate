@@ -5,14 +5,26 @@
   "name": "@appstrate/bun-toolkit",
   "version": "1.0.0",
   "display_name": "Bun Toolkit",
-  "description": "Reference integration referencing a separate Bun mcp-server package. It declares an api_key auth with delivery.http so the sidecar's MITM proxy injects X-Toolkit-Token on the upstream-calling tool — proving credential injection works without the server code ever reading the secret. A generic api_call tool is attached alongside the native tools.",
+  "description": "Reference integration carrying its own Bun MCP server. It declares an api_key auth with delivery.http so the sidecar's MITM proxy injects X-Toolkit-Token on the upstream-calling tool — proving credential injection works without the server code ever reading the secret. A generic api_call tool is attached alongside the native tools.",
   "license": "Apache-2.0",
   "keywords": ["bun", "reference", "test", "toolkit"],
   "source": {
     "kind": "local",
     "server": {
-      "name": "@appstrate/bun-toolkit-server",
-      "version": "^1.0.0"
+      "type": "node",
+      "entry_point": "./server.ts",
+      "mcp_config": { "command": "bun", "args": ["./server.ts"] },
+      "tools": [
+        { "name": "kv_set" },
+        { "name": "kv_get" },
+        { "name": "kv_list" },
+        { "name": "hash" },
+        { "name": "password_hash" },
+        { "name": "password_verify" },
+        { "name": "uuid" },
+        { "name": "system_info" },
+        { "name": "fetch_echo" }
+      ]
     }
   },
   "auths": {

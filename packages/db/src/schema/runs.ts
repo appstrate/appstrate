@@ -21,6 +21,7 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { ModelErrorCategory } from "@appstrate/core/model-error";
 import type { PricingStatus } from "../pricing-status.ts";
 import {
   runStatusEnum,
@@ -126,18 +127,18 @@ export const runs = pgTable(
     // a plain nullable ADD COLUMN (no default backfill).
     artifacts: jsonb("artifacts").$type<RunArtifactsSummary>(),
     checkpoint: jsonb("checkpoint"),
-    // `error` stores the human-readable `RunError.message` only. The
-    // runtime `RunError` shape (`code`, `message`, `stack`, `context`,
-    // `timestamp`) IS round-tripped at the runtime/runner boundary —
-    // sinks observing run-event ingestion see the full structured
-    // payload — but only `message` is persisted on the row today. The
-    // structured fields are intentionally dropped at write time
-    // (`apps/api/src/services/run-event-ingestion.ts` extracts
-    // `result.error?.message`); widening this column to `jsonb` is
-    // tracked as a follow-up so the migration + OpenAPI bump + frontend
-    // reader update can land together. Until then, OpenAPI's
-    // `Run.error: string` reflects what the database actually exposes.
+    // `error` stores the human-readable `RunError.message`, verbatim: the run
+    // surface is a debugging surface. What a READER branches on is the three
+    // `model_error_*` columns below, never this text.
     error: text("error"),
+    // A run that failed on a model call (the runner's `adapter_error`), read
+    // once at finalize by `describeModelFailure` (`@appstrate/core/model-error`):
+    // its class, the provider's HTTP status and the provider's own sentence,
+    // each when the failure text carried one. NULL on every other run, and on
+    // runs finalized before these columns existed (nothing was recorded).
+    modelErrorCategory: text("model_error_category").$type<ModelErrorCategory>(),
+    modelErrorStatus: integer("model_error_status"),
+    modelErrorMessage: text("model_error_message"),
     // Snake-case keys: matches the wire format produced by every runner
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
     // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
@@ -200,8 +201,11 @@ export const runs = pgTable(
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot AND my
     // Gmail-Perso"). Shape: { "@scope/integration": ["<connection_id>", ...] }.
-    // Loses to an admin pin and an enforced org default. Resolution snapshot
-    // lives in resolvedConnections below. Flat (no per-authKey nesting): the
+    // Under an admin pin or an enforced org default the set that layer imposes
+    // is a floor, bound whole: the override only adds to it (`[]` adds
+    // nothing), where the admin pin allows additions; elsewhere an id outside
+    // the floor is `override_outranked`. Resolution snapshot lives in
+    // resolvedConnections below. Flat (no per-authKey nesting): the
     // chosen connections carry their own authKey.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Snapshot of the resolver output at run start — which connections were
@@ -439,6 +443,17 @@ export const runs = pgTable(
       "runs_cost_pricing_status_valid",
       sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
     ),
+    // The persisted model-failure vocabulary (`MODEL_ERROR_CATEGORIES`); the
+    // status and sentence only ever qualify a classified failure.
+    check(
+      "runs_model_error_category_valid",
+      sql`model_error_category IN ('credential_unavailable', 'rate_limited', 'upstream_unavailable', 'invalid_request', 'unknown')`,
+    ),
+    check(
+      "runs_model_error_detail_has_category",
+      sql`model_error_category IS NOT NULL OR (model_error_status IS NULL AND model_error_message IS NULL)`,
+    ),
+    check("runs_model_error_status_http", sql`model_error_status BETWEEN 100 AND 599`),
     // The proxy serves the run's pinned model, never one the request names.
     check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
     // A remote runner brings its own model and credentials.
@@ -831,8 +846,8 @@ export const schedules = pgTable(
     versionOverride: text("version_override"),
     // Per-schedule integration connection overrides — frozen at schedule
     // creation/edit (mirrors `dependencyOverrides` on runs). Same shape as
-    // `runs.connectionOverrides`. Loses to an admin pin and an enforced org
-    // default at fire time.
+    // `runs.connectionOverrides`, and the same floor rule at fire time: it
+    // only adds to an admin pin's or an enforced org default's set.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Per-schedule dependency version overrides — frozen at schedule
     // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`.

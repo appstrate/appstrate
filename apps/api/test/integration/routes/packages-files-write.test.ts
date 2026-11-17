@@ -16,7 +16,10 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
-import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {
+  apiIntegrationManifest,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import {
   seedApiKey,
   seedSpaceMember,
@@ -171,15 +174,13 @@ describe("PATCH /api/packages/{type}/{scope}/{name}", () => {
   });
 
   describe("the shared draft contract", () => {
-    for (const type of ["agent", "skill", "integration", "mcp-server"] as const) {
+    for (const type of ["agent", "skill", "integration"] as const) {
       it(`saves a ${type}'s manifest and files together with one lock increment`, async () => {
         const id = type === "skill" ? SKILL_ID : `@fw/edit-${type}`;
         const manifest: Record<string, unknown> =
-          type === "mcp-server"
-            ? mcpServerManifest({ name: id })
-            : type === "integration"
-              ? { ...apiIntegrationManifest({ name: id, auths: { api_key: { type: "api_key" } } }) }
-              : { ...skillManifest(), name: id, type };
+          type === "integration"
+            ? { ...apiIntegrationManifest({ name: id, auths: { api_key: { type: "api_key" } } }) }
+            : { ...skillManifest(), name: id, type };
         const folder = CONFIG_BY_TYPE[type].storageFolder;
         if (type !== "skill") {
           await seedPackage({
@@ -192,17 +193,7 @@ describe("PATCH /api/packages/{type}/{scope}/{name}", () => {
           });
           await seedPackageShare(ctx.defaultSpaceId, id);
           await seedSpacePackage(ctx.defaultSpaceId, id);
-          await uploadPackageFiles(
-            folder,
-            ctx.orgId,
-            id,
-            type === "mcp-server"
-              ? {
-                  "main.js": encoder.encode("export {};"),
-                  "manifest.json": encoder.encode(JSON.stringify(manifest)),
-                }
-              : {},
-          );
+          await uploadPackageFiles(folder, ctx.orgId, id, {});
         }
         const before = await packageRow(id);
         const res = await saveFiles([{ op: "write", path: "notes.md", text: "Shared editor" }], {
@@ -218,19 +209,25 @@ describe("PATCH /api/packages/{type}/{scope}/{name}", () => {
       });
     }
 
-    it("refuses a broken MCP entry point but accepts its rename with the matching manifest", async () => {
+    it("refuses a broken local-server entry point but accepts its rename with the matching manifest", async () => {
       const id = "@fw/server";
-      const manifest = mcpServerManifest({ name: id });
+      const local = (entryPoint: string) =>
+        localIntegrationManifest({
+          name: id,
+          server: { entryPoint },
+          auths: { api_key: { type: "api_key" } },
+        }) as unknown as Record<string, unknown>;
+      const manifest = local("main.js");
       await seedPackage({
         id,
         orgId: ctx.orgId,
-        type: "mcp-server",
+        type: "integration",
         createdBy: ctx.user.id,
         draftManifest: manifest,
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
       await seedSpacePackage(ctx.defaultSpaceId, id);
-      await uploadPackageFiles("mcp-servers", ctx.orgId, id, {
+      await uploadPackageFiles("integrations", ctx.orgId, id, {
         "main.js": encoder.encode("export {};"),
         "manifest.json": encoder.encode(JSON.stringify(manifest)),
       });
@@ -244,7 +241,7 @@ describe("PATCH /api/packages/{type}/{scope}/{name}", () => {
       expect(decoder.decode(await fileBytes("main.js", id))).toBe("export {};");
       const accepted = await saveFiles([{ op: "move", from: "main.js", to: "next.js" }], {
         id,
-        manifest: mcpServerManifest({ name: id, entryPoint: "next.js" }),
+        manifest: local("next.js"),
       });
       expect(accepted.status).toBe(200);
       expect(decoder.decode(await fileBytes("next.js", id))).toBe("export {};");

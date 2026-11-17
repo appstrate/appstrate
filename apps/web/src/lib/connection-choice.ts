@@ -7,15 +7,9 @@ import {
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
 import { withConnectionOverride, type ConnectionSet } from "./connection-set";
-import {
-  type ActorValue,
-  type RunOverridesValue,
-  type ScheduleUpdateBody,
-  sameActor,
-} from "./schedule-payload";
+import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
-/** The integration package id an `integrations.{packageId}` error field names. */
 export function integrationIdOfField(field: string): string {
   return field.slice("integrations.".length);
 }
@@ -23,34 +17,61 @@ export function integrationIdOfField(field: string): string {
 /** One `errors[]` item of a `409 missing_integration_connection`. */
 export type MissingIntegrationFieldError = components["schemas"]["ConnectionResolutionItem"];
 
-type ConnectionChoiceCandidate = NonNullable<
+export type ConnectionChoiceCandidate = NonNullable<
   MissingIntegrationFieldError["candidate_connections"]
 >[number];
+
+/**
+ * What tells candidates apart: the account, whether another member shared it, whether it is dead.
+ * `labels` are the translated phrases, so the wording stays with the caller.
+ */
+export function candidateDescription(
+  c: Pick<ConnectionChoiceCandidate, "account_id" | "owned_by_actor" | "needs_reconnection">,
+  labels: { sharedByOther: string; needsReconnection: string },
+): string {
+  return [
+    // "default" is the placeholder of a connection with no account identity.
+    c.account_id !== "default" ? c.account_id : null,
+    !c.owned_by_actor ? labels.sharedByOther : null,
+    c.needs_reconnection ? labels.needsReconnection : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+/** A candidate as a single-choice option; a dead connection fails the run it is picked for. */
+export function candidateSelectOption(
+  c: ConnectionChoiceCandidate,
+  labels: { sharedByOther: string; needsReconnection: string },
+): { value: string; label: string; disabled: boolean } {
+  const description = candidateDescription(c, labels);
+  return {
+    value: c.id,
+    label: description ? `${c.label} · ${description}` : c.label,
+    disabled: c.needs_reconnection,
+  };
+}
 
 const SCHEDULE_CHOICE_CODES = [
   "must_choose_connection",
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
   "override_outranked",
+  "connection_set_too_large",
   "required_integration_unbound",
 ] as const satisfies readonly MissingIntegrationConnectionCode[];
 
-/**
- * An integration a schedule write was refused over. `candidates` are those the caller may
- * name — none when only the actor can choose. Only an edit of the schedule clears any of them.
- */
+/** `candidates`: those the caller may name; none when only the actor can choose. */
 export interface ConnectionChoice {
   integrationId: string;
   code: (typeof SCHEDULE_CHOICE_CODES)[number];
   candidates: ConnectionChoiceCandidate[];
 }
 
-/** An integration refused for a reason no pick fixes alone (see `isChoiceRequest`). */
 export type ConnectionRefusal = ConnectionChoice & {
   code: Exclude<ConnectionChoice["code"], "must_choose_connection">;
 };
 
-/** A connection the schedule cannot settle by itself: it asks for a choice rather than fails. */
 export function isChoiceRequest(choice: ConnectionChoice): boolean {
   return choice.code === "must_choose_connection";
 }
@@ -81,10 +102,7 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
   );
 }
 
-/**
- * The refused integrations whose current set is still the one the refused save sent (no pick and
- * `[]` differ). Derived, so a mark clears as soon as the user picks — and comes back on undo.
- */
+/** Refused integrations whose current set is still the one the refused save sent (no pick and `[]` differ). */
 export function pendingConnectionChoices(
   choices: readonly ConnectionChoice[],
   submitted: Readonly<Record<string, string[]>> | null | undefined,
@@ -97,7 +115,6 @@ export function pendingConnectionChoices(
   });
 }
 
-/** What a schedule save was sent with — what its refusal, if any, speaks for. */
 export interface SubmittedPicks {
   runsAs: ActorValue | undefined;
   picks: Readonly<Record<string, string[]>>;
@@ -110,23 +127,6 @@ export function refusalForActor(
   runsAs: ActorValue | undefined,
 ): readonly ConnectionChoice[] {
   return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
-}
-
-/**
- * A schedule PATCH refused over connections: what it was refused over, and whom and with which
- * picks the server judged it — the sent map, else the stored one (an absent key keeps it).
- * `null` for any other outcome.
- */
-export function refusedScheduleWrite(
-  error: unknown,
-  sent: ScheduleUpdateBody | undefined,
-  stored: { actor: ActorValue; picks: Record<string, string[]> | null },
-): (SubmittedPicks & { choices: ConnectionChoice[] }) | null {
-  const choices = scheduleConnectionChoices(error);
-  if (choices.length === 0 || !sent) return null;
-  const picks =
-    "connection_overrides" in sent ? sent.connection_overrides : (stored.picks ?? undefined);
-  return { choices, runsAs: sent.actor ?? stored.actor, picks: picks ?? {} };
 }
 
 /**
@@ -163,7 +163,6 @@ export function withConnectionPickAs(
     : overrides;
 }
 
-/** Why an integration was refused, as an `agents` key. */
 export function refusalReasonKey(choice: ConnectionRefusal): string {
   switch (choice.code) {
     case "override_connection_unavailable":
@@ -172,6 +171,8 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
       return "error.authServesNoSelectedTool";
     case "override_outranked":
       return "error.overrideOutranked";
+    case "connection_set_too_large":
+      return "error.connectionSetTooLarge";
     case "required_integration_unbound":
       return "error.requiredIntegrationUnbound";
   }
@@ -181,6 +182,7 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   ...INTEGRATION_MANIFEST_FAILURE_CODES,
 ]);
 
@@ -188,11 +190,7 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/**
- * Re-run state of a refused launch: offered when a row can be answered, held while the launch is
- * in flight or `stillBlocking` names a refused integration (undefined = verdict not loaded,
- * nothing gated: the server stays the authority).
- */
+/** Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded, nothing gated). */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   retrying: boolean,

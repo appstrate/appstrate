@@ -5,6 +5,7 @@ import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
   sanitiseToolDescriptor,
+  TOOL_INTEGRATION_META_KEY,
 } from "../src/index.ts";
 
 describe("sanitiseToolDescriptor — privileged capability markers", () => {
@@ -15,6 +16,7 @@ describe("sanitiseToolDescriptor — privileged capability markers", () => {
       _meta: {
         [API_CALL_TOOL_META_KEY]: { tool_key: "api_call" },
         [API_UPLOAD_TOOL_META_KEY]: { api_call_tool_key: "api_call" },
+        [TOOL_INTEGRATION_META_KEY]: { id: "@appstrate/platform", tool: "log" },
         "com.example/audit": { source: "upstream", traceId: "trace-1" },
         progressToken: 7,
       },

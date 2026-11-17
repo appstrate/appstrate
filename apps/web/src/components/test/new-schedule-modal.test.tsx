@@ -8,13 +8,10 @@
  * the fires run.
  */
 
-import { afterAll, describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-
-// Registered before the fake storage's own teardown, so it runs first.
-afterAll(() => getSession.mockRestore());
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -24,16 +21,10 @@ installFakeStorage({
 const { ScheduleFieldsReady } = await import("../new-schedule-modal.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
-const { authClient } = await import("../../lib/auth-client.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
-const { startAuthBootstrap } = await import("../../hooks/use-auth.ts");
 
-const getSession = spyOn(authClient, "getSession").mockResolvedValue({
-  data: null,
-  error: null,
-});
-startAuthBootstrap();
-for (let i = 0; i < 5000 && authStore.getState().loading; i++) await Bun.sleep(1);
+// Signed out, the session read settled: the state the boot resync leaves without a session.
+authStore.setState({ user: null, profile: null, loading: false });
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
@@ -95,20 +86,13 @@ describe("ScheduleFieldsReady", () => {
     expect(html).toContain(t("schedule.optionsTitle"));
   });
 
-  it("asks the creator's verdict for the published version the fires run", () => {
+  it("asks no readiness verdict to write: the server names the creator's fallback", () => {
     const qc = new QueryClient();
     renderForm(qc);
     const asked = qc
       .getQueryCache()
       .getAll()
-      .some(({ queryKey: [, path, init] }) => {
-        const params = (init as { params?: { path?: { name?: string }; query?: unknown } })?.params;
-        return (
-          path === "/api/agents/{scope}/{name}/connection-readiness" &&
-          params?.path?.name === "mailer" &&
-          Bun.deepEquals(params.query, { version: "published" })
-        );
-      });
-    expect(asked).toBe(true);
+      .some(({ queryKey: [, path] }) => path === "/api/agents/{scope}/{name}/connection-readiness");
+    expect(asked).toBe(false);
   });
 });

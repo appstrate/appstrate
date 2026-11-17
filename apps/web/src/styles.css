@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @plugin "@tailwindcss/typography";
 
 /* UI packages live outside apps/web/src (symlinked under node_modules), which
@@ -42,8 +43,6 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
   /* Page canvas — the grey the whole chrome sits on. Distinct from
@@ -59,20 +58,37 @@
   /* Soft tints of the brand blue and the spark. Selection
      fills in the switcher, where two dimensions are picked side by side and
      need to be told apart at a glance. */
-  --color-primary-soft: var(--primary-soft);
-  --color-spark-soft: var(--spark-soft);
-  /* Person palette — the colour an end-user's initials sit in, hashed from
-     their id so the same person is always the same colour. Eight hues that
-     tell people apart in a list; never a status, which is what success,
-     warning and destructive say. */
-  --color-avatar-1: var(--avatar-1);
-  --color-avatar-2: var(--avatar-2);
-  --color-avatar-3: var(--avatar-3);
-  --color-avatar-4: var(--avatar-4);
-  --color-avatar-5: var(--avatar-5);
-  --color-avatar-6: var(--avatar-6);
-  --color-avatar-7: var(--avatar-7);
-  --color-avatar-8: var(--avatar-8);
+  /* Identity palette — the hues of `APPEARANCE_COLORS` (`@appstrate/core/
+     appearance`), one per key, behind every identity tile: an agent, a space,
+     an organization, a person. A tile without a chosen colour takes one
+     hashed from its id, so the same entity is always the same colour. Eight
+     hues that tell entities apart in a list; never a status, which is what
+     success, warning and destructive say. A tile (`-tile`) is the hue mixed
+     at 20 % into the page background, opaque so a tile laid over another (a
+     badge) does not show it through, under its `-foreground`: the same hue,
+     darkened in the light theme so the glyph or initials reach 4.5:1 on that
+     tint over the card and the canvas; the base itself in the dark theme,
+     where it already does. Tile classes: `packages/ui/src/identity-colors.ts`. */
+  --color-identity-blue-foreground: var(--identity-blue-foreground);
+  --color-identity-blue-tile: color-mix(in oklab, var(--identity-blue) 20%, var(--background));
+  --color-identity-emerald-foreground: var(--identity-emerald-foreground);
+  --color-identity-emerald-tile: color-mix(
+    in oklab,
+    var(--identity-emerald) 20%,
+    var(--background)
+  );
+  --color-identity-violet-foreground: var(--identity-violet-foreground);
+  --color-identity-violet-tile: color-mix(in oklab, var(--identity-violet) 20%, var(--background));
+  --color-identity-amber-foreground: var(--identity-amber-foreground);
+  --color-identity-amber-tile: color-mix(in oklab, var(--identity-amber) 20%, var(--background));
+  --color-identity-rose-foreground: var(--identity-rose-foreground);
+  --color-identity-rose-tile: color-mix(in oklab, var(--identity-rose) 20%, var(--background));
+  --color-identity-cyan-foreground: var(--identity-cyan-foreground);
+  --color-identity-cyan-tile: color-mix(in oklab, var(--identity-cyan) 20%, var(--background));
+  --color-identity-pink-foreground: var(--identity-pink-foreground);
+  --color-identity-pink-tile: color-mix(in oklab, var(--identity-pink) 20%, var(--background));
+  --color-identity-orange-foreground: var(--identity-orange-foreground);
+  --color-identity-orange-tile: color-mix(in oklab, var(--identity-orange) 20%, var(--background));
   /* Page frame — a fluid gutter and a 1300px column. The
      header shares the gutter and not the column: it runs edge to edge, so its
      trail lines up with the content's left edge until the page is wider than
@@ -130,23 +146,24 @@
   --canvas: oklch(0.985 0 0); /* #FAFAFA */
   --spark: oklch(0.682 0.18 37.9); /* #F2683C */
   --spark-foreground: oklch(1 0 0);
-  --primary-soft: oklch(0.957 0.019 263); /* #EAF1FE */
-  --spark-soft: oklch(0.956 0.021 51.5); /* #FDEDE4 */
-  --avatar-1: oklch(0.546 0.215 263);
-  --avatar-2: oklch(0.596 0.145 163);
-  --avatar-3: oklch(0.541 0.281 293);
-  --avatar-4: oklch(0.666 0.179 58);
-  --avatar-5: oklch(0.586 0.253 18);
-  --avatar-6: oklch(0.609 0.126 222);
-  --avatar-7: oklch(0.591 0.293 323);
-  --avatar-8: oklch(0.646 0.222 41);
+  --identity-blue: oklch(0.546 0.215 263);
+  --identity-emerald: oklch(0.596 0.145 163);
+  --identity-violet: oklch(0.541 0.281 293);
+  --identity-amber: oklch(0.666 0.179 58);
+  --identity-rose: oklch(0.586 0.253 18);
+  --identity-cyan: oklch(0.609 0.126 222);
+  --identity-pink: oklch(0.591 0.293 323);
+  --identity-orange: oklch(0.646 0.222 41);
+  --identity-blue-foreground: oklch(0.496 0.215 263);
+  --identity-emerald-foreground: oklch(0.481 0.104 163);
+  --identity-violet-foreground: oklch(0.511 0.281 293);
+  --identity-amber-foreground: oklch(0.511 0.122 58);
+  --identity-rose-foreground: oklch(0.491 0.196 18);
+  --identity-cyan-foreground: oklch(0.489 0.09 222);
+  --identity-pink-foreground: oklch(0.501 0.236 323);
+  --identity-orange-foreground: oklch(0.506 0.155 41);
   --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
   --sidebar-foreground: oklch(0.21 0.006 285.9);
-  /* Stays near-black, not the brand blue: it fills the organization avatar,
-     and a blue avatar would compete with the one blue that means "primary
-     action". */
-  --sidebar-primary: oklch(0.21 0.006 285.9);
-  --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.929 0.005 286.3); /* hover/active nav surface */
   --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
   --sidebar-border: oklch(0.929 0.005 286.3);
@@ -180,22 +197,24 @@
   --canvas: oklch(0.145 0.004 286);
   --spark: oklch(0.72 0.16 38);
   --spark-foreground: oklch(0.145 0.004 286);
-  --primary-soft: oklch(0.3 0.06 262);
-  --spark-soft: oklch(0.3 0.06 38);
-  --avatar-1: oklch(0.707 0.165 255);
-  --avatar-2: oklch(0.765 0.177 163);
-  --avatar-3: oklch(0.702 0.183 294);
-  --avatar-4: oklch(0.828 0.189 84);
-  --avatar-5: oklch(0.712 0.194 13);
-  --avatar-6: oklch(0.789 0.154 212);
-  --avatar-7: oklch(0.74 0.238 322);
-  --avatar-8: oklch(0.75 0.183 56);
+  --identity-blue: oklch(0.707 0.165 255);
+  --identity-emerald: oklch(0.765 0.177 163);
+  --identity-violet: oklch(0.702 0.183 294);
+  --identity-amber: oklch(0.828 0.189 84);
+  --identity-rose: oklch(0.712 0.194 13);
+  --identity-cyan: oklch(0.789 0.154 212);
+  --identity-pink: oklch(0.74 0.238 322);
+  --identity-orange: oklch(0.75 0.183 56);
+  --identity-blue-foreground: var(--identity-blue);
+  --identity-emerald-foreground: var(--identity-emerald);
+  --identity-violet-foreground: var(--identity-violet);
+  --identity-amber-foreground: var(--identity-amber);
+  --identity-rose-foreground: var(--identity-rose);
+  --identity-cyan-foreground: var(--identity-cyan);
+  --identity-pink-foreground: var(--identity-pink);
+  --identity-orange-foreground: var(--identity-orange);
   --sidebar: oklch(0.145 0.004 286);
   --sidebar-foreground: oklch(0.96 0.002 286);
-  /* Mirrors the light theme's org-avatar contrast (dark chip / light text)
-     rather than turning it into the brand blue. */
-  --sidebar-primary: oklch(0.96 0.002 286);
-  --sidebar-primary-foreground: oklch(0.21 0.006 285.9);
   --sidebar-accent: oklch(0.28 0.005 286);
   --sidebar-accent-foreground: oklch(0.96 0.002 286);
   --sidebar-border: oklch(0.28 0.005 286);
@@ -305,10 +324,114 @@
 
 /* Dialogs and sheets stack: settings and the catalogue are overlays, and their
    pages open dialogs of their own. Each portal is a child of `body`, so a later
-   overlay is a sibling of the first one. Dimming twice turns the margin nearly
-   black and leaves the dialog underneath as a lighter, rounded block, so only
-   the first overlay dims. Unlayered on purpose: it must beat the overlay's
-   `bg-black/80` utility. */
+   overlay is a sibling of the first one. A nested overlay still dims, so the
+   dialog underneath reads as behind, but lighter: a second `bg-black/80` would
+   turn the margin nearly black. Unlayered on purpose: it must beat the
+   overlay's `bg-black/80` utility. */
 [data-slot="dialog-overlay"] ~ [data-slot="dialog-overlay"] {
-  background-color: transparent;
+  background-color: rgb(0 0 0 / 0.5);
+}
+
+/* Without scroll-driven animations (Firefox stable), shadcn's `scroll-fade-*`
+   falls back to a static fade on both edges, whatever the scroll position,
+   marking edges that hide nothing. No fade there instead: the row just
+   scrolls. Unlayered on purpose, to beat the utility. */
+@supports not (animation-timeline: scroll()) {
+  .scroll-fade-x {
+    --scroll-fade-mask: none;
+  }
+}
+
+/* Previous / next arrows drawn by the browser (`::scroll-button()`): a click
+   scrolls about one scrollport, the arrow disables itself at the end, no
+   JavaScript. Chromium 135+ only; elsewhere the row just scrolls. Accessible
+   names come from the scroller's `data-scroll-prev` / `data-scroll-next`. A
+   `background-image` SVG cannot read `currentColor`, so the chevron's stroke
+   is `--foreground` written out per theme. */
+@utility scroll-buttons-x {
+  anchor-name: --scroll-buttons-x;
+  /* A fractional width leaves a fractional scroll end that no scroll offset
+     reaches, so the next arrow would never disable. */
+  width: round(down, 100%, 1px);
+  --scroll-button-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+
+  .dark & {
+    --scroll-button-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FAFAFA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+  }
+
+  /* The arrows paint as part of the scroller, so `scroll-fade-x`'s mask would
+     erase them: add an opaque disc under each one. */
+  @supports selector(::scroll-button(*)) {
+    &.scroll-fade-x {
+      --scroll-fade-mask:
+        var(--scroll-fade-inline),
+        radial-gradient(circle at 1.5rem 50%, #000 1.125rem, transparent 1.2rem),
+        radial-gradient(circle at calc(100% - 1.5rem) 50%, #000 1.125rem, transparent 1.2rem);
+      mask-composite: add;
+    }
+  }
+
+  &::scroll-button(*) {
+    position: absolute;
+    position-anchor: --scroll-buttons-x;
+    top: anchor(center);
+    translate: 0 -50%;
+    z-index: 10;
+    box-sizing: border-box;
+    width: --spacing(8);
+    height: --spacing(8);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--background) var(--scroll-button-icon) center / --spacing(4) no-repeat;
+    box-shadow: var(--shadow-xs);
+    cursor: pointer;
+    transition: opacity var(--transition-duration-fast) ease-in-out;
+  }
+  &::scroll-button(*):hover {
+    background-color: var(--accent);
+  }
+  &::scroll-button(*):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  &::scroll-button(*):disabled {
+    opacity: 0;
+    pointer-events: none;
+  }
+  &::scroll-button(inline-start) {
+    content: "" / attr(data-scroll-prev);
+    left: calc(anchor(left) + --spacing(2));
+    scale: -1 1;
+  }
+  &::scroll-button(inline-end) {
+    content: "" / attr(data-scroll-next);
+    right: calc(anchor(right) + --spacing(2));
+  }
+}
+
+/* A form drawn as its own skeleton (`FormSkeleton`): the real layout and its
+   static labels, every control greyed and pulsing, so the loaded form lands on
+   exactly the boxes it waited in. */
+.skeleton-form
+  :is(
+    input,
+    textarea,
+    button,
+    [role="combobox"],
+    [role="radio"],
+    [role="checkbox"],
+    [role="switch"],
+    [data-slot="badge"]
+  ) {
+  background-color: var(--muted) !important;
+  border-color: transparent !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  animation: var(--animate-pulse);
+}
+.skeleton-form :is(input, textarea)::placeholder {
+  color: transparent;
+}
+.skeleton-form :is(button, [role="radio"], [role="checkbox"], [role="switch"]) * {
+  visibility: hidden;
 }

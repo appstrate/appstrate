@@ -34,7 +34,8 @@ function asOrgMember(
     id: "org_dash",
     name: "Dash",
     slug: "dash",
-    logo: null,
+    icon: null,
+    color: null,
     role: "member",
     deleting_at: null,
     permissions,
@@ -55,6 +56,7 @@ function asOrgMember(
 function content(overrides: Partial<DashboardData> = {}): DashboardData {
   return {
     firstName: "Ada",
+    spanning: false,
     agents: [],
     runs: [],
     runTotal: 0,
@@ -90,6 +92,7 @@ function makeSchedule(i: number, overrides: Partial<EnrichedSchedule> = {}): Enr
     next_run_at: `2026-10-${String(15 + i).padStart(2, "0")}T09:00:00.000Z`,
     createdAt: "2026-10-01T00:00:00.000Z",
     updatedAt: "2026-10-01T00:00:00.000Z",
+    agent_name: `@acme/agent-${i}`,
     actor_name: null,
     actor_type: "user",
     running_runs: 0,
@@ -149,7 +152,7 @@ describe("the dashboard", () => {
     } as unknown as DashboardData["agents"][number];
     const html = asOrgMember(
       READER,
-      <DashboardContent {...content({ agents: [agent], unreadCounts: { [agent.id]: 3 } })} />,
+      <DashboardContent {...content({ agents: [{ ...agent, unread_count: 3 }] })} />,
     );
     expect(html).toContain('aria-label="3 runs non lus"');
   });

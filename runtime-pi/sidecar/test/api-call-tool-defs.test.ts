@@ -161,3 +161,30 @@ describe("createApiCallToolDefs — what Pi settles before the sidecar", () => {
     expect(headers).toEqual({ "X-Count": "5", "X-Flag": "true", "X-T": "v" });
   });
 });
+
+describe("createApiCallToolDefs — api_upload target", () => {
+  const upload = createApiCallToolDefs(integ({ uploadProtocols: ["tus"] }), deps)[1]!;
+  const accepts = (target: string): boolean => {
+    try {
+      validateToolArguments(
+        { name: "t", description: "", parameters: upload.descriptor.inputSchema } as never,
+        {
+          type: "toolCall",
+          id: "1",
+          name: "t",
+          arguments: { target, fromFile: "a.bin", uploadProtocol: "tus" },
+        },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("Pi accepts a {{field}} anywhere in the target, as for api_call", () => {
+    expect(accepts("https://api.example.com/files/{{folder_id}}/upload")).toBe(true);
+    expect(accepts("{{site_url}}/upload")).toBe(true);
+  });
+
+  it("Pi still refuses a non-URL target", () => expect(accepts("not a url")).toBe(false));
+});

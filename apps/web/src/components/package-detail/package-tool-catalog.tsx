@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import type {
@@ -11,9 +11,9 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar } from "../list-toolbar";
-import { EmptyState } from "../page-states";
+import { EmptyState, NoMatchState } from "../page-states";
 import { Modal } from "../modal";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { CellEmpty } from "../table-cells";
 import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
@@ -49,9 +49,8 @@ export function PackageToolCatalog({
   tools: PackageTool[];
   inspection?: IntegrationToolInspection;
   /**
-   * Names the catalog in the URL, since a page can hold several: a tool's
-   * inspection opens at `?inspectTool=<integrationId>:<tool name>`, and only the
-   * catalog of that integration answers.
+   * Names the catalog in the URL: a tool's inspection opens at
+   * `?inspectTool=<integrationId>:<tool name>`.
    */
   integrationId?: string;
   selection?: {
@@ -60,7 +59,6 @@ export function PackageToolCatalog({
   };
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const inspectParam = useModalParam("inspectTool");
   // Inspection is read-only and must never feed a bundle selection control.
   const inventory = !selection ? inspection : undefined;
   const catalog: PackageTool[] = inventory
@@ -71,18 +69,10 @@ export function PackageToolCatalog({
         inspection: entry,
       }))
     : tools;
-  const inspectPrefix = `${integrationId ?? ""}:`;
-  const inspected =
-    inventory && inspectParam.value?.startsWith(inspectPrefix)
-      ? inspectParam.value.slice(inspectPrefix.length)
-      : null;
-  const selected = catalog.find((tool) => tool.name === inspected) ?? null;
+  const inspectKey = (tool: PackageTool) => `${integrationId ?? ""}:${tool.name}`;
   // A link to a tool this catalog does not hold (renamed, removed) drops the parameter.
-  const { close: closeInspect } = inspectParam;
-  const stale = inspected !== null && selected === null;
-  useEffect(() => {
-    if (stale) closeInspect();
-  }, [stale, closeInspect]);
+  const inspect = useUrlModalTarget("inspectTool", inventory ? catalog : undefined, inspectKey);
+  const selected = inspect.target ?? null;
   const hasScopes = (tool: PackageTool) =>
     Object.values(tool.permissions ?? {}).some((scopes) => scopes.length > 0);
   const hasRules = (tool: PackageTool) => hasScopes(tool) || !!tool.inspection?.hidden_reason;
@@ -119,8 +109,9 @@ export function PackageToolCatalog({
   const columns: DataColumn<PackageTool>[] = [
     {
       id: "name",
-      header: t("packageTools.name"),
-      width: inventory ? "minmax(200px,2fr)" : "minmax(160px,1fr)",
+      header: t("log.tool"),
+      width: inventory ? 200 : 160,
+      elastic: true,
       cell: (tool) => (
         <div className="flex items-start gap-2">
           {selection && (
@@ -152,8 +143,9 @@ export function PackageToolCatalog({
       ? [
           {
             id: "description",
-            header: t("packageTools.description"),
-            width: "minmax(220px,2fr)" as const,
+            header: t("editor.fieldDescLabel"),
+            width: 220,
+            elastic: true as const,
             cell: (tool: PackageTool) =>
               tool.description ? (
                 <span className="text-muted-foreground text-sm break-words">
@@ -168,7 +160,8 @@ export function PackageToolCatalog({
           {
             id: "exposure",
             header: t("settings:integration.inventory.exposure"),
-            width: "minmax(120px,1fr)" as const,
+            width: 120,
+            elastic: true as const,
             cell: (tool: PackageTool) => (
               <Badge
                 variant={
@@ -186,7 +179,8 @@ export function PackageToolCatalog({
           {
             id: "origin",
             header: t("settings:integration.inventory.origin"),
-            width: "minmax(130px,1fr)" as const,
+            width: 130,
+            elastic: true as const,
             cell: (tool: PackageTool) => (
               <span className="text-muted-foreground text-xs">
                 {t(`settings:integration.inventory.origin.${tool.inspection!.origin}`)}
@@ -196,10 +190,21 @@ export function PackageToolCatalog({
           {
             id: "rules",
             header: t("settings:integration.inventory.rules"),
-            width: "minmax(110px,1fr)" as const,
-            cell: (tool: PackageTool) => (
-              <span className="text-muted-foreground text-xs">{rulesLabel(tool)}</span>
-            ),
+            width: 160,
+            elastic: true as const,
+            cell: (tool: PackageTool) =>
+              hasScopes(tool) ? (
+                <div className="flex flex-col gap-1.5">
+                  {tool.inspection?.hidden_reason && (
+                    <span className="text-muted-foreground text-xs">
+                      {t(`settings:integration.inventory.rules.${tool.inspection.hidden_reason}`)}
+                    </span>
+                  )}
+                  <ScopeBadges tool={tool} />
+                </div>
+              ) : (
+                <span className="text-muted-foreground text-xs">{rulesLabel(tool)}</span>
+              ),
           },
         ]),
     ...(!inventory && authKeys.length
@@ -207,23 +212,9 @@ export function PackageToolCatalog({
           {
             id: "permissions",
             header: t("packageTools.permissions"),
-            width: "minmax(180px,1fr)" as const,
-            cell: (tool: PackageTool) => (
-              <div className="flex flex-wrap gap-1.5">
-                {Object.entries(tool.permissions ?? {}).flatMap(([auth, scopes]) =>
-                  scopes.map((scope, index) => (
-                    <Badge
-                      key={`${auth}:${index}:${scope}`}
-                      variant="secondary"
-                      className="max-w-full"
-                      title={`${auth}: ${scope}`}
-                    >
-                      <span className="truncate">{scope}</span>
-                    </Badge>
-                  )),
-                )}
-              </div>
-            ),
+            width: 180,
+            elastic: true as const,
+            cell: (tool: PackageTool) => <ScopeBadges tool={tool} />,
           },
         ]
       : []),
@@ -241,7 +232,6 @@ export function PackageToolCatalog({
         </p>
       )}
       <ListToolbar
-        placement="panel"
         actions={actions}
         search={{
           value: list.search,
@@ -303,25 +293,21 @@ export function PackageToolCatalog({
         columns={columns}
         rows={rows}
         rowKey={(tool) => tool.name}
-        rowAction={
-          inventory ? (tool) => inspectParam.open(`${inspectPrefix}${tool.name}`) : undefined
-        }
+        rowAction={inventory ? (tool) => inspect.open(inspectKey(tool)) : undefined}
         rowLabel={(tool) => t("settings:integration.inventory.inspect", { name: tool.name })}
-        surface="integrated"
-        columnMode="scroll"
         empty={
-          <EmptyState
-            icon={Wrench}
-            message={t(catalog.length ? "packageTools.noMatch" : "packageTools.empty")}
-            compact
-          />
+          catalog.length ? (
+            <NoMatchState message={t("packageTools.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState icon={Wrench} message={t("packageTools.empty")} compact />
+          )
         }
       />
-      <Modal open={selected !== null} onClose={inspectParam.close} title={selected?.name ?? ""}>
-        {selected?.inspection && (
-          <div className="space-y-5 text-sm">
+      {selected?.inspection && (
+        <Modal onClose={inspect.close} title={selected.name}>
+          <div className="flex flex-col gap-5 text-sm">
             {selected.description && <p>{selected.description}</p>}
-            <dl className="space-y-4">
+            <dl className="flex flex-col gap-4">
               <div>
                 <dt className="text-muted-foreground text-xs">
                   {t("settings:integration.inventory.origin")}
@@ -356,14 +342,14 @@ export function PackageToolCatalog({
                 </dt>
                 <dd className="mt-1">
                   {hasScopes(selected) ? (
-                    <div className="space-y-3">
+                    <div className="flex flex-col gap-3">
                       <code className="text-xs break-all">{`tools_policy[${JSON.stringify(selected.name)}].required_scopes`}</code>
                       {Object.entries(selected.permissions ?? {})
                         .filter(([, scopes]) => scopes.length > 0)
                         .map(([auth, scopes]) => (
                           <div key={auth}>
                             <p className="text-muted-foreground text-xs">{auth}</p>
-                            <ul className="mt-1 space-y-1">
+                            <ul className="mt-1 flex flex-col gap-1">
                               {scopes.map((scope) => (
                                 <li className="break-all" key={scope}>
                                   {scope}
@@ -380,8 +366,28 @@ export function PackageToolCatalog({
               </div>
             </dl>
           </div>
-        )}
-      </Modal>
+        </Modal>
+      )}
     </>
+  );
+}
+
+/** The scopes a tool requires, one badge each, its auth in the title. */
+function ScopeBadges({ tool }: { tool: PackageTool }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {Object.entries(tool.permissions ?? {}).flatMap(([auth, scopes]) =>
+        scopes.map((scope, index) => (
+          <Badge
+            key={`${auth}:${index}:${scope}`}
+            variant="secondary"
+            className="max-w-full"
+            title={`${auth}: ${scope}`}
+          >
+            <span className="truncate">{scope}</span>
+          </Badge>
+        )),
+      )}
+    </div>
   );
 }

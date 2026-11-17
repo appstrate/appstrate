@@ -1,0 +1,31 @@
+{
+  "title": "Features",
+  "icon": "Blocks",
+  "collapsible": false,
+  "defaultOpen": true,
+  "pages": [
+    "agents",
+    "runs",
+    "run-cost",
+    "run-liveness",
+    "scheduling",
+    "webhooks",
+    "realtime",
+    "notifications",
+    "skills",
+    "tools",
+    "memory",
+    "files",
+    "packages",
+    "library",
+    "proxies",
+    "multi-tenancy",
+    "organizations",
+    "spaces",
+    "roles-and-permissions",
+    "end-users",
+    "embedded-sign-in",
+    "api-keys",
+    "sandbox-and-sidecar"
+  ]
+}

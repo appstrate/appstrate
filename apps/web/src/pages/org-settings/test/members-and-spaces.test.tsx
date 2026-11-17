@@ -7,14 +7,15 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import type { DataColumn } from "../../../components/data-table.tsx";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
-import { useSpaceColumns, type SpaceRow } from "../space-columns.tsx";
+import type { SpaceRow } from "../space-columns.tsx";
 
-// The members page reaches the auth client, which reads `window.location` at import.
+// Both modules imported below reach the auth client, which reads `window.location` at import.
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
   location: { origin: "https://app.example.test" },
 });
 const { invalidateMemberWrite } = await import("../../../hooks/use-org.ts");
+const { useSpaceColumns } = await import("../space-columns.tsx");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -39,6 +40,8 @@ describe("the spaces list", () => {
     isDefault: false,
     createdAt: "2026-01-01T00:00:00Z",
     personal: false,
+    icon: null,
+    color: null,
     visibility: "closed",
     access: "member",
   };

@@ -1,44 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One table for an auth's OAuth clients, out of the two lists the API serves.
- *
- * The server resolves a new connection's client as: the space's flagged client,
- * else the org's, else the system's (`pickDefault`). It answers that through two
- * lists: the SPACE list (the space's own clients, plus the inherited client when
- * it is the one in use) and the ORG list (the org's own clients, plus the system
- * client it would fall back on). Each marks its tier's effective default.
- *
- * Shown as two tables they repeat each other and carry two "default" columns
- * that mean different things. Merged, each client appears once, with its level,
- * whether THIS space uses it, and whether it is the organization's default.
+ * One table for an auth's OAuth clients, merged from the two API lists. A new connection's client
+ * is the space's flagged one, else the org's, else the system's (`pickDefault`). The SPACE list
+ * holds the space's clients (plus the inherited one in use); the ORG list the org's (plus the
+ * system fallback); each marks its tier's default. Shown separately the two repeat each other
+ * under two "default" columns that mean different things.
  */
 
 import type { IntegrationClient } from "../hooks/use-integrations";
 
-/** The tier that owns the client — the API names it the same way. */
 export type ClientLevel = IntegrationClient["source"];
 
 export interface ClientRow {
   client: IntegrationClient;
   level: ClientLevel;
-  /** New connections in this space use it. */
   usedHere: boolean;
-  /** The organization's default, which every space without its own inherits. */
   orgDefault: boolean;
-  /** The space list carries it, so the space may choose it (`setDefault` on the space tier). */
+  /** The space may choose it. */
   inSpaceList: boolean;
-  /** The org list carries it, so an org admin may choose it for the organization. */
+  /** An org admin may choose it. */
   inOrgList: boolean;
 }
 
 const LEVEL_ORDER: Record<ClientLevel, number> = { space: 0, org: 1, system: 2 };
 
-/**
- * Space clients first (they win), then the organization's, then the system's;
- * within a level, the server's order. `orgClients` is undefined when the caller
- * may not read the org tier.
- */
+/** Space, then org, then system; server order within a level. `orgClients` is undefined when the caller may not read the org tier. */
 export function mergeClientTiers(
   spaceClients: readonly IntegrationClient[],
   orgClients: readonly IntegrationClient[] | undefined,

@@ -27,7 +27,8 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "endpoint",
       header: t("settings:webhooks.urlColumn"),
-      width: "minmax(100px,2fr)",
+      width: 100,
+      elastic: true,
       cell: (wh) => (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate font-mono text-xs" title={wh.url}>
@@ -35,7 +36,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
           </span>
           {wh.level === "org" && (
             <Badge variant="outline" className="shrink-0">
-              {t("settings:webhooks.levelBadge.org")}
+              {t("settings:source.org")}
             </Badge>
           )}
         </span>
@@ -43,21 +44,19 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     },
     {
       id: "state",
-      header: t("settings:webhooks.stateColumn"),
-      width: "72px",
+      header: t("settings:providers.col.state"),
+      width: 72,
       cell: (wh) => (
         <Badge variant={wh.enabled ? "success" : "secondary"}>
-          {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+          {wh.enabled ? t("settings:catalogue.filter.active") : t("settings:webhooks.inactive")}
         </Badge>
       ),
     },
     {
       id: "events",
       header: t("settings:webhooks.eventsColumn"),
-      width: "minmax(100px,1.4fr)",
-      // Tier 2, not 3: this list is a full page, but it is also reachable in
-      // the settings dialog, which never crosses the 56rem threshold.
-      tier: 2,
+      width: 100,
+      elastic: true,
       cell: (wh) => (
         <span
           className="text-muted-foreground truncate font-mono text-xs"
@@ -69,16 +68,15 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     },
     {
       id: "agent",
-      header: t("settings:webhooks.agentColumn"),
-      width: "minmax(80px,1fr)",
-      tier: 2,
+      header: t("settings:integration.admin.pinManagement.colAgent"),
+      width: 80,
+      elastic: true,
       cell: (wh) => <CellText>{wh.packageId || t("settings:webhooks.allAgents")}</CellText>,
     },
     {
       id: "payload",
       header: t("settings:webhooks.payloadColumn"),
-      width: "88px",
-      tier: 2,
+      width: 88,
       // The mode's short name; the sentence that says what it carries on hover.
       cell: (wh) => {
         const full = wh.payloadMode === "full";

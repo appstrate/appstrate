@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_LOGO_PROPERTY } from "../schemas.ts";
+import { APPEARANCE_PROPERTIES } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
+  connectionShareAllSpacesOperation,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
+  shareAllSpacesSchema,
   connectionSetRefusals,
   connectionShareDeleteConflicts,
   connectionShareEndpoints,
@@ -72,6 +75,7 @@ const meConnectionEntrySchema = {
     },
     auth_key: { type: "string" },
     scope: connectionScopeSchema,
+    share_all_spaces: shareAllSpacesSchema,
     shared_spaces: {
       type: "array",
       items: namedSpaceSchema,
@@ -140,12 +144,12 @@ export const mePaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "name", "slug", "logo", "role", "createdAt"],
+                      required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
                         slug: { type: "string" },
-                        logo: ORG_LOGO_PROPERTY,
+                        ...APPEARANCE_PROPERTIES,
                         role: {
                           type: "string",
                           enum: ["owner", "admin", "member", "guest", "end_user"],
@@ -173,7 +177,8 @@ export const mePaths = {
                     id: "org_abc123",
                     name: "Acme Corp",
                     slug: "acme",
-                    logo: null,
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
@@ -246,6 +251,22 @@ export const mePaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
+    },
+  },
+  "/api/me/connections/{connectionId}/shares": {
+    put: {
+      ...connectionShareAllSpacesOperation,
+      operationId: "setMeConnectionShareAllSpaces",
+      tags: ["Me"],
+      summary: "Share an owned connection with current and future team spaces",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
     },
   },
   "/api/me/connections/{connectionId}/shares/{spaceId}": {
@@ -398,9 +419,15 @@ export const mePaths = {
       summary: "Pin connections for the caller's runs of an agent",
       description:
         "Persists the caller's preference for an integration on this agent. " +
-        "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
-        "to an admin pin, an enforced org default and the launch override (the run's or " +
-        "the schedule's `connection_overrides`). " +
+        "It wins over a soft org default and the fallback, and loses to the launch override " +
+        "(the run's or the schedule's `connection_overrides`); an admin pin or an enforced org " +
+        "default governs instead. " +
+        "Under an admin pin that allows additions the pin supplies the member's additions to the " +
+        "imposed set, which it never removes (`[]` there means no addition); the set is stored as " +
+        "named, imposed ids included — the dashboard writes the additions only. It is written only " +
+        "where it binds: under an admin pin closed to additions, an enforced org default, or an " +
+        "open admin pin the space's enforced default closes, it would bind nothing, so the write " +
+        "is refused (409) and nothing is stored. " +
         "The body carries the WHOLE set and this write replaces it — `[]` pins none: the run " +
         "starts without the integration, or is refused when the agent requires it; `DELETE` " +
         "clears the pin. " +
@@ -453,6 +480,15 @@ export const mePaths = {
           description:
             "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
+        "409": {
+          description: `\`connection_additions_blocked\`: an admin pin closed to additions, an enforced org default, or an open admin pin under an enforced default imposes this agent's set for the integration, and nothing can be added to it — a member pin there would bind nothing. Ask an admin to open the pin to additions, or drop the member pin. \`connection_set_too_large\`: under an admin pin open to additions, its connections plus this set exceed ${MAX_CONNECTIONS_PER_INTEGRATION} distinct connections (compared case-insensitively) — pin fewer. Nothing is stored either way.`,
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -460,8 +496,9 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
-        "(soft org default, then accessible connections). " +
+        "Removes the caller's member pin. Ungoverned, the resolver falls back to the soft org " +
+        "default, then the caller's own connection; under an admin pin that allows additions the " +
+        "run binds the imposed set with no addition. Always allowed, whatever governs. " +
         namingLayerRemovalEffect,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -862,6 +899,12 @@ export const mePaths = {
                           type: "string",
                           description:
                             "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range.",
+                        },
+                        needs_reconnection: {
+                          type: "boolean",
+                          enum: [true],
+                          description:
+                            "Present (`true`) when none of the caller's usable connections of this integration is healthy: its owner must reconnect it before it can be used. Omitted otherwise.",
                         },
                         default_tools: {
                           description:

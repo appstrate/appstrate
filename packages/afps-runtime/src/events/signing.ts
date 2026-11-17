@@ -14,7 +14,7 @@
  * Specification: see `AFPS_EXTENSION_ARCHITECTURE.md` §5, §10.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 export interface SignedEnvelopeHeaders {
   "webhook-id": string;
@@ -43,6 +43,11 @@ export function sign(opts: SignOptions): SignedEnvelopeHeaders {
     "webhook-timestamp": String(opts.timestampSec),
     "webhook-signature": `v1,${signature}`,
   };
+}
+
+/** {@link sign} for a message sent once: a fresh message id, timestamped now. */
+export function signFresh(opts: Pick<SignOptions, "body" | "secret">): SignedEnvelopeHeaders {
+  return sign({ ...opts, msgId: randomUUID(), timestampSec: Math.floor(Date.now() / 1000) });
 }
 
 export interface VerifyOptions extends SignOptions {

@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Readable names for permission strings.
- *
- * A permission reads `agents:run` on the wire and "Lancer les agents" on
- * screen. A string with no translation — a module's, say — shows as itself
- * rather than as a blank, so a new permission is never invisible.
- *
- * Keys use a dot where the wire uses a colon: `:` is i18next's namespace
- * separator, so `permissions.label.agents:run` would look up a namespace.
+ * Readable names for permission strings; one with no translation (a module's)
+ * shows as itself. Keys use a dot where the wire uses a colon: `:` is i18next's
+ * namespace separator.
  */
 type Translate = (key: string) => string;
 

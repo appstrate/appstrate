@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
+
 import { useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
-import { Field, FieldGroup, FormItem } from "@appstrate/ui/components/field";
+import { Field, FieldGroup } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Label } from "@appstrate/ui/components/label";
-import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
+import { SelectItem } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { FormModal } from "./form-modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
@@ -33,31 +36,24 @@ interface ViewAsDialogProps {
   onClose: () => void;
   /** Space the trigger is about. Defaults to the space the user is in. */
   spaceId?: string;
-  /** The role whose row opened the dialog: it arrives chosen (`?viewAs=<kind>:<key>`). */
+  /** The role whose row opened the dialog: it arrives chosen. */
   preset?: ViewAsPreset | null;
 }
 
 /**
- * Entry point for "view as role" — the only place a preview is started.
+ * Entry point for "view as role" — the only place a preview is started. Mounted
+ * conditionally by its triggers, so every open starts from its props.
  *
- * Mounted conditionally by its triggers (like `RoleFormModal`), so every open
- * starts from the props it was given rather than from the last visit's state.
- *
- * The role catalog comes from `useSpaceRoleOptions(spaceId)`, the same
- * grantability rule the server applies in `validateViewAs`, read HERE with the
- * caller's real permissions: once the preview is on, that catalog is answered
- * AS the persona and no longer says what the admin may preview.
- *
- * Eligibility is not decided here — the triggers show only for an owner or an
- * administrator, and the server refuses anyone else (`view_as_forbidden`).
+ * The role catalog (`useSpaceRoleOptions`, the server's `validateViewAs` rule) is read
+ * HERE with the caller's real permissions: once the preview is on, it is answered AS the
+ * persona. Eligibility is the server's call (`view_as_forbidden`).
  */
 export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  // A personal space has one member and no roles to preview: nobody else can
-  // ever stand in it.
+  // A personal space has one member and no roles to preview.
   const { data: allSpaces } = useSpaces();
   const spaces = allSpaces?.filter((s) => !s.personal);
   const navigate = useNavigate();
@@ -70,6 +66,8 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const [pickedSpaceId, setPickedSpaceId] = useState<string | null>(null);
   const [pickedRole, setPickedRole] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
+  /** Why the preview did not start, under the fields: the dialog stays open for another try. */
+  const [refusal, setRefusal] = useState<string | null>(null);
   /** A closed or unmounted dialog must never commit a pending preview. */
   const abandoned = useRef(false);
   useLayoutEffect(() => {
@@ -104,52 +102,39 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   } = useSpaceRoleOptions(inSpace ? selectedSpaceId : undefined, inSpace);
   const space = spaces?.find((s) => s.id === selectedSpaceId);
   const roleValue = viewAsRoleValue(presetRoleKey, pickedRole, roles);
-  // Grantability is per space, so the catalog is what says whether this pair is
-  // previewable. Unknown is not empty: until the catalog lands there is nothing
-  // to judge the choice against.
+  // Grantability is per space; unknown is not empty (nothing to judge against until the catalog lands).
   const roleOption = rolesKnown ? options.find((o) => o.value === roleValue) : undefined;
   const catalogUsable = rolesKnown && !rolesError && options.length > 0;
   const ready = !!orgId && (!inSpace || (!!roleOption && !!space));
 
   const submit = async () => {
     if (!orgId || !ready || entering) return;
-    // Replaces any preview already running: the store commits one persona and
-    // resets the cache either way.
     const persona = toViewAsPersona(orgId, orgRole, space, roleOption);
     setEntering(true);
+    setRefusal(null);
     try {
-      // Load the persona's own org row BEFORE committing it: the permissions
-      // and the banner must appear together, and a load that fails must leave
-      // the admin exactly where they were rather than under a persona wearing
-      // their own authority.
+      // Load the persona's org row BEFORE committing: permissions and banner appear together,
+      // and a failed load must leave the admin where they were.
       const orgs = await fetchOrgsAs(persona);
-      // Committing a preview the user already left would persist it, and a
-      // persona the server accepts is never stopped later: nothing would undo it.
+      // Committing a preview the user already left would persist it, with nothing to undo it.
       if (abandoned.current) return;
-      // Only a preview that moves the admin has a space to bring them back to.
-      const moves = !!space && !!roleOption && space.id !== currentSpaceId;
-      enterViewAs(persona, orgs, moves ? currentSpaceId : null);
+      setEntering(false);
+      requestScopeChange(() => {
+        const moves = !!space && !!roleOption && space.id !== currentSpaceId;
+        enterViewAs(persona, orgs, moves ? currentSpaceId : null);
+        if (space && roleOption) switchSpace(space.id);
+        close();
+        if (moves) navigate("/", { replace: true });
+        else closeOverlay();
+      });
     } catch (err) {
       if (abandoned.current) return;
       setEntering(false);
-      // Three of the four refusals are permanent; "try again" is only ever true
-      // of a failure the server named nothing for.
+      // Three of the four refusals are permanent; "try again" fits only an unnamed failure.
       const code = viewAsRefusalCode(err);
-      toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
+      setRefusal(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
       return;
     }
-    // Land where the persona's role applies. Elsewhere the persona is only its
-    // org role — an implicit member of open spaces — and a banner naming
-    // "Lecteur dans Default" over a page answered for another space reads as
-    // a preview that does not work.
-    const movesSpace = !!space && !!roleOption && space.id !== currentSpaceId;
-    if (space && roleOption) switchSpace(space.id);
-    // The settings overlay this was opened in goes with it: the preview is for
-    // looking at the app. Back to the screen the overlay covered, unless the
-    // space changed under it (that screen belongs to the other space): home.
-    close();
-    if (movesSpace) navigate("/", { replace: true });
-    else closeOverlay();
   };
 
   return (
@@ -159,8 +144,9 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         e.preventDefault();
         void submit();
       }}
-      title={t("viewAs.title")}
-      submitLabel={t("viewAs.submit")}
+      title={t("viewAs.trigger")}
+      error={refusal}
+      submitLabel={t("viewAs.rowAction")}
       // Not `isPending`: Cancel must stay live while the preview loads, to abandon it.
       submitDisabled={!ready || entering}
       submitTestId="view-as-submit"
@@ -177,7 +163,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
         />
 
         <FieldGroup>
-          <FormItem id="view-as-space" label={t("viewAs.spaceLabel")}>
+          <FormItem id="view-as-space" label={t("source.space")}>
             <OptionSelect
               value={selectedSpaceId}
               onValueChange={(value) => {

@@ -3,10 +3,9 @@
 /**
  * Platform-side bundle assembly helpers.
  *
- * These are thin wrappers over the runtime primitives — the only
- * platform-specific concern is plumbing {@link DbPackageCatalog} through
- * the right composition for each entry point (classic run, import, export
- * endpoint).
+ * Thin wrappers over the runtime primitives. The export delegates to
+ * {@link assembleAgentBundle}, the assembly the run bundle uses; only the
+ * import plumbs a catalog of its own.
  *
  * Runtime primitives are in `@appstrate/afps-runtime/bundle`:
  *   - `buildBundleFromCatalog` — transitive walk
@@ -16,18 +15,18 @@
 
 import {
   buildBundleFromAfps,
-  buildBundleFromCatalog,
   extractRootFromAfps,
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
-import { downloadVersionZip } from "./package-storage.ts";
-import { resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
-import { db } from "@appstrate/db/client";
-import { packageVersions } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { assembleAgentBundle, downloadVersionZip } from "./package-storage.ts";
+import {
+  assertIntegrationVersionsResolved,
+  resolveRunIntegrationVersions,
+} from "./integration-service.ts";
+import { getVersionRow, versionArtifactUnavailable } from "./package-versions.ts";
 import { ApiError, notFound } from "../lib/errors.ts";
 import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
 import type { LoadedPackage } from "../types/index.ts";
@@ -38,16 +37,31 @@ export interface BundleAssemblyScope {
 }
 
 /**
- * Build a Bundle for a classic run — the root agent was resolved from
- * the DB and its transitive deps come from the org registry.
+ * Assemble the export bundle for `root` — the same members a run of that
+ * manifest gets ({@link assembleAgentBundle}), with integration versions
+ * frozen exactly as a run freezes them (no overrides), and no signature
+ * policy: an export hands bytes over, it does not execute them.
+ *
+ * An unsatisfiable integration pin fails like a run does, as
+ * `DEPENDENCY_UNRESOLVED` carrying `details.missing` (422 dependency_unresolved).
  */
-export async function buildBundleFromDb(
+async function buildExportBundle(
   root: BundlePackage,
   scope: BundleAssemblyScope,
   metadata?: BundleMetadata,
 ): Promise<Bundle> {
-  const catalog = new DbPackageCatalog({ orgId: scope.orgId });
-  return buildBundleFromCatalog(root, catalog, { metadata, depTypes: ["skills"] });
+  const integrationVersions = assertIntegrationVersionsResolved(
+    await resolveRunIntegrationVersions({
+      agentManifest: root.manifest as Record<string, unknown>,
+      orgId: scope.orgId,
+    }),
+  );
+  return assembleAgentBundle(root, {
+    orgId: scope.orgId,
+    integrationVersions,
+    forExecution: false,
+    ...(metadata ? { metadata } : {}),
+  });
 }
 
 /**
@@ -82,68 +96,68 @@ export async function buildBundleFromUploadedAfps(
  * same sentence; an export that answered anything else would hand the CLI
  * different bytes from the ones a server-side run of the same agent executes.
  *
- * Returns the resolved `version` string. Throws `notFound` if no version
- * exists for the package.
+ * Returns the resolved version and its catalog manifest. Throws `notFound` if
+ * no version exists for the package.
  */
 export async function resolveExportVersion(
   packageId: string,
   versionSpec?: string | null,
-): Promise<string> {
-  if (versionSpec) {
-    const versionId = await resolveVersion(packageId, versionSpec);
-    if (!versionId) {
-      throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
-    }
-    const [row] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, versionId))
-      .limit(1);
-    if (!row) throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
-    return row.version;
-  }
-
-  // Fall back to "latest"
-  const latestId = await resolveVersion(packageId, "latest");
-  if (latestId) {
-    const [row] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, latestId))
-      .limit(1);
-    if (row) return row.version;
-  }
-
+): Promise<{ version: string; manifest: Record<string, unknown> }> {
+  const row = await getVersionRow(packageId, versionSpec || "latest");
+  if (row) return row;
   throw notFound(
-    `No exportable version found for '${packageId}' — publish a version first, then retry`,
+    versionSpec
+      ? `Version '${versionSpec}' not found for '${packageId}'`
+      : `No exportable version found for '${packageId}' — publish a version first, then retry`,
   );
 }
 
 /**
  * Build an export Bundle for the given package at the resolved version.
  *
- * Downloads the AFPS ZIP for `(packageId, version)` from storage, runs it
- * through the same extraction primitive as ingestion (`extractRootFromAfps`),
- * and walks transitive dependencies via {@link DbPackageCatalog}. The result
- * is a canonical multi-package Bundle that can be serialised to bytes via
- * {@link writeBundleToBuffer} and streamed to the caller.
+ * The root's MANIFEST is the version's catalog row (`package_versions.manifest`),
+ * the one a server-side run of that version executes (`resolveAgentRunVersion`);
+ * its other files come from the version's AFPS ZIP, extracted by the same
+ * primitive as ingestion (`extractRootFromAfps`), so the export hands the CLI the
+ * manifest a run of that version executes. Members are assembled via
+ * {@link buildExportBundle}; the result serialises via
+ * {@link writeBundleToBuffer}, which recomputes every RECORD and integrity.
  */
 export async function buildBundleForAgentExport(
   packageId: string,
   scope: BundleAssemblyScope,
   opts: { versionSpec?: string | null; metadata?: BundleMetadata } = {},
 ): Promise<Bundle> {
-  const version = await resolveExportVersion(packageId, opts.versionSpec);
+  const { version, manifest } = await resolveExportVersion(packageId, opts.versionSpec);
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) throw versionArtifactUnavailable(packageId, version);
-  const root = extractRootFromAfps(new Uint8Array(zip));
-  return buildBundleFromDb(root, scope, opts.metadata);
+  const root = withCatalogManifest(extractRootFromAfps(new Uint8Array(zip)), manifest);
+  return buildExportBundle(root, scope, opts.metadata);
+}
+
+/**
+ * `root` with `manifest` as its manifest. Returned as-is when the archive's
+ * manifest already says the same thing, so its bytes (and a `signature.sig`
+ * over them) are kept. Otherwise `manifest.json` is rewritten and
+ * `signature.sig` is dropped: the signature covers the archive's bytes, which
+ * the root no longer carries.
+ */
+function withCatalogManifest(
+  root: BundlePackage,
+  manifest: Record<string, unknown>,
+): BundlePackage {
+  if (Bun.deepEquals(root.manifest, manifest)) return root;
+  const files = new Map(root.files);
+  files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
+  files.delete("signature.sig");
+  return { ...root, manifest: manifest as BundlePackage["manifest"], files, integrity: "" };
 }
 
 /**
  * Build a Bundle whose ROOT is the agent's DRAFT state (the
  * `packages.draftManifest` + `packages.draftContent` columns) and whose
- * dependencies are the PUBLISHED versions its manifest pins select.
+ * dependencies are the PUBLISHED versions its manifest pins select (skills and
+ * integrations alike — see {@link buildExportBundle}).
  *
  * The draft is the root and only the root. `?source=draft` is the export of a
  * `version=draft` run, so it must hand the CLI the bytes that run executes —
@@ -188,5 +202,5 @@ export async function buildBundleFromAgentDraft(
     files: rootFiles,
     integrity: "",
   };
-  return buildBundleFromDb(root, scope, metadata);
+  return buildExportBundle(root, scope, metadata);
 }

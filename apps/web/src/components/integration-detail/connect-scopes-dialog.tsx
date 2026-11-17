@@ -4,11 +4,11 @@ import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { CheckboxField } from "@appstrate/ui/components/checkbox";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { Modal } from "../modal";
 import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { scopeLabels } from "../integration-connect/scope-labels";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useUrlModal } from "../../hooks/use-url-modal";
 import { connectPopupInput, type ScopeTarget } from "./connect-scope-choice";
 import { AgentQuickFill } from "./agent-quick-fill";
 
@@ -25,13 +25,14 @@ export function ConnectScopesModal({
   ...target
 }: ScopeTarget & { forceAccountSelect: boolean }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const modal = useModalParam(CONNECT_SCOPES_PARAM);
+  const modal = useUrlModal(CONNECT_SCOPES_PARAM);
   const { openPopup } = useHostedConnectPopup();
   const formId = `connect-scopes-${target.authKey}`;
 
+  if (modal.value !== target.authKey) return null;
+
   return (
     <Modal
-      open={modal.value === target.authKey}
       onClose={modal.close}
       title={t("integration.auth.scopeChoice.title")}
       actions={
@@ -71,7 +72,7 @@ export function ConnectScopesForm({
   return (
     <form
       id={formId}
-      className="space-y-4"
+      className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(ticked);
@@ -92,7 +93,7 @@ export function ConnectScopesForm({
           })}
         </p>
       )}
-      <fieldset className="min-w-0 space-y-2">
+      <fieldset className="flex min-w-0 flex-col gap-2">
         <legend className="mb-2 text-xs font-medium">
           {t("integration.auth.scopeChoice.extra")}
         </legend>

@@ -25,6 +25,8 @@ import {
   parseRunResource,
   parseRunUpdateFrame,
   producedFilesFromFileList,
+  readRunLogPages,
+  RUN_LOG_PAGE_CAP,
   publishedFilesFromLogs,
   shouldOpenLiveTail,
   shouldRaiseSweepDone,
@@ -783,5 +785,51 @@ describe("retired `document` wire shapes", () => {
         documents: [{ id: "file_old", name: "old.md" }],
       }).map((f) => f.id),
     ).toEqual(["file_new"]);
+  });
+});
+
+describe("readRunLogPages", () => {
+  const row = (id: number) => ({
+    id,
+    runId: "run_1",
+    type: "progress",
+    event: "x",
+    message: `m${id}`,
+    data: null,
+    createdAt: "2026-01-01T00:00:00Z",
+  });
+
+  it("follows the since cursor until hasMore is false", async () => {
+    const sinces: Array<number | undefined> = [];
+    const got: number[] = [];
+    const pages = [
+      { data: [row(1), row(2)], hasMore: true },
+      { data: [row(3)], hasMore: false },
+    ];
+    const res = await readRunLogPages(
+      async (since) => {
+        sinces.push(since);
+        return pages[sinces.length - 1];
+      },
+      (lines) => got.push(...lines.map((l) => l.id)),
+    );
+    expect(res).toBe("ok");
+    expect(sinces).toEqual([undefined, 2]);
+    expect(got).toEqual([1, 2, 3]);
+  });
+
+  it("reports failed when a page fails and stops at the page cap", async () => {
+    expect(
+      await readRunLogPages(
+        async () => undefined,
+        () => {},
+      ),
+    ).toBe("failed");
+    let calls = 0;
+    await readRunLogPages(
+      async () => ({ data: [row(++calls)], hasMore: true }),
+      () => {},
+    );
+    expect(calls).toBe(RUN_LOG_PAGE_CAP);
   });
 });

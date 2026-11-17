@@ -13,10 +13,7 @@ type PairingStatus =
 /** `lost`: the server refuses to state the pairing (row gone, or no longer readable). */
 export type PairingPollState = PairingStatus | "lost";
 
-/**
- * What a pairing produces: a new subscription owned as `ownerType` says, or the
- * existing `credentialId` reconnected in place, whose owner the server knows.
- */
+/** What a pairing produces: a new subscription owned as `ownerType` says, or `credentialId` reconnected in place. */
 export type PairingTarget =
   | { ownerType: ModelProviderCredentialInfo["owner_type"]; credentialId?: never }
   | { credentialId: string; ownerType?: never };
@@ -34,7 +31,7 @@ export function pairingRequestBody(
     : { providerId: input.providerId, owner_type: input.ownerType };
 }
 
-/** A refusal ends the poll even over a cached `pending`; a transient error changes nothing. */
+// A refusal ends the poll even over a cached `pending`; a transient error changes nothing.
 export function pairingPollState(
   status: PairingStatus | undefined,
   error: unknown,
@@ -43,10 +40,7 @@ export function pairingPollState(
   return status ?? "pending";
 }
 
-/**
- * Whether a usable subscription of `providerId` can serve organization models:
- * one the server lists as `bindable`, which a member's own is not.
- */
+/** Whether a usable `bindable` subscription of `providerId` can serve org models (a member's own is not). */
 export function hasOrgSubscription(
   credentials:
     | readonly Pick<

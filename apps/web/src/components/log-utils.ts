@@ -5,6 +5,9 @@
 // the richer, correlated shape the UI renders.
 
 import { jsonText } from "@appstrate/afps-shared/json-text";
+import { isApiCallToolName, type ToolIntegration } from "@appstrate/core/integration";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { LOG_TOOL, platformTool } from "../lib/platform-tool-results";
 
 interface ExecutionEntryBase {
   /** Stable across live start -> result updates and historical replay. */
@@ -24,8 +27,11 @@ export type ToolExecutionStatus = "running" | "success" | "failed" | "interrupte
 
 export interface ToolExecutionEntry extends ExecutionEntryBase {
   kind: "tool";
+  /** The name the model called. */
   tool: string;
   toolCallId?: string;
+  /** Absent for a tool no integration serves (the runner's own, Pi's built-ins). */
+  integration?: ToolIntegration;
   status: ToolExecutionStatus;
   args?: unknown;
   result?: unknown;
@@ -33,17 +39,10 @@ export interface ToolExecutionEntry extends ExecutionEntryBase {
   /** True when a result arrived without a matching start row. */
   orphaned?: boolean;
   /**
-   * Wall time of a tool call, in milliseconds, when the runner could pair the
-   * call's start and end (`data.durationMs`). Omitted otherwise — the runner
-   * deliberately emits nothing rather than a misleading zero.
-   *
-   * NOTE: whether this survives a live SSE frame depends on the stream, not on
-   * the field. `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
-   * `run_log.data` only for NON-verbose subscribers — the org-wide
-   * `use-global-run-sync` stream, which deliberately omits `verbose` because it
-   * discards log payloads anyway. The per-run stream that feeds this projection
-   * opens with `verbose=true` (`use-realtime.ts`), so its frames arrive with
-   * `data` intact and this materializes live, not only on the REST logs query.
+   * Wall time of a tool call in ms (`data.durationMs`); omitted when the runner could
+   * not pair start and end, never a misleading zero. Live frames carry it only on
+   * `verbose=true` streams: `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
+   * `run_log.data` for the non-verbose org-wide stream.
    */
   durationMs?: number;
   completedAt?: Date | string | null;
@@ -73,12 +72,9 @@ export function journalLevel(entry: ExecutionEntry): "info" | "warn" | "error" {
 }
 
 /**
- * One settled assistant turn, projected from a `data.event === "turn"` run-log
- * row (emitted by `buildTurnProgress` in `@appstrate/afps-runtime`).
- *
- * `contextTokens` is the prompt the provider actually saw that turn
- * (`inputTokens + cacheReadTokens + cacheWriteTokens`, output excluded) — the
- * number that reveals where a run started re-reading its whole context.
+ * One settled assistant turn, projected from a `data.event === "turn"` run-log row.
+ * `contextTokens` is the prompt the provider saw (input + cache read + cache write,
+ * output excluded).
  */
 export interface RunTurnRow {
   index: number;
@@ -90,14 +86,8 @@ export interface RunTurnRow {
   /** Omitted when the runner could not observe the turn's start. */
   latencyMs?: number;
   /**
-   * The window `contextTokens` is a share of, as stated by the runner for THIS
-   * turn — the denominator of the whole context reading.
-   *
-   * It rides the breadcrumb rather than the run row because the runner is the
-   * only authority on it: it applies the container-side default the platform
-   * cannot see, and it is where the number exists at emission time. Omitted
-   * when the runner cannot state it, and absent on every run predating the
-   * field — never zero, never a fabricated default.
+   * The window `contextTokens` is a share of, as stated by the runner for THIS turn
+   * (it alone knows the container-side default). Absent when unknown, never zero.
    */
   contextWindow?: number;
 }
@@ -114,15 +104,7 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/**
- * Project the raw run logs into the per-turn breakdown rendered by
- * `TurnsTable` (`run-detail/run-turns-detail.tsx`). Pure and total: rows that are not
- * turn breadcrumbs, or whose payload is malformed/absent, are skipped rather
- * than throwing.
- *
- * Runs that predate the breadcrumb emit no such rows at all — an empty array
- * is the normal case, and the caller renders nothing for it.
- */
+/** Per-turn breakdown for `TurnsTable`. Total: non-turn or malformed rows are skipped. */
 export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
   const rows: RunTurnRow[] = [];
   for (const log of rawLogs) {
@@ -136,23 +118,14 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
     const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
     const latencyMs = d["latencyMs"];
-    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: neither has
-    // an honest fallback. A missing window is "unknown", which the reading must
-    // be able to tell apart from any number at all — so the key is left ABSENT
-    // rather than defaulted, and a malformed payload drops it the same way
-    // instead of throwing.
+    // Deliberately NOT `readNumber` (as for `latencyMs`): a missing window is "unknown",
+    // so the key stays ABSENT rather than defaulted.
     const contextWindow = d["contextWindow"];
 
     rows.push({
       index: d["index"],
-      // The emitter sets `contextTokens` unconditionally (`buildTurnProgress`
-      // in `@appstrate/afps-runtime`), unlike `latencyMs`/`contextWindow`
-      // above, which are conditional spreads. So an absent value means a
-      // malformed payload, not an older emitter — the field and its only
-      // producer landed in the same commit and no release ever wrote a turn
-      // row without it. Read it like the other token counts and let a
-      // malformed row fall to 0; do NOT recompute a plausible-looking total
-      // from the parts, which plots a bar that was never measured.
+      // Always emitted, so absent means malformed: fall to 0, do NOT recompute a total
+      // from the parts (that plots a bar never measured).
       contextTokens: readNumber(d["contextTokens"], 0),
       inputTokens,
       outputTokens,
@@ -192,9 +165,41 @@ function formatToolArgs(args: unknown): string {
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
 }
 
+/**
+ * An `api_call` reads as the request it sent; any other tool, or a call missing the method or
+ * target its schema requires (so never sent), as its flattened arguments.
+ */
+function toolDetail(args: unknown, integration: ToolIntegration | undefined): string {
+  const request = integration && isApiCallToolName(integration.tool) ? asRecordOrNull(args) : null;
+  if (request && typeof request.method === "string" && typeof request.target === "string") {
+    return `${request.method} ${request.target}`;
+  }
+  return formatToolArgs(args);
+}
+
+function readIntegration(data: Record<string, unknown>): ToolIntegration | undefined {
+  const raw = asRecordOrNull(data["integration"]);
+  const id = stringValue(raw?.id);
+  const tool = stringValue(raw?.tool);
+  if (!id || !tool) return undefined;
+  const title = stringValue(raw?.title);
+  return { id, tool, ...(title ? { title } : {}) };
+}
+
+/**
+ * A call of the platform `log` tool writes the journal row (`event === "log"`) that says the
+ * same thing: its tool row is shown only when the call did not complete, which writes none.
+ */
+function isRedundantLogCall(entry: ToolExecutionEntry): boolean {
+  return (
+    platformTool(entry.integration) === LOG_TOOL &&
+    (entry.status === "running" || entry.status === "success")
+  );
+}
+
 const ASSISTANT_MESSAGE_EVENT = "assistant_message";
 
-function owns(value: Record<string, unknown>, key: string): boolean {
+function owns(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
@@ -210,10 +215,8 @@ function toolName(data: Record<string, unknown>, message: string): string {
 }
 
 /**
- * Tool starts and results deliberately share the generic `appstrate.progress`
- * envelope. Their payload is the stable discriminator: results always carry
- * `isError`, even when the underlying tool returned `undefined`; starts carry
- * `args` when the SDK supplied them and use the `Tool:` message otherwise.
+ * Starts and results share the `appstrate.progress` envelope; the payload discriminates:
+ * results always carry `isError`, starts carry `args` or a `Tool:` message.
  */
 function toolRowPhase(
   data: Record<string, unknown>,
@@ -235,12 +238,7 @@ function rawEntryId(log: RawLog, index: number, suffix = ""): string {
   return `log:${log.id ?? index}${suffix}`;
 }
 
-/**
- * `assistant_message` is the only marker of model-authored prose. An untagged
- * `appstrate.progress` row is a runner LIFECYCLE breadcrumb by definition
- * (`AppstrateProgressEvent`, `@appstrate/afps-runtime`), so it belongs to the
- * `runtime` kind — attributing it to the model would put words in its mouth.
- */
+/** `assistant_message` is the only marker of model prose; untagged progress rows are runner lifecycle (`runtime` kind). */
 function isAgentText(log: RawLog): boolean {
   return log.type === "progress" && log.data?.["event"] === ASSISTANT_MESSAGE_EVENT;
 }
@@ -251,12 +249,9 @@ interface BuildLogEntriesOptions {
 }
 
 /**
- * Project raw run logs into a compact execution trace and structured output.
- *
- * Tool starts/results remain separate in persistence but collapse here by
- * exact `toolCallId`. Tool-name matching is intentionally forbidden: parallel
- * calls of the same tool may settle out of order. Legacy rows without an id
- * remain separate and explicitly `unknown` once a run is terminal.
+ * Project raw run logs into an execution trace and structured output. Tool starts and
+ * results collapse by exact `toolCallId` only (never by name: parallel calls of the
+ * same tool settle out of order); id-less legacy rows stay separate, `unknown` once terminal.
  */
 export function buildLogEntries(
   rawLogs: RawLog[],
@@ -276,18 +271,13 @@ export function buildLogEntries(
     } else if (log.event === "run_completed") {
       continue;
     } else if (isTurnRow(log)) {
-      // Per-turn breadcrumbs are a structured series, not narration: a heavy
-      // run emits ~108 of them and they would drown the agent's own log lines.
-      // They are rendered as a table instead (`buildTurnRows` → `TurnsTable`
-      // in `run-detail/run-turns-detail.tsx`).
+      // Turn breadcrumbs would drown the log lines; rendered by `buildTurnRows` → `TurnsTable`.
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
       if (!message) continue;
 
-      // Explicit semantic channels win over message-shape fallbacks. In
-      // particular, agent prose or a log-tool message is allowed to begin
-      // with "Tool:" without becoming a synthetic tool invocation.
+      // Explicit channels win over message-shape fallbacks: a log message may begin with "Tool:".
       if (log.event === "log") {
         entries.push({
           id: rawEntryId(log, rawIndex, ":explicit-log"),
@@ -319,29 +309,30 @@ export function buildLogEntries(
         if (phase === "start") {
           const existingIndex = callId ? toolEntryByCallId.get(callId) : undefined;
           if (existingIndex !== undefined) {
-            // Defensive out-of-order path: a result row was projected first.
-            // Merge the late start into it without guessing by tool name.
+            // Out-of-order: a result row was projected first; merge the late start into it.
             const existing = entries[existingIndex];
             if (existing?.kind === "tool") {
-              const args = logData["args"];
+              const integration = existing.integration ?? readIntegration(logData);
               entries[existingIndex] = {
                 ...existing,
                 tool: name === "unknown" ? existing.tool : name,
-                ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+                ...(integration ? { integration } : {}),
+                ...(owns(logData, "args") ? { args: logData["args"] } : {}),
                 orphaned: false,
               };
             }
             continue;
           }
 
-          const args = logData["args"];
+          const integration = readIntegration(logData);
           const entry: ToolExecutionEntry = {
             id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-start"),
             kind: "tool",
             tool: name,
             ...(callId ? { toolCallId: callId } : {}),
+            ...(integration ? { integration } : {}),
             status: options.isRunTerminal ? (callId ? "interrupted" : "unknown") : "running",
-            ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+            ...(owns(logData, "args") ? { args: logData["args"] } : {}),
             ...(typeof durationMs === "number" && Number.isFinite(durationMs)
               ? { durationMs }
               : {}),
@@ -358,9 +349,11 @@ export function buildLogEntries(
         if (existingIndex !== undefined) {
           const existing = entries[existingIndex];
           if (existing?.kind === "tool") {
+            const integration = existing.integration ?? readIntegration(logData);
             entries[existingIndex] = {
               ...existing,
               tool: existing.tool === "unknown" ? name : existing.tool,
+              ...(integration ? { integration } : {}),
               status,
               result: logData["result"],
               ...(typeof durationMs === "number" && Number.isFinite(durationMs)
@@ -372,11 +365,13 @@ export function buildLogEntries(
           continue;
         }
 
+        const integration = readIntegration(logData);
         const resultEntry: ToolExecutionEntry = {
           id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-result"),
           kind: "tool",
           tool: name,
           ...(callId ? { toolCallId: callId } : {}),
+          ...(integration ? { integration } : {}),
           status,
           result: logData["result"],
           orphaned: true,
@@ -401,7 +396,220 @@ export function buildLogEntries(
     }
   }
 
-  return { entries, output };
+  // Settled last: a call's identity, arguments and status may each arrive on either event.
+  const settled = entries.flatMap((entry): ExecutionEntry[] => {
+    if (entry.kind !== "tool") return [entry];
+    if (isRedundantLogCall(entry)) return [];
+    return [
+      owns(entry, "args") ? { ...entry, detail: toolDetail(entry.args, entry.integration) } : entry,
+    ];
+  });
+  return { entries: settled, output };
+}
+
+/** The integrations the journal's tool calls reached, in order of first call. */
+export function journalIntegrationIds(entries: readonly ExecutionEntry[]): string[] {
+  const ids = new Set<string>();
+  for (const entry of entries)
+    if (entry.kind === "tool" && entry.integration) ids.add(entry.integration.id);
+  return [...ids];
+}
+
+export interface IntegrationLook {
+  name: string;
+  icon?: string | null;
+  /** Its row is still being read: the name and icon are not known yet. */
+  pending: boolean;
+}
+
+/** An integration's display name and icon; its id stands in for a name the read does not know. */
+export type JournalIntegrations = (integrationId: string) => IntegrationLook;
+
+const JOURNAL_TYPES = {
+  agent: "message",
+  tool: "tool",
+  log: "journal",
+  runtime: "system",
+} as const satisfies Record<ExecutionEntry["kind"], string>;
+export type JournalTypeFilter = (typeof JOURNAL_TYPES)[ExecutionEntry["kind"]];
+export const JOURNAL_TYPE_VALUES = Object.values(JOURNAL_TYPES);
+
+/** A tool row keeps one type while it runs and once it settles: its status icon tells which. */
+export function journalType(entry: ExecutionEntry): JournalTypeFilter {
+  return JOURNAL_TYPES[entry.kind];
+}
+
+/** What the journal shows: an empty list of values does not filter on its dimension. */
+export interface JournalFilters {
+  levels: readonly string[];
+  types: readonly string[];
+  integrations: readonly string[];
+  showTools: boolean;
+  /** Trimmed and lower-cased in `locale`; empty matches every entry. */
+  query: string;
+  locale: string;
+}
+
+/** The entries the journal's filters and search keep, in order. */
+export function filterJournal(
+  entries: readonly ExecutionEntry[],
+  filters: JournalFilters,
+  t: (key: string) => string,
+  integrations: JournalIntegrations,
+): ExecutionEntry[] {
+  const { levels, types, showTools, query, locale } = filters;
+  return entries.filter((entry) => {
+    if (!showTools && entry.kind === "tool") return false;
+    if (levels.length > 0 && !levels.includes(journalLevel(entry))) return false;
+    if (types.length > 0 && !types.includes(journalType(entry))) return false;
+    if (
+      filters.integrations.length > 0 &&
+      !(
+        entry.kind === "tool" &&
+        entry.integration &&
+        filters.integrations.includes(entry.integration.id)
+      )
+    ) {
+      return false;
+    }
+    return (
+      !query ||
+      journalSearchText(entry, t, (id) => integrations(id).name)
+        .toLocaleLowerCase(locale)
+        .includes(query)
+    );
+  });
+}
+
+/** Consecutive lines of the runner, drawn as one row that opens in place. */
+export interface JournalGroup {
+  kind: "group";
+  /** Its first entry's id, which later lines of the run do not change. */
+  id: string;
+  entries: ExecutionEntry[];
+}
+
+/** What the journal draws on one line: an entry, or a group of them. */
+export type JournalRow = ExecutionEntry | JournalGroup;
+
+function foldable(entry: ExecutionEntry): boolean {
+  return entry.kind === "runtime" && journalLevel(entry) === "info";
+}
+
+/**
+ * The rows the journal draws from its filtered entries: each run of two or more consecutive
+ * `runtime` entries of level info or debug is one group (a warning or an error stays a row of
+ * its own and ends the run). A search or a level or type filter in force folds nothing: the
+ * reader is looking for lines.
+ */
+export function journalRows(
+  entries: readonly ExecutionEntry[],
+  filters: Pick<JournalFilters, "levels" | "types" | "query">,
+): JournalRow[] {
+  if (filters.query || filters.levels.length > 0 || filters.types.length > 0) return [...entries];
+  const rows: JournalRow[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    let end = index;
+    while (end < entries.length && foldable(entries[end]!)) end += 1;
+    if (end - index >= 2) {
+      rows.push({
+        kind: "group",
+        id: `group:${entries[index]!.id}`,
+        entries: entries.slice(index, end),
+      });
+      index = end;
+    } else {
+      rows.push(entries[index]!);
+      index += 1;
+    }
+  }
+  return rows;
+}
+
+/**
+ * The groups drawn open. A group is as the reader set it (`open`); left alone, it is open while
+ * it is a live run's last row (its lines are still arriving) and folds once another event
+ * follows it or the run ends. One holding the open row (a reload, a shared link) stays open.
+ */
+export function expandedJournalGroups(
+  rows: readonly JournalRow[],
+  state: {
+    open: Readonly<Record<string, boolean>>;
+    live: boolean;
+    selectedEntryId?: string | null;
+  },
+): Set<string> {
+  const tail = rows[rows.length - 1];
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== "group") continue;
+    const open =
+      state.open[row.id] ??
+      ((state.live && row === tail) ||
+        row.entries.some((entry) => entry.id === state.selectedEntryId));
+    if (open) ids.add(row.id);
+  }
+  return ids;
+}
+
+function timeOf(value: Date | string | null | undefined): number {
+  return value ? new Date(value).getTime() : Number.NaN;
+}
+
+/** The time between a group's first and last lines, 0 when either was not dated. */
+export function journalGroupElapsedMs(group: JournalGroup): number {
+  const { entries } = group;
+  const elapsed = timeOf(entries[entries.length - 1]?.createdAt) - timeOf(entries[0]?.createdAt);
+  return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
+}
+
+/**
+ * The tools the runner itself offers the model: its harness tools and the coding agent's
+ * built-ins (`@appstrate/runner-pi`), each with the key of its label.
+ */
+const HARNESS_TOOL_LABELS = new Map([
+  ["output", "log.harness.output"],
+  ["publish_file", "log.harness.publish_file"],
+  ["read", "log.harness.read"],
+  ["bash", "log.harness.bash"],
+  ["edit", "log.harness.edit"],
+  ["write", "log.harness.write"],
+  ["grep", "log.harness.grep"],
+  ["find", "log.harness.find"],
+  ["ls", "log.harness.ls"],
+]);
+
+/** What a tool row is called: its server's title or name, a harness tool's label, else the name the model called. */
+export function toolLabel(entry: ToolExecutionEntry, t: (key: string) => string): string {
+  if (entry.integration) return entry.integration.title ?? entry.integration.tool;
+  const harnessKey = HARNESS_TOOL_LABELS.get(entry.tool);
+  return harnessKey ? t(harnessKey) : entry.tool;
+}
+
+/** What the journal's search reads of an entry: a tool call by every name it goes by. */
+export function journalSearchText(
+  entry: ExecutionEntry,
+  t: (key: string) => string,
+  integrationName: (integrationId: string) => string,
+): string {
+  if (entry.kind === "tool") {
+    const integration = entry.integration;
+    return [
+      entry.tool,
+      toolLabel(entry, t),
+      integration?.tool,
+      integration?.id,
+      integration && integrationName(integration.id),
+      entry.detail,
+      entry.status,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  return [entry.message, entry.kind === "runtime" ? entry.sourceType : undefined]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {
@@ -419,9 +627,3 @@ export function formatTimestamp(d: Date | string | null | undefined, lang: strin
     return "\u2014";
   }
 }
-
-/** Text color by severity level (overrides type color when set). */
-export const levelColors: Record<string, string> = {
-  warn: "text-amber-400",
-  error: "text-destructive",
-};

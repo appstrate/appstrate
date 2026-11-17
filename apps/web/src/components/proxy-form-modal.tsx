@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { FormModal } from "./form-modal";
-import { FormItem } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import type { OrgProxyInfo } from "../hooks/use-proxies";
 
@@ -11,6 +11,8 @@ interface ProxyFormModalProps {
   onClose: () => void;
   proxy: OrgProxyInfo | null;
   isPending: boolean;
+  /** The submission's refusal, shown under the fields. */
+  error?: string | null;
   onSubmit: (data: { label: string; url: string }) => void;
 }
 
@@ -20,7 +22,13 @@ type ProxyFormData = {
 };
 
 /** Mounted by the caller while open, one per proxy (`key`): closing abandons the input. */
-export function ProxyFormModal({ onClose, proxy, isPending, onSubmit }: ProxyFormModalProps) {
+export function ProxyFormModal({
+  onClose,
+  proxy,
+  isPending,
+  error,
+  onSubmit,
+}: ProxyFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
 
   const {
@@ -42,13 +50,14 @@ export function ProxyFormModal({ onClose, proxy, isPending, onSubmit }: ProxyFor
   return (
     <FormModal
       onClose={onClose}
-      title={proxy ? t("proxies.modal.editTitle") : t("proxies.modal.createTitle")}
+      title={proxy ? t("proxies.modal.editTitle") : t("proxies.add")}
       onSubmit={handleSubmit(onFormSubmit)}
       isPending={isPending}
+      error={error}
     >
       <FormItem
         id="px-label"
-        label={t("proxies.modal.label")}
+        label={t("spaces.nameLabel")}
         error={showError("label") ? errors.label?.message : undefined}
       >
         <Input

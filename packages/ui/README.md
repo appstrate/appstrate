@@ -11,7 +11,7 @@ Private workspace package — not published to npm. Consumed within the monorepo
 "dependencies": { "@appstrate/ui": "workspace:*" }
 ```
 
-Peer deps: `react` 19, `react-dom` 19, `@rjsf/core` ^6, `@rjsf/utils` ^6, `@rjsf/validator-ajv8` ^6, `lucide-react`, `react-select` ^5, `@appstrate/core` (workspace), `typescript` ^5.
+Peer deps: `react` 19, `react-dom` 19, `@rjsf/core` ^6, `@rjsf/utils` ^6, `@rjsf/validator-ajv8` ^6, `lucide-react`, `@appstrate/core` (workspace), `typescript` ^5.
 
 The package ships raw `.tsx`/`.ts` sources (no build step) — consumers transpile via their bundler (Vite, etc.). Same convention as `@appstrate/core`.
 

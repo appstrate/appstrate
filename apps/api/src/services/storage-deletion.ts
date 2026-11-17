@@ -30,7 +30,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
-import { listResponse } from "../lib/list-response.ts";
+import { listResponse } from "@appstrate/core/list-query";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 import {
@@ -284,9 +284,8 @@ export async function processStorageDeletionJobs(
     );
     try {
       // A package key a live row has taken back is closed without deleting.
-      const outcome = await deleteUnlessReclaimed(job.bucket, job.storageKey, () =>
-        deleteStorageTarget(job.bucket, job.storageKey, del, download),
-      );
+      const purge = () => deleteStorageTarget(job.bucket, job.storageKey, del, download);
+      const outcome = await deleteUnlessReclaimed(job.bucket, job.storageKey, purge);
       if (outcome === "reclaimed") {
         reclaimed += 1;
         logger.info("storage deletion job skipped: key reclaimed by a live row", {
@@ -405,7 +404,7 @@ export async function listStorageDeletionJobs(params: {
   limit: number;
   startingAfter?: string;
 }): Promise<ListEnvelope<StorageDeletionJobView>> {
-  const limit = Math.min(Math.max(params.limit, 1), 200);
+  const { limit } = params;
   const conditions = [statusFilter(params.status)];
 
   if (params.startingAfter) {

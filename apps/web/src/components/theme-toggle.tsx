@@ -21,15 +21,15 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
-          <CurrentIcon className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="size-8">
+          <CurrentIcon />
           <span className="sr-only">{t("userMenu.theme")}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {themeOptions.map(({ value, labelKey, icon: Icon }) => (
           <DropdownMenuItem key={value} onClick={() => setTheme(value)}>
-            <Icon className="mr-2 h-4 w-4" />
+            <Icon className="mr-2" />
             {t(labelKey)}
             {theme === value && <span className="ml-auto">✓</span>}
           </DropdownMenuItem>

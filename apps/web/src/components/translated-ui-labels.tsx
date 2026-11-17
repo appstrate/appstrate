@@ -9,15 +9,15 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
   const { t } = useTranslation("common");
   const labels = useMemo(
     () => ({
-      carouselNext: t("carousel.next"),
-      carouselPrevious: t("carousel.previous"),
       close: t("btn.close"),
-      copy: t("btn.copy"),
-      copied: t("btn.copied"),
-      copyFailed: t("error.copyFailed"),
       sidebar: t("nav.sidebar"),
       sidebarDescription: t("nav.sidebarDescription"),
       toggleSidebar: t("nav.toggleSidebar"),
+      breadcrumb: t("nav.breadcrumb"),
+      breadcrumbMore: t("nav.breadcrumbMore"),
+      copy: t("btn.copy"),
+      copied: t("btn.copied"),
+      copyFailed: t("error.copyFailed"),
     }),
     [t],
   );

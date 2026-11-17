@@ -49,12 +49,21 @@ import {
   isBareAuthSchemePrefix,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { normaliseMcpToolBody, normaliseMcpToolNamespace } from "@appstrate/afps-shared/mcp-naming";
+import { isPlainObject } from "./safe-json.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
+import {
+  getMcpServerWorkspaceMount,
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  MCP_SERVER_WORKSPACE_META_KEY,
+  isMcpServerRuntime,
+} from "./mcp-server.ts";
 
 /** RFC 3986 `scheme://` prefix of an authority-form templated authorized_uris entry. */
 const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
@@ -78,6 +87,83 @@ export const API_META_KEY = "dev.appstrate/api";
 
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
 
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: runtime binding (`_meta["dev.appstrate/platform"]`)
+// ─────────────────────────────────────────────
+
+/**
+ * `_meta` key binding an integration to the runtime that executes the run: its MCP endpoint is the
+ * runtime's own, and the runtime authenticates to it. The declared `source.remote.url` is never
+ * contacted by a runtime that honours the key; a runtime that does not know the key leaves the
+ * integration unbound.
+ *
+ * Shape: `{}`. The declaration is a JSON object under the key (AFPS §10.1); any other value binds
+ * nothing. Legal only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
+ * (`integrationManifestSchema`). Only a system package may carry it: every org write path refuses
+ * it (`findRuntimeBinding`), because a bound integration receives the platform's own run tools,
+ * called as the run.
+ */
+export const PLATFORM_META_KEY = "dev.appstrate/platform";
+
+/**
+ * Id of the system integration that ships the run tools and carries {@link PLATFORM_META_KEY}
+ * (its catalog: the manifest of the `@appstrate/platform` system package). An agent
+ * declares it to receive those tools; the manifests the platform writes on an author's behalf
+ * (inline-run defaults, the default agent) name it.
+ * Whether an integration is bound to the runtime is never read from this id:
+ * {@link isRuntimeBoundIntegration} decides.
+ */
+export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
+
+/** The exposed name of `tool` of {@link PLATFORM_INTEGRATION_ID}, as the agent sees it. */
+export function platformToolName(tool: string): string {
+  return `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
+}
+
+/**
+ * The integration tool a run's tool call reached, as recorded on the tool's `appstrate.progress`
+ * events (`data.integration`) and stamped by the host on the descriptor it exposes
+ * (`_meta["dev.appstrate/integration"]`).
+ */
+export interface ToolIntegration {
+  /** Integration package id (`@scope/name`). */
+  id: string;
+  /** The tool's name on its server. */
+  tool: string;
+  /** The server's `title`, else `annotations.title`. */
+  title?: string;
+}
+
+/** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
+export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
+
+/**
+ * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
+ * resolver, activation, the manifest schema, the write rule and the CLI read it, never the
+ * package id. The value
+ * must be a JSON object (AFPS §10.1), so `null` or a scalar binds nothing.
+ */
+export function isRuntimeBoundIntegration(manifest: unknown): boolean {
+  if (!isPlainObject(manifest)) return false;
+  const meta = manifest._meta;
+  return isPlainObject(meta) && isPlainObject(meta[PLATFORM_META_KEY]);
+}
+
+/**
+ * WRITE-path refusal of {@link PLATFORM_META_KEY} on a package the platform did not ship. The
+ * caller applies it to every non-system manifest it stores.
+ */
+export function findRuntimeBinding(manifest: unknown): { path: IssuePath; message: string }[] {
+  return isRuntimeBoundIntegration(manifest)
+    ? [
+        {
+          path: ["_meta", PLATFORM_META_KEY],
+          message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+        },
+      ]
+    : [];
+}
+
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
  * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
@@ -96,6 +182,18 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
 // ─────────────────────────────────────────────
 // Integration manifest (AFPS + Appstrate cross-field rules)
 // ─────────────────────────────────────────────
+
+/**
+ * True for an `oauth2` auth declaring `connect.login` (AFPS §7.7, *On an `oauth2` auth method*):
+ * its first token is acquired by a token request to `token_endpoint` carrying the grant the user
+ * submits through `credentials.schema`, instead of the authorization-code flow. Once acquired, the
+ * connection is an ordinary oauth2 one.
+ */
+export function acquiresByConnectLogin(auth: { type?: unknown; connect?: unknown }): boolean {
+  return (
+    auth.type === "oauth2" && (auth.connect as { login?: unknown } | undefined)?.login !== undefined
+  );
+}
 
 /**
  * The integration manifest validator. The base structural schema comes from
@@ -334,6 +432,43 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
 
+  // (0) A `local` integration's Appstrate `_meta` hints: the workspace mount and the runtime
+  // override must be well-formed and compatible with `source.server.type`.
+  const localServer = getLocalServer(manifest);
+  if (localServer !== null) {
+    try {
+      getMcpServerWorkspaceMount(manifest);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["_meta", MCP_SERVER_WORKSPACE_META_KEY],
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+    const hint = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
+    if (hint?.runtime !== undefined) {
+      if (!isMcpServerRuntime(hint.runtime)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+          message:
+            `Unsupported MCP server runtime ${JSON.stringify(hint.runtime)}. ` +
+            `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
+        });
+      } else {
+        const compatibleType = MCP_SERVER_RUNTIME_CAPABILITIES[hint.runtime].manifestServerType;
+        if (localServer.type !== compatibleType) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+            message: `Runtime '${hint.runtime}' requires source.server.type '${compatibleType}'.`,
+          });
+        }
+      }
+    }
+  }
+
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
     const authorizedUris = auth.authorized_uris ?? [];
@@ -507,9 +642,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // only reference declared connect outputs. We only enforce the gating
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
-    // surface here).
+    // surface here). An oauth2 login declares no outputs — its response is a
+    // token response, its credential the oauth2 token bundle — so none of it applies.
     const login = auth.connect?.login;
-    if (login) {
+    if (login && !acquiresByConnectLogin(auth)) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {
         ctx.addIssue({
@@ -672,6 +808,26 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
+  // (5b) `_meta["dev.appstrate/platform"]` (runtime binding): only on an unauthenticated
+  // `remote` integration — the runtime authenticates to its own endpoint, so an auth would never
+  // be used, and only a remote source has an MCP endpoint to bind.
+  if (isRuntimeBoundIntegration(manifest)) {
+    if (manifest.auths !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires an integration without auths`,
+        path: ["auths"],
+      });
+    }
+    if (manifest.source?.kind !== "remote") {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires source.kind "remote"`,
+        path: ["source", "kind"],
+      });
+    }
+  }
+
   // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent
   // inherits when it depends on this integration but omits `integrations_configuration.<id>`.
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
@@ -682,7 +838,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
   if (defaultTools !== undefined) {
     if (isToolsWildcard(defaultTools)) {
-      if ((manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true) {
+      if (!allowsUndeclaredTools(manifest)) {
         ctx.addIssue({
           code: "custom",
           message:
@@ -710,6 +866,83 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
  * above adds cross-field validation without changing the shape).
  */
 export type IntegrationManifest = AfpsIntegrationManifest;
+
+/** The inline run declaration of a `local` source (`source.server`, AFPS §7.1). */
+export type LocalServer = Extract<
+  NonNullable<AfpsIntegrationManifest["source"]>,
+  { kind: "local" }
+>["server"];
+
+/**
+ * The `source.server` of a `local` integration; `null` for any other source or when the
+ * declaration is missing / malformed (a draft being edited): no `type`, `entry_point`, or
+ * `mcp_config` object with a string `command`.
+ */
+export function getLocalServer(manifest: unknown): LocalServer | null {
+  const source = (manifest as { source?: { kind?: unknown; server?: unknown } } | null)?.source;
+  if (source?.kind !== "local") return null;
+  const server = source.server as
+    { type?: unknown; entry_point?: unknown; mcp_config?: unknown } | null | undefined;
+  if (!server || typeof server !== "object" || Array.isArray(server)) return null;
+  if (typeof server.type !== "string" || typeof server.entry_point !== "string") return null;
+  const config = server.mcp_config as { command?: unknown } | null | undefined;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  if (typeof config.command !== "string") return null;
+  return server as LocalServer;
+}
+
+/**
+ * The literal `source.server.mcp_config.env` entries of a `local` integration (AFPS §7.1: literal
+ * values only — credentials reach the server through the auth's `delivery.env` / `delivery.files`,
+ * which win over these at spawn). Non-string values are skipped; `{}` when the source is not
+ * local, the declaration is malformed, or no env is declared.
+ */
+export function getLocalServerEnv(manifest: unknown): Record<string, string> {
+  const env: unknown = getLocalServer(manifest)?.mcp_config.env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The advisory tool catalog of a `local` integration (`source.server.tools`, AFPS §7.1);
+ * `undefined` when the source is not local or the declaration carries no `tools`.
+ */
+export function getLocalServerTools(
+  manifest: unknown,
+): ReadonlyArray<{ name: string; description?: string }> | undefined {
+  const tools = (getLocalServer(manifest) as { tools?: unknown } | null)?.tools;
+  if (!Array.isArray(tools)) return undefined;
+  return tools.filter(
+    (t): t is { name: string; description?: string } =>
+      !!t && typeof t === "object" && typeof (t as { name?: unknown }).name === "string",
+  );
+}
+
+export function getIntegrationSourceKind(
+  manifest: IntegrationManifest,
+): "local" | "remote" | "none" | undefined {
+  const kind = manifest.source?.kind;
+  return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
+}
+
+/**
+ * `transport` is checked against AFPS §7.1's enum so no caller is tempted to coerce an unknown one
+ * to HTTP. The schema parse already refuses it; this keeps the type honest, it is not the gate.
+ */
+export function getRemoteSource(
+  manifest: IntegrationManifest,
+): { url: string; transport: "streamable-http" | "sse" } | null {
+  const source = manifest.source;
+  if (source?.kind !== "remote" || !source.remote) return null;
+  const { url, transport } = source.remote;
+  if (typeof url !== "string") return null;
+  if (transport !== "streamable-http" && transport !== "sse") return null;
+  return { url, transport };
+}
 
 /**
  * Narrowed view of a single auth method's `delivery` (AFPS §7.6). The
@@ -842,12 +1075,40 @@ export function apiUploadToolNameFor(apiCallToolName: string): string {
  * Names of MCP tools the integration declares POLICY for in its top-level
  * `tools_policy` record. Empty when the integration didn't opt into per-tool
  * metadata. For a `local` source this is NOT the catalog of exposed tools —
- * that is the mcp-server's, and `tools_policy` a sparse policy table over it.
+ * that is `source.server.tools`, and `tools_policy` a sparse policy table over it.
  * For any other source these names are the base of the catalog
  * {@link resolveIntegrationToolCatalog} resolves.
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
+}
+
+/**
+ * An unauthenticated integration (AFPS §7.2): it omits `auths`, so it injects no credential and
+ * binds no connection — `required: true` asks nothing of it.
+ */
+export function isUnauthenticatedIntegration(
+  manifest: Pick<IntegrationManifest, "auths">,
+): boolean {
+  return manifest.auths === undefined;
+}
+
+/**
+ * An unauthenticated integration's `variables` (AFPS §7.2, §7.12): their values live on a
+ * connection, which this platform creates only on an auth method. A WRITE-path refusal.
+ */
+export function findConnectionlessVariables(
+  manifest: unknown,
+): { path: IssuePath; message: string }[] {
+  const m = manifest as { auths?: unknown; variables?: unknown } | null;
+  if (m === null || m.auths !== undefined || m.variables === undefined) return [];
+  return [
+    {
+      path: ["variables"],
+      message:
+        "an integration without auths cannot declare variables: their values live on a connection, and this platform creates connections only on an auth method",
+    },
+  ];
 }
 
 /**
@@ -957,12 +1218,20 @@ export interface IntegrationToolInspection {
 export interface ResolveIntegrationToolCatalogInput {
   integration: IntegrationManifest;
   /**
-   * Verbatim MCPB `tools[]` from the referenced mcp-server (local source
-   * only). Pass `undefined` for remote/api sources or when the mcp-server
-   * manifest is unavailable — the resolver then falls back to
-   * `integration.tools_policy` keys.
+   * The tools the running server listed (`tools/list`), when the caller holds them and the
+   * manifest lets them stand for the catalog (a remote source with `allow_undeclared_tools`).
+   * Omitted, the catalog is the manifest's: `source.server.tools` for a local source, else the
+   * `tools_policy` keys.
    */
-  mcpServerTools?: ReadonlyArray<{ name: string; description?: string }>;
+  listedTools?: ReadonlyArray<{ name: string; description?: string }>;
+}
+
+/**
+ * Whether the integration authorizes the tools its server lists beyond `tools_policy`
+ * (AFPS §7.8 `allow_undeclared_tools: true`); `false` when absent or malformed.
+ */
+export function allowsUndeclaredTools(manifest: object): boolean {
+  return (manifest as { allow_undeclared_tools?: unknown }).allow_undeclared_tools === true;
 }
 
 /**
@@ -971,7 +1240,7 @@ export interface ResolveIntegrationToolCatalogInput {
  * Resolution:
  *
  *   1. Base catalog (the integration's own surface)
- *      - local + mcpServerTools provided → MCPB-canonical entries
+ *      - local + `source.server.tools` declared → those entries
  *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
  *   1b. Append api_call tool(s) from `_meta["dev.appstrate/api"]` (additive —
  *       orthogonal to source kind; a `none` source contributes only these),
@@ -994,12 +1263,13 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
   catalog: IntegrationToolCatalogEntry[];
   inspection: IntegrationToolInspection;
 } {
-  const { integration, mcpServerTools } = input;
+  const { integration, listedTools } = input;
 
   // Step 1 — the integration's own MCP catalog
+  const serverTools = listedTools ?? getLocalServerTools(integration);
   let base: IntegrationToolCatalogEntry[];
-  if (mcpServerTools !== undefined) {
-    base = mcpServerTools.map((t) => ({ name: t.name, description: t.description }));
+  if (serverTools !== undefined) {
+    base = serverTools.map((t) => ({ name: t.name, description: t.description }));
   } else {
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }
@@ -1057,7 +1327,7 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
       ...resolved,
       origin: syntheticApiNames.has(entry.name)
         ? "appstrate"
-        : mcpServerTools !== undefined
+        : serverTools !== undefined
           ? "mcp_package"
           : "manifest",
       exposure: isHidden ? "hidden" : "available",
@@ -1093,7 +1363,7 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
     catalog: out,
     inspection: {
       basis:
-        mcpServerTools !== undefined
+        serverTools !== undefined
           ? "mcp_package"
           : integration.source?.kind === "none"
             ? "platform"
@@ -1229,27 +1499,24 @@ function carriesOnlyAppstrateMeta(node: unknown): boolean {
  * The `default_tools` names the manifest proves unexposed, each once: one {@link hiddenToolNames}
  * withholds, whatever the source, and one outside {@link resolveIntegrationToolCatalog} where that
  * catalog is known — a `none` source carrying no `_meta` extension but Appstrate's (another
- * vendor's may supply tools), a `local` source given its mcp-server's `tools[]`, and a `remote`
+ * vendor's may supply tools), a `local` source declaring `source.server.tools`, and a `remote`
  * source declaring a `tools_policy`, which bounds the default as it bounds an agent's selection.
  */
-function unexposedDefaultTools(
-  manifest: IntegrationManifest,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
-): { path: IssuePath; message: string }[] {
+function unexposedDefaultTools(manifest: IntegrationManifest): {
+  path: IssuePath;
+  message: string;
+}[] {
   const defaults = readDefaultTools(manifest);
   if (defaults === undefined || isToolsWildcard(defaults)) return [];
   const kind = manifest.source?.kind;
-  const serverTools = kind === "local" ? mcpServerTools : undefined;
   const catalogIsKnown =
     kind === "none"
       ? carriesOnlyAppstrateMeta(manifest)
       : kind === "remote"
         ? getDeclaredToolNames(manifest).length > 0
-        : serverTools !== undefined;
+        : getLocalServerTools(manifest) !== undefined;
   const catalog = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools: serverTools }).map(
-      (e) => e.name,
-    ),
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
   const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
   return [...new Set(defaults)]
@@ -1261,12 +1528,12 @@ function unexposedDefaultTools(
 }
 
 /** WRITE-path form of {@link unexposedDefaultTools}; none for a structurally invalid manifest. */
-export function findUnexposedDefaultTools(
-  manifest: unknown,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
-): { path: IssuePath; message: string }[] {
+export function findUnexposedDefaultTools(manifest: unknown): {
+  path: IssuePath;
+  message: string;
+}[] {
   return afpsIntegrationManifestSchema.safeParse(manifest).success
-    ? unexposedDefaultTools(manifest as IntegrationManifest, mcpServerTools)
+    ? unexposedDefaultTools(manifest as IntegrationManifest)
     : [];
 }
 
@@ -1503,7 +1770,8 @@ export function expandScopesGranted(
 
 /**
  * The `required` scopes that `granted`, expanded through `scope_catalog[].implies`
- * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept.
+ * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept. `offline_access`
+ * is never uncovered: whether it yields a refresh token is the authorization server's decision.
  */
 export function scopesNotCovered(
   required: readonly string[],
@@ -1512,7 +1780,7 @@ export function scopesNotCovered(
   authKey: string,
 ): string[] {
   const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
-  return required.filter((s) => !expanded.has(s));
+  return required.filter((s) => s !== "offline_access" && !expanded.has(s));
 }
 
 /**
@@ -1565,11 +1833,8 @@ export interface AgentIntegrationScopeError {
  * errors — empty means install-valid.
  *
  * Tool validation uses {@link resolveIntegrationToolCatalog} so it sees the
- * MCPB-canonical mcp-server tools (when `mcpServerTools` is passed) rather
- * than the sparse `integration.tools` policy table. Pass `mcpServerTools`
- * for local-source integrations; omit it for remote/api sources or when
- * the mcp-server manifest is unavailable (the resolver falls back to
- * `integration.tools` keys).
+ * `source.server.tools` of a local integration (when declared) rather than
+ * the sparse `tools_policy` table (the resolver falls back to its keys).
  *
  * Default semantics:
  *   - Empty resolved catalog → no tool validation (caller is responsible
@@ -1580,7 +1845,6 @@ export interface AgentIntegrationScopeError {
 export function validateAgentIntegrationScopes(
   selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
-  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
@@ -1590,9 +1854,7 @@ export function validateAgentIntegrationScopes(
     // via `allow_undeclared_tools: true` (§7.8). The integration schema
     // already enforces that this flag requires ≥1 auth with non-empty
     // `default_scopes`, so the scope set is well-defined at this point.
-    if (
-      (integrationManifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true
-    ) {
+    if (!allowsUndeclaredTools(integrationManifest)) {
       errors.push({
         field: `integrations_configuration.${selection.id}.tools`,
         code: "wildcard_not_authorized",
@@ -1602,7 +1864,6 @@ export function validateAgentIntegrationScopes(
   } else if (selection.tools && selection.tools.length > 0) {
     const catalog = resolveIntegrationToolCatalog({
       integration: integrationManifest,
-      mcpServerTools,
     });
     if (catalog.length > 0) {
       const allowed = new Set(catalog.map((e) => e.name));
@@ -1734,11 +1995,13 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "pinned_connection_unavailable",
   "override_connection_unavailable",
   "override_outranked",
+  "connection_set_too_large",
   "must_choose_connection",
   "insufficient_scopes",
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   "required_integration_unbound",
   "integration_not_active",
 ] as const;
@@ -1758,11 +2021,13 @@ export const CONNECTION_RESOLUTION_ERROR_REMEDY = {
   pinned_connection_unavailable: "connection",
   override_connection_unavailable: "connection",
   override_outranked: "connection",
+  connection_set_too_large: "connection",
   must_choose_connection: "connection",
   insufficient_scopes: "connection",
   auth_key_mismatch: "connection",
   auth_serves_no_selected_tool: "connection",
   auth_key_serves_no_selected_tool: "agent",
+  auth_key_on_unauthenticated_integration: "agent",
   required_integration_unbound: "connection",
   integration_not_active: "connection",
 } as const satisfies Record<ConnectionResolutionErrorCode, "connection" | "agent">;
@@ -1797,7 +2062,6 @@ export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
  */
 export const OVERRIDE_REFUSAL_CODES = [
   "undeclared_connection_override",
-  "required_integration_unbound",
   "undeclared_dependency_override",
 ] as const;
 
@@ -1868,12 +2132,14 @@ export interface ConnectionResolutionError {
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed, on every layer-bound code, and the layer that chose `[]`
+   * The layer that named the failing row (or set), on every layer-bound code — the adding layer on
+   * `override_outranked` and `connection_set_too_large` — and the layer that chose `[]`
    * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
-   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
+   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`,
+   * `auth_key_on_unauthenticated_integration`).
    */
   source?: ConnectionResolutionSource;
-  /** The failing layer's whole set, in its order. */
+  /** The whole set that failed to bind, in its order: under governance, the floor then its additions. */
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
@@ -1882,9 +2148,10 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
-   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
-   * agent's configuration must change, no connection clears it).
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch`, on
+   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools) and on
+   * `auth_key_on_unauthenticated_integration` (an integration declaring no auth, AFPS §4.4): on
+   * both, the agent's configuration must change, no connection clears it.
    */
   requiredAuthKey?: string;
   /**

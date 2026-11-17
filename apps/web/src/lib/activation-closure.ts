@@ -8,11 +8,10 @@
 
 import type { LibraryPackageItem } from "../hooks/use-library";
 
-/** One integration an agent declares, and whether the target space runs it. */
 export interface MissingDependency {
   id: string;
   name: string;
-  /** False when the caller may not switch it on there — naming it is all we can do. */
+  /** False when the caller may not switch it on: naming it is all we can do. */
   activatable: boolean;
 }
 
@@ -24,9 +23,7 @@ export function missingIntegrations(
 ): MissingDependency[] {
   return declared.flatMap((entry) => {
     const row = integrations.find((candidate) => candidate.id === entry.id);
-    // A system integration has a real switch like any other, but a package the
-    // library does not carry is one this caller cannot see: naming it would
-    // leak its existence, and the run gate will say it in its own words.
+    // Not in the library = invisible to this caller: naming it would leak its existence.
     if (!row) return [];
     const active = row.placements.some(
       (placement) => placement.space_id === spaceId && placement.state === "active",

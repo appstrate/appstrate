@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -117,12 +117,11 @@ describe("attachConnectOffers — block_user_connections", () => {
 });
 
 /**
- * The gate reads the flag off a `space_packages` row, and a row only speaks
- * for a space the package is PLACED in — but it must NOT require `enabled`: a
- * lock recorded on an integration the space later switched off is still the
- * space's own decision.
+ * The gate reads the flag off the space's own `space_packages` row — and it
+ * must NOT require `enabled`: a lock recorded on an integration the space later
+ * switched off is still the space's own decision.
  */
-describe("isUserConnectionCreationBlocked — the row must be placed", () => {
+describe("isUserConnectionCreationBlocked — the space's own row decides", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -130,7 +129,7 @@ describe("isUserConnectionCreationBlocked — the row must be placed", () => {
     ctx = await createTestContext({ orgSlug: "blocked" });
   });
 
-  it("ignores an ORPHAN row's flag, and honours a placed one with the switch off", async () => {
+  it("ignores another space's flag, and honours its own with the switch off", async () => {
     const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
     await seedPackage({
       id: INTEGRATION,
@@ -140,12 +139,11 @@ describe("isUserConnectionCreationBlocked — the row must be placed", () => {
       source: "local",
       draftManifest: oauthManifest() as unknown as Record<string, unknown>,
     });
-    // A row here, homed elsewhere, offered to nobody: no placement, no say.
-    await seedSpacePackage(ctx.defaultSpaceId, INTEGRATION, { blockUserConnections: true });
+    // The lock belongs to the home space: it says nothing here.
+    await seedSpacePackage(elsewhere.id, INTEGRATION, { blockUserConnections: true });
     expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION)).toBe(false);
 
-    // The offer places it. The lock now holds — even switched OFF.
-    await seedPackageShare(ctx.defaultSpaceId, INTEGRATION);
+    // Placed here switched OFF, with its own lock: the lock holds.
     await seedSpacePackage(ctx.defaultSpaceId, INTEGRATION, {
       enabled: false,
       blockUserConnections: true,

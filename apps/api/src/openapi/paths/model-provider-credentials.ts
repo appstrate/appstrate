@@ -134,6 +134,12 @@ export const modelProviderCredentialsPaths = {
                                 description:
                                   "Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's pinned `featuredModels` list; the rest of the offer falls under 'All models'.",
                               },
+                              subscription_unverified: {
+                                type: "boolean",
+                                enum: [true],
+                                description:
+                                  "Present and `true` on a model of a subscription (OAuth) provider that comes from the live catalog, not from the registry bundled with the platform's agent SDK: the platform builds its request offline, but whether the provider serves it to this subscription is not established. A provider may refuse it at first use, for instance for the client version the SDK announces. Absent otherwise.",
+                              },
                             },
                           },
                         },
@@ -199,6 +205,7 @@ export const modelProviderCredentialsPaths = {
                     owner_name: null,
                     allowed_actions: ["edit", "delete", "test"],
                     bindable: false,
+                    serves_model_ids: [],
                     created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",

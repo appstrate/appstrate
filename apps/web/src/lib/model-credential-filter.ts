@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Which saved keys a form may bind to, for the provider it names.
- *
- * An overridable provider matches on `providerId` alone — each key was saved
- * against its own host, which the form reads off the key. A pinned provider
- * shares its `apiShape` with others, so there the endpoint is the match.
- * Built-in credentials are never offered: their slug id is no UUID FK.
- */
+// Which saved keys a form may bind to. An overridable provider matches on `providerId`
+// alone (each key keeps its own host); a pinned one shares its `apiShape` with others,
+// so the endpoint is the match. Built-in credentials are never offered: their slug id is no UUID FK.
 
 import type {
   ModelProviderCredentialInfo,

@@ -54,7 +54,7 @@ export function TableRowActions({
   const hasItems = plain.length > 0 || destructive.length > 0 || hasChildren;
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
-      {isPending && <Spinner label={t("loading")} />}
+      {isPending && <Spinner aria-label={t("loading")} />}
       {hasItems && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -63,12 +63,12 @@ export function TableRowActions({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="size-7 p-0"
               title={menuLabel}
               aria-label={menuLabel}
               disabled={isPending}
             >
-              <MoreHorizontal size={14} />
+              <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

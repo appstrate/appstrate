@@ -57,13 +57,13 @@ export function visibleSettingsSections(
   }[] = [
     {
       scope: "organization",
-      labelKey: "orgSettings.sectionOrganization",
+      labelKey: "source.org",
       items: [
         entry("/org-settings/general", Building, "orgSettings.tabGeneral"),
         entry("/org-settings/members", Users, "orgSettings.tabMembers"),
         entry("/org-settings/roles", ShieldCheck, "roles.tabTitle"),
-        entry("/org-settings/spaces", LayoutGrid, "spaces.pageTitle"),
-        entry("/org-settings/models", BrainCircuit, "models.tabTitle"),
+        entry("/org-settings/spaces", LayoutGrid, "common:switcher.workspacesColumn"),
+        entry("/org-settings/models", BrainCircuit, "providers.col.models"),
         entry("/org-settings/proxies", Globe, "proxies.tabTitle"),
         entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
         entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
@@ -74,9 +74,9 @@ export function visibleSettingsSections(
       scope: "workspace",
       labelKey: "workspaceSettings.sectionGeneral",
       items: [
-        entry("/workspace-settings/general", Settings, "spaceSettings.tabGeneral"),
+        entry("/workspace-settings/general", Settings, "orgSettings.tabGeneral"),
         entry("/workspace-settings/members", Users, "spaceMembers.tabTitle"),
-        entry("/workspace-settings/auth", Shield, "spaceSettings.tabAuth"),
+        entry("/workspace-settings/auth", Shield, "integration.presentation.authentication"),
         entry("/workspace-settings/api-keys", KeyRound, "orgSettings.tabApiKeys"),
         entry("/workspace-settings/oauth", KeyRound, "spaceSettings.tabOauth"),
         entry("/workspace-settings/end-users", Users, "endUsers.pageTitle"),
@@ -87,11 +87,11 @@ export function visibleSettingsSections(
       scope: "account",
       labelKey: "preferences.sectionAccount",
       items: [
-        entry("/preferences/general", User, "preferences.tabGeneral"),
+        entry("/preferences/general", User, "orgSettings.tabGeneral"),
         entry("/preferences/appearance", Palette, "preferences.tabAppearance"),
         entry("/preferences/security", Shield, "preferences.tabSecurity"),
         entry("/preferences/devices", Laptop, "preferences.tabDevices"),
-        entry("/preferences/connections", Plug, "preferences.tabConnections"),
+        entry("/preferences/connections", Plug, "connections.myConnections"),
         entry("/preferences/mcp-access", Blocks, "orgSettings.tabMcpAccess"),
         entry("/preferences/models", KeyRound, "preferences.tabModels"),
       ],

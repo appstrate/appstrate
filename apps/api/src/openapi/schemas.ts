@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
@@ -20,9 +21,14 @@ import {
   MODEL_REASONING_OFF_BEHAVIOURS,
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
-import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
+import {
+  APPEARANCE_COLORS,
+  ICON_IMAGE_MAX_BYTES,
+  ICON_IMAGE_MAX_SIZE,
+  ICON_IMAGE_TYPES,
+} from "@appstrate/core/appearance";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
@@ -42,6 +48,7 @@ import {
   originSpaceIdSchema,
   sharedHereSchema,
   sharedSpaceIdsSchema,
+  shareAllSpacesSchema,
   spaceIdSchema,
 } from "./paths/integrations.ts";
 
@@ -53,14 +60,6 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
  * turn a server-side id-shape change into a client-side break.
  */
 export const SPACE_ROLE_ID_PATTERN = "^srl_";
-
-/**
- * Runtime-tool ids a manifest may DECLARE — the canonical catalog
- * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
- * Schema `enum` member takes. There is no second list to pick from and no
- * reason to import anything but the catalog itself.
- */
-const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
@@ -85,7 +84,7 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
  * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
- * `PackageHome`). ONE
+ * `PackageHome`); `AgentListItem` carries `home_space_id` alone. ONE
  * definition: the server computes all four in one place (`homeWireForCaller`),
  * and four hand-copied descriptions drifted the moment the contract changed.
  */
@@ -108,53 +107,43 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
-/** An organization logo that is one emoji: the write form, and one of the read forms. */
-export const ORG_LOGO_EMOJI_SCHEMA = {
-  type: "object",
-  required: ["kind", "emoji"],
-  properties: {
-    kind: { type: "string", const: "emoji" },
-    emoji: { type: "string", description: "Exactly one emoji." },
-  },
-  additionalProperties: false,
-} as const;
+/**
+ * What a write does to an `emoji:` icon (`normalizeEmoji`, `@appstrate/core/appearance`),
+ * stated once for the identity component and every write body.
+ */
+export const EMOJI_ICON_WRITE_RULE =
+  "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
 
-export const ORG_LOGO_PROPERTY = {
-  oneOf: [
-    ORG_LOGO_EMOJI_SCHEMA,
-    {
-      type: "object",
-      required: ["kind", "url"],
-      properties: {
-        kind: { type: "string", const: "image" },
-        url: {
-          type: "string",
-          description:
-            "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good.",
-        },
-      },
-      additionalProperties: false,
-    },
-    { type: "null" },
-  ],
-  description:
-    "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial.",
-} as const;
+/** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
+export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
+  "Whether members may use the space's connections directly, outside a run: " +
+  "`/api/credential-proxy/connections`, `/api/credential-proxy/tools`, " +
+  "`/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, " +
+  "`POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP " +
+  "tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
+  "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
+  "and admins included. Runs keep their connections: a run the platform executes reaches them " +
+  "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +
+  "member who may launch an inline run from having an agent make the call inside that run; " +
+  "that is governed by the inline-run permission of the member's role. Default `true`.";
 
-/** The agent's identity tile, on the list item and on the detail. */
-const AGENT_IDENTITY_PROPERTIES = {
+/**
+ * The visual identity of an agent, a space or an organization — one `icon`
+ * and one `color`, both always present, both nullable. The one definition every
+ * resource carrying an identity spreads.
+ */
+export const APPEARANCE_PROPERTIES = {
   icon: {
-    type: "string",
-    description:
-      "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none.",
+    type: ["string", "null"],
+    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — an uploaded image as a base64 data URI, ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). ${EMOJI_ICON_WRITE_RULE} An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
   },
   color: {
-    type: "string",
-    description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+    type: ["string", "null"],
+    description: `The colour, a palette key: ${APPEARANCE_COLORS.map((c) => `\`${c}\``).join(", ")}. \`null\` means derived from the resource id (a stable hue, never \`neutral\`); \`neutral\` is an explicit choice. An agent's is \`_meta["dev.appstrate/ui"].color\`, \`null\` when that is not a palette key.`,
   },
 } as const;
 
@@ -236,6 +225,15 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
  * schema object: verify-openapi's shared-type check reads only the properties
  * declared there, never through `allOf`.
  */
+/** `space_ids` of an index row (`AgentListItem`, `OrgPackageItem`). */
+const INDEX_SPACE_IDS = {
+  type: "array",
+  minItems: 1,
+  items: { type: "string", pattern: SPACE_ID_RE.source },
+  description:
+    "The spaces of the index where the package is ACTIVE (spc_ prefix): the request's space on a single-space index; on a list spanning spaces, those among the spaces it reads, the package's home first when it is one of them, then in the order of `GET /api/spaces`.",
+};
+
 const ORG_PACKAGE_ITEM_SCHEMA = {
   type: "object",
   // Always emitted by the listOrgItems mapper. `created_by_name` stays
@@ -259,9 +257,11 @@ const ORG_PACKAGE_ITEM_SCHEMA = {
     "home_writable",
     "home_deletable",
     "home_shareable",
+    "space_ids",
   ],
   properties: {
     id: { type: "string" },
+    space_ids: INDEX_SPACE_IDS,
     orgId: {
       type: ["string", "null"],
       description: "Owning organization ID (null for system packages)",
@@ -317,6 +317,17 @@ export const schemas = {
       title: {
         type: "string",
         description: "Human-readable title; preserved from the underlying error factory.",
+      },
+      line: {
+        type: "integer",
+        minimum: 1,
+        description:
+          "On a file-level validation item, the 1-based line where the validator stopped, counted in the file itself (e.g. `skill_invalid_frontmatter` on a YAML syntax error: the opening `---` is line 1). Absent when unknown.",
+      },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The 1-based column beside `line`.",
       },
       // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
       // Documented here so SDK consumers can rely on them without reading the resolver source.
@@ -405,7 +416,7 @@ export const schemas = {
       required_auth_key: {
         type: "string",
         description:
-          "Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
+          "Populated on `auth_key_mismatch`, `auth_key_serves_no_selected_tool` and `auth_key_on_unauthenticated_integration`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. On `auth_key_on_unauthenticated_integration` it names an auth of an integration that declares none (AFPS §4.4): the agent's `auth_key` must be removed.",
       },
       available_auth_keys: {
         type: "array",
@@ -417,13 +428,13 @@ export const schemas = {
         type: "string",
         enum: [...CONNECTION_RESOLUTION_SOURCES],
         description:
-          "The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.",
+          "The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, the selection's layer on `connection_set_too_large`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.",
       },
       connect_url: {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -807,12 +818,22 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "logo", "role", "permissions", "createdAt", "deleting_at"],
+    required: [
+      "id",
+      "name",
+      "slug",
+      "icon",
+      "color",
+      "role",
+      "permissions",
+      "createdAt",
+      "deleting_at",
+    ],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: ORG_LOGO_PROPERTY,
+      ...APPEARANCE_PROPERTIES,
       role: { type: "string", enum: ORG_ROLES },
       permissions: {
         type: "array",
@@ -833,13 +854,42 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: ["userId", "role", "joinedAt"],
+    required: ["userId", "role", "joinedAt", "spaces"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
       joinedAt: { type: "string", format: "date-time" },
+      spaces: {
+        type: "array",
+        description:
+          "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
+        items: { $ref: "#/components/schemas/OrgMemberSpace" },
+      },
+    },
+  },
+  OrgMemberSpace: {
+    type: "object",
+    required: ["id", "name", "source", "role"],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
     },
   },
   SpaceAssignment: {
@@ -874,11 +924,12 @@ export const schemas = {
   },
   OrgDetail: {
     type: "object",
+    required: ["id", "name", "slug", "icon", "color"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: ORG_LOGO_PROPERTY,
+      ...APPEARANCE_PROPERTIES,
       createdAt: { type: "string", format: "date-time" },
       deleting_at: {
         type: ["string", "null"],
@@ -943,17 +994,25 @@ export const schemas = {
     // only ever say `true` — `AgentDetail.active` is where the switch is read.
     required: [
       "id",
+      "icon",
+      "color",
       "source",
       "type",
       "running_runs",
+      "unread_count",
       "dependencies",
       "scope",
       "keywords",
       "version",
+      "published",
+      "space_ids",
+      "home_space_id",
     ],
     properties: {
       id: { type: "string" },
-      ...AGENT_IDENTITY_PROPERTIES,
+      home_space_id: PACKAGE_HOME_PROPERTIES.home_space_id,
+      space_ids: INDEX_SPACE_IDS,
+      ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       schema_version: { type: "string" },
@@ -966,26 +1025,33 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
+      published: {
+        type: "boolean",
+        description:
+          "True when the agent has a published version (or is a system agent) — " +
+          "run it via `runAgent` with `version` omitted. False means draft-only: " +
+          "omitting `version` answers 404 `no_published_version`.",
+      },
       type: {
         type: "string",
         description: "Package type from manifest",
         enum: [...packageTypeValues],
       },
       running_runs: { type: "integer" },
+      unread_count: {
+        type: "integer",
+        description:
+          "Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`.",
+      },
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
-        // caller; a launcher is the one who connects them. `skills` and
-        // `mcp_servers` are the composition, withheld from a summary read
+        // caller; a launcher is the one who connects them. `skills` is the
+        // composition, withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
           skills: {
-            type: "object",
-            additionalProperties: { type: "string" },
-            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
             type: "object",
             additionalProperties: { type: "string" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
@@ -1020,6 +1086,8 @@ export const schemas = {
     // answered yet" rather than "no".
     required: [
       "id",
+      "icon",
+      "color",
       "source",
       "scope",
       "version",
@@ -1037,7 +1105,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      ...AGENT_IDENTITY_PROPERTIES,
+      ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: [...packageSourceValues] },
@@ -1111,8 +1179,8 @@ export const schemas = {
       dependencies: {
         type: "object",
         // `integrations` (via parseManifestIntegrations) is emitted to every
-        // caller — a launcher is the one who connects them. `skills` and
-        // `mcp_servers`, the composition, are withheld from a summary read
+        // caller — a launcher is the one who connects them. `skills`, the
+        // composition, is withheld from a summary read
         // (`agents:run` without `agents:read`) and absent rather than empty.
         required: ["integrations"],
         properties: {
@@ -1120,19 +1188,6 @@ export const schemas = {
             type: "array",
             items: { $ref: "#/components/schemas/AgentSkillRef" },
             description: "Withheld from a summary read (`agents:run` without `agents:read`).",
-          },
-          mcp_servers: {
-            type: "array",
-            items: {
-              type: "object",
-              required: ["id", "version"],
-              properties: {
-                id: { type: "string" },
-                version: { type: "string" },
-              },
-            },
-            description:
-              "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`).",
           },
           integrations: {
             type: "array",
@@ -1398,6 +1453,7 @@ export const schemas = {
       "status",
       "input",
       "result",
+      "model_error",
       "artifacts",
       "checkpoint",
       "error",
@@ -1464,7 +1520,7 @@ export const schemas = {
         properties: {
           output: {
             description:
-              "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
+              "Structured JSON emitted via the `output` tool the runner injects from the agent's `output.schema`. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
           },
         },
       },
@@ -1504,7 +1560,28 @@ export const schemas = {
       // `runs.checkpoint` is a nullable jsonb column — null on every run that
       // never emitted a checkpoint (pending/running/most terminal runs).
       checkpoint: { type: ["object", "null"], additionalProperties: true },
-      error: { type: ["string", "null"] },
+      error: {
+        type: ["string", "null"],
+        description:
+          "The failure as it happened, verbatim — a debugging surface. To say WHY a run failed, branch on `model_error` (and `status`), never on this text.",
+      },
+      model_error: {
+        description:
+          "What a run that failed on a model call failed on, classified once when it finalized: `category` (one of `credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request`, `unknown`), `retryable` (derived from it), the provider's HTTP `status` and its own `message`, each `null` when the failure text carried none. `null` on every other run, and on a run finalized before the platform recorded it. A `cancelled` run is always a member's cancellation (`POST /api/runs/{id}/cancel`).",
+        oneOf: [
+          {
+            type: "object",
+            required: ["category", "retryable", "status", "message"],
+            properties: {
+              category: { type: "string", enum: [...MODEL_ERROR_CATEGORIES] },
+              retryable: { type: "boolean" },
+              status: { type: ["integer", "null"], minimum: 100, maximum: 599 },
+              message: { type: ["string", "null"] },
+            },
+          },
+          { type: "null" },
+        ],
+      },
       token_usage: {
         description:
           "Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage.",
@@ -1639,7 +1716,7 @@ export const schemas = {
       unread: {
         type: "boolean",
         description:
-          "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
+          "True when the caller has not read this run yet. Per recipient, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows; `PUT /api/runs/{id}/read` clears it.",
       },
       runNumber: {
         type: ["integer", "null"],
@@ -1671,7 +1748,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks for this run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Under an admin pin or an enforced org default it names additions to the imposed floor, which binds whole whatever it says (\`[]\` = no addition), and a connection outside the floor only when the admin pin allows additions (\`override_outranked\` otherwise); ungoverned, it beats member pins, a soft org default and the fallback. A set is stored as named, imposed ids included: the dashboard writes the additions only.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1779,6 +1856,7 @@ export const schemas = {
       "next_run_at",
       "createdAt",
       "updatedAt",
+      "agent_name",
       "actor_name",
       "actor_type",
       "running_runs",
@@ -1802,7 +1880,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin or an enforced org default (`override_outranked`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -1815,7 +1893,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire. Under an admin pin or an enforced org default it names additions to the imposed floor, which binds whole whatever it says (\`[]\` = no addition), and a connection outside the floor only when the admin pin allows additions (\`override_outranked\` otherwise); ungoverned, it beats member pins, a soft org default and the fallback. A set is stored as named, imposed ids included: the dashboard writes the additions only.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1828,6 +1906,11 @@ export const schemas = {
       next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+      agent_name: {
+        type: "string",
+        description:
+          "Display name of the scheduled agent: its draft manifest's `display_name`, else its package id — the name the package catalog shows.",
+      },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
       running_runs: {
@@ -1839,7 +1922,7 @@ export const schemas = {
         type: "integer",
         minimum: 0,
         description:
-          "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`.",
+          "Runs of this schedule the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread`.",
       },
       last_run_number: {
         type: "integer",
@@ -1887,24 +1970,32 @@ export const schemas = {
   OrgPackageItem: ORG_PACKAGE_ITEM_SCHEMA,
   IntegrationIndexItem: {
     ...ORG_PACKAGE_ITEM_SCHEMA,
-    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server"],
+    required: [...ORG_PACKAGE_ITEM_SCHEMA.required, "source_kind", "server", "authenticated"],
     properties: {
       ...ORG_PACKAGE_ITEM_SCHEMA.properties,
       source_kind: {
         type: "string",
         enum: ["local", "remote", "none"],
         description:
-          "The manifest's `source.kind`: `local` runs an MCP server package in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
+          "The manifest's `source.kind`: `local` runs the MCP server the integration archive carries, in the sandbox, `remote` reaches a hosted MCP server, `none` has no MCP backing (the platform calls the service's API itself).",
       },
       server: {
         type: ["object", "null"],
-        required: ["name", "version"],
+        required: ["type", "entry_point"],
         properties: {
-          name: { type: "string" },
-          version: { type: "string", description: "Semver range" },
+          type: { type: "string", description: "Runtime: `node`, `python`, `binary` or `uv`." },
+          entry_point: {
+            type: "string",
+            description: "Path of the server entry point inside the integration archive.",
+          },
         },
         description:
-          "`source.server` of a `local` integration — the MCP server package it runs and its version range. `null` for any other source.",
+          "`source.server` of a `local` integration — the runtime and entry point of the MCP server its archive carries. `null` for any other source.",
+      },
+      authenticated: {
+        type: "boolean",
+        description:
+          "Whether the integration declares `auths`. `false` for an unauthenticated integration (AFPS §7.2): it injects no credential and binds no connection.",
       },
     },
   },
@@ -1950,7 +2041,7 @@ export const schemas = {
       content: {
         type: ["string", "null"],
         description:
-          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
+          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an integration published without one. Read from the draft or from the published archive according to `definition`.",
       },
       source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
@@ -2000,6 +2091,7 @@ export const schemas = {
       "owner_name",
       "allowed_actions",
       "bindable",
+      "serves_model_ids",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -2050,6 +2142,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
+      },
+      serves_model_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -2278,7 +2376,9 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The cascade, first layer with a set wins: admin pin → enforced org default → launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick); then a health and scope check. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
+      "Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The bound set is floor ∪ selection, floor first in its own order, then the selection's additions in theirs, deduplicated. Governed — an admin pin, else an enforced org default — the governing set is the floor, bound whole, and the selection is the launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override), else the member pin when additions are open, else nothing; no soft org default and no fallback contributes. Additions are open only under an admin pin that allows them with no enforced org default (`additional_connections_allowed`); open, the selection is drawn from the connections the actor can reach, closed, an override naming a connection outside the floor is `override_outranked`. Ungoverned there is no floor, and the first layer with a set is the selection: launch override → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick). More than " +
+      `${MAX_CONNECTIONS_PER_INTEGRATION} connections in all is \`connection_set_too_large\`; then a health and scope check on every bound connection. ` +
+      "Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. Per-connection provenance, read off the fields: under governance the floor is `admin_pinned_connection_ids` when an admin pin exists, else `org_default_connection_ids` (enforced); every other id of `resolved_connection_ids` is an addition — here the member pin's (`member_pinned_connection_ids`); a run's launch override, when it carries one, supplies them instead. Ungoverned, the whole set comes from `source`.",
     required: [
       "source",
       "error_code",
@@ -2289,6 +2389,7 @@ export const schemas = {
       "member_pinned_connection_ids",
       "org_default_connection_ids",
       "org_default_enforced",
+      "additional_connections_allowed",
       "can_add_connection",
       "candidates",
     ],
@@ -2297,7 +2398,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
-          "The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+          "The cascade layer that bound the FIRST connection of a non-empty set — under governance the floor's (`admin_pin` / `org_default_enforced`), whatever its additions came from; per-connection provenance is the `source` of each entry in the run's `resolved_connections` — or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside a governing set that allows no additions — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `auth_key_on_unauthenticated_integration`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
@@ -2343,6 +2444,11 @@ export const schemas = {
         description: "`null` when no org default exists; an org default is never empty.",
       },
       org_default_enforced: { type: "boolean" },
+      additional_connections_allowed: {
+        type: "boolean",
+        description:
+          "Whether the run's selection — a launch override, else the caller's member pin — is bound on top of the imposed set: true only under an admin pin with `allow_additional_connections`, and no enforced org default for the integration. `false` with nothing imposed (no floor to add to: the selection binds alone) and under a closed one (it is masked, and an override outside the set is `override_outranked`).",
+      },
       can_add_connection: {
         type: "boolean",
         description:
@@ -2388,6 +2494,7 @@ export const schemas = {
             spaceId: spaceIdSchema,
             shared_here: sharedHereSchema,
             shared_space_ids: sharedSpaceIdsSchema,
+            share_all_spaces: shareAllSpacesSchema,
             origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },
             missing_scopes: { type: "array", items: { type: "string" } },
@@ -2417,7 +2524,7 @@ export const schemas = {
       errors: {
         type: "array",
         description:
-          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
+          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{id}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
         items: {
           allOf: [
             { $ref: "#/components/schemas/ResolutionFieldError" },
@@ -2437,7 +2544,14 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "required", "run_blocking", "inert", "resolution"],
+          required: [
+            "integration_package_id",
+            "required",
+            "run_blocking",
+            "inert",
+            "connection_required",
+            "resolution",
+          ],
           properties: {
             integration_package_id: { type: "string" },
             required: {
@@ -2454,6 +2568,11 @@ export const schemas = {
               type: "boolean",
               description:
                 "True iff the agent declares this integration with nothing a run would start (inert): a run resolves no connection for it, whatever `resolution` reports for the picker.",
+            },
+            connection_required: {
+              type: "boolean",
+              description:
+                "False for an integration declaring no auths (AFPS §7.2): it binds no connection, a run reaches its server without one, and `required` asks nothing of it.",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },
@@ -2564,6 +2683,8 @@ export const schemas = {
       "agent_package_id",
       "integration_package_id",
       "connection_ids",
+      "allow_additional_connections",
+      "agent_active",
       "createdAt",
       "updatedAt",
     ],
@@ -2573,7 +2694,17 @@ export const schemas = {
       connection_ids: {
         ...connectionIdSetJsonSchema,
         description:
-          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it.",
+          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it. On an admin pin, the floor every run of the agent binds; on a member pin, the member's selection.",
+      },
+      allow_additional_connections: {
+        type: "boolean",
+        description:
+          "Admin pin: whether the run's selection (a launch override, else the member's pin) is bound on top of the pinned set; closed, nothing adds to it. An enforced org default for the integration keeps it closed whatever this says, and the two writes refuse each other (409 `connection_additions_conflict`). Never true over `[]`, and always false on a member pin.",
+      },
+      agent_active: {
+        type: "boolean",
+        description:
+          "Whether the pin's agent is active in this space — placed here and switched on, or on by the deployment's default. A pin of an inactive agent still stands and names its connections, but the agent runs nowhere here. Always true on a write's response: a pin is written only for an active agent.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -2631,10 +2762,13 @@ export const schemas = {
       "object",
       "orgId",
       "name",
+      "icon",
+      "color",
       "isDefault",
       "settings",
       "visibility",
       "default_role",
+      "credential_proxy_open",
       "personal",
       "access",
       "role",
@@ -2648,6 +2782,7 @@ export const schemas = {
       object: { type: "string", enum: ["space"], description: "Object type" },
       orgId: { type: "string", description: "Organization ID" },
       name: { type: "string", description: "Human-readable space name" },
+      ...APPEARANCE_PROPERTIES,
       isDefault: { type: "boolean", description: "Whether this is the default space" },
       settings: {
         type: "object",
@@ -2669,6 +2804,10 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      credential_proxy_open: {
+        type: "boolean",
+        description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
       },
       personal: {
         type: "boolean",
@@ -2878,29 +3017,11 @@ export const schemas = {
     },
   },
   AgentManifest: {
+    type: "object",
     description:
-      "AFPS Agent manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, " +
-      "with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
-    allOf: [
-      { $ref: "https://schemas.afps.dev/v0/agent.schema.json" },
-      {
-        type: "object",
-        properties: {
-          runtime_tools: {
-            type: "array",
-            items: {
-              type: "string",
-              enum: RUNTIME_TOOL_IDS,
-            },
-            description:
-              "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
-              "An id outside this enum is rejected on author input and dropped (with the " +
-              "drop reported) when read back from a stored manifest.",
-          },
-        },
-      },
-    ],
+      "AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's " +
+      'extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta["dev.appstrate/*"]`, AFPS §10).',
+    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   FileConstraintsMap: {
     type: "object",
@@ -2956,6 +3077,7 @@ export const schemas = {
         "home_shareable",
         "published",
         "placements",
+        "activation",
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
@@ -2980,6 +3102,20 @@ export const schemas = {
           type: "boolean",
           description:
             "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published.",
+        },
+        activation: {
+          type: "array",
+          description:
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+          items: {
+            type: "object",
+            required: ["spaceId", "activate", "deactivate"],
+            properties: {
+              spaceId: { type: "string" },
+              activate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+              deactivate: { type: "string", enum: ["allowed", "not_shareable", "forbidden"] },
+            },
+          },
         },
         placements: {
           type: "array",
@@ -3006,13 +3142,13 @@ export const schemas = {
         type: "string",
         enum: ["home", "shared", "system"],
         description:
-          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).",
+          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).",
       },
       state: {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
       },
       chat_enforced: {
         type: "boolean",
@@ -3022,7 +3158,7 @@ export const schemas = {
       shared_by: {
         type: ["object", "null"],
         description:
-          'Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+          'Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
@@ -3034,7 +3170,7 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
     required: ["kind"],
     oneOf: [
       {
@@ -3075,22 +3211,31 @@ export const schemas = {
   PackageShare: {
     type: "object",
     description:
-      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-    required: ["object", "target", "shared_by", "createdAt"],
+      "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
+    required: ["object", "target", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
       shared_by: {
         type: ["object", "null"],
         description:
-          "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
+          "Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind.",
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
           name: { type: "string" },
         },
       },
-      createdAt: { type: "string", format: "date-time" },
+      enabled: {
+        type: "boolean",
+        description:
+          "Whether the package is switched on in the target space (`space_packages.enabled`). A placement lands on when the sharer may activate in the target, and off otherwise, for the target's members to switch on.",
+      },
+      createdAt: {
+        type: "string",
+        format: "date-time",
+        description: "When the placement row was created (`space_packages.installed_at`).",
+      },
     },
   },
   PackageHome: {
@@ -3114,7 +3259,7 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
+          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
       },
     },
   },

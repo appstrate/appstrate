@@ -62,7 +62,7 @@ interface Finding {
  *
  * This deliberately calls the freeze-point validator rather than reimplementing
  * its predicate. Selection length is insufficient: `default_tools: ["x"]`
- * where `x` is hidden or absent from the resolved mcp-server is non-empty but
+ * where `x` is hidden or absent from the local server's `tools` is non-empty but
  * still aborts at boot.
  */
 async function emptySelections(
