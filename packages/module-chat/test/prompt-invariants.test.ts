@@ -57,7 +57,6 @@ const CONTEXT_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
-  enforced: [],
 };
 
 describe("full persona invariants", () => {

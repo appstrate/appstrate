@@ -1,27 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Skill picker: the conversation's skill mode and chosen skills. Controlled;
-// nothing is written here — the next turn carries the selection. The skills the
-// space imposes are listed first, locked: no selection removes them.
+// nothing is written here — the next turn carries the selection.
 
 import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ReactNode } from "react";
 import { BookOpenIcon } from "lucide-react";
-import { Badge, badgeVariants } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import {
-  injectsSkills,
-  isDefaultSkillSelection,
-  MAX_PINNED_SKILLS,
-  type ChatSkillSelection,
-} from "../skills.ts";
-import { ownPins, pinCapReached, skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useEnforcedSkills } from "./use-enforced-skills.ts";
+import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
+import { skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useSkillCatalogue } from "./use-skill-catalogue.ts";
+import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 /** Every mode in display order, with its copy; a `Record`, so a new mode must be added here. */
@@ -36,7 +29,7 @@ interface SkillsPickerProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onChange: (selection: ChatSkillSelection) => void;
-  /** Opened from the composer's "+" menu or the chip, never by a trigger of its own. */
+  /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The popover anchors to this: the composer's tools row. */
@@ -45,30 +38,30 @@ interface SkillsPickerProps {
 
 /**
  * The entry to the picker in the composer's tool row while no skill is loaded (drawn by
- * `SkillChips`): drawn for a non-default selection, it reopens the picker.
+ * `SkillChips`): drawn only off the automatic mode, it reopens the picker, and its X returns to
+ * the automatic mode (the chosen skills are kept, unused, as the mode switch keeps them).
  */
 export function SkillsChip({
   selection,
   onClick,
+  onReset,
 }: {
   selection: ChatSkillSelection;
   onClick: () => void;
+  onReset: () => void;
 }) {
   const { t } = useChatHost();
-  if (isDefaultSkillSelection(selection)) return null;
+  if (!injectsSkills(selection.skillMode)) return null;
   return (
-    <button
-      type="button"
-      data-testid="skills-picker-trigger"
-      onClick={onClick}
-      className={cn(
-        badgeVariants({ variant: "secondary" }),
-        "text-muted-foreground h-7 shrink-0 gap-1.5 px-2.5 py-0 font-normal",
-      )}
+    <RemovableChip
+      icon={<BookOpenIcon />}
+      open={{ onClick, label: t("skills.label"), testId: "skills-picker-trigger" }}
+      removeLabel={t("skills.resetToAuto")}
+      onRemove={onReset}
+      className="shrink-0"
     >
-      <BookOpenIcon className="size-3.5" />
-      <span>{t("skills.label")}</span>
-    </button>
+      {t("skills.label")}
+    </RemovableChip>
   );
 }
 
@@ -81,17 +74,14 @@ export function SkillsPickerPanel({
   const { t } = useChatHost();
   const catalogue = useSkillCatalogue(transport, true);
   const skills = catalogue.data ?? [];
-  const enforcedQuery = useEnforcedSkills(transport);
-  const enforced = enforcedQuery.data ?? [];
-  const enforcedIds = new Set(enforced.map((skill) => skill.packageId));
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
-  // as "nothing". Waiting on the enforced read too keeps an imposed skill from flashing as choosable.
-  const loading = catalogue.isLoading || enforcedQuery.isLoading;
+  // as "nothing".
+  const loading = catalogue.isLoading;
 
-  const pinned = ownPins(selection.pinnedSkills, enforcedIds);
+  const pinned = selection.pinnedSkills;
   const pinnedSet = new Set(pinned);
-  const atPinCap = pinCapReached(selection.pinnedSkills, enforcedIds);
-  const rows = skillPickerRows(skills, pinned, enforcedIds);
+  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
+  const rows = skillPickerRows(skills, pinned);
   // `auto` keeps the chosen skills but uses none: no list is offered then.
   const choosing = injectsSkills(selection.skillMode);
 
@@ -131,38 +121,9 @@ export function SkillsPickerPanel({
       </p>
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
-        {enforced.map((skill) => (
-          <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
-            <Checkbox
-              data-testid={`skill-enforced-${skill.packageId}`}
-              checked
-              disabled
-              aria-label={skill.display_name ?? skill.packageId}
-              className="mt-0.5 shrink-0"
-            />
-            <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-1.5">
-              <span className="truncate text-xs font-medium">
-                {skill.display_name ?? skill.packageId}
-              </span>
-              {skill.version && (
-                <span className="text-muted-foreground shrink-0 text-[0.65rem]">
-                  v{skill.version}
-                </span>
-              )}
-              <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
-                {t("skills.enforcedBadge")}
-              </Badge>
-            </span>
-          </div>
-        ))}
-        {enforcedQuery.isError && (
-          <p className="text-destructive px-1 pb-1 text-[0.7rem] leading-snug">
-            {t("skills.enforcedError")}
-          </p>
-        )}
         {!choosing ? (
           // Automatic: the assistant picks among the space's skills itself, so none is listed
-          // to choose from: only what the space imposes (above) is shown.
+          // to choose from.
           <p className="text-muted-foreground px-1 py-1 text-[0.7rem] leading-snug">
             {t("skills.chooseInAuto")}
           </p>
@@ -189,7 +150,7 @@ export function SkillsPickerPanel({
               <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
             ) : rows.length === 0 ? (
               <p className="text-muted-foreground px-1 py-3 text-center text-xs">
-                {t(enforced.length > 0 ? "skills.emptyBesidesEnforced" : "skills.empty")}
+                {t("skills.empty")}
               </p>
             ) : (
               rows.map(({ skill, available }, index) => {

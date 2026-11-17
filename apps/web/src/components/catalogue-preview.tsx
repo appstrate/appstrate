@@ -6,13 +6,11 @@
  *
  * Answers what it is, where it is and what the reader may do there (graded by their
  * rights, `lib/catalogue-sheet.ts`), and what it needs. Skills are named, never linked:
- * one not shared to the reader's space would 404. A skill also carries a per-space
- * `chat_enforced` switch.
+ * one not shared to the reader's space would 404.
  */
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { useTranslation } from "react-i18next";
 import {
@@ -41,11 +39,7 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import type { PackageType } from "@appstrate/core/validation";
-import {
-  useSetChatEnforced,
-  type LibraryPackageItem,
-  type LibrarySpace,
-} from "../hooks/use-library";
+import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
 import { ApiError } from "../api/errors";
 import { fetchPackageDetail, useVersionInfo } from "../hooks/use-packages";
 import { TextSkeleton } from "./loading-skeletons";
@@ -54,21 +48,17 @@ import { useHereSpaceId } from "../hooks/use-overview-mode";
 import { missingIntegrations } from "../lib/activation-closure";
 import type { IntegrationSource } from "../lib/integration-collection";
 import { IntegrationSourceLabel } from "./integration-source-label";
-import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
-import { toastError } from "../lib/mutation-error";
 import { detailSpace, type CataloguePlacement } from "../lib/catalogue-placement";
 import { ACTIVATION_REFUSAL_KEY, type ActivationGate } from "../lib/catalogue-gates";
 import { CATALOGUE_TYPE_LABEL_KEY } from "../lib/catalogue-link";
 import {
   pinnedVersionState,
-  sheetChatEnforce,
   sheetSpaceMode,
   sheetSpaceRows,
   type SheetSpaceRow,
 } from "../lib/catalogue-sheet";
 import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
-import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { ManifestOverview } from "./package-manifest/manifest-overview";
 import { SettingsHeading } from "./settings/settings-heading";
@@ -137,7 +127,6 @@ export function CataloguePreview({
   spaces,
   placement,
   gateOf,
-  mayConfigureIn,
   integrations,
   agents,
   source,
@@ -155,8 +144,6 @@ export function CataloguePreview({
   placement: CataloguePlacement;
   /** The reader's verdict for switching it on (`next: true`) or off in a space. */
   gateOf: (spaceId: string, next: boolean) => ActivationGate;
-  /** The placement PATCH's `configure` gate (what imposing a skill on a space's chat asks); no personal-space exemption. */
-  mayConfigureIn: (spaceId: string) => boolean;
   /** The library's integrations: what an agent's switch-on would still need. */
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
@@ -262,60 +249,6 @@ export function CataloguePreview({
       onCheckedChange={(next) => onSetActive(row.id, next === true)}
     />
   );
-  // ── Imposed on the chat (skills only, `lib/catalogue-sheet`) ──
-  const setChatEnforced = useSetChatEnforced();
-  const [confirmEnforce, setConfirmEnforce] = useState<SheetSpaceRow | null>(null);
-  const enforceable = type === "skill";
-  const chatEnforcedIn = (spaceId: string) =>
-    item.placements.some((entry) => entry.space_id === spaceId && entry.chat_enforced);
-  const enforcesAnywhere = enforceable && rows.some((row) => chatEnforcedIn(row.id));
-  const notifyEnforceError = (err: unknown) => {
-    const key = chatEnforceErrorKey(err);
-    if (key) toast.error(t(key, { ns: "common" }));
-    else toastError(err);
-  };
-  const enforceSwitchFor = (row: SheetSpaceRow) => {
-    const verdict = sheetChatEnforce(type, row, {
-      enforced: chatEnforcedIn(row.id),
-      published: item.published,
-      mayConfigure: mayConfigureIn(row.id),
-    });
-    if (!verdict) return null;
-    const pending =
-      setChatEnforced.isPending &&
-      setChatEnforced.variables?.packageId === item.id &&
-      setChatEnforced.variables.spaceId === row.id;
-    return (
-      <Switch
-        checked={verdict.checked}
-        disabled={verdict.disabled || pending}
-        aria-label={t("library.chatEnforce.toggle", {
-          ns: "common",
-          package: item.name || item.id,
-          space: row.name,
-        })}
-        title={
-          verdict.refusal === "configure"
-            ? t("library.chatEnforce.cannot", { ns: "common" })
-            : verdict.refusal === "publishFirst"
-              ? t("library.chatEnforce.publishFirst", { ns: "common" })
-              : undefined
-        }
-        onCheckedChange={(next) => {
-          // Imposing discloses the content to every member who chats there: confirm first.
-          if (next) setConfirmEnforce(row);
-          else
-            setChatEnforced.mutate(
-              { spaceId: row.id, packageId: item.id, enforced: false },
-              { onError: notifyEnforceError },
-            );
-        }}
-      />
-    );
-  };
-
-  const singleEnforce = mode === "single" && rows[0] ? enforceSwitchFor(rows[0]) : null;
-
   const missingText = (spaceId: string) => {
     const names = missingIn(spaceId);
     return names.length > 0 ? t("catalogue.sheet.missing", { names: names.join(", ") }) : null;
@@ -480,16 +413,6 @@ export function CataloguePreview({
               : t("catalogue.activeNowhere")}
           </p>
         )}
-        {mode === "readonly" && enforcesAnywhere && (
-          <p className="text-muted-foreground mt-1 text-sm">
-            {t("catalogue.sheet.chatEnforcedIn", {
-              spaces: rows
-                .filter((row) => chatEnforcedIn(row.id))
-                .map((row) => row.name)
-                .join(", "),
-            })}
-          </p>
-        )}
         {mode === "single" && rows[0] && (
           <div className="border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
             <div className="min-w-0">
@@ -504,12 +427,6 @@ export function CataloguePreview({
             {switchFor(rows[0])}
           </div>
         )}
-        {singleEnforce && (
-          <label className="border-border mt-2 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
-            <span>{t("library.column.chatEnforced", { ns: "common" })}</span>
-            {singleEnforce}
-          </label>
-        )}
         {mode === "table" && (
           <div className="overflow-hidden rounded-lg border">
             <Table>
@@ -521,11 +438,6 @@ export function CataloguePreview({
                   <TableHead className="w-px text-right whitespace-nowrap">
                     {t("catalogue.filter.active")}
                   </TableHead>
-                  {enforceable && (
-                    <TableHead className="w-px text-right whitespace-nowrap">
-                      {t("library.column.chatEnforced", { ns: "common" })}
-                    </TableHead>
-                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -548,9 +460,6 @@ export function CataloguePreview({
                       </TableCell>
                     )}
                     <TableCell className="text-right">{switchFor(row)}</TableCell>
-                    {enforceable && (
-                      <TableCell className="text-right">{enforceSwitchFor(row)}</TableCell>
-                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -558,29 +467,6 @@ export function CataloguePreview({
           </div>
         )}
       </SettingsGroup>
-
-      {enforceable && (
-        <ConfirmModal
-          open={confirmEnforce !== null}
-          onClose={() => setConfirmEnforce(null)}
-          title={t("library.chatEnforce.confirmTitle", { ns: "common" })}
-          description={t("library.chatEnforce.confirmDescription", {
-            ns: "common",
-            package: item.name || item.id,
-            space: confirmEnforce?.name ?? "",
-          })}
-          confirmLabel={t("library.chatEnforce.confirm", { ns: "common" })}
-          variant="default"
-          isPending={setChatEnforced.isPending}
-          onConfirm={() => {
-            if (!confirmEnforce) return;
-            setChatEnforced.mutate(
-              { spaceId: confirmEnforce.id, packageId: item.id, enforced: true },
-              { onError: notifyEnforceError, onSettled: () => setConfirmEnforce(null) },
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

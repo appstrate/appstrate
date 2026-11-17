@@ -46,7 +46,6 @@ import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail, useAgents } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
-import { mayConfigurePackage } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useIntegrationsById } from "../hooks/use-integrations";
 import { PackageIcon } from "./package-icon";
@@ -556,9 +555,6 @@ export function OrgCatalogueModal({
           spaces={librarySpaces}
           placement={placementOf(previewed)}
           gateOf={(targetSpaceId, next) => activationGate(previewed, targetSpaceId, next)}
-          mayConfigureIn={(targetSpaceId) =>
-            mayConfigurePackage(grantById.get(targetSpaceId), active)
-          }
           integrations={library?.packages.integration ?? []}
           agents={library?.packages.agent ?? []}
           pinnedVersion={pinnedVersion}

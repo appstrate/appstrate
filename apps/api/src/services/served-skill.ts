@@ -2,10 +2,8 @@
 
 /**
  * What the MCP Skills extension (SEP-2640) serves for one skill: its files as
- * an Agent Skills directory, and its entry. The MCP module serves it, and the
- * chat's enforced skills (`./chat-enforced-skills.ts`) inject the same
- * `SKILL.md`. Pure: the reads and the access rule live in
- * `./served-skills.ts` and `./skill-read.ts`; the `skill://` grammar in
+ * an Agent Skills directory, and its entry. Pure: the reads and the access rule
+ * live in `./served-skills.ts` and `./skill-read.ts`; the `skill://` grammar in
  * `@appstrate/core/skill-uri`.
  */
 
@@ -103,25 +101,6 @@ export function serveSkill(
       frontmatter: parsed.fields as SkillEntry["frontmatter"],
       files,
     },
-  };
-}
-
-/**
- * The `SKILL.md` {@link serveSkill} serves from `stored`, with the served name:
- * the text the chat injects and `resources/read` answers, or why the tree
- * cannot be served.
- */
-export function serveSkillMd(
-  packageId: string,
-  stored: Record<string, Uint8Array>,
-  version: string | null,
-): { ok: true; name: string; content: string } | { ok: false; reason: string } {
-  const served = serveSkill(packageId, stored, version);
-  if (!served.ok) return served;
-  return {
-    ok: true,
-    name: served.skill.name,
-    content: new TextDecoder("utf-8", { ignoreBOM: true }).decode(served.skill.files[SKILL_ENTRY]),
   };
 }
 

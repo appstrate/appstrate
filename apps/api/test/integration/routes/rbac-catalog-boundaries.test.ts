@@ -35,7 +35,6 @@ interface Placement {
   space_id: string;
   via: "home" | "shared" | "system";
   state: "active" | "inactive" | "none";
-  chat_enforced: boolean;
   shared_by: { user_id: string; name: string } | null;
 }
 interface Library {
@@ -280,7 +279,6 @@ describe("organization library administration", () => {
         space_id: ctx.defaultSpaceId,
         via: "shared",
         state: "inactive",
-        chat_enforced: false,
         shared_by: null,
       },
     ]);

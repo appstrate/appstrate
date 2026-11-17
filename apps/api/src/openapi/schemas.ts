@@ -748,7 +748,6 @@ export const schemas = {
       "modelId",
       "proxyId",
       "enabled",
-      "chat_enforced",
       "installed_at",
       "updatedAt",
       "package_type",
@@ -764,11 +763,6 @@ export const schemas = {
       modelId: { type: ["string", "null"], description: "Model override for this space" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
       enabled: { type: "boolean" },
-      chat_enforced: {
-        type: "boolean",
-        description:
-          "Skills only: while the skill is active here, its latest published `SKILL.md` is injected in every chat conversation held in this space, whatever the member's `skills:*` grants. Kept across deactivation. Always `false` for other types.",
-      },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
       package_type: { type: "string", enum: [...packageTypeValues] },
@@ -3033,7 +3027,6 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
-        "published",
         "placements",
         "activation",
       ],
@@ -3056,11 +3049,6 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
-        published: {
-          type: "boolean",
-          description:
-            "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published.",
-        },
         activation: {
           type: "array",
           description:
@@ -3090,7 +3078,7 @@ export const schemas = {
     type: "object",
     description:
       "One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it.",
-    required: ["space_id", "via", "state", "chat_enforced", "shared_by"],
+    required: ["space_id", "via", "state", "shared_by"],
     properties: {
       space_id: {
         type: "string",
@@ -3107,11 +3095,6 @@ export const schemas = {
         enum: ["active", "inactive", "none"],
         description:
           "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
-      },
-      chat_enforced: {
-        type: "boolean",
-        description:
-          "Whether this space enforces the skill in its chat (`SpacePackage.chat_enforced`). `false` with no placement row, and for every type but `skill`.",
       },
       shared_by: {
         type: ["object", "null"],

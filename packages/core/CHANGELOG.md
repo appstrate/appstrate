@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`EnforcedChatSkill`, `EnforcedChatSkillRef`, `MAX_ENFORCED_CHAT_SKILLS`,
+  `CHAT_SKILLS_CONTENT_BUDGET_CHARS`** — BREAKING (`@appstrate/core/chat-contract`), and
+  **`PlatformServices.loadEnforcedChatSkills`, `PlatformServices.listEnforcedChatSkills`**
+  (`@appstrate/core/module`). Space-enforced chat skills are removed (#2265): a conversation
+  spans several spaces, so a per-space imposition has no single space to read from.
+  `CHAT_SKILLS_CONTENT_BUDGET_CHARS` moves into the chat module, its only consumer.
 - **`bundleMcpServer`, `BundleMcpServerInput`, `BundleMcpServerResult`, `BundlerError`,
   `BunCompatProbeResult`, `BunProbeOptions`, `probeBunCompat`, `DOS_EPOCH_MS`,
   `packDeterministicZip`, `rewriteManifestForDistribution`, `suggestBundleFileName`,
@@ -115,12 +121,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table names it; the caller's own entries are kept. An absent `output` defaults to the open
   object schema. The `runtime_tools` default and the refusal of a non-array
   `manifest.runtime_tools` are removed.
-
-- **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
-  the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
-  resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
-  chat injects the bytes `resources/read` answers. A `loadEnforcedChatSkills` implementation
-  returns both. (#2175)
 
 - **BREAKING: `@appstrate/core/runtime-tool-defs` is removed** (#2197, #2199), with
   `buildRuntimeToolDefs`, `BuildRuntimeToolDefsOptions`, `buildOutputToolDef`,

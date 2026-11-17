@@ -16,7 +16,6 @@ import {
   SESSIONS_QUERY_KEY,
   stopSession,
 } from "../src/ui/sessions.ts";
-import { fetchEnforcedSkills } from "../src/ui/chat-skills.ts";
 import { requestAnswering, transportOver } from "./fake-request.ts";
 
 const headers = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a", "X-Chat-Locale": "fr" });
@@ -41,7 +40,6 @@ describe("the chat's routes", () => {
       await deleteSession(transport, "chs_1");
       await markSessionRead(transport, "chs_1");
       await stopSession(transport, "chs_1");
-      await fetchEnforcedSkills(transport, "spc_a").catch(() => {});
 
       expect(request.calls.map((c) => c.path.replace(/\?.*/, ""))).toEqual([
         "/api/orgs/org_1/chat/sessions",
@@ -50,7 +48,6 @@ describe("the chat's routes", () => {
         "/api/orgs/org_1/chat/sessions/chs_1",
         "/api/orgs/org_1/chat/sessions/chs_1/read",
         "/api/orgs/org_1/chat/sessions/chs_1/stop",
-        "/api/orgs/org_1/chat/enforced-skills",
       ]);
     }
   });

@@ -32,7 +32,7 @@ import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
-import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
+import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
@@ -468,16 +468,9 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // The enforced skills are the origin space's alone (none without one): they start as soon
-  // as the row resolves; phase A's join awaits them, so their 503 refuses the turn before
-  // any file is materialized.
-  const enforcedSkills: Promise<EnforcedChatSkill[]> = turn.then(({ originSpace }) =>
-    originSpace ? deps.loadEnforcedSkills(orgId, originSpace.id) : [],
-  );
-  // Then the caller-context block. It depends on the reach and the session row
-  // (the turn's grants and its skills) — never on the
-  // chosen model or the admission gate — so it starts the moment the row
-  // resolves, overlapping the model list, the attachment materialization, the
+  // The caller-context block. It depends on the reach and the session row (the
+  // turn's grants and its skills) — never on the chosen model or the admission
+  // gate — so it starts the moment the row resolves, overlapping the model list, the attachment materialization, the
   // credential resolution and the gate rather than waiting behind them. A turn the gate
   // rejects has read its skills for nothing, which is acceptable — what a rejected turn
   // must not do is persist a user message, record a space on the conversation (an
@@ -512,7 +505,6 @@ export async function handleChatStream(
           capabilities,
           permissions,
           skills,
-          enforced: enforcedSkills,
           // The turn's skills are read before the claim naming them exists, so
           // over a connection of their own: the caller's permissions, not narrowed by
           // `turnPermissions`, and no claim — what the caller reads.
@@ -548,7 +540,7 @@ export async function handleChatStream(
     );
 
   const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, enforcedSkills]);
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn]);
   let chosen;
   try {
     chosen = pickModel(models, modelId);

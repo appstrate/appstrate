@@ -62,7 +62,7 @@ import {
   listSpacePackages,
   getSpacePackage,
   getResolvedRunConfig,
-  updatePlacementSettings,
+  updateSpacePackage,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
@@ -242,8 +242,6 @@ export const updatePackageSchema = z
     generation_config: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
-    // Skills only: inject the published SKILL.md in every chat turn held here.
-    chat_enforced: z.boolean().optional(),
   })
   .strict();
 
@@ -310,7 +308,7 @@ async function coarseSpacePackageGate(
 }
 
 /**
- * Gate a space-package write and resolve the package's type, in the order that
+ * Gate a space-package write on the package's type, in the order that
  * keeps 403 and 404 independent of each other.
  *
  *   1. **Coarse gate, before any catalog read**
@@ -346,7 +344,7 @@ async function gateSpacePackageWrite(
      */
     ownSpace?: boolean;
   },
-): Promise<PackageType> {
+): Promise<void> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
   const { type } = await assertCatalogPackageAccess(c, packageId);
@@ -356,7 +354,6 @@ async function gateSpacePackageWrite(
   // other RBAC call site — the move `requirePackageReadPermission` makes in
   // `routes/packages.ts`. An unmapped type fails CLOSED.
   if (!ownSpace) await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
-  return type;
 }
 
 /** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
@@ -892,17 +889,8 @@ export function createSpacesRouter() {
     // package runs, and nothing else. Activation left it when it got its own
     // pair of doors, so an empty body is gated exactly like a full one and can
     // never be a free existence probe.
-    const type = await gateSpacePackageWrite(c, orgId, packageId, "configure");
+    await gateSpacePackageWrite(c, orgId, packageId, "configure");
     const data = await readJsonBody(c, updatePackageSchema);
-    if (data.chat_enforced !== undefined && type !== "skill") {
-      throw new ApiError({
-        status: 400,
-        code: "chat_enforced_not_skill",
-        title: "Not A Skill",
-        detail: `Only a skill can be enforced in the chat; '${packageId}' is a ${type}`,
-        param: "chat_enforced",
-      });
-    }
 
     const placement = await getSpacePackage(scope, packageId);
     let generationConfig = data.generation_config;
@@ -937,26 +925,17 @@ export function createSpacesRouter() {
       }
     }
 
-    const { generation_config: _generationConfig, chat_enforced: chatEnforced, ...rest } = data;
+    const { generation_config: _generationConfig, ...rest } = data;
     void _generationConfig;
     const updates = {
       ...rest,
       ...(generationConfig !== undefined ? { generationConfig } : {}),
-      ...(chatEnforced !== undefined ? { chatEnforced } : {}),
     };
     // An EXISTING placement only: a package not placed here (or not visible
     // to the org) is a 404, never an implicit activation via upsert.
-    const { chatEnforcedChanged } = await updatePlacementSettings(scope, packageId, updates);
-    if (chatEnforcedChanged) {
-      await recordAuditFromContext(c, {
-        action: chatEnforced ? "package.chat_enforced" : "package.chat_released",
-        resourceType: "package",
-        resourceId: packageId,
-        after: { spaceId },
-      });
-    }
+    await updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
     const updated = await getSpacePackage(scope, packageId);
-    // One event for every setting the write moved (`chat_enforced` keeps its own pair above).
+    // One event for every setting the write moved.
     const diff = auditDiff({
       modelId: [placement?.modelId, updated?.modelId ?? null],
       proxyId: [placement?.proxyId, updated?.proxyId ?? null],
