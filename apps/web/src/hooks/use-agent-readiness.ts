@@ -25,7 +25,7 @@ export function isNeverPublishedForReader(detail: AgentDetail | undefined): bool
 }
 
 type AgentLaunchRefusal =
-  "detail.titleNotActive" | "detail.titleNotActiveAnySpace" | "detail.titleNeverPublished";
+  "detail.titleNotActive" | "detail.titleNotActiveAcross" | "detail.titleNeverPublished";
 type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
 type AgentRunBlocker =
   AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
@@ -33,7 +33,7 @@ type AgentRunBlocker =
 /** Every blocker key, checked exhaustive by `satisfies`: the run button renders `t(blocker)`, so a test holds each in both locales. */
 export const AGENT_RUN_BLOCKERS = Object.keys({
   "detail.titleNotActive": true,
-  "detail.titleNotActiveAnySpace": true,
+  "detail.titleNotActiveAcross": true,
   "detail.titleNeverPublished": true,
   "detail.titleEmptyPrompt": true,
   "detail.titleMissingSkill": true,
@@ -42,20 +42,20 @@ export const AGENT_RUN_BLOCKERS = Object.keys({
 } satisfies Record<AgentRunBlocker, true>);
 
 /**
- * Where a verdict is judged: the space the detail was read in, or, `anySpace` (« Tous les espaces »,
+ * Where a verdict is judged: the space the detail was read in, or, `spanning` (« Tous les espaces »,
  * the space chosen at launch), only on what holds in every space; the launch answers the rest.
  */
 interface VerdictScope {
-  anySpace?: boolean;
+  spanning?: boolean;
 }
 
 /** The refusals no launch option can cure, as i18n keys (namespace `agents`); switched off comes first (one click cures it). */
 export function agentLaunchRefusal(
   detail: AgentDetail,
-  { anySpace = false }: VerdictScope = {},
+  { spanning = false }: VerdictScope = {},
 ): AgentLaunchRefusal | null {
-  if (!anySpace && !detail.active) return "detail.titleNotActive";
-  if (anySpace && detail.space_ids.length === 0) return "detail.titleNotActiveAnySpace";
+  if (!spanning && !detail.active) return "detail.titleNotActive";
+  if (spanning && detail.space_ids.length === 0) return "detail.titleNotActiveAcross";
   if (isNeverPublishedForReader(detail)) return "detail.titleNeverPublished";
   return null;
 }
@@ -82,7 +82,7 @@ export function agentRunBlocker(
     return "detail.titleEmptyPrompt";
   }
   // The skills a run gets are those placed in the space it runs in.
-  if (scope.anySpace) return modelBlocker;
+  if (scope.spanning) return modelBlocker;
   const requiredSkills =
     (detail.manifest?.dependencies as Record<string, Record<string, string>> | undefined)?.skills ??
     {};
@@ -94,18 +94,18 @@ export function agentRunBlocker(
 }
 
 /**
- * `undefined` for a page that is not an agent's: neither read is made. `anySpace` reads no space's
+ * `undefined` for a page that is not an agent's: neither read is made. `spanning` reads no space's
  * pin and blocks only on an organization with no usable model: a pin in the chosen space may
  * answer a missing default.
  */
 export function useAgentModelBlocker(
   packageId: string | undefined,
-  { anySpace = false }: VerdictScope = {},
+  { spanning = false }: VerdictScope = {},
 ): AgentModelBlocker | null {
   const { data: orgModels } = useModels(packageId !== undefined);
-  const { data: agentModel } = useAgentModel(anySpace ? undefined : packageId);
+  const { data: agentModel } = useAgentModel(spanning ? undefined : packageId);
   const blocker = agentModelBlocker(orgModels, agentModel?.modelId);
-  return anySpace && blocker === "detail.titleNoDefaultModel" ? null : blocker;
+  return spanning && blocker === "detail.titleNoDefaultModel" ? null : blocker;
 }
 
 export function useAgentRunBlocker(

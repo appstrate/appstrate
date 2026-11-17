@@ -62,7 +62,8 @@ function useActInSpace(): (spaceId: string, act: () => void) => void {
 /**
  * Where an action naming no space may act. Out of the mode: `offered` is the working space's
  * verdict and `eligible` is empty. In it: the spaces that grant `need`, only those of `among`
- * when given, and `offered` when there is one.
+ * when given, `offered` when there is one, and `anyOf` the one an act answering the same from
+ * any of them reads (the working space when it is one).
  */
 export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { on } = useOverviewMode();
@@ -71,6 +72,7 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { features } = useAppConfig();
   const orgPermissions = useOrg().currentOrg?.permissions;
   const { data: spaces } = useSpaces();
+  const workingSpaceId = useCurrentSpaceId();
 
   const admits = (gate: SpaceGate, space: { id: string; personal: boolean }) =>
     (!among || among.includes(space.id)) &&
@@ -83,7 +85,10 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
     : "permission" in need
       ? can(need.permission)
       : canReach(need.route);
-  return { on, eligible, offered };
+  const anyOf = (eligible.find((space) => space.id === workingSpaceId) ?? eligible[0])?.id;
+  const working = spaces?.find((space) => space.id === workingSpaceId);
+  const targets = on ? eligible : offered && working ? [working] : [];
+  return { on, eligible, offered, anyOf, targets };
 }
 
 /** How {@link useSpaceAction} picks and enters a space. */

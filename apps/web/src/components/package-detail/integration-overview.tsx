@@ -6,11 +6,10 @@ import { Layers, Plug, Wrench } from "lucide-react";
 import { HealthCard, HealthCardItem, HealthAction, HealthIssueBadge } from "../health-card";
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { useAgents } from "../../hooks/use-packages";
-import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { useOverviewMode, useWorkingSpaceWording } from "../../hooks/use-overview-mode";
+import { useSpaceLink } from "../../hooks/use-current-space";
 import { useMyConnections } from "../../hooks/use-me-connections";
 import { useCurrentOrgId } from "../../hooks/use-org";
-import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { connectionsAcross } from "../integration-detail/connections-across";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { packageDetailPath } from "../../lib/package-paths";
@@ -51,7 +50,7 @@ export function IntegrationOverview({
   // integration's spaces, as its index card counts them; otherwise the working space's.
   const { data: myConnections } = useMyConnections();
   const orgId = useCurrentOrgId();
-  const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
+  const spaceWording = useWorkingSpaceWording("settings");
   const across =
     on && myConnections && spaceIds
       ? connectionsAcross(myConnections, orgId, packageId, spaceIds)
@@ -88,10 +87,9 @@ export function IntegrationOverview({
           if (detail.active && !prepared(auth))
             items.push({
               key: `setup:${auth.auth_key}`,
-              title:
-                on && workingSpace
-                  ? t("integration.health.setupIn", { method: labelFor(auth), space: workingSpace })
-                  : t("integration.health.setup", { method: labelFor(auth) }),
+              title: spaceWording("integration.health.setup", "integration.health.setupIn", {
+                method: labelFor(auth),
+              }),
               onClick: onConfigureAuth ? () => onConfigureAuth(auth.auth_key) : undefined,
               action: t("detail.diagnostics.fix", { ns: "agents" }),
             });

@@ -128,24 +128,17 @@ export function RunAgentButton({
 
   const start = () => {
     const target = spaceStore.getState().id;
-    // The target's own, read before entering it.
-    const entered = runAction.enteredDetail();
-    if (entered) {
-      startRun(entered);
-      return;
-    }
-    // Detail already available (provided, or cached from a previous click) when it is the
-    // target's: the one held is the working space's at the click.
-    if (detail && target === workingSpaceId) {
-      startRun(detail);
+    const inTarget = packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId);
+    // The target's own: the one held when it is the working space, else the one read on entering it.
+    const known =
+      target === workingSpaceId ? detail : qc.getQueryData<AgentDetail>(inTarget.queryKey);
+    if (known) {
+      startRun(known);
       return;
     }
     // Deferred fetch, on the key the detail query reads in the target space — `isFetching`
     // drives the pending spinner meanwhile.
-    qc.fetchQuery(packageDetailQueryOptions("agent", { orgId, spaceId: target }, packageId)).then(
-      startRun,
-      () => toast.error(t("error.generic", { ns: "common" })),
-    );
+    qc.fetchQuery(inTarget).then(startRun, () => toast.error(t("error.generic", { ns: "common" })));
   };
 
   // Between several of the row's spaces, the button is the menu of them.

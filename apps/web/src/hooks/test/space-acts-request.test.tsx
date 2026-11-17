@@ -19,6 +19,7 @@ const { spaceStore } = await import("../../stores/space-store.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { overviewStore } = await import("../../stores/overview-store.ts");
 const { useAgentSpaceAction } = await import("../use-agent-run-space.ts");
+const { packageDetailQueryOptions } = await import("../use-packages.ts");
 const { useDeleteAgentRuns } = await import("../use-mutations.ts");
 const { useDeleteAgentMemories, useDeletePersistenceRow, fetchAgentPersistence } =
   await import("../use-persistence.ts");
@@ -137,10 +138,13 @@ describe("entering a space to act there", () => {
         preferWorkingSpace: false,
       }),
     );
-    renderInMode(<action.Probe />);
+    const qc = renderInMode(<action.Probe />);
     let entered: unknown = "not run";
     const menu = action.current!.choose("Lancer dans…", () => {
-      entered = action.current!.enteredDetail();
+      entered = qc.getQueryData(
+        packageDetailQueryOptions("agent", { orgId: "org_1", spaceId: "spc_c" }, PACKAGE_ID)
+          .queryKey,
+      );
     });
     expect(menu?.spaces.map((s) => s.id)).toEqual(["spc_b", "spc_c"]);
 
@@ -153,19 +157,6 @@ describe("entering a space to act there", () => {
     expect(init.headers?.["X-Space-Id"]).toBe("spc_c");
     expect(spaceStore.getState().id).toBe("spc_c");
     expect((entered as { id?: string } | undefined)?.id).toBe(PACKAGE_ID);
-  });
-
-  it("keeps no read once its act has run: a later act re-seeds nothing", async () => {
-    const action = capture(() =>
-      useAgentSpaceAction(PACKAGE_ID, "agents:run", ["spc_b", "spc_c"], {
-        preferWorkingSpace: false,
-      }),
-    );
-    renderInMode(<action.Probe />);
-    let ran = false;
-    action.current!.choose("Lancer dans…", () => (ran = true))!.onPick("spc_b");
-    await until(() => ran);
-    expect(action.current!.enteredDetail()).toBeUndefined();
   });
 
   it("does not enter a space whose read fails", async () => {

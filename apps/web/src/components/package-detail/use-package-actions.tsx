@@ -43,10 +43,11 @@ import { menuSections, type PackageMenuEntry } from "./package-menu";
 import {
   deedEntry,
   deedOfAction,
+  deedInSpaces,
   spaceDeedLabels,
   usePlacementDeeds,
   type SpaceDeed,
-} from "./space-deed";
+} from "../space-deed";
 
 /** What the menu reads off the detail response: the home verdicts gating each act, and the facts confirmations name. `agents` exists on the non-agent shape only. */
 type PackageActionsDetail = Pick<
@@ -116,7 +117,7 @@ export function usePackageActions({
   const { on: overview } = useOverviewMode();
   const deletePkg = useDeletePackage(type);
   const [movingHome, setMovingHome] = useState(false);
-  const [forking, setForking] = useState(false);
+  const [forkSpaceId, setForkSpaceId] = useState<string | null>(null);
   // The space each act targets, kept while its dialog fades out.
   const [removing, setRemoving] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
@@ -150,14 +151,12 @@ export function usePackageActions({
   const spaceIds = detail?.space_ids;
   const published = (detail?.version_count ?? 0) > 0;
   // Forking writes a NEW package in the space it is made in: one where the reader writes the type.
-  const forkAction = useSpaceAction({ permission: packagePermission(type, "write") });
+  const forkAction = useSpacesFor({ permission: packagePermission(type, "write") });
   const showFork = forkAction.offered && !isOwned;
   // The export needs `<type>:read`, which a summary-only caller (an `agents:run` runner) lacks,
   // in a space the package is active in; the file is the same from any of them.
   const readers = useSpacesFor({ permission: packagePermission(type, "read") }, spaceIds);
-  const exportFrom = overview
-    ? (readers.eligible.find((space) => space.id === spaceId) ?? readers.eligible[0])?.id
-    : undefined;
+  const exportFrom = readers.anyOf;
   const canExport = readers.offered && !!downloadVersion && !!onDownload;
   // A run resolves an integration's published version in a space where it is active: the agent
   // using it is created in one of those that grants writing agents.
@@ -228,8 +227,11 @@ export function usePackageActions({
       icon: GitFork,
       label: t("fork.button"),
       ...deedEntry(
-        deedOfAction(forkAction, spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"), () =>
-          setForking(true),
+        deedInSpaces(
+          overview,
+          forkAction.targets,
+          spaceDeedLabels(t, "spaceChoice.fork", "spaceChoice.forkIn"),
+          setForkSpaceId,
         ),
       ),
       hidden: !showFork,
@@ -279,7 +281,8 @@ export function usePackageActions({
       group: "administration",
       icon: PackagePlus,
       label: t("packages.activate", { ns: "settings" }),
-      ...deedEntry(placement.activate),
+      // An integration's is its header button (`IntegrationActivateButton`).
+      ...deedEntry(type === "integration" ? undefined : placement.activate),
     },
     {
       id: "deactivate",
@@ -351,9 +354,10 @@ export function usePackageActions({
           }}
         />
       )}
-      {forking && showFork && (
+      {forkSpaceId && showFork && (
         <ForkPackageModal
-          onClose={() => setForking(false)}
+          spaceId={forkSpaceId}
+          onClose={() => setForkSpaceId(null)}
           packageId={packageId}
           defaultName={splitPackageRef(packageId).name}
           type={type}

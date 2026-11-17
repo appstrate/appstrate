@@ -22500,7 +22500,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent in use (runs in progress in some space of the organization), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`. */
+            /** @description Agent in use (runs in progress in this space), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22666,7 +22666,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` `agent_in_use`. */
+            /** @description Agent in use: it has runs in progress in this space. RFC 9457 problem+json with `code` `agent_in_use`. */
             409: {
                 headers: {
                     [name: string]: unknown;

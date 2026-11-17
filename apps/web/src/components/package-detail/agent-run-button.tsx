@@ -24,11 +24,11 @@ export function AgentRunButton({
   const { data: detail } = usePackageDetail("agent", packageId);
   // In « Tous les espaces » the run is judged in the space the reader picks: the detail's own
   // space is hidden, so only what holds in every space blocks, and the launch answers the rest.
-  const { on: anySpace } = useOverviewMode();
-  const blocker = useAgentRunBlocker(packageId, detail, { anySpace });
+  const { on: spanning } = useOverviewMode();
+  const blocker = useAgentRunBlocker(packageId, detail, { spanning });
   // The same server resolver as the launch's 409, in the space the page reads. Each integration
   // says whether it blocks the run, so a switched-off agent is not read as a connection gap.
-  const { data: connections } = useAgentConnectionReadiness(anySpace ? undefined : packageId);
+  const { data: connections } = useAgentConnectionReadiness(spanning ? undefined : packageId);
   const connectionGap = connections ? blockingIntegrationIds(connections).length > 0 : false;
 
   if (!detail) return null;

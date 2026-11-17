@@ -166,6 +166,18 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (`PackageActionsDropdown`) and a schedule's are items inside it, never a
    hand-built trigger. A page with no deed has no trigger. Search, filters,
    columns and view changes are list controls, they never enter this menu.
+   **A deed that acts in one space** (a menu entry, a header button) acts in the working space
+   when one is selected and asks in « Tous les espaces »; its label says which
+   (`SpaceDeedLabels`): plain « X » with a space selected, « X dans {space} » when the mode leaves
+   one space, « X dans… » when it asks (the trigger is then the menu of the spaces,
+   `SpaceChoiceDropdown` for a button, `SpaceChoiceSubmenu` for an entry), and no entry when none
+   grants it. Build it with `components/space-deed.ts` (`deedOfAction` over `useSpaceAction`,
+   `deedInSpaces` for a space named without entering it, `usePlacementDeeds` for Activer,
+   Désactiver, Retirer de) and never twice on one page: an integration's « Activer » is its header
+   button, not a menu entry. A space is named with `SpaceName`/`SpaceNameOf`, several with
+   `SpaceTileStack`. A per-space section or tab shown in the mode opens with the space it is read
+   in (`ConfigurationSpace`, `components/configuration-space.tsx`: the working space when the
+   header names it, a button to pick another), entered through the page's `useSpaceEntry`.
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`

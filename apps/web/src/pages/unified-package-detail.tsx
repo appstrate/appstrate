@@ -128,7 +128,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   // here, beside the detail, so the alert does not wait for the loading gate.
   // In « Tous les espaces » the run's space is chosen at launch: no one space's pin is read.
   const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined, {
-    anySpace: overview,
+    spanning: overview,
   });
 
   // Type-narrowed aliases for type-specific branches

@@ -34,7 +34,7 @@
   "spaceChoice.fork": "Dupliquer dans…",
   "spaceChoice.forkIn": "Dupliquer dans {{space}}",
   "spaceChoice.remove": "Retirer de…",
-  "spaceChoice.removeFrom": "Retirer de {{space}}",
+  "spaceChoice.removeIn": "Retirer de {{space}}",
   "spaceChoice.schedule": "Planifier dans…",
   "spaceChoice.scheduleIn": "Planifier dans {{space}}",
   "spaceChoice.create": "Créer dans…",

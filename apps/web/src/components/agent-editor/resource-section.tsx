@@ -76,13 +76,13 @@ export function ResourceSection({
   // The picker offers the index, what the working space runs (in « Tous les espaces », any space
   // the reader reaches: the definition is the same everywhere). A declared dependency resolves
   // org-wide (RBAC §6.9), so one outside the index stays listed below.
-  const { on: anySpace } = useOverviewMode();
-  const { data: items, isLoading, error } = usePackageList(type, anySpace);
+  const { on: spanning } = useOverviewMode();
+  const { data: items, isLoading, error } = usePackageList(type, spanning);
   // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
   const canReadCatalog = useSpacesFor({ permission: packagePermission(type, "read") }).offered;
   const catalogUnreadable = t(
-    anySpace ? "editor.catalogUnreadableAnySpace" : "editor.catalogUnreadable",
+    spanning ? "editor.catalogUnreadableAcross" : "editor.catalogUnreadable",
   );
   const [importing, setImporting] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -221,11 +221,11 @@ export function ResourceSection({
                             <AlertTriangle className="size-3.5 shrink-0" />
                             {t(
                               isIntegration
-                                ? anySpace
-                                  ? "editor.integrationInactiveAnySpace"
+                                ? spanning
+                                  ? "editor.integrationInactiveAcross"
                                   : "editor.integrationInactive"
-                                : anySpace
-                                  ? "editor.dependencyMissingAnySpace"
+                                : spanning
+                                  ? "editor.dependencyMissingAcross"
                                   : "editor.dependencyMissing",
                             )}
                           </span>
@@ -247,7 +247,7 @@ export function ResourceSection({
                         ) : (
                           // It switches it on in the working space, which the mode does not name.
                           isIntegration &&
-                          !anySpace && <ActivateIntegrationButton packageId={entry.id} />
+                          !spanning && <ActivateIntegrationButton packageId={entry.id} />
                         )
                       ) : (
                         <PackageVersionSelect

@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { HeaderActionButton } from "../header-action-button";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { SpaceChoiceDropdown } from "../space-choice-menu";
-import { usePlacementDeeds } from "../package-detail/space-deed";
+import { usePlacementDeeds } from "../space-deed";
 import { usePackageActivation } from "../../hooks/use-library";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 

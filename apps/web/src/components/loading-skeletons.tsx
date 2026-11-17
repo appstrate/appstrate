@@ -46,6 +46,8 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useListView } from "../stores/list-view-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { isSpaceSetting, SECTION_PERMISSION } from "../lib/agent-settings-sections";
+import type { AgentSettingsSection } from "../lib/settings-section-href";
 import { CardGridSkeleton } from "./card-grid";
 import { FileTileSkeleton } from "./file-tile";
 import { ShellHeaderActions } from "./shell-header-slots";
@@ -176,10 +178,21 @@ function useOpenTab(): string {
   return useLocation().hash.replace(/^#/, "");
 }
 
+/** The space a per-space tab is read in (`ConfigurationSpace`): its label, then its button. */
+function SpaceLineBlocks() {
+  return (
+    <div className="mb-6 flex min-h-8 items-center gap-2">
+      <SkeletonLine className="w-36 text-sm" />
+      <Skeleton className="h-8 w-32" />
+    </div>
+  );
+}
+
 /** A list tab (runs, connections, usage): its toolbar over the table's own card. */
-function ListTabBlocks() {
+function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <>
+      {spaceLine && <SpaceLineBlocks />}
       <ToolbarBlocks columns />
       <TableBlocks framed />
     </>
@@ -187,20 +200,27 @@ function ListTabBlocks() {
 }
 
 /**
- * Whether an agent's settings section opens with the space it is read in, in « Tous les espaces »
- * (`AgentSettingsView`): a section set in one space (model, proxy, parameters, connections — the
- * section the rail opens on when none is named) always, and Fichiers or Versions when the
- * working space refuses `agents:read`, its panel then naming the space to read them from.
+ * Whether a package's open tab starts with the space it is read in, in « Tous les espaces »
+ * (`ConfigurationSpace`): an agent's settings section asking a permission of its space, always for
+ * one set there (the rail opens on the model when none is named), else when the working space
+ * refuses it; an integration's Connexions, and its Authentification or Accès (the default section).
  */
-function useNamesConfigurationSpace(type: PackageType): boolean {
+function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
   const { on } = useOverviewMode();
   const { can } = usePermissions();
-  const section = new URLSearchParams(useLocation().search).get("agentSettings");
-  if (!on || type !== "agent") return false;
-  if (section === null || ["model", "proxy", "inputs", "connections"].includes(section)) {
-    return true;
+  const search = new URLSearchParams(useLocation().search);
+  if (!on) return false;
+  if (type === "agent" && tab === "settings") {
+    const section = search.get("agentSettings") ?? "model";
+    const permission = SECTION_PERMISSION[section as AgentSettingsSection];
+    return !!permission && (isSpaceSetting(section) || !can(permission));
   }
-  return (section === "files" || section === "versions") && !can("agents:read");
+  if (type !== "integration") return false;
+  if (tab === "connections") return true;
+  const section = search.get("integrationSettings");
+  return (
+    tab === "settings" && (section === null || section === "authentication" || section === "access")
+  );
 }
 
 /**
@@ -222,13 +242,7 @@ function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
             <Skeleton className="h-11 w-full" />
           </div>
           <div className="p-6">
-            {/* The space the configuration is read in (`ConfigurationSpace`): label, then its button. */}
-            {spaceLine && (
-              <div className="mb-6 flex min-h-8 items-center gap-2">
-                <SkeletonLine className="w-36 text-sm" />
-                <Skeleton className="h-8 w-32" />
-              </div>
-            )}
+            {spaceLine && <SpaceLineBlocks />}
             {/* The open section's `SettingsHeading` (title over its hint), then its rows. */}
             <header className="mb-6">
               <SkeletonLine className="w-32 text-xl font-semibold" />
@@ -319,7 +333,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const listCrumb = usePackageListCrumb(type);
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
-  const spaceLine = useNamesConfigurationSpace(type);
+  const spaceLine = useOpensWithSpaceLine(type, tab);
   return (
     <DetailPageSkeleton
       title={title}
@@ -335,7 +349,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
-          <ListTabBlocks />
+          <ListTabBlocks spaceLine={spaceLine} />
         ) : type === "agent" ? (
           <AgentOverviewSkeleton />
         ) : type === "integration" ? (

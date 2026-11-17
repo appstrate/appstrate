@@ -34,7 +34,7 @@
   "spaceChoice.fork": "Fork into…",
   "spaceChoice.forkIn": "Fork into {{space}}",
   "spaceChoice.remove": "Remove from…",
-  "spaceChoice.removeFrom": "Remove from {{space}}",
+  "spaceChoice.removeIn": "Remove from {{space}}",
   "spaceChoice.schedule": "Schedule in…",
   "spaceChoice.scheduleIn": "Schedule in {{space}}",
   "spaceChoice.create": "Create in…",

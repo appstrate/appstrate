@@ -19,7 +19,7 @@ import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { NewScheduleModal } from "../new-schedule-modal";
-import { deedEntry, deedOfAction, spaceDeedLabels } from "./space-deed";
+import { deedEntry, deedOfAction, spaceDeedLabels } from "../space-deed";
 import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
@@ -65,10 +65,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const create = useAgentSpaceAction(packageId, "schedules:write", detail?.space_ids, {
     preferWorkingSpace: false,
   });
-  const openNew = () => {
-    create.enteredDetail();
-    setNewScheduleOpen(true);
-  };
 
   if (detail && schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
@@ -125,7 +121,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
                     deedOfAction(
                       create,
                       spaceDeedLabels(t, "spaceChoice.schedule", "spaceChoice.scheduleIn"),
-                      openNew,
+                      () => setNewScheduleOpen(true),
                     ),
                   ),
                 }}

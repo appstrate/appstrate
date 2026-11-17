@@ -24,7 +24,7 @@ import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
 import { NewScheduleModal } from "../new-schedule-modal";
 import type { PackageActionsDropdownProps } from "./use-package-actions";
-import { deedInSpaces, deedOfAction, spaceDeedLabels, type SpaceDeed } from "./space-deed";
+import { deedInSpaces, deedOfAction, spaceDeedLabels, type SpaceDeed } from "../space-deed";
 
 type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
 type ChoiceSpace = SpaceChoiceMenu["spaces"][number];
@@ -148,12 +148,7 @@ export function useAgentActions({
   // « Télécharger le bundle »: the export answers in a space where the agent is active, the same
   // bundle from any of them: the working space when it is one, else the first that reads agents.
   const bundleReaders = useSpacesFor({ permission: "agents:read" }, spaceIds);
-  const bundleFrom = overview
-    ? (
-        bundleReaders.eligible.find((space) => space.id === workingSpaceId) ??
-        bundleReaders.eligible[0]
-      )?.id
-    : undefined;
+  const bundleFrom = bundleReaders.anyOf;
   const bundle: SpaceDeed = {
     offered:
       !!downloadBundle && (overview ? !!bundleFrom : bundleReaders.offered && !!detail?.active),
@@ -163,18 +158,9 @@ export function useAgentActions({
   if (!detail) return { dropdown: undefined, dialogs: null };
 
   // Not the full run verdict: the options modal picks the model and the version.
-  const refusal = agentLaunchRefusal(detail, { anySpace: overview });
+  const refusal = agentLaunchRefusal(detail, { spanning: overview });
   const runBlockedReason = refusal ? t(refusal) : unsavedReason;
   const canRunWithOptions = can("agents:run") && !runBlockedReason;
-  // Opened once in the space: the modal reads the agent of the space entered.
-  const openRunOptions = () => {
-    runSpace.enteredDetail();
-    setRunOptionsOpen(true);
-  };
-  const openNewSchedule = () => {
-    scheduleSpace.enteredDetail();
-    setNewScheduleOpen(true);
-  };
   const pendingConfirmation =
     deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
@@ -206,14 +192,15 @@ export function useAgentActions({
       runWithOptions: deedOfAction(
         runSpace,
         spaceDeedLabels(t, "spaceChoice.runOptions", "spaceChoice.runOptionsIn"),
-        openRunOptions,
+        // Opened once in the space: the modal reads the agent of the space entered.
+        () => setRunOptionsOpen(true),
       ),
       runBlockedReason,
       addSchedule: {
         ...deedOfAction(
           scheduleSpace,
           spaceDeedLabels(t, "spaceChoice.schedule", "spaceChoice.scheduleIn"),
-          openNewSchedule,
+          () => setNewScheduleOpen(true),
         ),
         // A schedule cannot carry a file input.
         offered: scheduleSpace.offered && !schemaHasFileFields(detail.input?.schema),

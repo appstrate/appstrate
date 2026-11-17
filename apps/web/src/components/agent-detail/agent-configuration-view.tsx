@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentConfigurationTab } from "../package-detail/agent-configuration-tab";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentSchedulesTab } from "../package-detail/agent-tabs";
 import { SettingsHeading } from "../settings/settings-heading";
-import { SpaceChoiceDropdown } from "../space-choice-menu";
-import { SpaceNameOf } from "../space-name";
+import { ConfigurationSpace } from "../configuration-space";
 import { ModelRequiredAlert } from "./model-required-alert";
 import { useAgentSpaceAction } from "../../hooks/use-agent-run-space";
 import { useAgentModelBlocker } from "../../hooks/use-agent-readiness";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useSpaces } from "../../hooks/use-spaces";
-import { spaceLabel } from "../../lib/space-label";
+import { useOverviewMode, useWorkingSpaceWording } from "../../hooks/use-overview-mode";
+import { isSpaceSetting } from "../../lib/agent-settings-sections";
 import type { ConfigurationSection } from "../../lib/settings-section-href";
 
 const CONFIGURATION_SECTION_TEXT: Record<
@@ -46,17 +41,11 @@ const CONFIGURATION_SECTION_TEXT: Record<
   },
 };
 
-/** The sections set in one space (`space_packages`): in « Tous les espaces », that space is named. */
-const isSpaceSetting = (section: ConfigurationSection) => section !== "schedules";
-
 /**
- * The space a section is shown from, in « Tous les espaces »: one of the agent's active spaces
- * (`spaceIds`, the header's tiles), named, with the menu of the others that grant `permission`.
- * The working space is named only when it is one of them, so the line never names a space the
- * header does not; otherwise the button asks for one. Picking one enters it, the agent already
- * read there, so every read and write below is that space's.
+ * The space an agent's section is shown from, in « Tous les espaces » (`ConfigurationSpace`):
+ * one of its active spaces (`spaceIds`) granting `permission`, the agent read there on entering.
  */
-export function ConfigurationSpace({
+export function AgentConfigurationSpace({
   packageId,
   spaceIds,
   permission,
@@ -66,35 +55,16 @@ export function ConfigurationSpace({
   permission: string;
 }) {
   const { t } = useTranslation("agents");
-  const workingSpaceId = useCurrentSpaceId();
   const enter = useAgentSpaceAction(packageId, permission, spaceIds, {
     preferWorkingSpace: false,
   });
-  const named = !!workingSpaceId && spaceIds.includes(workingSpaceId);
-  const choice = enter.choose(t("detail.configuration.spaceChoice"), () => enter.enteredDetail());
-  // A space to go to: a menu between several, the one other space at a click.
-  const elsewhere = enter.target ? enter.target.id !== workingSpaceId : !!choice;
-
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" data-configuration-space>
-      <span className="text-muted-foreground">{t("detail.configuration.spaceLabel")}</span>
-      {elsewhere ? (
-        <SpaceChoiceDropdown choice={choice}>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={enter.entering}
-            onClick={choice ? undefined : () => enter.run(() => enter.enteredDetail())}
-          >
-            {named ? <SpaceNameOf spaceId={workingSpaceId} /> : t("detail.configuration.pickSpace")}
-            <ChevronsUpDown className="text-muted-foreground" aria-hidden />
-          </Button>
-        </SpaceChoiceDropdown>
-      ) : named ? (
-        <SpaceNameOf spaceId={workingSpaceId} size="md" />
-      ) : null}
-    </div>
+    <ConfigurationSpace
+      label={t("detail.configuration.spaceLabel")}
+      choiceLabel={t("detail.configuration.spaceChoice")}
+      spaceIds={spaceIds}
+      enter={enter}
+    />
   );
 }
 
@@ -123,9 +93,7 @@ export function AgentConfigurationView({
 }) {
   const { t } = useTranslation("agents");
   const { on: overview } = useOverviewMode();
-  const workingSpaceId = useCurrentSpaceId();
-  const { data: spaces } = useSpaces();
-  const workingSpace = spaces?.find((space) => space.id === workingSpaceId);
+  const spaceWording = useWorkingSpaceWording("agents");
   const namesSpace = overview && isSpaceSetting(section);
   const sharedConfigurationProps = {
     packageId,
@@ -145,18 +113,15 @@ export function AgentConfigurationView({
   })();
 
   const text = CONFIGURATION_SECTION_TEXT[section];
-  // « Cet espace » is the named one only once it is named.
   const description =
-    section === "connections" && namesSpace && workingSpace
-      ? t("detail.configuration.connectionsDescriptionIn", {
-          space: spaceLabel(workingSpace, t),
-        })
+    section === "connections"
+      ? spaceWording(text.descriptionKey, "detail.configuration.connectionsDescriptionIn")
       : t(text.descriptionKey);
 
   return (
     <section className="min-w-0 p-6">
       {namesSpace && permission && (
-        <ConfigurationSpace
+        <AgentConfigurationSpace
           packageId={packageId}
           spaceIds={detail.space_ids}
           permission={permission}

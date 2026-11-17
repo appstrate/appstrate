@@ -1065,23 +1065,31 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 }
 
 /**
- * Reject (409) when an agent package has runs in progress in ANY space of the
- * organization: the delete / create-version / restore-version / delete-version
- * handlers act on the package for every space it is placed in. No-op for
- * package types that don't gate version/delete ops on running runs (skills,
- * where `requireMutableForVersionOps` is unset).
+ * Reject (409) when an agent package has runs in progress. Removing the package or one of its
+ * versions takes it from every space it is placed in, so `"org"` counts the runs of every space;
+ * creating or restoring a version leaves the version a run froze untouched, so `"space"` counts
+ * the request's space only (a guest's run elsewhere does not block its author from publishing).
+ * No-op for package types that don't gate version/delete ops on running runs (skills, where
+ * `requireMutableForVersionOps` is unset).
  */
 async function assertNoRunningRuns(
   c: Context<AppEnv>,
   rcfg: PackageRouteConfig,
   itemId: string,
+  reach: "org" | "space",
 ): Promise<void> {
   if (!rcfg.requireMutableForVersionOps) return;
-  const running = await getRunningRunsForPackage({ orgId: c.get("orgId") }, itemId);
+  const orgId = c.get("orgId");
+  const running = await getRunningRunsForPackage(
+    reach === "org" ? { orgId } : { orgId, spaceId: c.get("spaceId") },
+    itemId,
+  );
   if (running > 0) {
     throw conflict(
       "agent_in_use",
-      `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}, in this space or another space of the organization`,
+      reach === "org"
+        ? `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}, in this space or another space of the organization`
+        : `${running} run(s) still running for this ${rcfg.cfg.labelSingular.toLowerCase()}`,
     );
   }
 }
@@ -1097,7 +1105,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId);
+    await assertNoRunningRuns(c, rcfg, itemId, "org");
 
     const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
@@ -1200,7 +1208,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId);
+    await assertNoRunningRuns(c, rcfg, itemId, "space");
 
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
@@ -1288,7 +1296,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await assertNoRunningRuns(c, rcfg, itemId);
+    await assertNoRunningRuns(c, rcfg, itemId, "space");
 
     const versionSpec = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionSpec);
@@ -1379,7 +1387,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     // Verify org ownership before deletion
     await loadOrgItemOr404(rcfg, orgId, itemId);
 
-    await assertNoRunningRuns(c, rcfg, itemId);
+    await assertNoRunningRuns(c, rcfg, itemId, "org");
 
     const versionSpec = c.req.param("version")!;
     const deleted = await deletePackageVersion(itemId, versionSpec);

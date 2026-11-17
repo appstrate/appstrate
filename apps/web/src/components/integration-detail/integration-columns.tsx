@@ -27,10 +27,10 @@ import { CellDate, CellEmpty, CellText } from "../table-cells";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
 import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
+import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
-import { useWorkingSpaceWording } from "./use-integration-space";
 import {
   AccountCell,
   ConnectionActionsCell,
@@ -111,7 +111,7 @@ export function useIntegrationClientColumns({
   onDelete: (row: ClientRow) => void;
 }): DataColumn<ClientRow>[] {
   const { t } = useTranslation("settings");
-  const spaceWording = useWorkingSpaceWording();
+  const spaceWording = useWorkingSpaceWording("settings");
 
   return [
     {

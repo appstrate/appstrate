@@ -79,19 +79,25 @@ test("in « Tous les espaces », « Lancer » asks the space and launches there,
     await expect(entries.filter({ hasText: beta.name })).toHaveCount(1);
     expect(launches).toHaveLength(0);
 
+    // The redirect entered one of the two; choose the OTHER, so the page must read it there
+    // before entering it.
+    const entered = await page.evaluate(
+      () => Object.values(JSON.parse(localStorage.getItem("appstrate_last_space") ?? "{}"))[0],
+    );
+    const target = entered === beta.id ? alpha : beta;
     const readsBefore = detailReads.length;
     const launched = page.waitForRequest(
       (request) => request.method() === "POST" && pathOf(request) === launchPath,
     );
-    await entries.filter({ hasText: beta.name }).click();
+    await entries.filter({ hasText: target.name }).click();
     const launch = await launched;
-    expect(spaceOf(launch)).toBe(beta.id);
+    expect(spaceOf(launch)).toBe(target.id);
     expect(launches).toHaveLength(1);
 
-    // The detail read made on the way, before entering Beta, read Beta's agent.
+    // The detail read made on the way, before entering the target, read the target's agent.
     const readOnTheWay = detailReads.slice(readsBefore);
     expect(readOnTheWay.length).toBeGreaterThan(0);
-    expect(spaceOf(readOnTheWay[0]!)).toBe(beta.id);
+    expect(spaceOf(readOnTheWay[0]!)).toBe(target.id);
   } finally {
     await context.close();
   }

@@ -123,7 +123,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(body.code).toBe("agent_in_use");
   });
 
-  it("refuses deleting or versioning an agent while a run of it runs in another space", async () => {
+  it("refuses deleting an agent while a run of it runs in another space, but lets its author publish", async () => {
     await seedAgent({
       id: "@delorg/elsewhere",
       orgId: ctx.orgId,
@@ -140,20 +140,22 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
       status: "running",
     });
 
-    for (const [method, suffix] of [
-      ["DELETE", ""],
-      ["POST", "/versions"],
-    ] as const) {
-      const res = await app.request(`/api/packages/agents/@delorg/elsewhere${suffix}`, {
-        method,
-        headers: authHeaders(ctx),
-      });
-      expect(res.status, method).toBe(409);
-      const body = (await res.json()) as { code?: string; detail?: string };
-      expect(body.code).toBe("agent_in_use");
-      expect(body.detail).toContain("another space of the organization");
-    }
+    const removed = await app.request("/api/packages/agents/@delorg/elsewhere", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(removed.status).toBe(409);
+    const body = (await removed.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("agent_in_use");
+    expect(body.detail).toContain("another space of the organization");
     await assertDbHas(packages, eq(packages.id, "@delorg/elsewhere"));
+
+    // The run froze its version: publishing another one leaves it untouched.
+    const published = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
+      method: "POST",
+      headers: authHeaders(ctx),
+    });
+    expect(published.status).not.toBe(409);
   });
 
   it("orphaned runs surface in GET /api/runs with the denormalized name", async () => {

@@ -24,8 +24,8 @@ import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useUrlModal } from "../../hooks/use-url-modal";
+import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
-import { useWorkingSpaceWording } from "./use-integration-space";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
   useIntegrationDetail,
@@ -304,7 +304,7 @@ export function ClientsTable({
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const spaceWording = useWorkingSpaceWording();
+  const spaceWording = useWorkingSpaceWording("settings");
   const { can } = usePermissions();
   // An auto-provisioned auth has no org list to manage (no client an admin registers or chooses
   // there); its org-tier machine client, listed with the space's clients, stays the org admin's to

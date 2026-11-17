@@ -9,11 +9,11 @@
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import type { MenuAction, SpaceChoiceMenu } from "../../lib/menu-action";
-import { spaceLabel } from "../../lib/space-label";
-import { usePackageActivationInSpaces } from "../../hooks/use-library";
-import { useOverviewMode } from "../../hooks/use-overview-mode";
-import { useSpaces } from "../../hooks/use-spaces";
+import type { MenuAction, SpaceChoiceMenu } from "../lib/menu-action";
+import { spaceLabel } from "../lib/space-label";
+import { usePackageActivationInSpaces } from "../hooks/use-library";
+import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpacesOf } from "../hooks/use-spaces";
 
 type ChoiceSpace = SpaceChoiceMenu["spaces"][number];
 
@@ -129,30 +129,30 @@ export function usePlacementDeeds(
   const { t } = useTranslation(["common", "settings"]);
   const { on } = useOverviewMode();
   const placement = usePackageActivationInSpaces(packageId, { spanning: on });
-  const { data: spaces } = useSpaces();
-  const spacesOf = (ids: readonly string[]) =>
-    ids.flatMap((id) => spaces?.find((space) => space.id === id) ?? []);
   const deed = (
-    ids: readonly string[],
+    spaces: readonly ChoiceSpace[],
     keys: [string, string],
     act: ((spaceId: string) => void) | undefined,
   ): SpaceDeed =>
     act
       ? {
-          ...deedInSpaces(on, spacesOf(ids), spaceDeedLabels(t, ...keys), act),
+          ...deedInSpaces(on, spaces, spaceDeedLabels(t, ...keys), act),
           disabled: placement.pending,
         }
       : { offered: false };
+  const activateIn = useSpacesOf(placement.activateIn);
+  const deactivateIn = useSpacesOf(placement.deactivateIn);
+  const removeFrom = useSpacesOf(placement.removeFrom);
   return {
-    activate: deed(placement.activateIn, ["spaceChoice.activate", "spaceChoice.activateIn"], (id) =>
+    activate: deed(activateIn, ["spaceChoice.activate", "spaceChoice.activateIn"], (id) =>
       placement.setActive(id, true),
     ),
     deactivate: deed(
-      placement.deactivateIn,
+      deactivateIn,
       ["spaceChoice.deactivate", "spaceChoice.deactivateIn"],
       onDeactivate,
     ),
-    remove: deed(placement.removeFrom, ["spaceChoice.remove", "spaceChoice.removeFrom"], onRemove),
+    remove: deed(removeFrom, ["spaceChoice.remove", "spaceChoice.removeIn"], onRemove),
     setActive: placement.setActive,
     pending: placement.pending,
   };

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
@@ -15,7 +16,7 @@ import {
   spacesWhere,
   type SpaceList,
 } from "../lib/space-lists";
-import { useSpaces } from "./use-spaces";
+import { useSpaceLabelOf, useSpaces } from "./use-spaces";
 import { useCurrentSpaceId } from "./use-current-space";
 
 /** Where the reader's choice is kept in the current org: per account and org; null before both. */
@@ -48,6 +49,19 @@ export function useOverviewMode() {
   const on = chosen && overviewOffered(spaces);
   const known = spaces !== undefined || isError;
   return { on, known, choose };
+}
+
+/**
+ * A sentence about the working space, its keys in `ns`: `plain` (« cet espace ») with a space
+ * selected; in « Tous les espaces », where the page names it, `named` with that space as
+ * `{{space}}`.
+ */
+export function useWorkingSpaceWording(ns: string) {
+  const { t } = useTranslation(ns);
+  const { on } = useOverviewMode();
+  const space = useSpaceLabelOf()(useCurrentSpaceId());
+  return (plain: string, named: string, options: Record<string, unknown> = {}): string =>
+    on && space ? t(named, { ...options, space }) : t(plain, options);
 }
 
 /**

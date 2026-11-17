@@ -60,7 +60,7 @@ import { ConfigAuthBlock } from "../components/integration-detail/config-auth-bl
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
-import { IntegrationSpaceSelector } from "../components/integration-detail/integration-space-selector";
+import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
@@ -70,9 +70,12 @@ import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/u
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
-import { useConfiguresIntegration } from "../components/integration-detail/use-integration-space";
+import {
+  useConfiguresIntegration,
+  useIntegrationSpaceAction,
+} from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useOverviewMode, useWorkingSpaceWording } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
@@ -130,6 +133,7 @@ export function IntegrationSettings({
   const { on: overview } = useOverviewMode();
   const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
   const canConfigure = useConfiguresIntegration(spaceIds);
+  const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
@@ -254,12 +258,11 @@ export function IntegrationSettings({
           // In « Tous les espaces » the space it is set in comes first, then why it is not shown.
           <div className="p-6">
             {overview && (
-              <IntegrationSpaceSelector
-                packageId={packageId}
-                spaceIds={spaceIds}
-                permission="integrations:configure"
+              <ConfigurationSpace
                 label={t("detail.configuration.spaceLabel", { ns: "agents" })}
                 choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+                spaceIds={spaceIds}
+                enter={configureIn}
               />
             )}
             {!detail.active ? (
@@ -273,12 +276,11 @@ export function IntegrationSettings({
         ) : (
           <div className="p-6">
             {overview && (
-              <IntegrationSpaceSelector
-                packageId={packageId}
-                spaceIds={spaceIds}
-                permission="integrations:configure"
+              <ConfigurationSpace
                 label={t("detail.configuration.spaceLabel", { ns: "agents" })}
                 choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+                spaceIds={spaceIds}
+                enter={configureIn}
               />
             )}
             <SettingsHeading
@@ -362,17 +364,14 @@ function ActivationHint({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   const { mayActivate, activate, pending } = usePackageActivation(packageId);
   // In « Tous les espaces » the working space is on no screen: the hint names it.
-  const { on } = useOverviewMode();
-  const space = useSpaceLabelOf()(useCurrentSpaceId());
+  const spaceWording = useWorkingSpaceWording("settings");
   return (
     <div
       className="border-border bg-muted/40 rounded-lg border p-6 text-center"
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">
-        {on && space
-          ? t("integrations.activate.hintIn", { space })
-          : t("integrations.activate.hint")}
+        {spaceWording("integrations.activate.hint", "integrations.activate.hintIn")}
       </p>
       <DisabledReasonTooltip
         reason={mayActivate ? null : t("library.cannotActivate", { ns: "common" })}
@@ -413,6 +412,7 @@ export function IntegrationDetailPage() {
   // The working space's verdict, for what acts in it.
   const canConfigure = can("integrations:configure");
   const configures = useConfiguresIntegration(spaceIds);
+  const connectionsIn = useIntegrationSpaceAction(packageId, "integrations:read", spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -553,12 +553,11 @@ export function IntegrationDetailPage() {
         {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists, and
             changes it. */}
         {overview && !pkgLoading && (
-          <IntegrationSpaceSelector
-            packageId={packageId}
-            spaceIds={spaceIds}
-            permission="integrations:read"
-            label={t("integration.connections.listedIn")}
+          <ConfigurationSpace
+            label={t("integration.connections.spaceLabel")}
             choiceLabel={t("integration.connections.spaceChoice")}
+            spaceIds={spaceIds}
+            enter={connectionsIn}
           />
         )}
         {!active ? (

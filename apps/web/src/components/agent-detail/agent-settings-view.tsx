@@ -31,8 +31,9 @@ import {
   type AgentSettingsSection,
   type ConfigurationSection,
 } from "../../lib/settings-section-href";
+import { isSpaceSetting, SECTION_PERMISSION } from "../../lib/agent-settings-sections";
 import { SettingsRailView } from "../settings/settings-rail-view";
-import { AgentConfigurationView, ConfigurationSpace } from "./agent-configuration-view";
+import { AgentConfigurationSpace, AgentConfigurationView } from "./agent-configuration-view";
 import { EditorPanelSkeleton } from "../loading-skeletons";
 import {
   PackageCommonSection,
@@ -92,21 +93,6 @@ const isDefinitionSection = (section: string) =>
 
 /** A system agent has no history of its own to browse. */
 const applies = (section: string, isSystem: boolean) => section !== "versions" || !isSystem;
-
-/** The permission a section asks of the space it is read or set from. */
-const SECTION_PERMISSION: Partial<Record<AgentSettingsSection, string>> = {
-  model: "agents:configure",
-  proxy: "agents:configure",
-  inputs: "agents:configure",
-  // Its integration reads are not implied by the route.
-  connections: "integrations:read",
-  files: "agents:read",
-  versions: "agents:read",
-};
-
-/** The sections set in one space (`space_packages`). */
-const isSpaceSetting = (section: string) =>
-  section === "model" || section === "proxy" || section === "inputs" || section === "connections";
 
 export function AgentSettingsView({
   packageId,
@@ -206,7 +192,7 @@ export function AgentSettingsView({
         if (elsewhere) {
           return (
             <div className="p-6">
-              <ConfigurationSpace
+              <AgentConfigurationSpace
                 packageId={packageId}
                 spaceIds={detail.space_ids}
                 permission={permission}

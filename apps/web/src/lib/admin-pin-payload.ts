@@ -42,6 +42,11 @@ export const ADDITIONS_REFUSAL_KEYS = {
   enforced_default: "integration.admin.pinManagement.additionsEnforcedDefault",
 } as const;
 
+/** The sentence naming the working space, in « Tous les espaces », of a reason that is about it. */
+export const ADDITIONS_REFUSAL_KEYS_IN: Partial<
+  Record<keyof typeof ADDITIONS_REFUSAL_KEYS, string>
+> = { inactive_agent: "integration.admin.pinManagement.additionsInactiveAgentIn" };
+
 /**
  * Why a pin over `pin.connection_ids` cannot be saved in « plus » (or, for the first two, at all),
  * else `null`. The server refuses (404) every write of a pin whose agent is not active in the

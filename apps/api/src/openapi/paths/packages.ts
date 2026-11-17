@@ -1885,7 +1885,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Agent in use (runs in progress in some space of the organization), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
+            "Agent in use (runs in progress in this space), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1927,7 +1927,7 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Agent in use: it has runs in progress in some space of the organization. RFC 9457 problem+json with `code` `agent_in_use`.",
+            "Agent in use: it has runs in progress in this space. RFC 9457 problem+json with `code` `agent_in_use`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

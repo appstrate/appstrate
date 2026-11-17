@@ -451,7 +451,7 @@ describe("« Lancer » in the mode", () => {
       (qc) => qc.setQueryData(detailKey("spc_a"), detail({ space_ids: [] })),
     );
     expect(button(html)).toContain('disabled=""');
-    expect(html).toContain(i18n.t("detail.titleNotActiveAnySpace", { ns: "agents" }));
+    expect(html).toContain(i18n.t("detail.titleNotActiveAcross", { ns: "agents" }));
   });
 
   it("CONTROL: is held back out of the mode, the working space being named", () => {

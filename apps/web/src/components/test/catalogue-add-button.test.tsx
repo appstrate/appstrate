@@ -46,8 +46,8 @@ const slot = (spaces: AddableSpace[], workingSpaceId: string | null, busy = fals
 
 const add = commonFr["btn.add"];
 const added = settingsFr["catalogue.added"];
-const addedIn = (count: number) =>
-  settingsFr[count === 1 ? "catalogue.addedIn_one" : "catalogue.addedIn_other"].replace(
+const addedCount = (count: number) =>
+  settingsFr[count === 1 ? "catalogue.addedCount_one" : "catalogue.addedCount_other"].replace(
     "{{count}}",
     String(count),
   );
@@ -101,8 +101,8 @@ describe("in « Tous les espaces »", () => {
     expect([...html.matchAll(/<button/g)]).toHaveLength(1);
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).not.toMatch(/Alpha|Beta|Gamma/);
-    expect(html).toContain(`title="${addedIn(2)}"`);
-    expect(html).toContain(`<span class="sr-only">${addedIn(2)}</span>`);
+    expect(html).toContain(`title="${addedCount(2)}"`);
+    expect(html).toContain(`<span class="sr-only">${addedCount(2)}</span>`);
   });
 
   it("opens the menu without a count when it runs nowhere yet", () => {
@@ -113,9 +113,9 @@ describe("in « Tous les espaces »", () => {
 
   it("says in how many spaces it is added when nothing is left to add", () => {
     const html = slot([space("spc_a", "Alpha", true), space("spc_b", "Beta", true)], null);
-    expect(html).toContain(addedIn(2));
+    expect(html).toContain(addedCount(2));
     expect(html).not.toContain("<button");
-    expect(slot([space("spc_a", "Alpha", true)], null)).toContain(addedIn(1));
+    expect(slot([space("spc_a", "Alpha", true)], null)).toContain(addedCount(1));
   });
 
   it("draws nothing where it runs nowhere and cannot be added", () => {

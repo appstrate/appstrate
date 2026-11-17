@@ -549,11 +549,19 @@ export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
+    mutationFn: async ({
+      packageId,
+      name,
+      spaceId,
+    }: {
+      packageId: string;
+      name?: string;
+      spaceId: string;
+    }) => {
       // 201 → the forked package resource, bare: `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
       const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
-        params: { path: splitPackageRef(packageId) },
+        params: { path: splitPackageRef(packageId), header: { "X-Space-Id": spaceId } },
         body: name ? { name } : {},
       });
       return { id: data!.id, forked_from: data!.forked_from ?? null };
