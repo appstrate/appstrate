@@ -359,6 +359,8 @@
   "packageSpaces.availableIn": "Disponible dans {{names}}",
   "packageSpaces.platform": "Plateforme",
   "packageSpaces.hiddenHome": "Espace non visible",
+  "packageSpaces.sharedFrom": "Partagé depuis {{space}}",
+  "packageSpaces.sharedFromHidden": "Partagé depuis un autre espace",
   "table.resizeColumn": "Redimensionner la colonne {{column}}",
   "table.column.space": "Espace",
   "toolbar.clearAll": "Tout effacer",

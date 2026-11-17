@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import type { DataColumn } from "../components/data-table";
 import { PackageIcon } from "../components/package-icon";
+import { PackageSharedFrom } from "../components/package-shared-from";
 import { usePackageSpaceColumn } from "../components/space-column";
 import {
   useCatalogueOriginColumn,
@@ -42,6 +43,10 @@ export function useIntegrationListColumns(
         <div className="flex min-w-0 items-center gap-2">
           <PackageIcon type="integration" icon={integration.icon} size="sm" />
           <span className="truncate font-medium">{integration.name}</span>
+          <PackageSharedFrom
+            homeSpaceId={integration.home_space_id}
+            system={integration.source === "system"}
+          />
         </div>
       ),
     },

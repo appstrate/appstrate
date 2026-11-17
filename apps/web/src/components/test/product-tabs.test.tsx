@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** In « Tous les espaces » the products toggle offers the Chat tab where some space opens the chat. */
+/**
+ * The products toggle: in « Tous les espaces » it offers the Chat tab where some space opens the
+ * chat, and it draws nothing when only one product remains (one choice is no choice).
+ */
 
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
@@ -31,6 +34,25 @@ const ORG = {
 };
 
 describe("the products toggle", () => {
+  it("is not drawn with the Studio alone (the chat module off)", () => {
+    const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
+      ...orgStore.getInitialState(),
+      id: "org_1",
+    });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["orgs"], [ORG]);
+    // No space to enter: the permission set is the org's, and the toggle answers at once.
+    queryClient.setQueryData(
+      ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
+      { object: "list", hasMore: false, data: [] },
+    );
+    try {
+      expect(render(<ProductTabs />, { queryClient })).toBe("");
+    } finally {
+      snapshot.mockRestore();
+    }
+  });
+
   it("draws the Chat tab in « Tous les espaces » where a space opens the chat", () => {
     const tabs = (overview: boolean, workingPermissions: string[]) => {
       const stubs = [
