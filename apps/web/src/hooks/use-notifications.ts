@@ -64,6 +64,18 @@ export function invalidateNotificationQueries(
   qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] }, options);
 }
 
+/** One notification of the caller — the notification's page. */
+export function useNotification(id: string | undefined) {
+  const scope = useOrgScope();
+  const spaceId = useCurrentSpaceId();
+  return $api.useQuery(
+    "get",
+    "/api/notifications/{id}",
+    { params: { header: scope.header, path: { id: id ?? "" } } },
+    { enabled: !!spaceId && !!id },
+  );
+}
+
 export function useMarkRead() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/{id}/read", {

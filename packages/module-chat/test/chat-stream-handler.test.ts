@@ -285,7 +285,7 @@ describe("handleChatStream", () => {
       c.set("user", ctx.user);
       // What `enterSpaceContext` writes on every `/api/chat/*` route in
       // production — the session's space and the scope of the turn's reads.
-      c.set("space", { id: ctx.defaultSpaceId });
+      c.set("space", { id: ctx.defaultSpaceId, credentialProxyOpen: true });
       c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
       c.set("orgName", CONTEXT_ORG_MARKER);
@@ -1018,7 +1018,7 @@ describe("handleChatStream", () => {
     // The cached MCP surface is keyed on exactly what the bearer carries: a key
     // cut from any other list would hand this turn another caller's descriptors.
     expect(input.platformMcp.surfaceKey).toBe(
-      platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input)),
+      platformMcpSurfaceKey(input.platformMcp.url, await tokenPermissions(input), true),
     );
     // The MCP transport is the platform's in-process dispatch, not global
     // `fetch` — JSON-RPC hops that used to open real loopback sockets back

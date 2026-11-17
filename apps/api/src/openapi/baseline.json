@@ -2926,7 +2926,7 @@
         "operationId": "markAllRunsRead",
         "tags": ["Runs"],
         "summary": "Mark every run read",
-        "description": "Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "description": "Marks every unread run of the space read for the caller (read state is per recipient), and the failure notices (`run_failed`) the bell held for them; the messages agents sent stay unread. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2987,7 +2987,7 @@
         "operationId": "markRunRead",
         "tags": ["Runs"],
         "summary": "Mark a run read",
-        "description": "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
+        "description": "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its failure notice (`run_failed`) when the bell held one — never a message its agent sent (`agent_message`), which is read on its own page. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19036,6 +19036,224 @@
         }
       }
     },
+    "/api/notifications/{id}": {
+      "get": {
+        "operationId": "getNotification",
+        "tags": ["Notifications"],
+        "summary": "Get a notification",
+        "description": "Returns one notification of the current recipient. A pure read: marking it read is `PUT /api/notifications/{id}/read`. Returns 404 when the notification does not belong to the caller.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Notification id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The notification",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "run_failed"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "agent_name", "status"],
+                          "properties": {
+                            "packageId": {
+                              "type": ["string", "null"],
+                              "description": "The run's agent; null once the agent is deleted."
+                            },
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted)."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed", "timeout"]
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "package_shared"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "package_type", "shared_by_name"],
+                          "properties": {
+                            "packageId": {
+                              "type": "string"
+                            },
+                            "package_type": {
+                              "type": "string",
+                              "enum": ["agent", "skill", "integration"]
+                            },
+                            "shared_by_name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "agent_message"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": ["packageId", "agent_name", "title", "message"],
+                          "properties": {
+                            "packageId": {
+                              "type": ["string", "null"],
+                              "description": "The agent of the run that sent it; null when the run no longer references its agent."
+                            },
+                            "agent_name": {
+                              "type": ["string", "null"],
+                              "description": "The agent's name as stamped on the run, for display when the agent is not listed (an inline run, an agent switched off in the space or deleted)."
+                            },
+                            "title": {
+                              "type": "string",
+                              "description": "Headline the agent wrote (`notify` tool)."
+                            },
+                            "message": {
+                              "type": "string",
+                              "description": "Body the agent wrote (`notify` tool)."
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "type": "agent_message",
+                  "runId": "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
+                  "payload": {
+                    "packageId": "@acme/weekly-report",
+                    "agent_name": "Weekly report",
+                    "title": "Report ready",
+                    "message": "This week's report is in the shared drive."
+                  },
+                  "read_at": null,
+                  "createdAt": "2026-01-15T10:31:12Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/notifications/{id}/read": {
       "put": {
         "operationId": "markNotificationReadById",
@@ -19092,7 +19310,7 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "description": "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their failure notices with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

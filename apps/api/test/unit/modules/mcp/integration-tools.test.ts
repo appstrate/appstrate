@@ -1121,13 +1121,20 @@ describe("typed tools of a remote MCP integration", () => {
   });
 
   it("calls the tool through the proxy's tool route by its server name and relays its result", async () => {
-    const upstream = { content: [{ type: "text" as const, text: "3 documents" }] };
+    const upstream = {
+      content: [{ type: "text" as const, text: "3 documents" }],
+      // The server's own `_meta`, and its claim to the platform's mark.
+      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": false },
+    };
     const made = makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture);
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "invoices" } }, noExtra);
-    // Relayed as the server answered.
-    expect(result).toEqual(upstream);
+    // Relayed as the server answered, marked relayed whatever it claimed.
+    expect(result).toEqual({
+      ...upstream,
+      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true },
+    });
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
       integration_package_id: REMOTE,
@@ -1221,7 +1228,8 @@ describe("typed tools of a remote MCP integration", () => {
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
-    expect(result).toEqual(upstream);
+    // As is, marked relayed: a third party wrote it whole.
+    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/relayed": true } });
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
@@ -1429,7 +1437,10 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(texts[3]).toContain("The tool ran");
     expect(texts[3]).toContain("1 text block(s) cut, 2 other block(s)");
     expect(result.isError).toBeUndefined();
-    expect(result._meta).toEqual({ "dev.appstrate/truncated": true });
+    expect(result._meta).toEqual({
+      "dev.appstrate/truncated": true,
+      "dev.appstrate/relayed": true,
+    });
     expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
   });
 

@@ -201,7 +201,7 @@ async function until(condition: () => boolean): Promise<void> {
 /** A cache hit whose lazy connect is held at `initialize` until `release()`. */
 async function wedgedHit(signal?: AbortSignal) {
   const stub = mcpStub();
-  const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+  const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
   await (await buildTurn(stub, "alpha", key)).close();
   stub.reset();
   let release!: () => void;
@@ -216,7 +216,7 @@ async function wedgedHit(signal?: AbortSignal) {
 describe("platform MCP surface cache", () => {
   it("serves a repeated surface with zero MCP hops and byte-identical instructions", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
 
     const first = await buildTurn(stub, "alpha", key);
     await first.close();
@@ -248,7 +248,7 @@ describe("platform MCP surface cache", () => {
 
   it("opens the client once, on the first tool call, and reuses it for the rest of the turn", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
     await (await buildTurn(stub, "alpha", key)).close();
 
     stub.reset();
@@ -278,8 +278,8 @@ describe("platform MCP surface cache", () => {
   it("never shares an entry between permission sets", async () => {
     const stub = mcpStub();
     const shared = uniquePermissions();
-    const keyA = platformMcpSurfaceKey(MCP_URL, shared);
-    const keyB = platformMcpSurfaceKey(MCP_URL, [...shared, "agents:write"]);
+    const keyA = platformMcpSurfaceKey(MCP_URL, shared, true);
+    const keyB = platformMcpSurfaceKey(MCP_URL, [...shared, "agents:write"], true);
     expect(keyB).not.toBe(keyA);
 
     await (await buildTurn(stub, "alpha", keyA)).close();
@@ -302,20 +302,22 @@ describe("platform MCP surface cache", () => {
 
   it("keys on the permission SET and the surface flags, not on list order", () => {
     const perms = uniquePermissions("runs:read");
-    const key = platformMcpSurfaceKey(MCP_URL, perms);
-    expect(platformMcpSurfaceKey(MCP_URL, [...perms].reverse())).toBe(key);
-    expect(platformMcpSurfaceKey(MCP_URL, [...perms, perms[0]!])).toBe(key);
-    expect(platformMcpSurfaceKey(MCP_URL, perms.slice(1))).not.toBe(key);
+    const key = platformMcpSurfaceKey(MCP_URL, perms, true);
+    expect(platformMcpSurfaceKey(MCP_URL, [...perms].reverse(), true)).toBe(key);
+    expect(platformMcpSurfaceKey(MCP_URL, [...perms, perms[0]!], true)).toBe(key);
+    expect(platformMcpSurfaceKey(MCP_URL, perms.slice(1), true)).not.toBe(key);
     // `context=injected` rewords the server's instructions, so it is part of the surface.
-    expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms)).not.toBe(key);
+    expect(platformMcpSurfaceKey(`${ORIGIN}/api/mcp/o/org_1`, perms, true)).not.toBe(key);
     expect(
-      platformMcpSurfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms),
+      platformMcpSurfaceKey("http://other.test/api/mcp/o/org_1?context=injected", perms, true),
     ).not.toBe(key);
+    // A space closing the credential proxy withholds the integration tools.
+    expect(platformMcpSurfaceKey(MCP_URL, perms, false)).not.toBe(key);
   });
 
   it("surfaces a failed lazy connect as the tool call's error, retries it, and evicts the entry", async () => {
     const stub = mcpStub();
-    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions());
+    const key = platformMcpSurfaceKey(MCP_URL, uniquePermissions(), true);
     await (await buildTurn(stub, "alpha", key)).close();
 
     stub.state.failInitialize = true;

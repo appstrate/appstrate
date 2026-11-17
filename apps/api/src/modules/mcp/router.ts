@@ -69,7 +69,7 @@ import {
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
-import { isBearerOnlyCaller } from "../../lib/bearer-only.ts";
+import { bearerCaller, isBearerOnlyCaller } from "../../lib/bearer-only.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -348,13 +348,11 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
 /**
  * Whether the credential proxy accepts the credential this request carries.
  * The proxy is bearer-only (`isBearerOnlyCaller`) and its tools re-enter it
- * with that same credential, so a cookie session or the chat's loopback bearer
- * is offered neither of them.
+ * with that same credential, so a cookie session is offered neither of them;
+ * the chat's server-minted MCP bearer is, like any MCP client's bearer.
  */
 function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
-  return isBearerOnlyCaller(c.get("authMethod"), {
-    firstPartyLoopback: c.get("firstPartyLoopback"),
-  });
+  return isBearerOnlyCaller(bearerCaller(c), "credential-proxy");
 }
 
 /**

@@ -56,6 +56,9 @@ export const ROUTE_ACCESS = {
 
   "/schedules": { anyOf: ["schedules:read"], operations: ["listSchedules"] },
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },
+  "/notifications/:id": {
+    open: "the caller's own notification: the feed asks no role grant, only a delegated credential's ceiling",
+  },
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },
   "/skills/:scope/:name": { anyOf: ["skills:read"], operations: ["getSkill"] },

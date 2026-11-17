@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { eq, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -12,7 +12,7 @@ import {
   type NotificationType,
   type PackageType,
 } from "@appstrate/db/schema";
-import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { listResponse } from "@appstrate/core/list-query";
@@ -86,11 +86,10 @@ export async function notifyRunFinished(
 }
 
 /**
- * Read the caller's notifications of one run (`runId`), or of every run: opening
- * a run, or reading them all, acknowledges what the bell showed for it — its
- * failure, and the message its agent sent. Every kind with a run is read.
+ * Read the caller's failure notices of one run (`runId`), or of every run: the
+ * run page is where a `run_failed` leads. Every other kind is read on its own page.
  */
-export async function markRunNotificationsRead(
+export async function markRunFailureNotificationsRead(
   scope: SpaceScope,
   actor: Actor,
   runId?: string,
@@ -104,7 +103,7 @@ export async function markRunNotificationsRead(
         spaceId: scope.spaceId,
         extra: [
           recipientFilter(actor),
-          isNotNull(notifications.runId),
+          eq(notifications.type, "run_failed"),
           isNull(notifications.readAt),
           ...(runId ? [eq(notifications.runId, runId)] : []),
         ],
@@ -197,6 +196,49 @@ export async function createPackageShareNotification(params: {
 // decided when it was written (`notifyRunFinished`, the share notice), so no
 // read below filters a kind.
 
+const notificationColumns = {
+  id: notifications.id,
+  type: notifications.type,
+  runId: notifications.runId,
+  payload: notifications.payload,
+  readAt: notifications.readAt,
+  createdAt: notifications.createdAt,
+};
+
+function toNotificationDto(
+  r: Pick<typeof notifications.$inferSelect, keyof typeof notificationColumns>,
+): NotificationDto {
+  return {
+    id: r.id,
+    type: r.type,
+    runId: r.runId,
+    payload: r.payload ?? null,
+    read_at: r.readAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+/** One notification of the caller; `null` when it is unknown or another's (the route's 404). */
+export async function getNotification(
+  scope: SpaceScope,
+  notificationId: string,
+  actor: Actor,
+): Promise<NotificationDto | null> {
+  if (!isUuid(notificationId)) return null;
+  const [row] = await db
+    .select(notificationColumns)
+    .from(notifications)
+    .where(
+      scopedWhere(notifications, {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
+      }),
+    )
+    .limit(1);
+  return row ? toNotificationDto(row) : null;
+}
+
 /**
  * Mark a single notification read. Idempotent for the recipient (already-read
  * → still `true`); returns `false` only when the notification does not exist or
@@ -212,6 +254,7 @@ export async function markNotificationRead(
   notificationId: string,
   actor: Actor,
 ): Promise<boolean> {
+  if (!isUuid(notificationId)) return false;
   const updated = await db
     .update(notifications)
     .set({ readAt: sql`COALESCE(${notifications.readAt}, now())` })
@@ -297,14 +340,7 @@ export async function listNotifications(
   })!;
 
   const rows = await db
-    .select({
-      id: notifications.id,
-      type: notifications.type,
-      runId: notifications.runId,
-      payload: notifications.payload,
-      readAt: notifications.readAt,
-      createdAt: notifications.createdAt,
-    })
+    .select(notificationColumns)
     .from(notifications)
     .where(where)
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
@@ -313,15 +349,5 @@ export async function listNotifications(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return listResponse(
-    page.map((r) => ({
-      id: r.id,
-      type: r.type,
-      runId: r.runId,
-      payload: r.payload ?? null,
-      read_at: r.readAt?.toISOString() ?? null,
-      createdAt: r.createdAt.toISOString(),
-    })),
-    { hasMore },
-  );
+  return listResponse(page.map(toNotificationDto), { hasMore });
 }

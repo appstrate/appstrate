@@ -901,7 +901,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Mark every run read",
       description:
-        "Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "Marks every unread run of the space read for the caller (read state is per recipient), and the failure notices (`run_failed`) the bell held for them; the messages agents sent stay unread. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -937,7 +937,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Mark a run read",
       description:
-        "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
+        "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its failure notice (`run_failed`) when the bell held one — never a message its agent sent (`agent_message`), which is read on its own page. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

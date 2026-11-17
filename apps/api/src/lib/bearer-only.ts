@@ -10,6 +10,8 @@
  * third-party providers / mint per-call usage on behalf of a logged-in user.
  */
 
+import type { Context } from "hono";
+import type { AppEnv } from "../types/index.ts";
 import { forbidden } from "./errors.ts";
 
 /**
@@ -20,8 +22,8 @@ import { forbidden } from "./errors.ts";
  * `oauth2-dashboard`) are strategy ids owned by the `oidc` module — core names
  * them explicitly because an allowlist that any loaded module could widen would
  * not be a security boundary. Adding a bearer strategy here is therefore a
- * deliberate core change, not a module capability. (The one *declared*
- * capability that bypasses the list is `firstPartyLoopback` — see below.)
+ * deliberate core change, not a module capability. (The *declared*
+ * capabilities that bypass it, one per surface, are below.)
  */
 const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "api_key",
@@ -30,47 +32,54 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Declared capability of the calling auth strategy, read from the request
- * context (NOT a hard-coded module id). A strategy sets
- * {@link AuthResolution.firstPartyLoopback} when it is a server-minted,
- * process-local loopback bearer (the chat module's inference path is the only
- * one today): a request the server constructed for itself, never reachable from
- * a browser. Core gates on this declared property, so the *loopback* bypass
- * names no module id — any future first-party loopback strategy works
- * unchanged. (The bearer allowlist above is the opposite by design: an
+ * The bearer-only surfaces, each with the DECLARED capability (`AuthResolution`,
+ * `@appstrate/core/module`) that admits a caller outside the allowlist. Read from
+ * the request context, never from a module id, so any future strategy declaring
+ * one works unchanged. (The allowlist above is the opposite by design: an
  * explicit, core-owned set of strategy ids.)
+ *
+ * - The credential proxy refuses a cookie for one reason: a drive-by CSRF would
+ *   spend the user's third-party credentials. A `serverMinted` bearer (a token the
+ *   server built for its own calls, never reachable from a browser) carries no
+ *   such risk, so it is admitted — the chat's MCP bearer and its inference bearer.
+ * - The LLM proxy admits only `firstPartyLoopback`, the chat's inference bearer:
+ *   it books the call as chat usage and may reach the subscription gateway, which
+ *   no other server-minted bearer is for.
  */
-interface BearerCallerCapabilities {
-  /** Strategy declared itself a first-party, server-minted loopback caller. */
+const SURFACES = {
+  "credential-proxy": { label: "Credential proxy", capability: "serverMinted" },
+  "llm-proxy": { label: "LLM proxy", capability: "firstPartyLoopback" },
+} as const;
+
+export type BearerOnlySurface = keyof typeof SURFACES;
+
+/** What the bearer-only rule reads of a caller: its auth method and declared capabilities. */
+export interface BearerCaller {
+  authMethod?: string;
+  serverMinted?: boolean;
   firstPartyLoopback?: boolean;
 }
 
-/**
- * Whether the caller passes the bearer-only rule: an accepted bearer strategy, or a declared
- * first-party loopback one. Pass `caps.firstPartyLoopback` (from `c.get("firstPartyLoopback")`)
- * so such a strategy is accepted without enumerating its id here.
- */
-export function isBearerOnlyCaller(
-  authMethod: string | undefined,
-  caps: BearerCallerCapabilities = {},
-): boolean {
-  return (
-    caps.firstPartyLoopback === true || (!!authMethod && ACCEPTED_AUTH_METHODS.has(authMethod))
-  );
+/** The caller of a request, as {@link isBearerOnlyCaller} reads it. */
+export function bearerCaller(c: Context<AppEnv>): BearerCaller {
+  return {
+    authMethod: c.get("authMethod"),
+    serverMinted: c.get("serverMinted"),
+    firstPartyLoopback: c.get("firstPartyLoopback"),
+  };
 }
 
-/**
- * Throw `forbidden(...)` unless {@link isBearerOnlyCaller} holds. `surfaceName` is the
- * human-readable surface noun used in the error message.
- */
-export function assertBearerOnly(
-  authMethod: string | undefined,
-  surfaceName: string,
-  caps: BearerCallerCapabilities = {},
-): void {
-  if (!isBearerOnlyCaller(authMethod, caps)) {
+/** Whether the caller passes `surface`'s bearer-only rule: an allowlisted bearer, or its capability. */
+export function isBearerOnlyCaller(caller: BearerCaller, surface: BearerOnlySurface): boolean {
+  if (caller[SURFACES[surface].capability] === true) return true;
+  return !!caller.authMethod && ACCEPTED_AUTH_METHODS.has(caller.authMethod);
+}
+
+/** Throw `forbidden(...)` unless {@link isBearerOnlyCaller} holds. */
+export function assertBearerOnly(caller: BearerCaller, surface: BearerOnlySurface): void {
+  if (!isBearerOnlyCaller(caller, surface)) {
     throw forbidden(
-      `${surfaceName} does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
+      `${SURFACES[surface].label} does not accept auth method "${caller.authMethod}" (cookie sessions and unknown strategies rejected)`,
     );
   }
 }

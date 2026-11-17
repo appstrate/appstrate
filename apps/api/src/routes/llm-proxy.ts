@@ -63,7 +63,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { bodyLimit } from "../middleware/body-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
-import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { assertBearerOnly, bearerCaller } from "../lib/bearer-only.ts";
 import { proxyStatusMarker } from "../lib/proxy-status.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
@@ -163,8 +163,7 @@ async function handleProxy(
   apiShape: ProxiedApiShape,
   limits: LlmProxyLimits,
 ): Promise<Response> {
-  const authMethod = c.get("authMethod");
-  assertBearerOnly(authMethod, "LLM proxy", { firstPartyLoopback: c.get("firstPartyLoopback") });
+  assertBearerOnly(bearerCaller(c), "llm-proxy");
 
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");
