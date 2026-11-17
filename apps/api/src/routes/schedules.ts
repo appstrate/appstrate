@@ -76,6 +76,7 @@ import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "@appstrate/core/list-query";
+import { parseEmptyQuery } from "../lib/list-query.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
@@ -452,6 +453,7 @@ export function createSchedulesRouter() {
 
   // GET /api/schedules — list all schedules (space-scoped)
   router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
+    parseEmptyQuery(c);
     const scope = getSpaceScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.

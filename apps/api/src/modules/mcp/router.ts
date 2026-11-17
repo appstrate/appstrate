@@ -588,11 +588,12 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // and cannot have been skipped: the org guard just proved `orgId` is set,
     // and that is the middleware's only early return.
     const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
-    // Dispatched calls re-enter the space this request entered — and, on the endpoint pinned to
-    // it, stay confined to it whatever the credential pins: a list spanning spaces then reaches
-    // that space only. On the organization-wide endpoint an external client's org-wide read keeps
-    // spanning the spaces it reaches; a credential bound to a set of spaces acts in ONE space
-    // per request, so its read reaches the entered space alone.
+    // Dispatched calls re-enter the space this request entered — and, on the
+    // endpoint pinned to it, stay confined to it whatever the credential pins:
+    // the caller's reach is then that space only, for the lists spanning spaces
+    // and for the package home authority alike.
+    // On the organization-wide endpoint, a credential bound to a set of spaces acts in ONE
+    // space per request, so its read reaches the entered space alone.
     authHeaders.set("x-space-id", scope.spaceId);
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces

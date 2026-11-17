@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { requestScopeChange } from "../hooks/use-unsaved-changes";
-
 /**
  * Organization and workspace switcher, at the head of the header trail: two columns, the
  * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
@@ -23,13 +21,14 @@ import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
 import { orgTile, spaceTile } from "../lib/identity-tile-props";
 import { matchesSearch } from "../lib/strings";
-import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
 import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { useViewer } from "../hooks/use-viewer";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { routeOf } from "../lib/route-match";
-import { holdsOverview, overviewOffered } from "../lib/space-lists";
+import { holdsOverview, isSpaceEnterable, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";

@@ -42,7 +42,7 @@ export function FileTile({
   onKeep,
   onPreview,
   showRunLink,
-  spaceId,
+  showSpace = false,
 }: {
   file: FileDto;
   isKeepPending: boolean;
@@ -51,8 +51,8 @@ export function FileTile({
   onKeep: (file: FileDto) => void;
   onPreview: (file: FileDto) => void;
   showRunLink?: boolean;
-  /** Where it lives, in a list spanning spaces. */
-  spaceId?: string;
+  /** Name the space it lives in: a list spanning spaces. */
+  showSpace?: boolean;
 }) {
   const { t } = useTranslation(["files", "common"]);
   const { preview, download } = file.capabilities;
@@ -100,10 +100,10 @@ export function FileTile({
           <span aria-hidden>·</span>
           <span>{formatDateField(file.createdAt, "datetime")}</span>
           <ExpiryBadge expiresAt={file.expiresAt} />
-          {spaceId && (
+          {showSpace && (
             <>
               <span aria-hidden>·</span>
-              <SpaceNameOf spaceId={spaceId} />
+              <SpaceNameOf spaceId={file.spaceId} />
             </>
           )}
         </CardDescription>

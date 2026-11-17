@@ -14,8 +14,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 // The space store reads `localStorage` at module init.
 installFakeStorage();
 
-const { droppedOnSpaceSwitch, enterableSpaceId, isSpaceEnterable } =
-  await import("../use-current-space.ts");
+const { droppedOnSpaceSwitch, enterableSpaceId } = await import("../use-current-space.ts");
 const { agentsKeys, packageKeys, paginatedRunsKeys, scheduleKeys } =
   await import("../../lib/query-keys.ts");
 
@@ -80,14 +79,6 @@ describe("enterableSpaceId with a link naming a space (`?enterSpace=`)", () => {
   it("is unchanged without a link", () => {
     expect(enterableSpaceId("spc_marketing", spaces, null)).toBe("spc_marketing");
     expect(enterableSpaceId(null, spaces, null)).toBe("spc_default");
-  });
-});
-
-describe("isSpaceEnterable", () => {
-  it("enters on member access only", () => {
-    expect(isSpaceEnterable({ access: "member" })).toBe(true);
-    // A closed space the caller may ask to join, an orphaned personal space.
-    expect(isSpaceEnterable({ access: "none" })).toBe(false);
   });
 });
 

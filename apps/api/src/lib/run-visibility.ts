@@ -18,11 +18,8 @@
  * ownership question — which is why the file surfaces test whichever of the
  * two they already have loaded rather than joining back to the other.
  *
- * One semantic, five shapes: the read-all test itself; the WHERE fragment over
- * per-space grants, for the queries listing one space or several;
- * the one-space WHERE fragment, `undefined` when nothing narrows; an
- * ownership test for a loaded row; and the assertion that turns it into the
- * 404 a handler throws. Nothing re-derives ownership on its own.
+ * One semantic in every shape below — WHERE fragments, the loaded-row test,
+ * the 404 assertion. Nothing re-derives ownership on its own.
  */
 
 import type { Context } from "hono";

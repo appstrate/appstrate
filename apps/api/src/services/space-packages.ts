@@ -377,11 +377,9 @@ export function activePackagesFilter(scope: OrgScope, type: PackageType) {
 
 /**
  * Narrow `query` (a `$dynamic()` select from `packages`) to the packages of one
- * `type` active in any of `spaceIds` ({@link activePackagesFilter}), one row per
- * package: each space is joined to its own placement row, so one statement
- * serves any number of spaces, and the rows are grouped by package. Select
- * {@link activeSpaceIds} to name the spaces; any column `query` selects beyond
- * `packages`' own goes in `groupBy`.
+ * `type` active in any of `spaceIds`, one row per package ({@link activeSpaceIds}
+ * names the spaces). A column `query` selects beyond `packages`' own goes in
+ * `groupBy`.
  */
 export function activeInSpaces<Q extends PgSelect>(
   query: Q,

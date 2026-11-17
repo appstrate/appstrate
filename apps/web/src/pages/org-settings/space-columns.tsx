@@ -26,7 +26,7 @@ import { formatDateField } from "../../lib/format-date";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { spaceLabel } from "../../lib/space-label";
 import { spaceTile } from "../../lib/identity-tile-props";
-import { isSpaceEnterable } from "../../hooks/use-current-space";
+import { isSpaceEnterable } from "../../lib/space-lists";
 import { useViewer } from "../../hooks/use-viewer";
 
 export interface SpaceRow {

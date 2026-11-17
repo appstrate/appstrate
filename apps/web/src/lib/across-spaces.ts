@@ -8,11 +8,27 @@
  * resolver enters that space (`useSpaceResolver`), then the route's gate drops the param
  * (`useEnterLinkedSpace`). Not `?space=`: the
  * file reader's `?org=…&space=…` names where to read WITHOUT switching.
+ *
+ * The param is dropped with `replace`: the entry it named becomes the plain detail, so Back from
+ * the detail returns to the list instead of to the same detail still naming the space.
  */
 
 import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
+import { isSpaceEnterable } from "./space-lists";
 
 export { ENTER_SPACE_PARAM };
+
+/**
+ * The space a row listed in several spaces (a package index) opens in: the current one when it is
+ * among them, else the first.
+ */
+export function rowSpace(
+  spaceIds: readonly string[] | undefined,
+  currentSpaceId: string | null,
+): string | undefined {
+  if (currentSpaceId && spaceIds?.includes(currentSpaceId)) return currentSpaceId;
+  return spaceIds?.[0];
+}
 
 /** `path` as it was within the current space (or for a row of no space); naming the row's space otherwise. */
 export function linkedSpacePath(
@@ -23,6 +39,19 @@ export function linkedSpacePath(
   // No current space yet: nothing to move from.
   if (!spaceId || !currentSpaceId || spaceId === currentSpaceId) return path;
   return `${path}?${new URLSearchParams({ [ENTER_SPACE_PARAM]: spaceId }).toString()}`;
+}
+
+/**
+ * Whether the space a link names can be entered: `undefined` until the listing answers; a failed
+ * listing cannot prove it, so `false`.
+ */
+export function linkedSpaceEnterable(
+  spaces: readonly { id: string; access: string }[] | undefined,
+  listingFailed: boolean,
+  linked: string | null,
+): boolean | undefined {
+  if (spaces) return spaces.some((space) => space.id === linked && isSpaceEnterable(space));
+  return listingFailed ? false : undefined;
 }
 
 /**

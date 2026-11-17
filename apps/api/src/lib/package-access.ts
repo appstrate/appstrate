@@ -116,10 +116,10 @@ export async function packageAccessSpaces(
 ): Promise<PackageAccessSpace[]> {
   const orgId = foreign?.orgId ?? c.get("orgId");
   // Memoized per request by `callerReachableSpaces`.
-  if (!c.get("endUser") || c.get("orgRole")) {
+  if (c.get("principalKind") !== "end_user") {
     return callerReachableSpaces(c, orgId, foreign?.orgRole ?? callerOrgRole(c, orgId));
   }
-  // An end-user token holds no org role: its own space, with its fixed allowlist.
+  // An end-user acts in its own space only (RBAC spec §7.2), with the request's set there.
   const spaceId = c.get("credentialSpaceId");
   if (spaceId === undefined) return [];
   const [space] = await db

@@ -67,7 +67,7 @@ export const parameters = {
     name: "orgId",
     in: "path" as const,
     required: true,
-    description: "Organization ID — the organization a list spanning its spaces reads.",
+    description: "Organization ID.",
     schema: { type: "string" },
   },
   SseOrgId: {

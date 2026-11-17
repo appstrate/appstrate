@@ -4,7 +4,14 @@ import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { ENTER_SPACE_PARAM, linkedSpacePath, linkedSpaceStep } from "../lib/across-spaces";
+import {
+  ENTER_SPACE_PARAM,
+  linkedSpaceEnterable,
+  linkedSpacePath,
+  linkedSpaceStep,
+  rowSpace,
+} from "../lib/across-spaces";
+import { isSpaceEnterable } from "../lib/space-lists";
 import {
   agentsKeys,
   packageKeys,
@@ -26,12 +33,21 @@ export function useCurrentSpaceId(): string | null {
 
 /**
  * Where a row opens: `path` in the row's own space (`linkedSpacePath`), naming it with
- * `?enterSpace=` when it is not the current one. Every list spanning spaces links its rows so.
+ * `?enterSpace=` when it is not the current one. Every list spanning spaces links its rows so. A
+ * row listed in several spaces passes them all and opens in {@link rowSpace}.
  */
-export function useSpaceLink(): (path: string, spaceId: string | undefined) => string {
+export function useSpaceLink(): (
+  path: string,
+  space: string | readonly string[] | undefined,
+) => string {
   const currentSpaceId = useCurrentSpaceId();
   return useCallback(
-    (path, spaceId) => linkedSpacePath(path, spaceId, currentSpaceId),
+    (path, space) =>
+      linkedSpacePath(
+        path,
+        typeof space === "object" ? rowSpace(space, currentSpaceId) : space,
+        currentSpaceId,
+      ),
     [currentSpaceId],
   );
 }
@@ -87,11 +103,6 @@ interface ResolvableSpace {
   isDefault: boolean;
   personal: boolean;
   access: string;
-}
-
-/** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
-export function isSpaceEnterable(space: { access: string }): boolean {
-  return space.access === "member";
 }
 
 /**
@@ -151,12 +162,7 @@ export function useEnterLinkedSpace(): boolean {
   const linked = params.get(ENTER_SPACE_PARAM);
   const current = useCurrentSpaceId();
   const { data: spaces, isError } = useSpaces();
-  // Undefined until the listing answers; a failed listing cannot prove the space enterable.
-  const enterable = spaces
-    ? spaces.some((s) => s.id === linked && isSpaceEnterable(s))
-    : isError
-      ? false
-      : undefined;
+  const enterable = linkedSpaceEnterable(spaces, isError, linked);
 
   useEffect(() => {
     if (linkedSpaceStep(linked, current, enterable) !== "drop") return;

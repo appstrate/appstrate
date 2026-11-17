@@ -97,6 +97,12 @@ describe("Schedule run counters", () => {
     return body.data;
   }
 
+  it("refuses an unknown query parameter, like its organization twin", async () => {
+    const res = await app.request("/api/schedules?limit=5", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
+  });
+
   it("reports zeroes for a schedule that never fired", async () => {
     await seedAgentSchedule("never-fired");
 

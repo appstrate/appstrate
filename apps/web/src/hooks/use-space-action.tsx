@@ -4,9 +4,9 @@
  * Acting from « Vue d'ensemble », where the screen is the same as in a space and an action that
  * needs a space gets one:
  *
- * - on a ROW, in the row's space (`useRowSpaceGrants` says whether it grants the action): the
- *   action names that space itself (an explicit `X-Space-Id`),
- *   or is a `useSpaceAction` among the row's spaces when it continues there (`RunAgentButton`);
+ * - on a ROW, in the row's space: the action names that space itself (an explicit `X-Space-Id`),
+ *   or is a `useSpaceAction` among the row's spaces when it continues there (`RunAgentButton`),
+ *   in the working space when it is one of them;
  * - naming NO space (create, import, the catalogue): `useSpaceAction` offers it where
  *   some space grants it, asks « Dans quel espace ? » between several (the only one is taken
  *   without asking), enters the space picked as the working space, then continues the action,
@@ -48,20 +48,23 @@ export function useRowSpaceGrants(): (spaceId: string | undefined, permission: s
 /**
  * Performs `act` in `spaceId`: at once in the working space, else after entering it as the
  * working space (behind the unsaved-drafts question a scope change asks), so every request
- * `act` sends, and every screen it opens, is that space's.
+ * `act` sends, and every screen it opens, is that space's. Exported for its test.
  */
+export function actInSpace(
+  spaceId: string,
+  act: () => void,
+  switchSpace: (spaceId: string) => void,
+): void {
+  if (spaceId === spaceStore.getState().id) return act();
+  requestScopeChange(() => {
+    switchSpace(spaceId);
+    act();
+  });
+}
+
 function useActInSpace(): (spaceId: string, act: () => void) => void {
   const { switchSpace } = useSpaceSwitcher();
-  return useCallback(
-    (spaceId, act) => {
-      if (spaceId === spaceStore.getState().id) return act();
-      requestScopeChange(() => {
-        switchSpace(spaceId);
-        act();
-      });
-    },
-    [switchSpace],
-  );
+  return useCallback((spaceId, act) => actInSpace(spaceId, act, switchSpace), [switchSpace]);
 }
 
 /**
@@ -105,7 +108,8 @@ export function useSpaceAction(need: SpaceNeed, among?: readonly string[]) {
 
   const run = (act: () => void) => {
     if (!on) return act();
-    const choice = spaceChoice(eligible);
+    // A row's action continues in the working space when it is among the row's.
+    const choice = spaceChoice(eligible, among ? spaceStore.getState().id : null);
     if (choice.kind === "one") {
       actIn(choice.spaceId, act);
     } else if (choice.kind === "ask") {

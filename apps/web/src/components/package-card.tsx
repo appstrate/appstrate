@@ -99,7 +99,7 @@ export function PackageCard({
                   </button>
                 ) : (
                   <Link
-                    to={linkInSpace(packageDetailPath(type, id), spaceIds?.[0])}
+                    to={linkInSpace(packageDetailPath(type, id), spaceIds)}
                     className={titleClass}
                   >
                     {displayName}

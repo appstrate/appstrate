@@ -9,13 +9,14 @@ import { overviewStore } from "../stores/overview-store";
 import { rememberedSpaceKey } from "../stores/space-store";
 import { routeOf } from "../lib/route-match";
 import {
-  admittingSpaces,
   holdsOverview,
   listAdmits,
   overviewLapsed,
   overviewOffered,
+  spacesWhere,
   type SpaceList,
 } from "../lib/space-lists";
+import { useOrg } from "./use-org";
 import { useSpaces } from "./use-spaces";
 
 /** Where the reader's choice is kept in the current org: per account and org; null before both. */
@@ -32,9 +33,10 @@ function useChoiceKey(): string | null {
  * before, `on` reads false. `choose` writes the reader's choice in an org, the current one by
  * default.
  *
- * A list PAGE reads `on` and passes it to its hooks as `spanning`, which reads the org routes;
- * a shared hook never reads it, since a detail page runs in one space while the mode is on. The
- * mode hides nothing: an action takes the row's space or asks for one (`useSpaceAction`).
+ * A list PAGE reads `on` and passes it to its data hooks as `spanning`, which reads the org
+ * routes; a data hook never reads it, since a detail page runs in one space while the mode is on.
+ * The verdicts and actions do (`useCanReach`, `useSpaceAction`): the mode hides nothing, an action
+ * takes the row's space or asks for one.
  */
 export function useOverviewMode() {
   const userId = useStore(authStore, (s) => s.user?.id);
@@ -61,11 +63,22 @@ export function useOverviewMode() {
  */
 export function useAdmittingSpaces(list: SpaceList) {
   const { data: spaces } = useSpaces();
-  return admittingSpaces(spaces, listAdmits(list));
+  const orgPermissions = useOrg().currentOrg?.permissions;
+  return spacesWhere(spaces, orgPermissions, listAdmits(list));
 }
 
 function withdraw(key: string): void {
   if (overviewStore.getState().chosen[key]) overviewStore.getState().set(key, false);
+}
+
+/** The page rule of {@link useOverviewRules}: rendering `pathname` withdraws the choice kept at `key` unless the page holds the mode. Exported for its test. */
+export function withdrawOnPage(key: string, pathname: string): void {
+  if (!holdsOverview(routeOf(pathname))) withdraw(key);
+}
+
+/** The listing rule of {@link useOverviewRules}: a listing proving the mode no longer offered withdraws it. Exported for its test. */
+export function withdrawIfLapsed(key: string, spaces: Parameters<typeof overviewLapsed>[0]): void {
+  if (overviewLapsed(spaces)) withdraw(key);
 }
 
 /**
@@ -80,9 +93,9 @@ export function useOverviewRules(): void {
   const key = useChoiceKey();
   const { data: spaces } = useSpaces();
   useEffect(() => {
-    if (key && !holdsOverview(routeOf(pathname))) withdraw(key);
+    if (key) withdrawOnPage(key, pathname);
   }, [key, pathname]);
   useEffect(() => {
-    if (key && overviewLapsed(spaces)) withdraw(key);
+    if (key) withdrawIfLapsed(key, spaces);
   }, [key, spaces]);
 }

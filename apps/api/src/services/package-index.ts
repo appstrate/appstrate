@@ -43,19 +43,21 @@ import { CONFIG_BY_TYPE } from "./package-items/config.ts";
  * The agent index of the spaces of `grants`, as `actor` reads each with its
  * grant there: a row's counters span the agent's runs in every space of
  * `grants`, each space counting the runs its grant admits, and the row is a
- * summary unless one of its spaces grants the content read.
+ * summary unless one of its spaces grants the content read. `reach` (the
+ * caller's `packageAccessSpaces`) is awaited alongside the index's own reads.
  */
 export async function listAgentIndex(
   orgId: string,
   grants: readonly SpaceGrant[],
   actor: Actor,
-  accessible: PackageAccessSpace[],
+  reach: Promise<PackageAccessSpace[]>,
 ) {
   const permissions = new Map(grants.map((g) => [g.spaceId, g.permissions]));
-  const [rows, runningCounts, unreadCounts] = await Promise.all([
+  const [rows, runningCounts, unreadCounts, accessible] = await Promise.all([
     listActivePackages(orgId, [...permissions.keys()], "agent"),
     getRunningRunCounts(orgId, grants, actor),
     getUnreadRunCountsByAgent(orgId, grants, actor),
+    reach,
   ]);
 
   return rows.map((row) => {
@@ -113,16 +115,19 @@ export async function listAgentIndex(
  * and its organization twin; the agents' launcher index is
  * {@link listAgentIndex}). Nothing on a row depends on the caller's role in the
  * listed space: `home_space_id` / `home_*`
- * follow their role in the package's home, computed from `accessible`, the
- * caller's reach (`packageAccessSpaces`, RBAC spec §6.9).
+ * follow their role in the package's home, computed from `reach`, the
+ * caller's `packageAccessSpaces` (RBAC spec §6.9), awaited alongside the items.
  */
 export async function listPackageIndex(
   type: PackageType,
   orgId: string,
   spaceIds: readonly string[],
-  accessible: PackageAccessSpace[],
+  reach: Promise<PackageAccessSpace[]>,
 ) {
-  const items = await listOrgItems(orgId, CONFIG_BY_TYPE[type], spaceIds);
+  const [items, accessible] = await Promise.all([
+    listOrgItems(orgId, CONFIG_BY_TYPE[type], spaceIds),
+    reach,
+  ]);
   const enriched = await enrichWithCreatorNames(items);
   return enriched.map(({ homeSpaceId, ...item }) => ({
     ...item,

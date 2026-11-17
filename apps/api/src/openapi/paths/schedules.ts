@@ -68,12 +68,16 @@ export const schedulesPaths = {
       operationId: "listSchedules",
       tags: ["Schedules"],
       summary: "List all schedules",
-      description: "List all schedules across all agents for the organization.",
+      description:
+        "List all schedules across all agents of the space. An unknown query parameter is rejected with `400`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
       ],
-      responses: scheduleListResponses,
+      responses: {
+        ...scheduleListResponses,
+        "400": { $ref: "#/components/responses/ValidationError" },
+      },
     },
   },
   "/api/orgs/{orgId}/schedules": {
