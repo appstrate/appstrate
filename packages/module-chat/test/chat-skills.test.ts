@@ -24,7 +24,7 @@ describe("fetchSkills", () => {
             name: "Tone",
             description: null,
             version: "1.2.0",
-            spaceId: "spc_a",
+            space_ids: ["spc_a"],
           },
         ],
       }),
@@ -38,20 +38,19 @@ describe("fetchSkills", () => {
     ]);
   });
 
-  it("keeps the skills of the spaces the chat acts in, one per package", async () => {
-    const row = (id: string, spaceId: string) => ({
+  it("keeps the skills active in a space the chat acts in", async () => {
+    const row = (id: string, ...space_ids: string[]) => ({
       id,
       name: id,
       description: null,
       version: "1.0.0",
-      spaceId,
+      space_ids,
     });
     const request = requestAnswering(() =>
       Response.json({
         data: [
           row("@acme/a", "spc_view"),
-          row("@acme/b", "spc_act"),
-          row("@acme/b", "spc_other"),
+          row("@acme/b", "spc_other", "spc_act"),
           row("@acme/c", "spc_act"),
         ],
       }),
@@ -66,13 +65,13 @@ describe("fetchSkills", () => {
     expect(await fetchSkills(transport, [])).toEqual([]);
   });
 
-  it("drops a row that names no space, whatever it lists", async () => {
+  it("drops a row that lists no spaces", async () => {
     const request = requestAnswering(() =>
       Response.json({
         data: [
           { id: "@acme/a", name: "A", description: null, version: "1.0.0" },
-          { id: "@acme/b", name: "B", description: null, version: "1.0.0", spaceId: 7 },
-          { id: "@acme/c", name: "C", description: null, version: "1.0.0", spaceId: "spc_a" },
+          { id: "@acme/b", name: "B", description: null, version: "1.0.0", space_ids: "spc_a" },
+          { id: "@acme/c", name: "C", description: null, version: "1.0.0", space_ids: ["spc_a"] },
         ],
       }),
     );

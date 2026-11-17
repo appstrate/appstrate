@@ -8,12 +8,12 @@ import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts"
 import type { ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
 
-/** A row of the organization index names the space it is active in; the rest is `parseSkillList`'s. */
-const spacedRowSchema = z.looseObject({ spaceId: z.string() });
+/** A row of the organization index lists the spaces it is active in; the rest is `parseSkillList`'s. */
+const spacedRowSchema = z.looseObject({ space_ids: z.array(z.string()) });
 
 /**
- * The active skills the picker chooses from: those of the spaces the chat acts in
- * (`actingSpaceIds`; one per package).
+ * The active skills the picker chooses from: those active in a space the chat acts in
+ * (`actingSpaceIds`). The organization index lists each package once.
  */
 export async function fetchSkills(
   transport: ChatTransport,
@@ -21,18 +21,15 @@ export async function fetchSkills(
 ): Promise<SkillHint[]> {
   const res = await transport.request(`/api/orgs/${transport.orgId}/packages/skills`);
   const body: unknown = await res.json();
-  // The organization index lists a package once per space it is active in (each row names its
-  // `spaceId`): parse the rows, keep those of the spaces the chat acts in, then one per package.
   const acting = new Set(actingSpaceIds);
   const rows = (body as { data?: unknown } | null)?.data;
   const kept = (Array.isArray(rows) ? rows : []).flatMap((row: unknown) => {
     const parsed = spacedRowSchema.safeParse(row);
-    return parsed.success && acting.has(parsed.data.spaceId) ? [parsed.data] : [];
+    return parsed.success && parsed.data.space_ids.some((id) => acting.has(id))
+      ? [parsed.data]
+      : [];
   });
-  const seen = new Set<string>();
-  return parseSkillList({ data: kept }).filter(
-    (skill) => !seen.has(skill.packageId) && seen.add(skill.packageId),
-  );
+  return parseSkillList({ data: kept });
 }
 
 const enforcedSkillsSchema = z.object({
