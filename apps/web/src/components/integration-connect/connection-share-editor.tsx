@@ -83,7 +83,11 @@ export function ConnectionShareEditor({
     return (
       <label
         className="flex items-center gap-1.5 text-xs"
-        title={t("integration.connection.share.thisSpaceHelp")}
+        title={named(
+          "integration.connection.share.thisSpaceHelp",
+          "integration.connection.share.thisSpaceHelpIn",
+          rowSpaceId,
+        )}
       >
         <Checkbox
           checked={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
@@ -189,7 +193,15 @@ export function ConnectionShareEditor({
           size="sm"
           className="h-7 text-xs"
           disabled={pending || !!lockHint}
-          title={lockHint ? undefined : t("integration.connection.share.removeHereHelp")}
+          title={
+            lockHint
+              ? undefined
+              : named(
+                  "integration.connection.share.removeHereHelp",
+                  "integration.connection.share.removeHereHelpIn",
+                  hereSpaceId,
+                )
+          }
           onClick={() => onUnshare(hereSpaceId)}
           data-testid={`share-remove-here-${connectionId}`}
         >

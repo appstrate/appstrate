@@ -99,7 +99,7 @@ export function CatalogueAddButton({
   // Where it already runs stays in the menu, ticked and inert: the picture is whole, and a space
   // does not vanish after a click. The trigger counts those spaces.
   const alreadyIn =
-    activeIn.size > 0 ? t("catalogue.alreadyIn", { count: activeIn.size }) : undefined;
+    activeIn.size > 0 ? t("catalogue.addedIn", { count: activeIn.size }) : undefined;
   return (
     <SpaceChoiceDropdown
       choice={{ label: t("catalogue.addToMenu"), spaces, onPick: onAdd }}

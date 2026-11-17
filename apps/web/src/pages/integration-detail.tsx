@@ -39,8 +39,6 @@ import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { UnreadableDetail } from "../components/unreadable-detail";
-import { SpaceChoiceDropdown } from "../components/space-choice-menu";
-import { WorkingSpaceName } from "../components/space-name";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { isQueryInFlight } from "../lib/query-state";
 import { SettingsSkeleton } from "../components/loading-skeletons";
@@ -54,7 +52,6 @@ import {
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
 import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { HeaderActionButton } from "../components/header-action-button";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageCommonSection } from "../components/package-detail/package-common-section";
 import { isOwnedSource } from "../components/package-detail/owned-source";
@@ -62,6 +59,9 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
+import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
+import { IntegrationSpaceSelector } from "../components/integration-detail/integration-space-selector";
+import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
@@ -70,7 +70,8 @@ import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/u
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { usePackageActivation } from "../hooks/use-library";
-import { useActivationChoice } from "../hooks/use-activation-choice";
+import { useConfiguresIntegration } from "../components/integration-detail/use-integration-space";
+import { useSpacesFor } from "../hooks/use-space-action";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceLabelOf } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -100,19 +101,20 @@ function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
   return <IntegrationFunctioning detail={detail} />;
 }
 
-function IntegrationSettings({
+export function IntegrationSettings({
   packageId,
   detail,
   blockUserConnections,
-  canConfigure,
+  spaceIds,
   definition,
   isOwned,
   versionGrants,
 }: {
   packageId: string;
+  /** The spaces the integration is active in: in « Tous les espaces », where it is configured from. */
+  spaceIds: readonly string[];
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
   blockUserConnections: boolean;
-  canConfigure: boolean;
   /**
    * The package draft, present when the reader may change the definition: its
    * sections are then edited here, in place. Absent, Définition stays a read.
@@ -125,6 +127,9 @@ function IntegrationSettings({
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const { can } = usePermissions();
+  const { on: overview } = useOverviewMode();
+  const workingSpace = useSpaceLabelOf()(useCurrentSpaceId());
+  const canConfigure = useConfiguresIntegration(spaceIds);
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
@@ -245,12 +250,37 @@ function IntegrationSettings({
               allowUndeclaredTools={detail.allow_undeclared_tools}
             />
           </div>
-        ) : !detail.active ? (
+        ) : !detail.active || (overview && !can("integrations:configure")) ? (
+          // In « Tous les espaces » the space it is set in comes first, then why it is not shown.
           <div className="p-6">
-            <ActivationHint packageId={packageId} />
+            {overview && (
+              <IntegrationSpaceSelector
+                packageId={packageId}
+                spaceIds={spaceIds}
+                permission="integrations:configure"
+                label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+                choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+              />
+            )}
+            {!detail.active ? (
+              <ActivationHint packageId={packageId} />
+            ) : (
+              <RoleLimitNotice>
+                {t("integration.config.roleLimitIn", { space: workingSpace ?? "" })}
+              </RoleLimitNotice>
+            )}
           </div>
         ) : (
           <div className="p-6">
+            {overview && (
+              <IntegrationSpaceSelector
+                packageId={packageId}
+                spaceIds={spaceIds}
+                permission="integrations:configure"
+                label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+                choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+              />
+            )}
             <SettingsHeading
               title={t(
                 active === "access"
@@ -370,9 +400,7 @@ export function IntegrationDetailPage() {
     "integration",
     packageId || undefined,
   );
-  const activation = usePackageActivation(packageId);
   const { on: overview } = useOverviewMode();
-  const activationChoice = useActivationChoice("integration", packageId);
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
   // The package's own detail response is the authority on its home — both the
@@ -381,7 +409,10 @@ export function IntegrationDetailPage() {
   const homeWritable = pkg?.home_writable;
   const homeDeletable = pkg?.home_deletable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
+  const spaceIds = pkg?.space_ids ?? [];
+  // The working space's verdict, for what acts in it.
   const canConfigure = can("integrations:configure");
+  const configures = useConfiguresIntegration(spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -397,7 +428,8 @@ export function IntegrationDetailPage() {
     void navigate({ search: params.toString(), hash: "connections" });
   };
   const canReach = useCanReach();
-  const canBrowseIntegrations = canReach("/integrations");
+  // In « Tous les espaces » the list spans the reader's spaces: some space opening it suffices.
+  const canBrowseIntegrations = useSpacesFor({ route: "/integrations" }).offered;
 
   // Only the integration detail gates the page; the package detail brings `source` and
   // follows in place (badges, read-only alert, actions menu).
@@ -466,29 +498,7 @@ export function IntegrationDetailPage() {
         }
         actions={
           <>
-            {overview && activationChoice && (
-              <SpaceChoiceDropdown choice={activationChoice}>
-                <HeaderActionButton primary data-testid="detail-activate-btn">
-                  {t("integrations.btn.activateIn")}
-                </HeaderActionButton>
-              </SpaceChoiceDropdown>
-            )}
-            {!overview && !active && (
-              <DisabledReasonTooltip
-                reason={
-                  activation.mayActivate ? null : t("library.cannotActivate", { ns: "common" })
-                }
-              >
-                <HeaderActionButton
-                  primary
-                  onClick={() => activation.activate()}
-                  disabled={activation.pending || !activation.mayActivate}
-                  data-testid="detail-activate-btn"
-                >
-                  {t("integrations.btn.activate")}
-                </HeaderActionButton>
-              </DisabledReasonTooltip>
-            )}
+            <IntegrationActivateButton packageId={packageId} activeHere={active} />
             {pkgLoading ? (
               <Skeleton className="size-8 rounded-md" />
             ) : (
@@ -540,12 +550,16 @@ export function IntegrationDetailPage() {
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">
-        {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists. */}
-        {overview && (
-          <p className="text-muted-foreground mb-4 flex min-w-0 items-center gap-1.5 text-sm">
-            {t("integration.connections.listedIn")}
-            <WorkingSpaceName size="sm" className="shrink-0" />
-          </p>
+        {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists, and
+            changes it. */}
+        {overview && !pkgLoading && (
+          <IntegrationSpaceSelector
+            packageId={packageId}
+            spaceIds={spaceIds}
+            permission="integrations:read"
+            label={t("integration.connections.listedIn")}
+            choiceLabel={t("integration.connections.spaceChoice")}
+          />
         )}
         {!active ? (
           <ActivationHint packageId={packageId} />
@@ -571,7 +585,7 @@ export function IntegrationDetailPage() {
             packageId={packageId}
             detail={detail}
             blockUserConnections={detail.block_user_connections}
-            canConfigure={canConfigure}
+            spaceIds={spaceIds}
             // Write authority is the package's HOME space, never the space being browsed.
             definition={homeWritable && pkg ? pkg : undefined}
             isOwned={isOwned}
@@ -588,10 +602,12 @@ export function IntegrationDetailPage() {
       {/* Capabilities, connected accounts and package usage are distinct concepts. */}
       <DetailTabPanel value="overview">
         <IntegrationOverview
+          packageId={packageId}
           detail={detail}
+          spaceIds={pkgLoading ? undefined : spaceIds}
           dependentIds={pkg?.agents.map((agent) => agent.id)}
           onOpenConnections={openConnections}
-          onConfigureAuth={canConfigure ? openAuthentication : undefined}
+          onConfigureAuth={configures ? openAuthentication : undefined}
         />
       </DetailTabPanel>
     </DetailTabs>

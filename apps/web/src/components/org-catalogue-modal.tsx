@@ -32,7 +32,6 @@ import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { RemoveFromSpaceConfirm, type RemovalTarget } from "./remove-from-space-confirm";
-import { packageDetailPath } from "../lib/package-paths";
 import {
   CATALOGUE_KINDS,
   CATALOGUE_PACKAGE_PARAM,
@@ -57,7 +56,9 @@ import {
   useSetPackageActive,
   type LibraryPackageItem,
 } from "../hooks/use-library";
-import { activationGate, catalogueDeeds } from "../lib/catalogue-gates";
+import { activationGate, catalogueDeeds, catalogueOpenPage } from "../lib/catalogue-gates";
+import { isSpaceEnterable } from "../lib/space-lists";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   cataloguePlacement,
   detailSpace,
@@ -175,6 +176,13 @@ export function OrgCatalogueModal({
   const integrationIconOf = new Map(
     (integrationsAcross.data ?? []).map((row) => [row.id, row.icon] as const),
   );
+  // An integration's source: its read in the working space, else, in « Tous les espaces », the
+  // index spanning the reader's spaces, so a package absent from the hidden space keeps its kind.
+  const sourceKindAcross = new Map(
+    (integrationsAcross.data ?? []).map((row) => [row.id, row.source_kind] as const),
+  );
+  const sourceKindOf = (id: string) =>
+    integrationById.get(id)?.manifest.source.kind ?? sourceKindAcross.get(id);
   // One tile per package, the card's and the sheet's alike; it waits for the read that carries it.
   const iconPending =
     (active === "agent" && agentsHerePending) ||
@@ -204,6 +212,8 @@ export function OrgCatalogueModal({
   // `/api/spaces` carries the grant of each space, the verdict a switch answers to.
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
+  const enterable = (reachable ?? []).filter(isSpaceEnterable).map((space) => space.id);
+  const workingSpaceId = useCurrentSpaceId();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -238,10 +248,13 @@ export function OrgCatalogueModal({
   const sources = list.values("source", INTEGRATION_SOURCES);
   // A source filter judges a row by its integration read: until it lands the list is loading, not empty.
   const listLoading =
-    isLoading || (active === "integration" && sources.length > 0 && integrationsQuery.isLoading);
+    isLoading ||
+    (active === "integration" &&
+      sources.length > 0 &&
+      (integrationsQuery.isLoading || (spanning && integrationsAcross.isLoading)));
   const all = ofKind.filter((item) => {
     if (active === "integration" && sources.length > 0) {
-      const kind = integrationById.get(item.id)?.manifest.source.kind;
+      const kind = sourceKindOf(item.id);
       if (!kind || !sources.includes(kind)) return false;
     }
     // Découvrir is the WHOLE catalogue, not the complement of the placed half: otherwise
@@ -346,8 +359,7 @@ export function OrgCatalogueModal({
       .filter((space) => space.active || mayActivateIn(item, space.id));
     // Only the placement in the space on screen: another space's share says nothing here.
     const sharer = (spaceId && placement?.sharedBy[spaceId]) || undefined;
-    const sourceKind =
-      active === "integration" ? integrationById.get(item.id)?.manifest.source.kind : undefined;
+    const sourceKind = active === "integration" ? sourceKindOf(item.id) : undefined;
     return {
       ...row,
       icon,
@@ -398,6 +410,9 @@ export function OrgCatalogueModal({
     );
   };
   const previewedItem = previewed ? toCardItem(previewed) : undefined;
+  const openPage = previewed
+    ? catalogueOpenPage(previewed, placementOf(previewed), enterable, spaceId, workingSpaceId)
+    : null;
 
   const { columns: nameColumns, menu: columnMenu } = useColumnVisibility(`catalogue-${active}`, [
     usePackageNameColumn(),
@@ -473,9 +488,7 @@ export function OrgCatalogueModal({
     busy: activate.isPending,
     onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
-  const sourceColumn = useCatalogueSourceColumn(
-    (item) => integrationById.get(item.id)?.manifest.source.kind,
-  );
+  const sourceColumn = useCatalogueSourceColumn((item) => sourceKindOf(item.id));
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending,
     deedsOf,
@@ -582,11 +595,7 @@ export function OrgCatalogueModal({
           agents={library?.packages.agent ?? []}
           pinnedVersion={pinnedVersion}
           onUnpin={unpin}
-          source={
-            active === "integration"
-              ? integrationById.get(previewed.id)?.manifest.source.kind
-              : undefined
-          }
+          source={active === "integration" ? sourceKindOf(previewed.id) : undefined}
           actionsMenu={
             <PageActionsMenu>
               <CatalogueMenuItems
@@ -594,13 +603,13 @@ export function OrgCatalogueModal({
                 deeds={catalogueDeeds(previewed, spaceId)}
                 spaceNameOf={spaceNameOf}
                 currentSpaceId={spaceId}
-                // The page lives in the current space: a package placed only elsewhere would 404.
+                // The page reads the package where it is placed: a space without it would 404.
                 open={
-                  previewed.source === "system" || placementOf(previewed).here !== null
+                  openPage
                     ? {
                         label: t("catalogue.openFullPage"),
                         icon: ExternalLink,
-                        onSelect: () => navigate(packageDetailPath(active, previewed.id)),
+                        onSelect: () => navigate(openPage),
                       }
                     : undefined
                 }

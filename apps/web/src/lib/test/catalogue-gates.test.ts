@@ -7,7 +7,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { activationGate, catalogueDeeds, mayRemoveFromSpace } from "../catalogue-gates.ts";
+import {
+  activationGate,
+  catalogueDeeds,
+  catalogueOpenPage,
+  mayRemoveFromSpace,
+  pageSpace,
+} from "../catalogue-gates.ts";
 import type { LibraryPackageItem, LibraryPlacement } from "../../hooks/use-library.ts";
 
 function placement(
@@ -117,6 +123,92 @@ describe("catalogueDeeds", () => {
       activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],
     });
     expect(catalogueDeeds(row, "spc_guest").revokeFrom).toEqual(["spc_guest"]);
+  });
+});
+
+describe("catalogueDeeds with no current space (« Tous les espaces »)", () => {
+  const placements = [
+    placement("spc_home", "home", "active"),
+    placement("spc_guest", "shared", "inactive"),
+    placement("spc_other", "shared", "active"),
+  ];
+
+  it("offers the recipient every shared placement it may switch off", () => {
+    const row = packageRow("agent", placements, {
+      activation: [
+        { spaceId: "spc_home", activate: "allowed", deactivate: "allowed" },
+        { spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" },
+        { spaceId: "spc_other", activate: "allowed", deactivate: "forbidden" },
+      ],
+    });
+    expect(catalogueDeeds(row, null).revokeFrom).toEqual(["spc_guest"]);
+  });
+
+  it("offers nothing where no shared placement grants it", () => {
+    // CONTROL for the case above: the same placements, every removal refused.
+    const row = packageRow("agent", placements, {
+      activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "forbidden" }],
+    });
+    expect(catalogueDeeds(row, null).revokeFrom).toEqual([]);
+  });
+});
+
+describe("pageSpace", () => {
+  const placement = (overrides: Partial<Parameters<typeof pageSpace>[0]> = {}) => ({
+    here: null,
+    activeIn: [] as string[],
+    inactiveIn: [] as string[],
+    homeSpaceId: null,
+    ...overrides,
+  });
+
+  it("opens in the current space only when it holds the package", () => {
+    expect(pageSpace(placement({ here: "inactive" }), [], "spc_a")).toBe("spc_a");
+    expect(pageSpace(placement({ activeIn: ["spc_b"] }), ["spc_b"], "spc_a")).toBeNull();
+  });
+
+  it("prefers, with no current space, an enterable space it runs in, then one it is placed in, then its home", () => {
+    const enterable = ["spc_a", "spc_b", "spc_h"];
+    expect(
+      pageSpace(
+        placement({ activeIn: ["spc_x", "spc_b"], inactiveIn: ["spc_a"], homeSpaceId: "spc_h" }),
+        enterable,
+        null,
+      ),
+    ).toBe("spc_b");
+    expect(
+      pageSpace(placement({ inactiveIn: ["spc_a"], homeSpaceId: "spc_h" }), enterable, null),
+    ).toBe("spc_a");
+    expect(pageSpace(placement({ homeSpaceId: "spc_h" }), enterable, null)).toBe("spc_h");
+  });
+
+  it("finds nothing when no enterable space holds it", () => {
+    expect(
+      pageSpace(placement({ activeIn: ["spc_x"], homeSpaceId: "spc_y" }), ["spc_a"], null),
+    ).toBeNull();
+  });
+});
+
+describe("catalogueOpenPage", () => {
+  const held = { here: null, activeIn: ["spc_b"], inactiveIn: [], homeSpaceId: null };
+  const nowhere = { here: null, activeIn: [], inactiveIn: [], homeSpaceId: null };
+  const skill = packageRow("skill", []);
+
+  it("enters the space holding it in « Tous les espaces », the working one hidden", () => {
+    expect(catalogueOpenPage(skill, held, ["spc_a", "spc_b"], null, "spc_a")).toBe(
+      "/skills/@org/example?enterSpace=spc_b",
+    );
+  });
+
+  it("stays in the working space when that is the one holding it", () => {
+    expect(catalogueOpenPage(skill, held, ["spc_b"], null, "spc_b")).toBe("/skills/@org/example");
+  });
+
+  it("offers no page held nowhere the reader enters, but a system package's", () => {
+    expect(catalogueOpenPage(skill, nowhere, ["spc_a"], null, "spc_a")).toBeNull();
+    expect(
+      catalogueOpenPage({ ...skill, source: "system" }, nowhere, ["spc_a"], null, "spc_a"),
+    ).toBe("/skills/@org/example");
   });
 });
 
