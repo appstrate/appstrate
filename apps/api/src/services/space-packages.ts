@@ -20,10 +20,6 @@ import {
   packageVersions,
   spaces,
 } from "@appstrate/db/schema";
-import {
-  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
-  MAX_ENFORCED_CHAT_SKILLS,
-} from "@appstrate/core/chat-contract";
 import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -34,12 +30,7 @@ import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
-import {
-  getLatestVersionId,
-  getVersionDetail,
-  requirePublishedArchive,
-} from "./package-versions.ts";
-import { serveSkillMd } from "./served-skill.ts";
+import { getLatestVersionId } from "./package-versions.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -152,7 +143,6 @@ function spacePackageWire(
     modelId: row.modelId,
     proxyId: row.proxyId,
     enabled: row.enabled,
-    chat_enforced: row.chatEnforced,
     installed_at: row.installedAt,
     updatedAt: row.updatedAt,
     package_type: pkg.type,
@@ -315,7 +305,6 @@ const spacePackageSelect = {
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
   enabled: spacePackages.enabled,
-  chat_enforced: spacePackages.chatEnforced,
   installed_at: spacePackages.installedAt,
   updatedAt: spacePackages.updatedAt,
   package_type: packages.type,
@@ -386,7 +375,7 @@ export function activeInSpaces<Q extends PgSelect>(
   orgId: string,
   spaceIds: readonly string[],
   type: PackageType,
-  { groupBy = [] }: { groupBy?: AnyPgColumn[] } = {},
+  groupBy: AnyPgColumn[] = [],
 ) {
   return query
     .innerJoin(spaces, and(eq(spaces.orgId, orgId), inArray(spaces.id, [...spaceIds])))
@@ -483,9 +472,9 @@ export async function listActivePackages(
     .from(packages)
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .$dynamic();
-  return activeInSpaces(query, orgId, spaceIds, type, {
-    groupBy: [packageDistTags.versionId],
-  }).orderBy(...packageListingOrder());
+  return activeInSpaces(query, orgId, spaceIds, type, [packageDistTags.versionId]).orderBy(
+    ...packageListingOrder(),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +511,7 @@ interface PackageHint {
 }
 
 /** ON clause for the package's non-yanked `latest` dist-tag — at most one row per package. */
-export function latestTagJoin(packageIdColumn: AnyPgColumn) {
+function latestTagJoin(packageIdColumn: AnyPgColumn) {
   return and(
     eq(packageDistTags.packageId, packageIdColumn),
     eq(packageDistTags.tag, "latest"),
@@ -852,10 +841,9 @@ export async function getResolvedRunConfig(
 }
 
 /**
- * Update the per-space settings row: model, proxy, generation settings, input
- * values and, with `requirePlacement`, the chat enforcement flag
- * (`chatEnforcedChanged` says whether it moved). Never `enabled` (activation
- * doors own it). The org check shares the write's transaction.
+ * Update the per-space settings row: model, proxy, generation settings and input
+ * values. Never `enabled` (activation doors own it). The org check shares the
+ * write's transaction.
  *
  *   - `requirePlacement: true`: the row must already exist, else 404.
  *   - default: update the row; with none, create it only where the package is
@@ -870,11 +858,10 @@ export async function updateSpacePackage(
     modelId?: string | null;
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
-    chatEnforced?: boolean;
   },
   /** `tx`: join the caller's transaction instead of opening one. */
   opts?: { requirePlacement?: boolean; tx?: Tx },
-): Promise<{ chatEnforcedChanged: boolean }> {
+): Promise<void> {
   const set: Partial<{
     updatedAt: Date;
     inputSettings: { values: Record<string, unknown>; locked: string[] };
@@ -897,13 +884,9 @@ export async function updateSpacePackage(
     const pkg = await loadPlaceablePackage(tx, scope, packageId);
 
     if (opts?.requirePlacement) {
-      const { chatEnforced } = updates;
-      // Read under the row lock, so the caller's audit names a real change.
-      const before =
-        chatEnforced === undefined ? null : await currentPlacement(tx, packageId, scope.spaceId);
       const updated = await tx
         .update(spacePackages)
-        .set(chatEnforced === undefined ? set : { ...set, chatEnforced })
+        .set(set)
         .where(
           and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
         )
@@ -911,9 +894,7 @@ export async function updateSpacePackage(
       if (updated.length === 0) {
         throw notFound(`Package '${packageId}' is not placed in this space`);
       }
-      return {
-        chatEnforcedChanged: chatEnforced !== undefined && before?.chatEnforced !== chatEnforced,
-      };
+      return;
     }
 
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
@@ -924,7 +905,7 @@ export async function updateSpacePackage(
         .where(
           and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
         );
-      return { chatEnforcedChanged: false };
+      return;
     }
     // Configuring never activates: `enabled` keeps the default's verdict.
     if (!placedWithoutRow(pkg, scope.spaceId)) {
@@ -948,92 +929,6 @@ export async function updateSpacePackage(
         target: [spacePackages.spaceId, spacePackages.packageId],
         set,
       });
-    return { chatEnforcedChanged: false };
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
-}
-
-type PlacementSettings = Parameters<typeof updateSpacePackage>[2];
-
-/**
- * Enforcing writes first and checks after, under a per-space lock: concurrent
- * enforcements cannot both pass the cap, an unplaced 404 precedes any 409, and
- * a refusal rolls the whole patch back.
- */
-export async function updatePlacementSettings(
-  scope: SpaceScope,
-  packageId: string,
-  updates: PlacementSettings,
-): Promise<{ chatEnforcedChanged: boolean }> {
-  if (!updates.chatEnforced) {
-    return updateSpacePackage(scope, packageId, updates, { requirePlacement: true });
-  }
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`space-chat-enforced:${scope.spaceId}`})::bigint)`,
-    );
-    const result = await updateSpacePackage(scope, packageId, updates, {
-      requirePlacement: true,
-      tx,
-    });
-    if (result.chatEnforcedChanged) await assertChatEnforceable(scope, packageId, tx);
-    return result;
-  });
-}
-
-/**
- * The `SKILL.md` the chat injects for the `latest` published version of a
- * skill: the one {@link serveSkillMd} serves from its whole archive (normalized
- * `name`, `metadata.version` written), or `null` without a published version. A
- * skill that cannot be served is refused: the chat could not inject it.
- */
-async function injectedSkillMd(packageId: string, tx: Tx): Promise<string | null> {
-  const detail = await getVersionDetail(packageId, "latest", { executor: tx });
-  if (!detail) return null;
-  const { files } = requirePublishedArchive("skill", packageId, detail);
-  const served = serveSkillMd(packageId, files, detail.version);
-  if (!served.ok) {
-    throw conflict(
-      "skill_not_servable",
-      `Skill '${packageId}' version ${detail.version} cannot be served as an Agent Skills skill (${served.reason}) — publish a version that can`,
-    );
-  }
-  return served.content;
-}
-
-// Every read goes through `tx`: under PGlite's single connection a query on
-// the root `db` would wait on this very transaction.
-async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
-  const own = await injectedSkillMd(packageId, tx);
-  if (own === null) {
-    throw conflict(
-      "no_published_version",
-      `Skill '${packageId}' has no published version to enforce — publish it first`,
-    );
-  }
-
-  // Every flagged row counts, enabled or not: re-activation brings the flag back unchecked.
-  const flagged = await tx
-    .select({ packageId: spacePackages.packageId })
-    .from(spacePackages)
-    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.chatEnforced, true)));
-  if (flagged.length > MAX_ENFORCED_CHAT_SKILLS) {
-    throw conflict(
-      "enforced_skills_limit",
-      `A space enforces at most ${MAX_ENFORCED_CHAT_SKILLS} skills in its chat`,
-      { limit: MAX_ENFORCED_CHAT_SKILLS },
-    );
-  }
-
-  const flaggedOthers = flagged.filter((row) => row.packageId !== packageId);
-  const others = await Promise.all(flaggedOthers.map((row) => injectedSkillMd(row.packageId, tx)));
-  // Measured as injected: the served `SKILL.md` is what the chat puts in the prompt.
-  const total = others.reduce((sum, skill) => sum + (skill?.length ?? 0), own.length);
-  if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
-    throw conflict(
-      "enforced_skills_budget",
-      `The enforced skills would total ${total} characters; the chat budget is ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}`,
-      { budget: CHAT_SKILLS_CONTENT_BUDGET_CHARS, total },
-    );
-  }
 }

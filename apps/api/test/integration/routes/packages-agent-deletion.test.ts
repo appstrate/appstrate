@@ -136,6 +136,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
         schema_version: "0.2",
         version: "0.2.0",
         type: "agent",
+        display_name: "Elsewhere",
         description: "Agent with a run in another space",
       },
     });
@@ -183,6 +184,17 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     const busyRestore = await restore();
     expect(busyRestore.status).toBe(409);
     expect(await busyRestore.json()).toHaveProperty("code", "agent_in_use");
+    await db
+      .update(packages)
+      .set({ draftContent: "Revised prompt" })
+      .where(eq(packages.id, "@delorg/elsewhere"));
+    const busyPublish = await app.request("/api/packages/agents/@delorg/elsewhere/versions", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ version: "0.3.0" }),
+    });
+    expect(busyPublish.status).toBe(409);
+    expect(await busyPublish.json()).toHaveProperty("code", "agent_in_use");
   });
 
   it.skipIf(isEmbeddedDb)(

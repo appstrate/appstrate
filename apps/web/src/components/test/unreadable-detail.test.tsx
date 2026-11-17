@@ -120,25 +120,41 @@ describe("UnreadableDetail", () => {
   });
 
   it("locates the live agent with launch-only sight and a version only with full read", () => {
-    const seed = (qc: QueryClient) => {
-      qc.setQueryData(
-        $api.queryOptions("get", "/api/packages/{scope}/{name}/home", {
-          params: {
-            path: { scope: "@acme", name: "a" },
-            header: { "X-Org-Id": ORG_ID, "X-Space-Id": "spc_hidden" },
+    const placements =
+      (readable: boolean, currentPlaced = true) =>
+      (qc: QueryClient) => {
+        qc.setQueryData(
+          $api.queryOptions("get", "/api/packages/{scope}/{name}/home", {
+            params: {
+              path: { scope: "@acme", name: "a" },
+              header: { "X-Org-Id": ORG_ID, "X-Space-Id": "spc_hidden" },
+            },
+          }).queryKey,
+          {
+            id: "@acme/a",
+            type: "agent",
+            read_space_ids: currentPlaced ? ["spc_other", "spc_hidden"] : ["spc_other"],
           },
-        }).queryKey,
-        { id: "@acme/a", type: "agent", read_space_ids: ["spc_other"] },
-      );
-      qc.setQueryData(
-        $api.queryOptions("get", "/api/spaces", {
-          params: { header: { "X-Org-Id": ORG_ID } },
-        }).queryKey,
-        { data: [SPACES[0], { ...SPACES[1], permissions: ["agents:run"] }] },
-      );
-    };
-    expect(detail({ overview: true, agent: {}, seed })).toBe("");
-    expect(detail({ overview: true, agent: { version: true }, seed })).toContain(HINT_ACROSS());
+        );
+        qc.setQueryData(
+          $api.queryOptions("get", "/api/spaces", {
+            params: { header: { "X-Org-Id": ORG_ID } },
+          }).queryKey,
+          {
+            data: [
+              { ...SPACES[0], permissions: ["agents:run"] },
+              { ...SPACES[1], permissions: [readable ? "agents:read" : "agents:run"] },
+            ],
+          },
+        );
+      };
+    expect(detail({ overview: true, agent: {}, seed: placements(false, false) })).toBe("");
+    // The home lookup ranks the other placement first. A summary-only read in the
+    // current space must not skip a historical version that is readable there.
+    expect(detail({ overview: true, agent: { version: true }, seed: placements(true) })).toBe("");
+    expect(detail({ overview: true, agent: { version: true }, seed: placements(false) })).toContain(
+      HINT_ACROSS(),
+    );
   });
 
   it("says unavailable in none of the reader's spaces when the look-up failed", () => {

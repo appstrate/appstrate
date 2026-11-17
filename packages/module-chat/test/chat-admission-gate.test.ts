@@ -119,7 +119,6 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},
     checkUsageAllowed: o.checkUsageAllowed,
-    loadEnforcedSkills: async () => [],
   };
 }
 

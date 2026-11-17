@@ -3,7 +3,7 @@
 /**
  * What the open conversation is anchored to: its origin space and whether it is limited to it.
  * Published by `Conversation` to everything below it (the composer's limit item and chip, the
- * enforced-skills read, the skills picker, the tool cards), which would otherwise each re-derive
+ * skills picker, the tool cards), which would otherwise each re-derive
  * it from the host's selected space — the one thing that does NOT define an existing conversation.
  */
 

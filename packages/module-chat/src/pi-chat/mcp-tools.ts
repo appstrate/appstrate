@@ -20,6 +20,7 @@
  * and `list_skills` lists the acting spaces' skills through `skills/list`.
  */
 
+import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import { spaceIdRefusal, type NamedSpace } from "@appstrate/core/mcp-spaces";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
@@ -228,6 +229,11 @@ type BuildPlatformMcpToolsOptions = {
   surfaceKey?: string;
   /** Registers `list_skills`: the `manual` skill mode, on a turn holding `skills:read`. */
   listsSkills?: boolean;
+  /**
+   * The model the turn's INLINE runs launch on (the composer's opt-in): handed to the
+   * launch client, never declared on the tool, so the model cannot set it.
+   */
+  inlineRunModel?: InlineRunModel;
 };
 
 /**
@@ -365,6 +371,7 @@ export async function buildPlatformMcpTools(
           writeChunk: opts.writeChunk,
           signal: opts.signal,
           turnBudget: opts.turnBudget,
+          ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
       : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget, organization),
   );
@@ -656,6 +663,7 @@ function makeRunAndWaitExtension(
     writeChunk: (chunk: UIMessageChunk) => void;
     signal: AbortSignal;
     turnBudget: PiTurnBudget;
+    inlineRunModel?: InlineRunModel;
   },
 ): ExtensionFactory {
   const runAndWaitScope = offerScopeOf(RUN_AND_WAIT_TOOL, {});
@@ -690,6 +698,7 @@ function makeRunAndWaitExtension(
           // card, never to the model. See `RUN_CONNECT_OFFERS_HEADER` in
           // `@appstrate/core/run-and-wait-client`.
           connectOffers: true,
+          ...(ctx.inlineRunModel ? { inlineRunModel: ctx.inlineRunModel } : {}),
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
             chatSessionId: ctx.turnBudget.chatSessionId,

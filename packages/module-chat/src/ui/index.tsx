@@ -63,7 +63,7 @@ export type {
   OpenFile,
   RenderSpaces,
   SelectConversation,
-  SpaceChoiceSubmenu,
+  SpaceChoiceMenu,
 } from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
@@ -108,6 +108,7 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
@@ -210,8 +211,8 @@ export interface ChatPageProps {
   linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
-  /** The host's sub-menu of spaces (see `ChatHost`). Pass a stable component. */
-  SpaceChoiceSubmenu: ChatHost["SpaceChoiceSubmenu"];
+  /** The host's menu of spaces (see `ChatHost`). Pass a stable component. */
+  SpaceChoiceMenu: ChatHost["SpaceChoiceMenu"];
 }
 
 export function ChatPage({
@@ -236,7 +237,7 @@ export function ChatPage({
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,
-  SpaceChoiceSubmenu,
+  SpaceChoiceMenu,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -344,7 +345,7 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
-      SpaceChoiceSubmenu,
+      SpaceChoiceMenu,
     }),
     [
       onOpenFile,
@@ -362,7 +363,7 @@ export function ChatPage({
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
-      SpaceChoiceSubmenu,
+      SpaceChoiceMenu,
     ],
   );
 
@@ -443,7 +444,7 @@ interface ConversationProps {
   composerSlot?: React.ReactNode;
   authorsPackages: boolean;
   canPinSkills: boolean;
-  /** `chat:write`: without the picker, the enforced skills are still named. */
+  /** `chat:write`: the composer placeholder and the not-found screen's new-conversation action. */
   canWrite: boolean;
   /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
   serverGenerating: boolean | undefined;
@@ -538,10 +539,9 @@ const Conversation = memo(function Conversation({
         onSelectionChange={chooseSkills}
         showPicker={showPicker}
         authorsPackages={authorsPackages}
-        showEnforced={canWrite}
       />
     ),
-    [transport, skills, chooseSkills, showPicker, authorsPackages, canWrite],
+    [transport, skills, chooseSkills, showPicker, authorsPackages],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -683,6 +683,7 @@ function ConversationInner({
             messages,
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
+            inlineRunsUseChatModel: getInlineRunModelEnabled(),
             skills: getChosenSkills(),
             creation: getCreation(),
           }),

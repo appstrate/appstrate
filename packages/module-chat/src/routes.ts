@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat API — session CRUD + history READ, and the enforced skills (names).
+ * Chat API — session CRUD + history READ.
  *
  * There is ONE kind of conversation: it belongs to the organization and its
  * author, under `/api/orgs/:orgId/chat/*`. Its nullable ORIGIN space
@@ -299,27 +299,6 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     rateLimited(60),
     guard("chat:write"),
     handlers.stop,
-  );
-
-  // GET …/enforced-skills?spaceId= — the names of a space's enforced skills, from the
-  // database: a member without `skills:read` may call it. The composer shows them for a
-  // new conversation in the selected space, or for an existing conversation's origin.
-  router.get(
-    "/api/orgs/:orgId/chat/enforced-skills",
-    rateLimited(120),
-    guard("chat:read"),
-    async (c) => {
-      const spaceId = c.req.query("spaceId");
-      if (!spaceId) throw invalidRequest("spaceId is required", "spaceId");
-      if (!sessionScope(c).readable.includes(spaceId)) {
-        throw invalidRequest("spaceId must be a space you can read chats in", "spaceId");
-      }
-      const skills = await deps.listEnforcedSkills(c.get("orgId"), spaceId);
-      return c.json({
-        object: "list",
-        data: skills.map(({ packageId, name, version }) => ({ id: packageId, name, version })),
-      });
-    },
   );
 
   // POST …/chat — the conversational loop (AI SDK UIMessage stream).

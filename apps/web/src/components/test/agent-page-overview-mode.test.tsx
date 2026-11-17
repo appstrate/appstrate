@@ -114,14 +114,12 @@ const LIBRARY = {
             via: "home",
             state: "inactive",
             shared_by: null,
-            chat_enforced: false,
           },
           {
             space_id: "spc_b",
             via: "shared",
             state: "active",
             shared_by: null,
-            chat_enforced: false,
           },
         ],
         activation: [

@@ -13,6 +13,7 @@
     "./conversation-skeleton": "./src/ui/conversation-skeleton.tsx",
     "./unread": "./src/ui/use-sessions.ts",
     "./package-authoring": "./src/ui/package-authoring-store.ts",
+    "./preferences": "./src/ui/preferences.ts",
     "./capabilities": "./src/capabilities.ts"
   },
   "scripts": {

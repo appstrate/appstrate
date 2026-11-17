@@ -7,7 +7,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { AssistantRuntimeProvider, useLocalRuntime } from "@assistant-ui/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
@@ -28,11 +29,11 @@ import {
   type AttachAvailability,
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
-import { AttachMenuEntry, ComposerTools, LimitMenuEntry } from "../src/ui/composer-tools.tsx";
+import { ComposerTools, LimitMenuEntry } from "../src/ui/composer-tools.tsx";
 import {
   ChatHostProvider,
   ChatTransportProvider,
-  type SpaceChoiceSubmenu,
+  type SpaceChoiceMenu,
 } from "../src/ui/runtime-context.ts";
 import {
   sessionQueryKey,
@@ -458,7 +459,6 @@ describe("the composer's limit chip", () => {
                 onSelectionChange={() => {}}
                 showPicker={false}
                 authorsPackages={false}
-                showEnforced={false}
               />
             </TooltipProvider>
           </ConversationScopeProvider>
@@ -498,8 +498,8 @@ describe("the composer's limit chip", () => {
 
 describe("the composer's limit entry", () => {
   const picked: string[] = [];
-  // The host's sub-menu of spaces, drawn as a marker naming what it was handed.
-  const HostSubmenu: SpaceChoiceSubmenu = ({ label, spaceIds, onPick, testId }) => {
+  // The host's menu of spaces, drawn as a marker naming what it was handed.
+  const HostSubmenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, testId }) => {
     onPick("spc_probe");
     return <u data-testid={testId} data-label={label} data-choice={spaceIds.join(",")} />;
   };
@@ -511,7 +511,7 @@ describe("the composer's limit entry", () => {
       actingSpaceIds,
       renderSpaces: (ids) => <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>,
       useSpaceLabelOf: () => (id) => (id ? names[id] : undefined),
-      SpaceChoiceSubmenu: HostSubmenu,
+      SpaceChoiceMenu: HostSubmenu,
     });
     // A sub-menu's content renders without a portal: the entry is drawn as the open menu draws it.
     return renderToStaticMarkup(
@@ -651,59 +651,71 @@ describe("the space a file is attached in", () => {
   });
 });
 
-describe("the composer's attach entry", () => {
+describe("the composer's attach button", () => {
   const names: Record<string, string> = { spc_a: "Studio", spc_b: "Atelier" };
-  // The host's sub-menu, drawn as a marker naming what it was handed (a pick opens a file picker).
-  const HostSubmenu: SpaceChoiceSubmenu = ({ label, spaceIds, testId }) => (
-    <u data-testid={testId} data-label={label} data-choice={spaceIds.join(",")} />
+  const HostMenu: SpaceChoiceMenu = ({ variant, label, spaceIds, trigger }) => (
+    <div data-variant={variant} data-label={label} data-choice={spaceIds.join(",")}>
+      {trigger}
+    </div>
   );
 
-  function entry(availability: AttachAvailability, shownSpaceId: string | null) {
+  function Runtime({ children }: { children: ReactNode }) {
+    const runtime = useLocalRuntime({ run: async () => ({ content: [] }) });
+    return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+  }
+
+  function render(availability: AttachAvailability, shownSpaceId: string | null) {
     const host = testHost({
       t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
-      renderSpaces: (ids) => <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>,
       useSpaceLabelOf: () => (id) => (id ? names[id] : undefined),
-      SpaceChoiceSubmenu: HostSubmenu,
+      SpaceChoiceMenu: HostMenu,
     });
+    const transport = transportOf(() => ({}), shownSpaceId);
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
-        <ChatTransportProvider value={transportOf(() => ({}), shownSpaceId)}>
+        <ChatTransportProvider value={transport}>
           <AttachTargetProvider value={{ availability, picked: null, pick: () => {} }}>
-            <DropdownMenu open>
-              <DropdownMenuSub open>
-                <DropdownMenuSubContent forceMount>
-                  <AttachMenuEntry />
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenu>
+            <Runtime>
+              <TooltipProvider>
+                <ComposerTools
+                  transport={transport}
+                  selection={{ skillMode: "auto", pinnedSkills: [] }}
+                  onSelectionChange={() => {}}
+                  showPicker={false}
+                  authorsPackages={false}
+                />
+              </TooltipProvider>
+            </Runtime>
           </AttachTargetProvider>
         </ChatTransportProvider>
       </ChatHostProvider>,
     );
   }
 
-  it("attaches in the space shown without naming it", () => {
-    const out = entry({ kind: "attach", spaceId: "spc_a" }, "spc_a");
-    expect(out).toContain("composer.attach<");
-    expect(out).not.toContain("composer.attachIn");
+  it("attaches directly in the space shown without naming it, alongside the settings button", () => {
+    const out = render({ kind: "attach", spaceId: "spc_a" }, "spc_a");
+    expect(out).toContain('aria-label="composer.attach"');
+    expect(out).toContain('aria-label="composer.settings"');
+    expect(out).not.toContain("data-choice");
   });
 
-  it("names the space when it is not the one shown (an origin elsewhere, « Tous les espaces »)", () => {
+  it("names a direct attachment's destination in another space or the overview", () => {
     for (const shown of ["spc_b", null]) {
-      const out = entry({ kind: "attach", spaceId: "spc_a" }, shown);
+      const out = render({ kind: "attach", spaceId: "spc_a" }, shown);
       expect(out).toContain('aria-label="composer.attachIn|Studio"');
-      expect(out).toContain('data-spaces="spc_a"');
+      expect(out).not.toContain("data-choice");
     }
   });
 
-  it("asks which space through the host's sub-menu of the acting spaces", () => {
-    const out = entry({ kind: "choose", spaceIds: ["spc_a", "spc_b"] }, null);
-    expect(out).toContain('data-testid="composer-attach-item"');
+  it("opens the acting spaces from the attach button itself", () => {
+    const out = render({ kind: "choose", spaceIds: ["spc_a", "spc_b"] }, null);
+    expect(out).toContain('data-variant="dropdown"');
     expect(out).toContain('data-label="composer.attach.choose"');
     expect(out).toContain('data-choice="spc_a,spc_b"');
+    expect(out).toContain('aria-label="composer.attach"');
   });
 
-  it("is inert with its reason, and without one while the acting set loads", () => {
+  it("disables the button with the reason, and without one while the acting set loads", () => {
     const cases: [AttachAvailability, string | null][] = [
       [{ kind: "unavailable", reason: "outside" }, "composer.attachUnavailable"],
       [{ kind: "unavailable", reason: "origin-outside" }, "composer.limit.outside"],
@@ -711,10 +723,10 @@ describe("the composer's attach entry", () => {
       [{ kind: "unavailable", reason: null }, null],
     ];
     for (const [availability, reason] of cases) {
-      const out = entry(availability, "spc_a");
-      expect(out).toContain('data-disabled=""');
+      const out = render(availability, "spc_a");
+      expect(out).toMatch(/<button[^>]*disabled=""[^>]*aria-label="composer.attach"/);
       if (reason) expect(out).toContain(reason);
-      else expect(out).not.toContain("composer-attach-reason");
+      else expect(out).not.toContain('class="sr-only"');
     }
   });
 });

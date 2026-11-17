@@ -25599,7 +25599,7 @@
         "operationId": "updateSpacePackage",
         "tags": ["Space Packages"],
         "summary": "Configure how this space runs a placed package",
-        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space, and — for a skill — whether the space enforces it in its chat. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{id}/packages` and `DELETE /api/spaces/{id}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{id}/packages` and `DELETE /api/spaces/{id}/packages/{scope}/{name}`, where the placement rule and the placement that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -25640,10 +25640,6 @@
                   },
                   "proxyId": {
                     "type": ["string", "null"]
-                  },
-                  "chat_enforced": {
-                    "type": "boolean",
-                    "description": "Skills only. `true` injects the skill's latest published `SKILL.md` in every chat conversation held in this space, for every member whatever their `skills:*` grants — its content is disclosed to them. Refused unless the skill has a published version, and within the space's cap of enforced skills and the chat's skills content budget. Audited as `package.chat_enforced` / `package.chat_released`, only when the stored value changes."
                   }
                 },
                 "additionalProperties": false
@@ -25668,8 +25664,7 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error (`validation_failed`), or `chat_enforced` sent for a package that is not a skill (`chat_enforced_not_skill`)."
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -25680,26 +25675,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
           },
           "503": {
             "$ref": "#/components/responses/EncryptionKeyUnavailable"
@@ -34087,20 +34062,17 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
-                        "published": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                             "via": "home",
                             "state": "active",
-                            "chat_enforced": false,
                             "shared_by": null
                           },
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "shared",
                             "state": "inactive",
-                            "chat_enforced": false,
                             "shared_by": {
                               "user_id": "usr_1",
                               "name": "Alex"
@@ -34133,20 +34105,17 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
-                        "published": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                             "via": "system",
                             "state": "active",
-                            "chat_enforced": false,
                             "shared_by": null
                           },
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "system",
                             "state": "inactive",
-                            "chat_enforced": false,
                             "shared_by": null
                           }
                         ],
@@ -34282,20 +34251,17 @@
                         "home_writable": true,
                         "home_deletable": true,
                         "home_shareable": true,
-                        "published": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                             "via": "home",
                             "state": "active",
-                            "chat_enforced": false,
                             "shared_by": null
                           },
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "shared",
                             "state": "inactive",
-                            "chat_enforced": false,
                             "shared_by": {
                               "user_id": "usr_1",
                               "name": "Alex"
@@ -34328,20 +34294,17 @@
                         "home_writable": false,
                         "home_deletable": false,
                         "home_shareable": false,
-                        "published": true,
                         "placements": [
                           {
                             "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                             "via": "system",
                             "state": "active",
-                            "chat_enforced": false,
                             "shared_by": null
                           },
                           {
                             "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                             "via": "system",
                             "state": "inactive",
-                            "chat_enforced": false,
                             "shared_by": null
                           }
                         ],
@@ -35324,7 +35287,6 @@
           "modelId",
           "proxyId",
           "enabled",
-          "chat_enforced",
           "installed_at",
           "updatedAt",
           "package_type",
@@ -35360,10 +35322,6 @@
           },
           "enabled": {
             "type": "boolean"
-          },
-          "chat_enforced": {
-            "type": "boolean",
-            "description": "Skills only: while the skill is active here, its latest published `SKILL.md` is injected in every chat conversation held in this space, whatever the member's `skills:*` grants. Kept across deactivation. Always `false` for other types."
           },
           "installed_at": {
             "type": "string",
@@ -38713,7 +38671,6 @@
             "home_writable",
             "home_deletable",
             "home_shareable",
-            "published",
             "placements",
             "activation"
           ],
@@ -38754,10 +38711,6 @@
               "type": "boolean",
               "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
             },
-            "published": {
-              "type": "boolean",
-              "description": "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published."
-            },
             "activation": {
               "type": "array",
               "description": "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
@@ -38792,7 +38745,7 @@
       "PackagePlacement": {
         "type": "object",
         "description": "One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it.",
-        "required": ["space_id", "via", "state", "chat_enforced", "shared_by"],
+        "required": ["space_id", "via", "state", "shared_by"],
         "properties": {
           "space_id": {
             "type": "string",
@@ -38807,10 +38760,6 @@
             "type": "string",
             "enum": ["active", "inactive", "none"],
             "description": "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{id}/packages`, deactivate with `DELETE /api/spaces/{id}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`."
-          },
-          "chat_enforced": {
-            "type": "boolean",
-            "description": "Whether this space enforces the skill in its chat (`SpacePackage.chat_enforced`). `false` with no placement row, and for every type but `skill`."
           },
           "shared_by": {
             "type": ["object", "null"],

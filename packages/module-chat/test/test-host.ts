@@ -22,7 +22,7 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     renderSpaces: (spaceIds) => spaceIds.join(", "),
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
-    SpaceChoiceSubmenu: () => null,
+    SpaceChoiceMenu: () => null,
     ...overrides,
   };
 }

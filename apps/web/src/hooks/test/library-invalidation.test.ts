@@ -17,7 +17,7 @@ import { invalidateLibraries } from "../use-library.ts";
 const header = { "X-Org-Id": "org_a" };
 
 describe("invalidateLibraries", () => {
-  it("marks the organization's library and every space's library stale", async () => {
+  it("invalidates both libraries and the placements used to resolve a direct link", async () => {
     const qc = new QueryClient();
     const keys = [
       $api.queryOptions("get", "/api/library", { params: { header } }).queryKey,
@@ -27,12 +27,23 @@ describe("invalidateLibraries", () => {
       $api.queryOptions("get", "/api/spaces/{id}/library", {
         params: { path: { id: "spc_b" }, header },
       }).queryKey,
+      $api.queryOptions("get", "/api/packages/{scope}/{name}/home", {
+        params: {
+          path: { scope: "@acme", name: "worker" },
+          header: { ...header, "X-Space-Id": "spc_a" },
+        },
+      }).queryKey,
     ];
     for (const key of keys) qc.setQueryData(key, { object: "library" });
 
     await invalidateLibraries(qc);
 
-    expect(keys.map((key) => qc.getQueryState(key)?.isInvalidated)).toEqual([true, true, true]);
+    expect(keys.map((key) => qc.getQueryState(key)?.isInvalidated)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 
   it("CONTROL: leaves an unrelated query alone", async () => {

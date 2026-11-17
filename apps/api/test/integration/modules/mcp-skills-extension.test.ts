@@ -37,7 +37,6 @@ import {
 } from "../../helpers/seed.ts";
 import { mcpRpc, type JsonRpcEnvelope, inSpace } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { loadEnforcedChatSkills } from "../../../src/services/chat-enforced-skills.ts";
 import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
@@ -203,16 +202,6 @@ describe("skills/list and resources/read", () => {
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
     expect(await listUris(headers)).toEqual([]);
     expect((await call(headers, "resources/read", { uri: toneUri() })).error?.code).toBe(-32002);
-  });
-});
-
-describe("an enforced chat skill", () => {
-  it("is injected as the SKILL.md resources/read serves at its URI", async () => {
-    await seedSpacePackage(owner.defaultSpaceId, TONE, { chatEnforced: true });
-    const [enforced] = await loadEnforcedChatSkills(owner.orgId, owner.defaultSpaceId);
-    expect(enforced?.uri).toBe(toneUri());
-    const read = await call(ownerHeaders(), "resources/read", { uri: toneUri() });
-    expect((read.result?.contents as Array<{ text: string }>)[0]!.text).toBe(enforced!.content!);
   });
 });
 

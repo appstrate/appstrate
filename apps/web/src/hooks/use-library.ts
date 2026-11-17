@@ -87,7 +87,6 @@ function applyActivation(
                 via: "shared" as const,
                 state: active ? ("active" as const) : ("inactive" as const),
                 shared_by: null,
-                chat_enforced: false,
               },
             ],
       };
@@ -102,9 +101,13 @@ function applyActivation(
   };
 }
 
-/** Invalidates both library forms (organization's and current space's); one alone leaves the other stale. */
+/** A placement change affects both libraries and the readable spaces used by direct links. */
 export function invalidateLibraries(qc: QueryClient) {
-  return invalidatePaths(qc, ["/api/library", "/api/spaces/{id}/library"]);
+  return invalidatePaths(qc, [
+    "/api/library",
+    "/api/spaces/{id}/library",
+    "/api/packages/{scope}/{name}/home",
+  ]);
 }
 
 /** Activation changes affect the library and every space's package/agent cache. */
@@ -116,34 +119,6 @@ export function useInvalidatePackageActivation() {
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
     void invalidateIntegrationQueries(qc);
   };
-}
-
-/**
- * No optimistic patch: the cap and the budget are the server's to judge. The
- * awaited invalidation keeps the box disabled until the refetch lands.
- */
-export function useSetChatEnforced() {
-  const qc = useQueryClient();
-  return useMutation({
-    meta: { errorHandledByCaller: true },
-    mutationFn: async ({
-      spaceId,
-      packageId,
-      enforced,
-    }: {
-      spaceId: string;
-      packageId: string;
-      enforced: boolean;
-    }) => {
-      const parsed = parseScopedName(packageId);
-      if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
-      await client.PATCH("/api/spaces/{id}/packages/{scope}/{name}", {
-        params: { path: { id: spaceId, scope: `@${parsed.scope}`, name: parsed.name } },
-        body: { chat_enforced: enforced },
-      });
-    },
-    onSettled: () => invalidateLibraries(qc),
-  });
 }
 
 /**

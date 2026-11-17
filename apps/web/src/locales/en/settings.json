@@ -1385,7 +1385,6 @@
   "catalogue.sheet.homeHint": "That is where it is edited.",
   "integration.clients.promote.action": "Share with the whole organization",
   "integration.clients.promote.confirm": "The client moves to the organization. It becomes the organization's default only if there is none yet. If it was this space's default, the space then uses the organization's default for new connections; otherwise this space's default is unchanged. Existing connections keep working.",
-  "catalogue.sheet.chatEnforcedIn": "Required in the chat of: {{spaces}}",
   "integration.admin.orgDefault.dropUnavailable": "Remove from the default",
   "integration.admin.orgDefault.pickBeforeMode": "The default's connections are no longer shared: pick others before changing the mode.",
   "integration.admin.orgDefault.clearsMemberChoices": "Enforcing the space default, or changing, removing or making optional a default that is already enforced, clears the connection choices of every member for this integration in the space. Schedules are disabled only when the default is removed or stops being enforced, not when its set changes.",

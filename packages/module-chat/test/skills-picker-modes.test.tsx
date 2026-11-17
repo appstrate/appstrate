@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills picker per mode: automatic lists only what the space imposes (the assistant picks the
- * rest itself), manual and strict add the choosable skills. SSR only, the panel rendered without the popover's portal.
+ * The skills picker per mode: automatic lists no skill to choose (the assistant picks them itself), manual and
+ * strict list the choosable skills. SSR only, the panel rendered without the popover's portal.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -16,20 +16,20 @@ import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { ChatSkillMode } from "@appstrate/db/schema";
+import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 
 const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
-function render(skillMode: ChatSkillMode): string {
+function render(skillMode: ChatSkillMode, pinnedSkills: string[] = []): string {
   const qc = new QueryClient();
   qc.setQueryData(
-    ["chat", "enforced-skills", "spc_a"],
-    [{ packageId: "@acme/tone", display_name: "Tone", version: "1.0.0" }],
-  );
-  qc.setQueryData(
     ["packages", "skills", { consumer: "chat" }, ["spc_a"]],
-    [{ packageId: "@acme/free", display_name: "Free", version: null }],
+    [
+      { packageId: "@acme/free", display_name: "Free", version: null },
+      ...pinnedSkills.map((packageId) => ({ packageId, display_name: packageId, version: null })),
+    ],
   );
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
@@ -40,7 +40,7 @@ function render(skillMode: ChatSkillMode): string {
           <TooltipProvider>
             <SkillsPickerPanel
               transport={transport}
-              selection={{ skillMode, pinnedSkills: [] }}
+              selection={{ skillMode, pinnedSkills }}
               onChange={() => {}}
             />
           </TooltipProvider>
@@ -51,18 +51,29 @@ function render(skillMode: ChatSkillMode): string {
 }
 
 describe("SkillsPicker modes", () => {
-  it("lists only the imposed skills in automatic mode, with the explanation", () => {
+  it("lists no choosable skill in automatic mode, with the explanation", () => {
     const html = render("auto");
-    expect(html).toContain("skill-enforced-@acme/tone");
     expect(html).toContain("skills.chooseInAuto");
     expect(html).not.toContain("skill-pin-");
     expect(html).not.toContain("skills.chooseHeading");
   });
 
+  it("disables an unchosen skill and says why once the chosen skills reach the cap", () => {
+    const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@acme/own-${i}`);
+    const pin = (html: string) =>
+      html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
+    const atCap = render("manual", full);
+    expect(atCap).toContain("skills.chosenMax");
+    expect(pin(atCap)).toContain(` disabled=""`);
+    const below = render("manual", full.slice(1));
+    expect(below).not.toContain("skills.chosenMax");
+    expect(pin(below)).not.toContain(` disabled=""`);
+  });
+
   for (const mode of ["manual", "strict"] as const) {
     it(`still lists the choosable skills in ${mode} mode`, () => {
       const html = render(mode);
-      expect(html).toContain("skill-enforced-@acme/tone");
+      expect(html).toContain("skill-pin-@acme/free");
       expect(html).toContain("skills.chooseHeading");
       expect(html).not.toContain("skills.chooseInAuto");
     });

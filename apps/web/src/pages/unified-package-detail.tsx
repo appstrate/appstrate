@@ -108,8 +108,7 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
 
   // Each tab below is fed by a read of its own, none implied by this route. In « Tous les
   // espaces » a tab listing rows across spaces opens where some space admits its list (runs,
-  // agents) or grants its read (memory); the agent's own content where some space it is active
-  // in grants reading it.
+  // agents) or grants its read (memory); the agent's own content where a readable placement grants full access.
   const { on: overview } = useOverviewMode();
   const runSpaces = useAdmittingSpaces("runs");
   const agentSpaces = useAdmittingSpaces("agents");

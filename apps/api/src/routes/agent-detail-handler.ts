@@ -223,7 +223,7 @@ export async function buildAgentDetailDto(
     // caller opens to put a switched-off agent back on — so the verdict travels
     // in the payload instead of turning the read into a 404.
     isPackageActiveHere(scope, agent.id),
-    // The spaces the org agent index would list it in for this caller.
+    // Every readable placement and the active subset where a launch is possible.
     packageDetailSpaces(
       orgId,
       agent.id,
@@ -303,8 +303,6 @@ export async function buildAgentDetailDto(
     // second endpoint to learn it. Unconditional, including on a summary read:
     // a launcher needs it most.
     active,
-    // Every space the caller reaches where the agent is active, as the org
-    // agent index's `space_ids`: the page names them and runs in one of them.
     ...packageSpaces,
     // Which space's `agents:write` governs this agent, and whether THIS caller
     // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted

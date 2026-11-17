@@ -799,7 +799,7 @@ async function buildPackageDetailDto(
       { id: item.id, source: item.source },
       opts.version?.trim() || undefined,
     ),
-    // The spaces the org index of this type would list it in for this caller.
+    // Every readable placement, including its activation state.
     packageDetailSpaces(
       orgId,
       item.id,

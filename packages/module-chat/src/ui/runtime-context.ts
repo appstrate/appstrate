@@ -62,11 +62,10 @@ export interface ChatTransport {
 export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
 
 /**
- * The host's menu entry whose deed asks for a space first: `trigger` opens a sub-menu of
- * `spaceIds` under `label`, each drawn as the host draws a space, and a pick calls `onPick`.
- * Rendered inside the module's dropdown menu (`@appstrate/ui`'s), so it is a sub-menu of it.
+ * The host's space picker, opened from a button or from an entry in a menu.
  */
-export type SpaceChoiceSubmenu = ComponentType<{
+export type SpaceChoiceMenu = ComponentType<{
+  variant: "dropdown" | "submenu";
   label: string;
   spaceIds: readonly string[];
   onPick: (spaceId: string) => void;
@@ -228,8 +227,8 @@ export interface ChatHost {
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
   useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
-  /** The host's sub-menu of spaces, the one every « … in which space? » entry of the app opens. */
-  SpaceChoiceSubmenu: SpaceChoiceSubmenu;
+  /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
+  SpaceChoiceMenu: SpaceChoiceMenu;
 }
 
 /** Whether the chat acts in `spaceId` (one of the host's acting set). */

@@ -172,25 +172,6 @@ export interface ChatUsageRecord {
 export const OPERATION_INDEX_HEADING = "## Operation index";
 
 /**
- * Characters the SKILL.md bodies injected into one chat turn share: the
- * space-enforced skills first, then the ones the user chose. Shared so the
- * platform's enforcement write and the chat module's injection agree.
- */
-export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
-
-/** Skills a space may enforce on its chat conversations. */
-export const MAX_ENFORCED_CHAT_SKILLS = 3;
-
-/** A skill a space enforces on its chat conversations, without its content. */
-export interface EnforcedChatSkillRef {
-  packageId: string;
-  /** Display name: the manifest's `display_name`, else the package id. */
-  name: string;
-  /** The `latest` published version; null when none resolves. */
-  version: string | null;
-}
-
-/**
  * What a conversation's turn needs in a space to act in it: the turn is the caller's to
  * run (`chat:write`), the conversation stays openable once the space is touched (`chat:read`), and the
  * tools can name the space (`mcp:read`). Read through {@link chatActsIn} alone.
@@ -248,16 +229,3 @@ export type InjectedSkill = InjectedSkills["skills"][string];
 
 /** `authExtra` key of the turn's MCP bearer carrying {@link InjectedSkills}. */
 export const INJECTED_SKILLS_AUTH_EXTRA = "injectedSkills";
-
-/** An enforced skill with its SKILL.md, read with platform authority at its latest published version. */
-export interface EnforcedChatSkill extends EnforcedChatSkillRef {
-  /** The `skill://` URI of the served SKILL.md, which `resources/read` answers; null with `content`. */
-  uri: string | null;
-  /**
-   * The published SKILL.md as the MCP Skills extension serves it (its `name`
-   * and `metadata.version` normalized); null only when no published version
-   * resolves. A version that resolves but cannot be read or served rejects
-   * the whole load instead.
-   */
-  content: string | null;
-}

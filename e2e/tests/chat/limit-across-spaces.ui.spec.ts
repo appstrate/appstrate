@@ -55,8 +55,21 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const chip = page.getByTestId("composer-limit-chip");
     await expect(chip).toHaveCount(0);
 
-    // « + » › « Limiter à un espace » › the acting spaces.
-    await page.getByTestId("composer-tools-trigger").click();
+    const attach = page.getByRole("button", { name: "Joindre des fichiers", exact: true });
+    await attach.click();
+    const files = page.waitForEvent("filechooser");
+    await page.getByRole("menuitem", { name: beta.name }).click();
+    await (
+      await files
+    ).setFiles({
+      name: "beta.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Beta"),
+    });
+    await expect(page.getByText("beta.txt", { exact: true })).toBeVisible();
+
+    // Settings › « Limiter à un espace » › the acting spaces.
+    await page.getByTestId("composer-settings-trigger").click();
     const limit = page.getByTestId("composer-limit-item");
     await expect(limit).toHaveText(/Limiter à un espace/);
     await limit.click();
@@ -77,6 +90,16 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     expect(response.request().postDataJSON()).toEqual({ spaceId: alpha.id, restricted: true });
     expect(response.status()).toBe(204);
     await expect(chip).toBeVisible();
+    const direct = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: `Joindre des fichiers dans ${alpha.name}` }).click();
+    await (
+      await direct
+    ).setFiles({
+      name: "alpha.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Alpha"),
+    });
+    await expect(page.getByText("alpha.txt", { exact: true })).toBeVisible();
   } finally {
     await context.close();
   }

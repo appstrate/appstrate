@@ -21,7 +21,7 @@ function placement(
   via: LibraryPlacement["via"],
   state: LibraryPlacement["state"],
 ): LibraryPlacement {
-  return { space_id, via, state, shared_by: null, chat_enforced: false };
+  return { space_id, via, state, shared_by: null };
 }
 
 function packageRow(
@@ -39,7 +39,6 @@ function packageRow(
     home_writable: false,
     home_shareable: false,
     home_deletable: false,
-    published: true,
     placements,
     activation: [],
     ...overrides,

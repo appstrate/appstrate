@@ -20,6 +20,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaces } from "../hooks/use-spaces";
+import { useRowSpaceGrants } from "../hooks/use-permissions";
 import { ACROSS_SPACES, scheduleKeys } from "../lib/query-keys";
 import { detailElsewhere, isUnreadableHere, type ElsewhereRow } from "../lib/detail-elsewhere";
 import { isSpaceEnterable } from "../lib/space-lists";
@@ -66,7 +67,7 @@ function PackageElsewhere(
   props: UnreadableDetailProps & { type: "agent" | "skill" | "integration" },
 ) {
   const scope = useOrgScope();
-  const { data: spaces } = useSpaces();
+  const grants = useRowSpaceGrants();
   const { data, isError } = $api.useQuery(
     "get",
     "/api/packages/{scope}/{name}/home",
@@ -82,9 +83,7 @@ function PackageElsewhere(
           {
             id: props.id,
             spaceIds: data.read_space_ids.filter(
-              (id) =>
-                !props.version ||
-                spaces?.some((s) => s.id === id && s.permissions.includes(`${props.type}s:read`)),
+              (id) => !props.version || grants(id, `${props.type}s:read`),
             ),
           },
         ]

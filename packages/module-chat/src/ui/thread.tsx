@@ -73,7 +73,7 @@ export function Thread({
   initialComposerDraft,
   messageQueue,
 }: {
-  /** Left of the composer's bottom row: the "+" menu and the active-setting chips. */
+  /** Left of the composer's bottom row: the attach button, the settings menu and the active-setting chips. */
   composerTools?: React.ReactNode;
   /** Right of it, before send: the model picker. */
   composerSlot?: React.ReactNode;

@@ -25,12 +25,3 @@ export function maySetPackageActive(
   if (space.personal && space.access === "member") return true;
   return space.permissions.includes(spacePackagePermission(type, next ? "activate" : "deactivate"));
 }
-
-/**
- * May this caller change how THIS space runs a placed package (the PATCH's
- * `configure` gate)? No personal-space exemption: the server waives the grant for
- * the owner on `activate`/`deactivate` only.
- */
-export function mayConfigurePackage(space: SpaceGrant | undefined, type: PackageType): boolean {
-  return !!space && space.permissions.includes(spacePackagePermission(type, "configure"));
-}
