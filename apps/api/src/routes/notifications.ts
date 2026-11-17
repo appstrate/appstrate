@@ -6,20 +6,24 @@ import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { requireAnyCeiling } from "../middleware/require-permission.ts";
 import {
+  getNotification,
   getUnreadNotificationCount,
   markNotificationRead,
   markAllNotificationsRead,
   listNotifications,
 } from "../services/state/notifications.ts";
 import { notFound } from "../lib/errors.ts";
+import { isUuid } from "../lib/db-helpers.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListLimit } from "@appstrate/core/list-query";
 
 /**
  * The recipient's notification feed — the dashboard bell: what needs their
- * attention (a failed run, a share). A run's read state is served with the
- * runs (`GET /api/runs?unread=true`, `PUT /api/runs/{id}/read`, `read-all`).
+ * attention (a failed run, a message an agent sent, a share). A notification is
+ * read by the page it opens: the run page for a `run_failed` (through the
+ * run's read state, `PUT /api/runs/{id}/read`, `read-all`), the notification's
+ * own page (`GET` + `PUT /api/notifications/{id}/read`) for every other kind.
  */
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -50,12 +54,28 @@ export function createNotificationsRouter() {
     return c.json({ count });
   });
 
+  // GET /api/notifications/:id — one notification of the caller, read by the
+  // page a notification opens. A pure read: that page marks it read through
+  // the PUT below, the one door that reads a notification by its id. 404 when
+  // it is not the caller's.
+  router.get("/notifications/:id", feedCeiling, async (c) => {
+    const id = c.req.param("id")!;
+    // A non-uuid id names no notification: answer as for an unknown one rather
+    // than letting the uuid column refuse it.
+    const notification = isUuid(id)
+      ? await getNotification(getSpaceScope(c), id, getActor(c))
+      : null;
+    if (!notification) throw notFound("Notification not found");
+    return c.json(notification);
+  });
+
   // PUT /api/notifications/:id/read
   router.put("/notifications/:id/read", feedCeiling, async (c) => {
     // Idempotent for the recipient (204 whether it was unread or already
     // read); 404 when the notification isn't the caller's — no silent no-op
     // for non-recipients.
-    const ok = await markNotificationRead(getSpaceScope(c), c.req.param("id")!, getActor(c));
+    const id = c.req.param("id")!;
+    const ok = isUuid(id) && (await markNotificationRead(getSpaceScope(c), id, getActor(c)));
     if (!ok) throw notFound("Notification not found");
     return c.body(null, 204);
   });

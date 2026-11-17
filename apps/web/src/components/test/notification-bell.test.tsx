@@ -2,9 +2,10 @@
 
 /**
  * The bell lists the notification feed by KIND: a share names the sharer and
- * the package and links to the package's sheet; a run that needs attention (it
- * failed or timed out) names its agent and status and links to the run; an
- * `agent_message` reads as the message its agent wrote, linked to the run.
+ * the package; a run that needs attention (it failed or timed out) names its
+ * agent and status; an `agent_message` reads as the message its agent wrote.
+ * A row leads to the page that marks it read: the run for a failed run, the
+ * notification's own page for every other kind.
  *
  * Same no-DOM harness as the other component suites — `renderToStaticMarkup`
  * through the SPA's own i18n singleton, so the assertions read the bundle
@@ -33,7 +34,7 @@ function renderList(
       notifications={notifications}
       agentName={(id) => (id === PACKAGE_ID ? "Worker" : undefined)}
       canReach={canReach}
-      onItemClick={() => {}}
+      onNavigate={() => {}}
       markAllRead={() => {}}
     />,
   );
@@ -57,27 +58,11 @@ describe("NotificationContent", () => {
     ]);
 
     expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
-    // One share, one decision: the link opens THAT package's sheet.
-    expect(html).toContain('href="/catalogue/agent?package=%40acme%2Fworker"');
+    // The share's own page, which links on to the package's sheet.
+    expect(html).toContain('href="/notifications/n1"');
     // Not a run: no run-scoped link, and nothing that reads as a dead agent.
     expect(html).not.toContain("Agent supprimé");
     expect(html).not.toContain('href="/runs/');
-  });
-
-  it("routes a shared skill to the local acceptance view", () => {
-    const html = renderList([
-      {
-        id: "n2",
-        type: "package_shared",
-        runId: null,
-        payload: { packageId: "@acme/helper", package_type: "skill", shared_by_name: "Bob" },
-        read_at: null,
-        createdAt: "2026-09-10T10:00:00.000Z",
-      },
-    ]);
-
-    // A shared SKILL opens on its own kind, on the package itself.
-    expect(html).toContain('href="/catalogue/skill?package=%40acme%2Fhelper"');
   });
 
   it("renders a failed run as its agent and status, linking to the run", () => {
@@ -132,9 +117,11 @@ describe("NotificationContent", () => {
 
     expect(html).toContain("Factures prêtes");
     expect(html).toContain("12 factures attendent votre relecture.");
-    // The sender is named by the agent's display name, and the row opens the run.
+    // The sender is named by the agent's display name; the row opens the message's
+    // own page, not the run: viewing the run does not read the message.
     expect(html).toContain("Message de Worker");
-    expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
+    expect(html).toContain('href="/notifications/n7"');
+    expect(html).not.toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
   });
 
   it("names the sender of an `agent_message` from an unlisted agent by the name stamped on its run", () => {
@@ -156,7 +143,6 @@ describe("NotificationContent", () => {
 
     expect(html).toContain("Message de Contrôle des factures");
     expect(html).not.toContain("Message de @inline");
-    expect(html).toContain('href="/agents/@inline/r-1/runs/run_6"');
   });
 
   it("titles an `agent_message` row without a payload by its agent's label", () => {
@@ -176,9 +162,10 @@ describe("NotificationContent", () => {
     expect(html.split(label)).toHaveLength(3);
   });
 
-  // Notifications follow the session's ceiling: a caller can hold a share of a
-  // package whose sheet would refuse them.
-  it("links nowhere the caller cannot reach", () => {
+  // Notifications follow the session's ceiling: a caller can hold a failure
+  // notice of a run whose page would refuse them. It opens the notification's
+  // own page instead, which reads it.
+  it("opens the notification's page when the run's page is closed to the caller", () => {
     const notifications: Notifications = [
       {
         id: "n4",
@@ -200,7 +187,9 @@ describe("NotificationContent", () => {
     const denied = renderList(notifications, () => false);
     expect(denied).toContain("Worker");
     expect(denied).toContain(`Bob vous a partagé ${PACKAGE_ID}`);
-    expect(denied).not.toContain("href=");
+    expect(denied).toContain('href="/notifications/n4"');
+    expect(denied).toContain('href="/notifications/n5"');
+    expect(denied).not.toContain('href="/agents/');
   });
 
   it("offers the next page only when the feed has one", () => {
@@ -221,7 +210,7 @@ describe("NotificationContent", () => {
           notifications={row}
           agentName={() => "Worker"}
           canReach={() => true}
-          onItemClick={() => {}}
+          onNavigate={() => {}}
           markAllRead={() => {}}
           hasMore={hasMore}
           onLoadMore={() => {}}

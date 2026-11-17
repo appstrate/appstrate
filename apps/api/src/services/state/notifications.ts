@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, isNull, isNotNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { eq, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -86,11 +86,13 @@ export async function notifyRunFinished(
 }
 
 /**
- * Read the caller's notifications of one run (`runId`), or of every run: opening
- * a run, or reading them all, acknowledges what the bell showed for it — its
- * failure, and the message its agent sent. Every kind with a run is read.
+ * Read the caller's failure notices of one run (`runId`), or of every run:
+ * opening a run, or reading them all, acknowledges the failure the bell showed
+ * for it — the run page is where a `run_failed` notification leads. Only that
+ * kind: a message the agent sent (`agent_message`) leads to its own page
+ * (`GET /api/notifications/{id}`) and is read there, never by viewing the run.
  */
-export async function markRunNotificationsRead(
+export async function markRunFailureNotificationsRead(
   scope: SpaceScope,
   actor: Actor,
   runId?: string,
@@ -104,7 +106,7 @@ export async function markRunNotificationsRead(
         spaceId: scope.spaceId,
         extra: [
           recipientFilter(actor),
-          isNotNull(notifications.runId),
+          eq(notifications.type, "run_failed"),
           isNull(notifications.readAt),
           ...(runId ? [eq(notifications.runId, runId)] : []),
         ],
@@ -196,6 +198,59 @@ export async function createPackageShareNotification(params: {
 // The bell: every notification of the caller, newest first. What reaches it was
 // decided when it was written (`notifyRunFinished`, the share notice), so no
 // read below filters a kind.
+
+/** Row → wire DTO, shared by the feed and the single read. */
+function toNotificationDto(r: {
+  id: string;
+  type: NotificationType;
+  runId: string | null;
+  payload: NotificationPayloads[NotificationType] | null;
+  readAt: Date | null;
+  createdAt: Date;
+}): NotificationDto {
+  return {
+    id: r.id,
+    type: r.type,
+    runId: r.runId,
+    payload: r.payload ?? null,
+    read_at: r.readAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+const notificationColumns = {
+  id: notifications.id,
+  type: notifications.type,
+  runId: notifications.runId,
+  payload: notifications.payload,
+  readAt: notifications.readAt,
+  createdAt: notifications.createdAt,
+};
+
+/**
+ * One notification of the caller — the notification page reads it. A pure
+ * read: the page marks it read through `PUT /api/notifications/{id}/read`.
+ * `null` when it does not exist or is not the caller's (the route's 404), so
+ * a recipient never learns of another's notification.
+ */
+export async function getNotification(
+  scope: SpaceScope,
+  notificationId: string,
+  actor: Actor,
+): Promise<NotificationDto | null> {
+  const [row] = await db
+    .select(notificationColumns)
+    .from(notifications)
+    .where(
+      scopedWhere(notifications, {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
+      }),
+    )
+    .limit(1);
+  return row ? toNotificationDto(row) : null;
+}
 
 /**
  * Mark a single notification read. Idempotent for the recipient (already-read
@@ -297,14 +352,7 @@ export async function listNotifications(
   })!;
 
   const rows = await db
-    .select({
-      id: notifications.id,
-      type: notifications.type,
-      runId: notifications.runId,
-      payload: notifications.payload,
-      readAt: notifications.readAt,
-      createdAt: notifications.createdAt,
-    })
+    .select(notificationColumns)
     .from(notifications)
     .where(where)
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
@@ -313,15 +361,5 @@ export async function listNotifications(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return listResponse(
-    page.map((r) => ({
-      id: r.id,
-      type: r.type,
-      runId: r.runId,
-      payload: r.payload ?? null,
-      read_at: r.readAt?.toISOString() ?? null,
-      createdAt: r.createdAt.toISOString(),
-    })),
-    { hasMore },
-  );
+  return listResponse(page.map(toNotificationDto), { hasMore });
 }

@@ -13,7 +13,10 @@ import {
 import { seedAgent, seedApiKey, seedRun, seedSpace } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
 import Ajv from "ajv";
-import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
+import {
+  createAgentMessageNotifications,
+  createPackageShareNotification,
+} from "../../../src/services/state/notifications.ts";
 import { recordRunFinished } from "../../../src/services/state/run-reads.ts";
 import { notificationsPaths } from "../../../src/openapi/paths/notifications.ts";
 import { db } from "@appstrate/db/client";
@@ -233,6 +236,102 @@ describe("Notifications feed API (per-recipient)", () => {
 
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/notifications/unread-count");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ─── GET /api/notifications/{id} ────────────────────────────
+
+  describe("GET /api/notifications/{id}", () => {
+    async function getOne(headers: Record<string, string>, id: string) {
+      return app.request(`/api/notifications/${id}`, { headers });
+    }
+
+    it("returns the caller's agent message with its payload, in the declared shape", async () => {
+      const run = await seedNotifiedRun("msg-agent");
+      await createAgentMessageNotifications(
+        scope(),
+        { id: run.id, packageId: "@notiforg/msg-agent", agentName: "Msg" },
+        [{ type: "user", id: ctx.user.id }],
+        { title: "Bonjour", message: "Le rapport est prêt." },
+      );
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      const res = await getOne(authHeaders(ctx), id);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as NotificationDto & {
+        payload: { title?: string; message?: string };
+      };
+      expect(body).toMatchObject({
+        id,
+        type: "agent_message",
+        runId: run.id,
+        read_at: null,
+        payload: { title: "Bonjour", message: "Le rapport est prêt." },
+      });
+      const schema =
+        notificationsPaths["/api/notifications/{id}"].get.responses["200"].content[
+          "application/json"
+        ].schema;
+      const validate = new Ajv({ strict: false }).compile(schema);
+      expect(validate(body)).toBe(true);
+    });
+
+    it("is a pure read — the notification stays unread", async () => {
+      await seedShare();
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      expect((await getOne(authHeaders(ctx), id)).status).toBe(200);
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("returns a read notification with its read_at", async () => {
+      await seedShare();
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      await markRead(authHeaders(ctx), id);
+
+      const body = (await (await getOne(authHeaders(ctx), id)).json()) as NotificationDto;
+      expect(body.read_at).not.toBeNull();
+    });
+
+    it("returns 404 for an unknown id", async () => {
+      const res = await getOne(authHeaders(ctx), "00000000-0000-0000-0000-000000000000");
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 for an id that is not a uuid", async () => {
+      expect((await getOne(authHeaders(ctx), "not-a-uuid")).status).toBe(404);
+    });
+
+    it("returns 404 for another member's notification", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+      await seedShare();
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      expect((await getOne(headersFor(userB), id)).status).toBe(404);
+    });
+
+    it("returns 404 for another org's notification", async () => {
+      await seedShare();
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      const otherCtx = await createTestContext({ orgSlug: "otherorg" });
+
+      expect((await getOne(authHeaders(otherCtx), id)).status).toBe(404);
+    });
+
+    it("returns 404 from another space of the same org", async () => {
+      await seedShare();
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
+      const headersB = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": spaceB.id };
+
+      const res = await getOne(headersB, id);
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request("/api/notifications/00000000-0000-0000-0000-000000000000");
       expect(res.status).toBe(401);
     });
   });

@@ -34,6 +34,7 @@ import {
   DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
+  NotificationDetailSkeleton,
   OverlayPanelSkeleton,
   PackageDetailSkeleton,
   RunDetailSkeleton,
@@ -97,6 +98,10 @@ const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
 const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReaderPage");
 const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
 const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
+const NotificationDetailPage = lazyPage(
+  () => import("./pages/notification-detail"),
+  "NotificationDetailPage",
+);
 const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
@@ -273,6 +278,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/files/:fileId": <FileReaderPage />,
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
+  "/notifications/:id": <NotificationDetailPage />,
   "/skills": <SkillsPage />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
@@ -385,6 +391,7 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (path === "/integrations/new/mcp") return <FormPageSkeleton />;
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
+  if (path === "/notifications/:id") return <NotificationDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
   const page = LIST_PAGE[path];

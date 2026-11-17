@@ -200,6 +200,54 @@ export const notificationsPaths = {
       },
     },
   },
+  "/api/notifications/{id}": {
+    get: {
+      operationId: "getNotification",
+      tags: ["Notifications"],
+      summary: "Get a notification",
+      description:
+        "Returns one notification of the current recipient — what the notification's own page shows. A pure read: the page marks it read with `PUT /api/notifications/{id}/read`. A `run_failed` notification leads to its run instead, and opening the run reads it (`PUT /api/runs/{id}/read`). Returns 404 when the notification does not belong to the caller.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "Notification id",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The notification",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: notificationObject,
+              example: {
+                id: "550e8400-e29b-41d4-a716-446655440000",
+                type: "agent_message",
+                runId: "run_9cd174b7-2dfe-404a-a3f1-cf5efadc9543",
+                payload: {
+                  packageId: "@acme/weekly-report",
+                  agent_name: "Weekly report",
+                  title: "Report ready",
+                  message: "This week's report is in the shared drive.",
+                },
+                read_at: null,
+                createdAt: "2026-01-15T10:31:12Z",
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/notifications/{id}/read": {
     put: {
       operationId: "markNotificationReadById",
@@ -236,7 +284,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
       description:
-        "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their failure notices with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

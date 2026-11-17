@@ -9,16 +9,16 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { RunStatus } from "@appstrate/core/run-status";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { markRunNotificationsRead, notifyRunFinished } from "./notifications.ts";
+import { markRunFailureNotificationsRead, notifyRunFinished } from "./notifications.ts";
 
 // --- Run read state ---
 //
 // Per recipient, in `run_reads`: a finished run is unread for its recipient
 // until they open it. Every reader goes through `unreadRunCondition` (a run's
 // `unread`, an agent's and a schedule's `unread_count`, `?unread=true`); every
-// writer is below. Reading a run also reads its notification, when the bell
-// had one (`markRunNotificationsRead`): opening the run is how a failure is
-// acknowledged, wherever it was seen.
+// writer is below. Reading a run also reads its failure notice, when the bell
+// had one (`markRunFailureNotificationsRead`): opening the run is how a failure is
+// acknowledged, wherever it was seen. A message its agent sent is not read here.
 
 /** Match the caller's own `run_reads` rows by their recipient tuple. */
 function recipientFilter(actor: Actor): SQL {
@@ -163,7 +163,7 @@ export function unreadRunCondition(actor: Actor | null): SQL<boolean> {
 }
 
 /**
- * Mark a run read for the caller, and its notification with it. Idempotent
+ * Mark a run read for the caller, and its failure notice with it. Idempotent
  * ack: a missing run or one the caller holds no read state for is a no-op.
  */
 export async function markRunRead(scope: SpaceScope, runId: string, actor: Actor): Promise<void> {
@@ -177,7 +177,7 @@ export async function markRunRead(scope: SpaceScope, runId: string, actor: Actor
         extra: [eq(runReads.runId, runId), recipientFilter(actor), isNull(runReads.readAt)],
       }),
     );
-  await markRunNotificationsRead(scope, actor, runId);
+  await markRunFailureNotificationsRead(scope, actor, runId);
 }
 
 /** Mark every run of the space read for the caller; returns how many were unread. */
@@ -193,7 +193,7 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
       }),
     )
     .returning({ runId: runReads.runId });
-  await markRunNotificationsRead(scope, actor);
+  await markRunFailureNotificationsRead(scope, actor);
   return updated.length;
 }
 

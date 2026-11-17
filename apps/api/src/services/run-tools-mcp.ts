@@ -348,7 +348,7 @@ const RUN_TOOLS: RunTool[] = [
     name: "notify",
     title: "Send a notification",
     description:
-      "Send an in-app notification about this run — it appears in the notification bell and links to the run. " +
+      "Send an in-app notification about this run — it appears in the notification bell and opens its own page, which links to the run. " +
       "It reaches the run's recipients: the member or end-user who triggered the run, or the " +
       "organization's owners and admins for an unattended run. It is not instant: the bell shows it " +
       "when the run ends, on reconnect, or at the 5-minute poll. Each recipient receives ONE notification per run: a " +

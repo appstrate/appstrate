@@ -118,12 +118,13 @@ describe("Run read state (per-recipient)", () => {
       .where(eq(runReads.runId, runId));
   }
 
-  /** The bell's `run_failed` notifications of one run. */
+  /** The bell's notifications of one run, every kind. */
   async function notificationsOf(runId: string) {
     return db
       .select({
         id: notifications.id,
         recipientId: notifications.recipientId,
+        type: notifications.type,
         payload: notifications.payload,
         readAt: notifications.readAt,
       })
@@ -393,7 +394,7 @@ describe("Run read state (per-recipient)", () => {
       expect((await notificationsOf(run.id))[0]!.readAt).not.toBeNull();
     });
 
-    it("also marks the message its agent sent read (`agent_message`)", async () => {
+    it("leaves the message its agent sent unread (`agent_message` is read on its own page)", async () => {
       const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
         title: "t",
@@ -403,10 +404,26 @@ describe("Run read state (per-recipient)", () => {
 
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
 
-      expect(await bellCount(authHeaders(ctx))).toBe(0);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("marks an inline run's `agent_message` read, though the run holds no read state", async () => {
+    it("reads the failure notice and leaves the agent's message of the same run unread", async () => {
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id }, status: "failed" });
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
+      expect(await bellCount(authHeaders(ctx))).toBe(2);
+
+      expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
+
+      const rows = await notificationsOf(run.id);
+      expect(rows.find((r) => r.type === "run_failed")!.readAt).not.toBeNull();
+      expect(rows.find((r) => r.type === "agent_message")!.readAt).toBeNull();
+    });
+
+    it("leaves an inline run's `agent_message` unread", async () => {
       const inlineId = `@inline/r-${crypto.randomUUID()}`;
       await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
       const run = await seedRun({
@@ -424,7 +441,7 @@ describe("Run read state (per-recipient)", () => {
 
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
 
-      expect(await bellCount(authHeaders(ctx))).toBe(0);
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
     });
 
     it("leaves another run's notification unread", async () => {
@@ -518,6 +535,19 @@ describe("Run read state (per-recipient)", () => {
       await readAll(authHeaders(ctx));
 
       expect(await bellCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("leaves the messages agents sent unread", async () => {
+      const run = await seedFinishedRun({ agentName: "ra-msg", actor: { userId: ctx.user.id } });
+      await createAgentMessageNotifications(scope(), run, [{ type: "user", id: ctx.user.id }], {
+        title: "t",
+        message: "m",
+      });
+
+      await readAll(authHeaders(ctx));
+
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      expect(await bellCount(authHeaders(ctx))).toBe(1);
     });
 
     it("returns 0 when nothing is unread", async () => {
